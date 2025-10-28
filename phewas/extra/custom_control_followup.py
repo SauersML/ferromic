@@ -35,6 +35,7 @@ import pandas as pd
 import statsmodels.api as sm
 from scipy.special import log_ndtr
 from statsmodels.tools.sm_exceptions import ConvergenceWarning, PerfectSeparationError
+from patsy import dmatrix
 
 from .. import iox as io
 from .. import pheno
@@ -110,6 +111,10 @@ DECIMAL_CONTEXT = Context(prec=50, Emin=-999999, Emax=999999)
 # diagnostics so that the root cause can be investigated instead of applying
 # ever-stronger penalties.
 MAX_ABS_DOSAGE_BETA = 15.0
+AGE_BSPLINE_DF = 4
+RIDGE_ALPHA = 1e-6
+GRADIENT_NORM_THRESHOLD = 1e-6
+HESSIAN_CONDITION_THRESHOLD = 1e12
 
 # Optimisation strategies attempted when fitting logistic regressions.  The
 # ``label`` is used for logging, while ``options`` are forwarded to
@@ -1073,129 +1078,137 @@ def _build_category_controls(scores: pd.DataFrame) -> dict[str, pd.DataFrame]:
     return controls
 
 
+def _collect_fit_diagnostics(
+    result,
+    X: pd.DataFrame,
+) -> dict[str, float]:
+    diagnostics: dict[str, float] = {}
+    params = np.asarray(getattr(result, "params", []), dtype=np.float64)
+    if params.size:
+        try:
+            gradient = np.asarray(result.model.score(params), dtype=np.float64)
+        except Exception:
+            gradient = np.array([])
+        if gradient.size:
+            diagnostics["gradient_norm"] = float(np.linalg.norm(gradient))
+    eta = X.to_numpy(dtype=np.float64, copy=False) @ params
+    if eta.size:
+        diagnostics["max_abs_eta"] = float(np.max(np.abs(eta)))
+    try:
+        hessian = np.asarray(result.model.hessian(params), dtype=np.float64)
+    except Exception:
+        hessian = np.array([])
+    if hessian.size:
+        diagnostics["hessian_condition"] = _compute_condition_number(-hessian)
+    retvals = getattr(result, "mle_retvals", {})
+    if isinstance(retvals, dict):
+        iterations = retvals.get("iterations")
+        if iterations is not None:
+            diagnostics["iterations"] = float(iterations)
+    return diagnostics
+
+
 def _fit_logistic(X: pd.DataFrame, y: pd.Series):
-    model = sm.Logit(y, X)
-    attempts: list[tuple[str, Exception]] = []
-    diagnostics_reported = False
+    if X.shape[0] != y.shape[0]:
+        raise RuntimeError("Design matrix and response vector have incompatible shapes.")
 
-    for label, solver_options in LOGIT_SOLVER_CANDIDATES:
-        fit_kwargs = dict(solver_options)
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always", ConvergenceWarning)
-            warnings.simplefilter("always", RuntimeWarning)
-            try:
-                result = model.fit(disp=False, **fit_kwargs)
-            except (PerfectSeparationError, np.linalg.LinAlgError, ValueError) as exc:
-                warn(f"{label} solver failed: {exc}")
-                include_design = not diagnostics_reported
-                _report_model_instability(
-                    label,
-                    [f"solver raised {exc}"],
-                    {},
-                    X,
-                    y,
-                    caught,
-                    include_design=include_design,
-                )
-                if include_design:
-                    diagnostics_reported = True
-                attempts.append((label, exc))
-                continue
-            except Exception as exc:  # pragma: no cover - defensive branch
-                warn(f"{label} solver failed with unexpected error: {exc}")
-                include_design = not diagnostics_reported
-                _report_model_instability(
-                    label,
-                    [f"unexpected solver error: {exc}"],
-                    {},
-                    X,
-                    y,
-                    caught,
-                    include_design=include_design,
-                )
-                if include_design:
-                    diagnostics_reported = True
-                attempts.append((label, exc))
-                continue
+    if X.dtypes.ne(np.float64).any():
+        raise RuntimeError("Design matrix must be float64 before fitting.")
 
-        stable, issues, metrics = _evaluate_result_stability(result)
-        if stable:
-            if caught:
-                warn(
-                    f"{label} emitted convergence warnings despite stability: "
-                    + "; ".join(_format_warning_records(caught))
-                )
-            return result, label
+    X_matrix = X.to_numpy(dtype=np.float64, copy=False)
+    if not np.isfinite(X_matrix).all():
+        raise RuntimeError("Design matrix contains non-finite values before fitting.")
 
-        include_design = not diagnostics_reported
-        _report_model_instability(
-            label,
-            issues or ["dosage estimate flagged as unstable"],
-            metrics,
-            X,
-            y,
-            caught,
-            include_design=include_design,
-        )
-        if include_design:
-            diagnostics_reported = True
-        issue_message = "; ".join(issues) if issues else "unstable dosage estimate"
-        attempts.append((label, RuntimeError(issue_message)))
+    y_vector = y.to_numpy(dtype=np.float64, copy=False)
+    if not np.isfinite(y_vector).all():
+        raise RuntimeError("Response vector contains non-finite values before fitting.")
 
-    with warnings.catch_warnings(record=True) as caught:
+    glm_result = None
+    with warnings.catch_warnings(record=True) as glm_warnings:
         warnings.simplefilter("always", ConvergenceWarning)
-        warnings.simplefilter("always", RuntimeWarning)
         try:
             glm_model = sm.GLM(y, X, family=sm.families.Binomial())
-            glm_result = glm_model.fit(maxiter=500, tol=1e-8)
+            glm_result = glm_model.fit(maxiter=200, tol=1e-8)
         except Exception as exc:
-            warn(f"glm_binomial solver failed: {exc}")
-            include_design = not diagnostics_reported
-            _report_model_instability(
-                "glm_binomial",
-                [f"solver raised {exc}"],
-                {},
-                X,
-                y,
-                caught,
-                include_design=include_design,
-            )
-            if include_design:
-                diagnostics_reported = True
-            attempts.append(("glm_binomial", exc))
+            warn(f"Initial GLM fit failed: {exc}")
+            glm_result = None
         else:
-            stable, issues, metrics = _evaluate_result_stability(glm_result)
-            if stable:
-                if caught:
-                    warn(
-                        "glm_binomial emitted convergence warnings despite stability: "
-                        + "; ".join(_format_warning_records(caught))
-                    )
-                warn("Falling back to GLM binomial fit for converged estimates.")
-                return glm_result, "glm_binomial"
+            if glm_warnings:
+                warn(
+                    "GLM emitted warnings: " + "; ".join(_format_warning_records(glm_warnings))
+                )
 
-            include_design = not diagnostics_reported
-            _report_model_instability(
-                "glm_binomial",
-                issues or ["dosage estimate flagged as unstable"],
-                metrics,
-                X,
-                y,
-                caught,
-                include_design=include_design,
+    start_params = getattr(glm_result, "params", None)
+
+    logit_model = sm.Logit(y, X)
+    with warnings.catch_warnings(record=True) as logit_warnings:
+        warnings.simplefilter("always", ConvergenceWarning)
+        try:
+            result = logit_model.fit(
+                start_params=start_params,
+                method="lbfgs",
+                maxiter=200,
+                tol=1e-8,
+                disp=False,
             )
-            if include_design:
-                diagnostics_reported = True
-            issue_message = "; ".join(issues) if issues else "unstable dosage estimate"
-            attempts.append(("glm_binomial", RuntimeError(issue_message)))
+            method = "logit_lbfgs"
+        except (PerfectSeparationError, np.linalg.LinAlgError, ValueError) as exc:
+            warn(f"Logit fit failed: {exc}; retrying without start parameters")
+            try:
+                result = logit_model.fit(
+                    method="lbfgs",
+                    maxiter=200,
+                    tol=1e-8,
+                    disp=False,
+                )
+                method = "logit_lbfgs"
+            except Exception as inner_exc:  # pragma: no cover - defensive branch
+                raise RuntimeError(
+                    _format_logistic_failure(inner_exc, X, y)
+                ) from inner_exc
+        except Exception as exc:  # pragma: no cover - defensive branch
+            raise RuntimeError(_format_logistic_failure(exc, X, y)) from exc
 
-    if attempts:
-        failure_lines = [f"{label}: {exc}" for label, exc in attempts]
-        message = "All logistic solvers failed:\n    " + "\n    ".join(failure_lines)
-    else:
-        message = "Logistic solver failed for unknown reasons"
+    if logit_warnings:
+        warn("Logit fit emitted warnings: " + "; ".join(_format_warning_records(logit_warnings)))
 
-    raise RuntimeError(_format_logistic_failure(RuntimeError(message), X, y))
+    diagnostics = _collect_fit_diagnostics(result, X)
+    need_ridge = False
+    gradient_norm = diagnostics.get("gradient_norm")
+    if gradient_norm is not None and gradient_norm > GRADIENT_NORM_THRESHOLD:
+        need_ridge = True
+    hessian_cond = diagnostics.get("hessian_condition")
+    if hessian_cond is not None and hessian_cond > HESSIAN_CONDITION_THRESHOLD:
+        need_ridge = True
+    max_abs_eta = diagnostics.get("max_abs_eta")
+    if max_abs_eta is not None and max_abs_eta > 30.0:
+        need_ridge = True
+    if not _logit_result_converged(result):
+        need_ridge = True
+
+    if need_ridge:
+        warn(
+            "Triggering ridge fallback due to convergence diagnostics "
+            f"(gradient_norm={gradient_norm}, hessian_condition={hessian_cond}, max_abs_eta={max_abs_eta})."
+        )
+        penalized = logit_model.fit_regularized(
+            start_params=start_params,
+            method="lbfgs",
+            maxiter=200,
+            alpha=RIDGE_ALPHA,
+            L1_wt=0.0,
+        )
+        result = logit_model.fit(
+            start_params=penalized.params,
+            method="lbfgs",
+            maxiter=200,
+            tol=1e-8,
+            disp=False,
+        )
+        method = "logit_lbfgs (ridge restart)"
+        diagnostics = _collect_fit_diagnostics(result, X)
+
+    return result, method, diagnostics
 
 
 @dataclass
@@ -1287,7 +1300,7 @@ def _load_shared_covariates() -> tuple[pd.DataFrame, pd.DataFrame, str | None]:
         anc_cat,
         prefix="ANC",
         drop_first=True,
-        dtype=np.float32,
+        dtype=np.float64,
     )
     # ``pd.get_dummies`` uses a fresh ``RangeIndex`` by default, which discards the
     # participant identifiers associated with ``anc_series``.  The downstream design
@@ -1332,215 +1345,289 @@ def _load_inversion(target: str) -> pd.DataFrame:
     return inversion_df[[target]].rename(columns={target: "dosage"})
 
 
-def _build_design_matrix(
+@dataclass
+class DesignPreconditioner:
+    index: pd.Index
+    dosage: pd.Series
+    age_basis: pd.DataFrame
+    sex: pd.Series | None
+    pcs_resid: pd.DataFrame
+    scaled_controls: pd.DataFrame
+    ancestry_dummies: pd.DataFrame
+    ancestry_labels: pd.Series
+    pc_projection_basis: np.ndarray
+    pc_projection_pinv: np.ndarray
+    diagnostics: dict[str, object]
+    control_order: list[str]
+    age_columns: list[str]
+    pc_columns: list[str]
+    ancestry_columns: list[str]
+    sex_column: str | None
+
+    def build_design(self, control_columns: Sequence[str]) -> pd.DataFrame:
+        selected_controls = [col for col in self.control_order if col in control_columns]
+
+        frames: list[pd.DataFrame] = [self.dosage.to_frame(name="dosage"), self.age_basis]
+        if self.sex is not None:
+            frames.append(self.sex.to_frame(name=self.sex.name))
+        if not self.pcs_resid.empty:
+            frames.append(self.pcs_resid)
+        if selected_controls:
+            frames.append(self.scaled_controls[selected_controls])
+        if not self.ancestry_dummies.empty:
+            frames.append(self.ancestry_dummies)
+
+        design = pd.concat(frames, axis=1)
+        order: list[str] = ["dosage", *self.age_columns]
+        if self.sex_column:
+            order.append(self.sex_column)
+        order.extend(self.pc_columns)
+        order.extend(selected_controls)
+        order.extend(self.ancestry_columns)
+
+        design = design[order]
+        design = design.astype(np.float64)
+        design.insert(0, "const", 1.0)
+
+        matrix = design.iloc[:, 1:].to_numpy(dtype=np.float64, copy=False)
+        if not np.isfinite(matrix).all():
+            raise RuntimeError("Design matrix contains non-finite values after conditioning.")
+
+        diagnostics = {k: v for k, v in self.diagnostics.items() if k != "control_scalers"}
+        rank = _estimate_rank(matrix)
+        diagnostics.update(
+            {
+                "condition_number": _compute_condition_number(matrix),
+                "matrix_rank": rank,
+                "effective_rank": rank,
+                "final_columns": ["const", *order],
+                "selected_custom_controls": selected_controls,
+            }
+        )
+        design.attrs["diagnostics"] = diagnostics
+
+        if design.dtypes.ne(np.float64).any():
+            raise RuntimeError("Design matrix contains non-float64 columns after conditioning.")
+
+        return design
+
+
+def _infer_ancestry_labels(
+    ancestry_dummies: pd.DataFrame,
+    reference_ancestry: str | None,
+) -> pd.Series:
+    if ancestry_dummies.empty:
+        label = reference_ancestry if reference_ancestry is not None else "REFERENCE"
+        return pd.Series(label, index=ancestry_dummies.index, dtype="object")
+
+    labels = pd.Series(
+        reference_ancestry if reference_ancestry is not None else "REFERENCE",
+        index=ancestry_dummies.index,
+        dtype="object",
+    )
+    nan_mask = ancestry_dummies.isna().any(axis=1)
+    labels.loc[nan_mask] = np.nan
+    for column in ancestry_dummies.columns:
+        values = ancestry_dummies[column]
+        active = values >= 0.5
+        labels.loc[active] = column.split("ANC_", 1)[-1]
+    return labels
+
+
+def _zscore_controls_within_ancestry(
+    controls: pd.DataFrame,
+    ancestry_labels: pd.Series,
+) -> tuple[pd.DataFrame, dict[str, dict[str, dict[str, float]]]]:
+    if controls.empty:
+        return controls.astype(np.float64), {}
+
+    scaled = pd.DataFrame(index=controls.index, columns=controls.columns, dtype=np.float64)
+    scalers: dict[str, dict[str, dict[str, float]]] = {}
+
+    unique_labels = ancestry_labels.dropna().unique()
+    for column in controls.columns:
+        scalers[column] = {}
+        col_values = controls[column].astype(np.float64)
+        for label in unique_labels:
+            mask = ancestry_labels == label
+            if not mask.any():
+                continue
+            segment = col_values.loc[mask]
+            mean = float(segment.mean()) if len(segment) else 0.0
+            std = float(segment.std(ddof=0)) if len(segment) else 0.0
+            if not math.isfinite(std) or std == 0.0:
+                scaled.loc[mask, column] = 0.0
+            else:
+                scaled.loc[mask, column] = (segment - mean) / std
+            scalers[column][str(label)] = {"mean": mean, "std": std}
+
+        remaining = ancestry_labels.isna()
+        if remaining.any():
+            segment = col_values.loc[remaining]
+            mean = float(segment.mean()) if len(segment) else 0.0
+            std = float(segment.std(ddof=0)) if len(segment) else 0.0
+            if not math.isfinite(std) or std == 0.0:
+                scaled.loc[remaining, column] = 0.0
+            else:
+                scaled.loc[remaining, column] = (segment - mean) / std
+            scalers[column]["nan"] = {"mean": mean, "std": std}
+
+    scaled = scaled.fillna(0.0).astype(np.float64)
+    return scaled, scalers
+
+
+def _fit_design_preconditioner(
     core: pd.DataFrame,
     ancestry_dummies: pd.DataFrame,
-    custom_controls: pd.DataFrame,
     reference_ancestry: str | None,
-) -> pd.DataFrame:
+    all_custom_controls: pd.DataFrame,
+) -> DesignPreconditioner:
     df = core.copy()
-    age_mean = df["AGE"].mean()
-    df["AGE_c"] = df["AGE"] - age_mean
-    df["AGE_c_sq"] = df["AGE_c"] ** 2
-    base_covars = _base_covariate_columns()
-    covar_cols: list[str] = ["dosage", *base_covars]
-    missing = [c for c in covar_cols if c not in df.columns]
+    if not all_custom_controls.empty:
+        df = df.join(all_custom_controls, how="left")
+
+    ancestry_slice = ancestry_dummies.reindex(df.index)
+    pc_columns = [f"PC{i}" for i in range(1, NUM_PCS + 1)]
+    missing_pcs = [col for col in pc_columns if col not in df.columns]
+    if missing_pcs:
+        raise KeyError(f"Missing required principal components: {missing_pcs}")
+
+    required_columns = ["dosage", "AGE", "sex", *pc_columns]
+    missing = [column for column in required_columns if column not in df.columns]
     if missing:
         raise KeyError(f"Missing required covariate columns: {missing}")
 
+    control_columns = list(dict.fromkeys(all_custom_controls.columns)) if not all_custom_controls.empty else []
+
+    mask = pd.Series(True, index=df.index, dtype=bool)
+    mask &= df[required_columns].apply(pd.to_numeric, errors="coerce").notna().all(axis=1)
+    if control_columns:
+        mask &= df[control_columns].apply(pd.to_numeric, errors="coerce").notna().all(axis=1)
+    if ancestry_slice.shape[1] > 0:
+        mask &= ~ancestry_slice.isna().any(axis=1)
+
+    dropped = int((~mask).sum())
+    if dropped:
+        warn(f"Dropped {dropped:,} participants due to missing covariates during conditioning.")
+
+    df = df.loc[mask]
+    ancestry_slice = ancestry_slice.loc[mask]
+    if control_columns:
+        df = df.dropna(subset=control_columns)
+
+    if df.empty:
+        raise RuntimeError("No participants remain after conditioning filters.")
+
+    ancestry_labels = _infer_ancestry_labels(ancestry_slice.fillna(0.0), reference_ancestry)
+
+    dosage = df["dosage"].astype(np.float64)
+    sex = df["sex"].astype(np.float64)
+
+    pcs = df[pc_columns].astype(np.float64)
+    pc_means = pcs.mean(axis=0)
+    pc_stds = pcs.std(axis=0, ddof=0)
+    pc_stds_replaced = pc_stds.replace(0.0, np.nan)
+    pcs_z = (pcs - pc_means) / pc_stds_replaced
+    pcs_z = pcs_z.fillna(0.0)
+
+    ancestry_matrix = ancestry_slice.fillna(0.0).astype(np.float64)
+    intercept = np.ones((len(ancestry_matrix), 1), dtype=np.float64)
+    projection_basis = intercept if ancestry_matrix.empty else np.hstack((intercept, ancestry_matrix.to_numpy(dtype=np.float64)))
+    projection_pinv = np.linalg.pinv(projection_basis)
+    pcs_residual = pcs_z.to_numpy(dtype=np.float64) - projection_basis @ (projection_pinv @ pcs_z.to_numpy(dtype=np.float64))
+    pcs_resid_df = pd.DataFrame(pcs_residual, index=df.index, columns=pc_columns)
+
+    age_decades = df["AGE"].astype(np.float64) / 10.0
+    age_basis = dmatrix(
+        f"bs(age, df={AGE_BSPLINE_DF}, degree=3, include_intercept=False)",
+        {"age": age_decades},
+        return_type="dataframe",
+    )
+    age_basis.index = df.index
+    age_basis = age_basis.astype(np.float64)
+    age_basis.columns = [f"AGE_BS_{i}" for i in range(age_basis.shape[1])]
+
+    if control_columns:
+        controls = df[control_columns].astype(np.float64)
+        scaled_controls, control_scalers = _zscore_controls_within_ancestry(controls, ancestry_labels)
+    else:
+        scaled_controls = pd.DataFrame(index=df.index, dtype=np.float64)
+        control_scalers = {}
+
+    ancestry_final = ancestry_matrix.astype(np.float64)
+
+    components = [
+        dosage.to_frame(name="dosage"),
+        age_basis,
+        sex.to_frame(name="sex"),
+        pcs_resid_df,
+        scaled_controls,
+        ancestry_final,
+    ]
+    combined = pd.concat(components, axis=1)
+    combined = combined.astype(np.float64)
+
+    if not np.isfinite(combined.to_numpy(dtype=np.float64, copy=False)).all():
+        raise RuntimeError("Non-finite values detected in covariates during conditioning.")
+
+    variances = combined.var(axis=0, ddof=0)
+    zero_variance = variances[variances == 0.0].index.tolist()
+    if "dosage" in zero_variance:
+        raise RuntimeError("Inversion dosage is constant after conditioning; cannot fit logistic model.")
+
+    if "sex" in zero_variance:
+        sex_series: pd.Series | None = None
+    else:
+        sex_series = sex.astype(np.float64)
+
+    age_basis = age_basis.drop(columns=[col for col in age_basis.columns if col in zero_variance])
+    pcs_resid_df = pcs_resid_df.drop(columns=[col for col in pcs_resid_df.columns if col in zero_variance])
+    scaled_controls = scaled_controls.drop(columns=[col for col in scaled_controls.columns if col in zero_variance])
+    ancestry_final = ancestry_final.drop(columns=[col for col in ancestry_final.columns if col in zero_variance])
+
+    control_order = [col for col in control_columns if col in scaled_controls.columns]
+
+    final_components = [
+        dosage.to_frame(name="dosage"),
+        age_basis,
+        sex_series.to_frame(name="sex") if sex_series is not None else None,
+        pcs_resid_df,
+        scaled_controls,
+        ancestry_final,
+    ]
+    final_components = [frame for frame in final_components if frame is not None and not frame.empty]
+    final_matrix = pd.concat(final_components, axis=1).astype(np.float64)
+
+    matrix = final_matrix.to_numpy(dtype=np.float64, copy=False)
+    rank = _estimate_rank(matrix)
     diagnostics: dict[str, object] = {
-        "dropped_non_finite": 0,
-        "dropped_constant": [],
-        "dropped_duplicates": [],
-        "dropped_collinear": [],
-        "ancestry_constants": [],
-        "dropped_missing_ancestry": 0,
+        "conditioning_rows": len(df),
+        "dropped_rows_missing": dropped,
+        "zero_variance_columns": zero_variance,
+        "condition_number": _compute_condition_number(matrix),
+        "matrix_rank": rank,
+        "effective_rank": rank,
+        "control_scalers": control_scalers,
     }
 
-    design = df[covar_cols].astype(np.float32, copy=False)
-    design["const"] = np.float32(1.0)
-
-    anc_slice = ancestry_dummies.reindex(design.index)
-    if anc_slice.shape[1] > 0:
-        missing_mask = anc_slice.isna().all(axis=1)
-        if missing_mask.any():
-            count_missing = int(missing_mask.sum())
-            diagnostics["dropped_missing_ancestry"] = count_missing
-            design = design.loc[~missing_mask]
-            anc_slice = anc_slice.loc[~missing_mask]
-            warn(
-                "Dropped participants lacking ancestry covariates after alignment: "
-                f"{count_missing:,}"
-            )
-    anc_slice = anc_slice.fillna(0.0).astype(np.float32)
-    out = pd.concat([design, anc_slice], axis=1)
-
-    if not custom_controls.empty:
-        aligned_custom = custom_controls.reindex(out.index)
-        aligned_custom = aligned_custom.dropna(axis=0, how="any")
-        out = out.loc[aligned_custom.index]
-        out = pd.concat([out, aligned_custom.astype(np.float32)], axis=1)
-
-    finite_mask = np.isfinite(out.to_numpy(dtype=np.float64)).all(axis=1)
-    if not finite_mask.all():
-        failing_rows = out.loc[~finite_mask]
-        non_finite_details: dict[str, dict[str, object]] = {}
-
-        for column in out.columns:
-            column_values = failing_rows[column]
-            if column_values.empty:
-                continue
-            details: dict[str, object] = {}
-            nan_count = int(column_values.isna().sum())
-            if nan_count:
-                details["nan"] = nan_count
-            pos_inf_count = int(np.isposinf(column_values.to_numpy(dtype=np.float64, copy=False)).sum())
-            if pos_inf_count:
-                details["pos_inf"] = pos_inf_count
-            neg_inf_count = int(np.isneginf(column_values.to_numpy(dtype=np.float64, copy=False)).sum())
-            if neg_inf_count:
-                details["neg_inf"] = neg_inf_count
-            if details:
-                examples: list[str] = []
-                for value in column_values.iloc[:3]:
-                    examples.append(_format_non_finite_value(value))
-                details["examples"] = examples
-                non_finite_details[column] = details
-
-        before = len(out)
-        out = out.loc[finite_mask]
-        dropped = before - len(out)
-        diagnostics["dropped_non_finite"] = dropped
-        if non_finite_details:
-            diagnostics["non_finite_details"] = non_finite_details
-        message_lines = [
-            f"Dropped {dropped:,} participants with non-finite covariates.",
-        ]
-        if non_finite_details:
-            column_summaries: list[str] = []
-            for column, details in non_finite_details.items():
-                pieces: list[str] = []
-                if details.get("nan"):
-                    pieces.append(f"NaN={details['nan']}")
-                if details.get("pos_inf"):
-                    pieces.append(f"+inf={details['pos_inf']}")
-                if details.get("neg_inf"):
-                    pieces.append(f"-inf={details['neg_inf']}")
-                if pieces:
-                    column_summaries.append(f"{column} ({', '.join(pieces)})")
-            if column_summaries:
-                message_lines.append("Problem columns: " + "; ".join(column_summaries))
-        warn("\n".join(message_lines))
-
-        if out.empty:
-            raise RuntimeError(
-                "All participants removed after filtering non-finite covariates."
-            )
-
-    # Statsmodels fails with a ``Singular matrix`` error when any covariate column is
-    # constant (all zeros/ones) after aligning the custom controls and ancestry
-    # dummies.  This situation arose in production when every participant belonged to
-    # the same ancestry stratum, leaving the corresponding dummy columns as all
-    # zeros.  The original code surfaced as a logistic regression failure for every
-    # affected phenotype, obscuring the underlying data issue.  We proactively drop
-    # non-informative constant columns so that the model has full rank.  If the
-    # dosage column itself is constant then the analysis cannot produce a meaningful
-    # estimate, so we abort early to avoid misleading output.
-    constant_counts = out.nunique(dropna=False)
-    constant_cols = [col for col, count in constant_counts.items() if count <= 1]
-
-    if "dosage" in constant_cols:
-        raise RuntimeError(
-            "Inversion dosage is constant after filtering; cannot fit logistic model."
-        )
-
-    ancestry_columns = [col for col in out.columns if col.startswith("ANC_")]
-    ancestry_constants = [col for col in ancestry_columns if col in constant_cols]
-
-    if ancestry_columns and ancestry_constants:
-        ancestry_details: list[str] = []
-        if all(out[col].eq(0.0).all() for col in ancestry_columns):
-            if reference_ancestry:
-                warn(
-                    "All participants fall into the reference ancestry stratum "
-                    f"('{reference_ancestry}') after filtering; ancestry covariates will be dropped."
-                )
-            else:
-                warn(
-                    "All participants fall into a single ancestry stratum after filtering; ancestry covariates will be dropped."
-                )
-            ancestry_details.append("all ancestry dummies = 0")
-        else:
-            details: list[str] = []
-            for col in ancestry_constants:
-                label = col.split("ANC_", 1)[-1]
-                value = float(out[col].iloc[0]) if len(out[col]) else float("nan")
-                if value == 0.0:
-                    details.append(f"{label}=0 (no participants)")
-                elif value == 1.0:
-                    details.append(f"{label}=1 (all participants)")
-                else:
-                    details.append(f"{label} constant at {value}")
-                ancestry_details.append(f"{col} -> {details[-1]}")
-            warn(
-                "One or more ancestry dummy covariates became constant after aligning "
-                "with the phenotype/custom controls: "
-                + "; ".join(details)
-            )
-        diagnostics["ancestry_constants"] = ancestry_details or [col for col in ancestry_constants]
-
-    removable = [col for col in constant_cols if col != "const"]
-    if removable:
-        out = out.drop(columns=removable)
-        diagnostics["dropped_constant"] = sorted(removable)
-        warn(
-            "Dropped constant covariate columns to avoid singular design: "
-            + ", ".join(sorted(removable))
-        )
-
-    signature_owner: dict[bytes, str] = {}
-    duplicate_cols: list[str] = []
-    duplicate_descriptions: list[str] = []
-    for column in out.columns:
-        signature = out[column].to_numpy(dtype=np.float64, copy=False).tobytes()
-        owner = signature_owner.get(signature)
-        if owner is None:
-            signature_owner[signature] = column
-            continue
-        duplicate_cols.append(column)
-        duplicate_descriptions.append(f"{column} == {owner}")
-
-    if duplicate_cols:
-        if "dosage" in duplicate_cols:
-            raise RuntimeError(
-                "Dosage covariate duplicates another predictor after alignment; cannot fit logistic model."
-            )
-        out = out.drop(columns=duplicate_cols)
-        diagnostics["dropped_duplicates"] = sorted(duplicate_cols)
-        warn(
-            "Dropped duplicate covariate columns to avoid singular design: "
-            + ", ".join(duplicate_descriptions)
-        )
-
-    try:
-        out, removed_collinear = _remove_collinear_columns(out)
-    except RuntimeError as exc:
-        raise RuntimeError(str(exc)) from exc
-
-    if removed_collinear:
-        diagnostics["dropped_collinear"] = sorted(removed_collinear)
-        warn(
-            "Dropped linearly dependent covariates detected via least-squares check: "
-            + ", ".join(sorted(removed_collinear))
-        )
-
-    final_matrix = out.to_numpy(dtype=np.float64, copy=False)
-    diagnostics["matrix_rank"] = _estimate_rank(final_matrix)
-    diagnostics["condition_number"] = _compute_condition_number(final_matrix)
-    diagnostics["final_columns"] = list(out.columns)
-    out.attrs["diagnostics"] = diagnostics
-
-    return out
+    return DesignPreconditioner(
+        index=df.index,
+        dosage=dosage.astype(np.float64),
+        age_basis=age_basis.astype(np.float64),
+        sex=sex_series.astype(np.float64) if sex_series is not None else None,
+        pcs_resid=pcs_resid_df.astype(np.float64),
+        scaled_controls=scaled_controls.astype(np.float64),
+        ancestry_dummies=ancestry_final.astype(np.float64),
+        ancestry_labels=ancestry_labels,
+        pc_projection_basis=projection_basis,
+        pc_projection_pinv=projection_pinv,
+        diagnostics=diagnostics,
+        control_order=control_order,
+        age_columns=list(age_basis.columns),
+        pc_columns=list(pcs_resid_df.columns),
+        ancestry_columns=list(ancestry_final.columns),
+        sex_column="sex" if sex_series is not None else None,
+    )
 
 
 def _ensure_pheno_cache(
@@ -1613,10 +1700,8 @@ def _analyse_single_phenotype(
     *,
     cfg: "PhenotypeRun",
     inv: str,
-    core: pd.DataFrame,
-    anc_dummies: pd.DataFrame,
-    reference_ancestry: str | None,
-    custom_controls: pd.DataFrame,
+    preconditioner: DesignPreconditioner,
+    custom_control_names: Sequence[str],
     definitions: pd.DataFrame,
     cdr_id: str,
     project_id: str,
@@ -1629,17 +1714,12 @@ def _analyse_single_phenotype(
         definitions,
         cfg.phenotype,
         cdr_id,
-        core.index.astype(str),
+        preconditioner.index.astype(str),
         project_id,
     )
 
     try:
-        design = _build_design_matrix(
-            core,
-            anc_dummies,
-            custom_controls,
-            reference_ancestry,
-        )
+        design = preconditioner.build_design(custom_control_names)
     except RuntimeError as exc:
         _log_lines(prefix, f"Skipping phenotype due to design matrix issue: {exc}", level="warn")
         return None, []
@@ -1648,7 +1728,7 @@ def _analyse_single_phenotype(
     phenotype_status = _load_case_status(
         cfg.phenotype,
         cdr_codename,
-        design.index,
+        preconditioner.index,
     )
 
     n_cases = int(phenotype_status.sum())
@@ -1670,6 +1750,10 @@ def _analyse_single_phenotype(
 
     y = phenotype_status.loc[design.index].astype(np.int8)
     X = design.copy()
+
+    design_diag = X.attrs.get("diagnostics", {})
+    if design_diag:
+        _log_lines(prefix, "Design diagnostics: " + _format_summary_dict(design_diag))
 
     dosage_stats = _summarise_column(X["dosage"])
     _log_lines(prefix, "Dosage summary: " + _format_summary_dict(dosage_stats))
@@ -1706,10 +1790,13 @@ def _analyse_single_phenotype(
     )
 
     try:
-        fit, fit_method = _fit_logistic(X, y)
+        fit, fit_method, fit_diagnostics = _fit_logistic(X, y)
     except RuntimeError as exc:
         _log_lines(prefix, f"Logistic regression failed: {exc}", level="warn")
         return None, []
+
+    if fit_diagnostics:
+        _log_lines(prefix, "Fit diagnostics: " + _format_summary_dict(fit_diagnostics))
 
     term_summary = _summarise_term(fit, "dosage")
     beta = float(term_summary.get("beta", math.nan))
@@ -1727,9 +1814,26 @@ def _analyse_single_phenotype(
 
     baseline_summary = _empty_term_summary()
     baseline_method: str | None = None
-    baseline_design = X.drop(columns=custom_cols, errors="ignore")
+    baseline_control_names: list[str] = []
     try:
-        baseline_fit, baseline_method = _fit_logistic(baseline_design, y.loc[baseline_design.index])
+        baseline_design = preconditioner.build_design(baseline_control_names)
+    except RuntimeError as exc:
+        _log_lines(
+            prefix,
+            f"Baseline design construction failed: {exc}",
+            level="warn",
+        )
+        baseline_design = X.drop(columns=custom_cols, errors="ignore")
+        baseline_design.attrs["diagnostics"] = {}
+    else:
+        baseline_design_diag = baseline_design.attrs.get("diagnostics", {})
+        if baseline_design_diag:
+            _log_lines(prefix, "Baseline design diagnostics: " + _format_summary_dict(baseline_design_diag))
+    try:
+        baseline_fit, baseline_method, baseline_diag = _fit_logistic(
+            baseline_design,
+            y.loc[baseline_design.index],
+        )
         baseline_summary = _summarise_term(baseline_fit, "dosage")
     except RuntimeError as exc:
         _log_lines(
@@ -1737,6 +1841,10 @@ def _analyse_single_phenotype(
             f"Baseline logistic regression (without custom PGS covariates) failed: {exc}",
             level="warn",
         )
+        baseline_diag = {}
+    else:
+        if baseline_diag:
+            _log_lines(prefix, "Baseline fit diagnostics: " + _format_summary_dict(baseline_diag))
 
     baseline_log_p = baseline_summary.get("log_p")
     if baseline_log_p is None or not math.isfinite(baseline_log_p):
@@ -1814,13 +1922,43 @@ def run() -> None:
         if "dosage" not in core.columns:
             raise KeyError(f"Inversion column '{inv}' missing after join")
 
+        control_frames: list[pd.DataFrame] = []
+        category_control_names: dict[str, list[str]] = {}
+        for category, controls in category_controls.items():
+            aligned = controls.reindex(core.index)
+            control_frames.append(aligned)
+            category_control_names[category] = list(aligned.columns)
+
+        if control_frames:
+            all_controls = pd.concat(control_frames, axis=1)
+            all_controls = all_controls.loc[:, ~all_controls.columns.duplicated()]
+            all_controls = all_controls.reindex(core.index)
+        else:
+            all_controls = pd.DataFrame(index=core.index)
+
+        try:
+            preconditioner = _fit_design_preconditioner(core, anc_dummies, reference_ancestry, all_controls)
+        except RuntimeError as exc:
+            warn(f"Skipping inversion {inv} due to conditioning failure: {exc}")
+            continue
+
+        info(
+            "Preconditioned cohort: "
+            f"{len(preconditioner.index):,} participants (condition_number={preconditioner.diagnostics.get('condition_number', float('nan')):.6g})"
+        )
+
+        for category, columns in category_control_names.items():
+            category_control_names[category] = [
+                col for col in columns if col in preconditioner.scaled_controls.columns
+            ]
+
         pending: dict[Future, PhenotypeRun] = {}
         with ThreadPoolExecutor(
-            max_workers=max(1, min(len(target_runs), os.cpu_count() or 1))
+            max_workers=max(1, min(4, len(target_runs), os.cpu_count() or 1))
         ) as executor:
             for cfg in target_runs:
-                custom_controls = category_controls.get(cfg.category)
-                if custom_controls is None:
+                control_names = category_control_names.get(cfg.category)
+                if control_names is None:
                     warn(
                         f"No custom controls found for category '{cfg.category}'; skipping {cfg.phenotype}."
                     )
@@ -1830,10 +1968,8 @@ def run() -> None:
                     _analyse_single_phenotype,
                     cfg=cfg,
                     inv=inv,
-                    core=core,
-                    anc_dummies=anc_dummies,
-                    reference_ancestry=reference_ancestry,
-                    custom_controls=custom_controls,
+                    preconditioner=preconditioner,
+                    custom_control_names=control_names,
                     definitions=definitions,
                     cdr_id=cdr_id,
                     project_id=project_id,
