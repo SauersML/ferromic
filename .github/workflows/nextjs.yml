@@ -129,6 +129,7 @@ jobs:
 
           if [ -z "$FIGURES_ROOT" ]; then
             FIGURES_ROOT=$(python3 scripts/find_figures_root.py --search-root "$SEARCH_ROOT")
+
           fi
 
           if [ -z "$FIGURES_ROOT" ]; then
