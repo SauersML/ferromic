@@ -109,6 +109,9 @@ MIN_LOG_FLOAT = math.log(sys.float_info.min)
 MAX_LOG_FLOAT = math.log(sys.float_info.max)
 DECIMAL_CONTEXT = Context(prec=50, Emin=-999999, Emax=999999)
 
+LRT_BOOTSTRAP_REPLICATES = 1000
+LRT_BOOTSTRAP_SEED = 13579
+
 # Logistic models occasionally reach extremely large coefficient estimates when the
 # outcome is nearly separated.  ``MAX_ABS_DOSAGE_BETA`` bounds what we consider a
 # numerically stable dosage coefficient; larger values trigger detailed
@@ -945,6 +948,82 @@ def _collect_fit_diagnostics(
     return diagnostics
 
 
+def _predict_probabilities(result, X: pd.DataFrame) -> np.ndarray | None:
+    predict = getattr(result, "predict", None)
+    try:
+        if callable(predict):
+            probs = predict(X)
+        else:
+            model = getattr(result, "model", None)
+            params = getattr(result, "params", None)
+            if model is None or params is None:
+                return None
+            probs = model.predict(np.asarray(params, dtype=np.float64), exog=np.asarray(X, dtype=np.float64))
+    except Exception:
+        return None
+
+    if isinstance(probs, pd.Series):
+        probs_array = probs.to_numpy(dtype=np.float64, copy=False)
+    else:
+        probs_array = np.asarray(probs, dtype=np.float64)
+
+    if probs_array.shape[0] != len(X):
+        return None
+
+    return probs_array
+
+
+def _compute_lrt_bootstrap_pvalue(
+    full_design: pd.DataFrame,
+    reduced_design: pd.DataFrame,
+    y: pd.Series,
+    reduced_fit,
+    observed_stat: float,
+    *,
+    replicates: int = LRT_BOOTSTRAP_REPLICATES,
+    seed: int | None = LRT_BOOTSTRAP_SEED,
+) -> tuple[float, int, int]:
+    if replicates <= 0:
+        return math.nan, 0, 0
+
+    probabilities = _predict_probabilities(reduced_fit, reduced_design)
+    if probabilities is None:
+        return math.nan, 0, 0
+
+    probabilities = np.clip(probabilities, 1e-9, 1 - 1e-9)
+    rng = np.random.default_rng(seed)
+
+    successes = 0
+    exceedances = 0
+    attempts = 0
+
+    for _ in range(replicates):
+        attempts += 1
+        sampled = rng.binomial(1, probabilities, size=probabilities.shape[0])
+        y_boot = pd.Series(sampled, index=y.index, dtype=np.float64)
+        try:
+            full_fit_boot, _, _ = _fit_logistic(full_design, y_boot)
+            reduced_fit_boot, _, _ = _fit_logistic(reduced_design, y_boot.loc[reduced_design.index])
+        except RuntimeError:
+            continue
+
+        full_ll = getattr(full_fit_boot, "llf", math.nan)
+        reduced_ll = getattr(reduced_fit_boot, "llf", math.nan)
+        if not (math.isfinite(full_ll) and math.isfinite(reduced_ll)):
+            continue
+
+        stat = max(0.0, 2.0 * (float(full_ll) - float(reduced_ll)))
+        successes += 1
+        if stat >= observed_stat:
+            exceedances += 1
+
+    if successes == 0:
+        return math.nan, 0, attempts
+
+    p_value = (exceedances + 1) / (successes + 1)
+    return p_value, successes, attempts
+
+
 class PenalizedLogitResult:
     """Minimal result wrapper exposing Wald diagnostics for penalized fits."""
 
@@ -982,6 +1061,11 @@ class PenalizedLogitResult:
         lower = self.params - z_value * self.bse
         upper = self.params + z_value * self.bse
         return pd.DataFrame({0: lower, 1: upper})
+
+    def predict(self, exog):
+        matrix = np.asarray(exog, dtype=np.float64)
+        params = self.params.to_numpy(dtype=np.float64)
+        return self.model.predict(params, exog=matrix)
 
 
 def _fit_logistic(X: pd.DataFrame, y: pd.Series):
@@ -1733,6 +1817,56 @@ def _analyse_single_phenotype(
     if log_p_value is None or not math.isfinite(log_p_value):
         log_p_value = math.nan
 
+    lrt_bootstrap_pvalue = math.nan
+    lrt_bootstrap_successes = 0
+    lrt_bootstrap_attempts = 0
+    lrt_bootstrap_ran = False
+    lrt_statistic = math.nan
+    try:
+        reduced_design = X.drop(columns=["dosage"])
+    except KeyError:
+        _log_lines(prefix, "Reduced design without dosage could not be constructed.", level="warn")
+        reduced_design = None
+    if reduced_design is not None and not reduced_design.empty:
+        try:
+            reduced_fit, _, reduced_diag = _fit_logistic(
+                reduced_design,
+                y.loc[reduced_design.index],
+            )
+        except RuntimeError as exc:
+            _log_lines(
+                prefix,
+                f"Reduced logistic regression (without dosage) failed: {exc}",
+                level="warn",
+            )
+        else:
+            if reduced_diag:
+                _log_lines(prefix, "Reduced fit diagnostics: " + _format_summary_dict(reduced_diag))
+            full_ll = getattr(fit, "llf", math.nan)
+            reduced_ll = getattr(reduced_fit, "llf", math.nan)
+            if math.isfinite(full_ll) and math.isfinite(reduced_ll):
+                lrt_statistic = max(0.0, 2.0 * (float(full_ll) - float(reduced_ll)))
+                (
+                    lrt_bootstrap_pvalue,
+                    lrt_bootstrap_successes,
+                    lrt_bootstrap_attempts,
+                ) = _compute_lrt_bootstrap_pvalue(
+                    X,
+                    reduced_design,
+                    y,
+                    reduced_fit,
+                    lrt_statistic,
+                )
+                lrt_bootstrap_ran = True
+            else:
+                _log_lines(
+                    prefix,
+                    "Log-likelihoods for full or reduced model were not finite; skipping LRT bootstrap.",
+                    level="warn",
+                )
+    elif reduced_design is not None and reduced_design.empty:
+        _log_lines(prefix, "Reduced design is empty after removing dosage; skipping LRT bootstrap.", level="warn")
+
     baseline_summary = _empty_term_summary()
     baseline_method: str | None = None
     baseline_control_names: list[str] = []
@@ -1783,6 +1917,15 @@ def _analyse_single_phenotype(
         ),
         f"p-value={p_value} (log_p={log_p_value})",
     ]
+    if math.isfinite(lrt_bootstrap_pvalue):
+        summary_lines.append(
+            "LRT bootstrap p-value="
+            f"{lrt_bootstrap_pvalue} (successes={lrt_bootstrap_successes}/{lrt_bootstrap_attempts})"
+        )
+    elif lrt_bootstrap_ran:
+        summary_lines.append("LRT bootstrap p-value unavailable (no successful replicates)")
+    else:
+        summary_lines.append("LRT bootstrap p-value unavailable (reduced model not fitted)")
     if baseline_method:
         summary_lines.append(
             (
@@ -1806,6 +1949,7 @@ def _analyse_single_phenotype(
         "OR_95CI_Upper": ci_upper,
         "P_Value": p_value,
         "Log_P_Value": log_p_value,
+        "P_Value_LRT_Bootstrap": lrt_bootstrap_pvalue,
         "Fit_Method": fit_method,
         "Control_File": str(scores_path),
         "Custom_Covariates": ",".join(custom_cols),
