@@ -965,6 +965,9 @@ def _pipeline_once():
         ctx_tag_by_inversion = {inv: _ctx_tag_for(inv) for inv in run.TARGET_INVERSIONS}
 
         governor = MultiTenantGovernor(monitor_thread)
+
+        category_summary_frames: list[pd.DataFrame] = []
+        category_summary_lock = threading.Lock()
         
         def run_single_inversion(target_inversion: str, baseline_rss_gb: float, shared_data: dict):
             inv_safe_name = models.safe_basename(target_inversion)
@@ -1254,11 +1257,11 @@ def _pipeline_once():
                                                 cat_df.loc[mask, "P_GLS"], alpha=0.05, method="fdr_bh"
                                             )
                                             cat_df.loc[mask, "Q_GLS"] = q_cat_gls
-                                        output_dir = os.getcwd()
-                                        summary_path = os.path.join(output_dir, f"{inv_safe_name}_category_summary.tsv")
-                                        cat_df.to_csv(summary_path, sep="\t", index=False)
+                                        cat_df.insert(0, "Inversion", target_inversion)
+                                        with category_summary_lock:
+                                            category_summary_frames.append(cat_df)
                                         print(
-                                            f"{log_prefix} Category summary saved to {summary_path} ({len(cat_df)} rows).",
+                                            f"{log_prefix} Category summary recorded with {len(cat_df)} rows.",
                                             flush=True,
                                         )
                                     else:
@@ -1348,6 +1351,18 @@ def _pipeline_once():
             time.sleep(1.0)
 
         print("\n--- All inversions processed. ---")
+
+        if category_summary_frames:
+            combined_category_summary = pd.concat(category_summary_frames, ignore_index=True)
+            output_dir = os.getcwd()
+            summary_path = os.path.join(output_dir, "category_summary.tsv")
+            combined_category_summary.to_csv(summary_path, sep="\t", index=False)
+            print(
+                f"[Summary] Combined category summary saved to {summary_path} ({len(combined_category_summary)} rows).",
+                flush=True,
+            )
+        else:
+            print("[Summary] No category summaries were generated.", flush=True)
 
         # --- PART 3: CONSOLIDATE & ANALYZE RESULTS (ACROSS ALL INVERSIONS) ---
         print("\n" + "=" * 70)
