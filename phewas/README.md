@@ -1,3 +1,4 @@
+Get the phewas code:
 ```
 # Mirror the repo's phewas/ directory locally
 rm -rf -- phewas && mkdir -p phewas && \
@@ -22,7 +23,7 @@ The pipeline can be launched with overrides for common configuration values via 
 `phewas.cli` module:
 
 ```
-python -m phewas.cli [--min-cases-controls N] [--pop-label POPULATION]
+python3 -m phewas.cli [--min-cases-controls N] [--pop-label POPULATION]
 ```
 
 * `--min-cases-controls` sets the minimum number of cases and controls required for a
@@ -32,3 +33,8 @@ python -m phewas.cli [--min-cases-controls N] [--pop-label POPULATION]
   generated during shared setup.
 
 Omitting these options keeps the existing default behaviour of the pipeline.
+
+Run extras like this (custom control example): 
+```
+python3 -m phewas.extra.custom_control_followup
+```
