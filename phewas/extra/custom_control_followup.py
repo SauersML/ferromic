@@ -112,6 +112,9 @@ DECIMAL_CONTEXT = Context(prec=50, Emin=-999999, Emax=999999)
 LRT_BOOTSTRAP_REPLICATES = 1000
 LRT_BOOTSTRAP_SEED = 13579
 
+RIDGE_PARAMETRIC_BOOTSTRAP_REPLICATES = 500
+RIDGE_PARAMETRIC_BOOTSTRAP_SEED = 424242
+
 # Logistic models occasionally reach extremely large coefficient estimates when the
 # outcome is nearly separated.  ``MAX_ABS_DOSAGE_BETA`` bounds what we consider a
 # numerically stable dosage coefficient; larger values trigger detailed
@@ -735,7 +738,13 @@ def _describe_covariate_columns(X: pd.DataFrame) -> list[str]:
     return lines
 
 
-def _summarise_term(result, term: str) -> dict[str, float | str | None]:
+def _summarise_term(
+    result,
+    term: str,
+    *,
+    design: pd.DataFrame | None = None,
+    response: pd.Series | None = None,
+) -> dict[str, float | str | None]:
     beta = _extract_parameter(result, term)
     se = _extract_series_value(result, "bse", term)
     if not math.isfinite(se) or se <= 0:
@@ -744,6 +753,8 @@ def _summarise_term(result, term: str) -> dict[str, float | str | None]:
     p_value = _extract_series_value(result, "pvalues", term)
     z_value = _extract_series_value(result, "tvalues", term)
     log_p: float | None
+    ci_low = math.nan
+    ci_high = math.nan
 
     if math.isfinite(p_value) and p_value > 0:
         log_p = math.log(p_value)
@@ -778,9 +789,35 @@ def _summarise_term(result, term: str) -> dict[str, float | str | None]:
         "log_p": log_p if log_p is not None and math.isfinite(log_p) else None,
     }
 
+    bootstrap_meta: dict[str, float | int | None] | None = None
+    if _is_penalized_result(result) and design is not None and response is not None:
+        try:
+            bootstrap_meta = _compute_penalized_parametric_bootstrap(result, design, response, term)
+        except Exception:
+            bootstrap_meta = None
+        if bootstrap_meta:
+            se = float(bootstrap_meta.get("se", se))
+            if math.isfinite(se) and se > 0:
+                summary["se"] = se
+            p_value_candidate = bootstrap_meta.get("p_value", math.nan)
+            log_p_candidate = bootstrap_meta.get("log_p")
+            if math.isfinite(p_value_candidate):
+                summary["p_value"] = p_value_candidate
+            if log_p_candidate is not None and math.isfinite(log_p_candidate):
+                summary["log_p"] = log_p_candidate
+
+            ci_low_candidate = bootstrap_meta.get("ci_low", math.nan)
+            ci_high_candidate = bootstrap_meta.get("ci_high", math.nan)
+            if math.isfinite(ci_low_candidate):
+                ci_low = float(ci_low_candidate)
+            if math.isfinite(ci_high_candidate):
+                ci_high = float(ci_high_candidate)
+            summary["penalized_bootstrap_successes"] = bootstrap_meta.get("successes")
+            summary["penalized_bootstrap_attempts"] = bootstrap_meta.get("attempts")
+            summary["penalized_bootstrap_replicates"] = bootstrap_meta.get("replicates")
+
     conf_int = getattr(result, "conf_int", None)
-    ci_low = ci_high = math.nan
-    if callable(conf_int):
+    if callable(conf_int) and not bootstrap_meta:
         try:
             interval = conf_int(alpha=0.05)
         except Exception:
@@ -1024,6 +1061,88 @@ def _compute_lrt_bootstrap_pvalue(
     return p_value, successes, attempts
 
 
+def _is_penalized_result(result) -> bool:
+    return bool(getattr(result, "penalized", False))
+
+
+def _compute_penalized_parametric_bootstrap(
+    result,
+    X: pd.DataFrame,
+    y: pd.Series,
+    term: str,
+    *,
+    replicates: int = RIDGE_PARAMETRIC_BOOTSTRAP_REPLICATES,
+    seed: int | None = RIDGE_PARAMETRIC_BOOTSTRAP_SEED,
+):
+    if replicates <= 0:
+        return None
+
+    probabilities = _predict_probabilities(result, X)
+    if probabilities is None:
+        return None
+
+    probabilities = np.clip(probabilities, 1e-9, 1 - 1e-9)
+    rng = np.random.default_rng(seed)
+
+    sampled_betas: list[float] = []
+    attempts = 0
+    successes = 0
+
+    for _ in range(replicates):
+        attempts += 1
+        sampled = rng.binomial(1, probabilities, size=probabilities.shape[0])
+        y_boot = pd.Series(sampled, index=y.index, dtype=np.float64)
+        try:
+            boot_fit, _, _ = _fit_logistic(X, y_boot)
+        except RuntimeError:
+            continue
+
+        beta = _extract_parameter(boot_fit, term)
+        if not math.isfinite(beta):
+            continue
+
+        sampled_betas.append(float(beta))
+        successes += 1
+
+    if not sampled_betas:
+        return None
+
+    beta_array = np.asarray(sampled_betas, dtype=np.float64)
+    try:
+        ci_low = float(np.percentile(beta_array, 2.5))
+        ci_high = float(np.percentile(beta_array, 97.5))
+    except Exception:
+        ci_low = math.nan
+        ci_high = math.nan
+
+    if beta_array.size > 1:
+        se = float(np.std(beta_array, ddof=1))
+    else:
+        se = math.nan
+
+    beta_hat = _extract_parameter(result, term)
+    if math.isfinite(beta_hat) and math.isfinite(se) and se > 0:
+        z_value = beta_hat / se
+        p_value = 2.0 * float(norm.sf(abs(z_value)))
+        log_p = math.log(p_value) if p_value > 0 else None
+    else:
+        z_value = math.nan
+        p_value = math.nan
+        log_p = None
+
+    return {
+        "se": se,
+        "ci_low": ci_low,
+        "ci_high": ci_high,
+        "p_value": p_value,
+        "log_p": log_p if log_p is not None and math.isfinite(log_p) else None,
+        "z_value": z_value,
+        "successes": successes,
+        "attempts": attempts,
+        "replicates": replicates,
+    }
+
+
 class PenalizedLogitResult:
     """Minimal result wrapper exposing Wald diagnostics for penalized fits."""
 
@@ -1052,6 +1171,7 @@ class PenalizedLogitResult:
             self.nobs = math.nan
         self.mle_retvals = {"converged": True, "method": "ridge"}
         self.converged = True
+        self.penalized = True
 
     def cov_params(self) -> pd.DataFrame:
         return self._cov
@@ -1179,6 +1299,8 @@ def _fit_logistic(X: pd.DataFrame, y: pd.Series):
         method = "logit_lbfgs (ridge penalty)"
         diagnostics = _collect_fit_diagnostics(result, X)
         diagnostics["penalized"] = True
+    else:
+        setattr(result, "penalized", False)
 
     return result, method, diagnostics
 
@@ -1803,11 +1925,20 @@ def _analyse_single_phenotype(
     if fit_diagnostics:
         _log_lines(prefix, "Fit diagnostics: " + _format_summary_dict(fit_diagnostics))
 
-    term_summary = _summarise_term(fit, "dosage")
+    term_summary = _summarise_term(fit, "dosage", design=X, response=y)
     beta = float(term_summary.get("beta", math.nan))
     if math.isnan(beta):
         _log_lines(prefix, "Dosage coefficient was not estimated; skipping.", level="warn")
         return None, []
+    if "penalized_bootstrap_successes" in term_summary:
+        successes = term_summary.get("penalized_bootstrap_successes")
+        attempts = term_summary.get("penalized_bootstrap_attempts")
+        replicates = term_summary.get("penalized_bootstrap_replicates")
+        _log_lines(
+            prefix,
+            "Penalized fit used parametric bootstrap: "
+            f"successes={successes}/{attempts} (requested={replicates}).",
+        )
     se = float(term_summary.get("se", math.nan))
     p_value = term_summary.get("p_value", math.nan)
     odds_ratio = term_summary.get("odds_ratio", math.nan)
@@ -1893,7 +2024,21 @@ def _analyse_single_phenotype(
             baseline_design,
             y.loc[baseline_design.index],
         )
-        baseline_summary = _summarise_term(baseline_fit, "dosage")
+        baseline_summary = _summarise_term(
+            baseline_fit,
+            "dosage",
+            design=baseline_design,
+            response=y.loc[baseline_design.index],
+        )
+        if "penalized_bootstrap_successes" in baseline_summary:
+            successes = baseline_summary.get("penalized_bootstrap_successes")
+            attempts = baseline_summary.get("penalized_bootstrap_attempts")
+            replicates = baseline_summary.get("penalized_bootstrap_replicates")
+            _log_lines(
+                prefix,
+                "Baseline penalized fit used parametric bootstrap: "
+                f"successes={successes}/{attempts} (requested={replicates}).",
+            )
     except RuntimeError as exc:
         _log_lines(
             prefix,
