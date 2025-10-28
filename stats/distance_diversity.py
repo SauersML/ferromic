@@ -7,6 +7,9 @@ from numba import njit
 from tqdm import tqdm
 import time
 
+DEBUG_LINE_LIMIT = 25
+DEBUG_SEQUENCE_LIMIT = 25
+
 # JIT-compiled function for linear distances
 @njit
 def compute_distances(positions, sequence_length):
@@ -17,7 +20,7 @@ def compute_distances(positions, sequence_length):
     return dists
 
 # Load data efficiently, limited to some sequences
-def load_data(file_path, max_sequences=5000):
+def load_data(file_path, max_sequences=1000):
     """Load up to some theta and pi data sequences from file."""
     print(f"INFO: Loading data from {file_path} (max {max_sequences} sequences)")
     start_time = time.time()
@@ -26,23 +29,36 @@ def load_data(file_path, max_sequences=5000):
     total_sequences = 0
     
     with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-        lines = f.readlines()
-        print(f"INFO: File read: {len(lines)} lines in {time.time() - start_time:.2f}s")
-        for i in tqdm(range(len(lines) - 1), desc="Parsing lines", unit="line"):
-            if total_sequences >= max_sequences:
-                break
-            if 'filtered_theta' in lines[i]:
-                values = lines[i + 1].strip().replace('NA', 'nan')
-                theta_labels.append(lines[i][1:].strip())
-                theta_data.append(np.fromstring(values, sep=',', dtype=np.float32))
+        line_count = 0
+        with tqdm(total=max_sequences * 2, desc="Parsing lines", unit="line") as pbar:
+            while total_sequences < max_sequences:
+                header = f.readline()
+                if not header:
+                    break
+                line_count += 1
+                if 'filtered_theta' not in header and 'filtered_pi' not in header:
+                    continue
+
+                data_line = f.readline()
+                if not data_line:
+                    break
+                line_count += 1
+
+                values = data_line.strip().replace('NA', 'nan')
+                if 'filtered_theta' in header:
+                    theta_labels.append(header[1:].strip())
+                    theta_data.append(np.fromstring(values, sep=',', dtype=np.float32))
+                    if len(theta_labels) <= DEBUG_LINE_LIMIT:
+                        print(f"DEBUG: Theta line {len(theta_labels)} loaded: {theta_labels[-1]}, {len(theta_data[-1])} values")
+                else:
+                    pi_labels.append(header[1:].strip())
+                    pi_data.append(np.fromstring(values, sep=',', dtype=np.float32))
+                    if len(pi_labels) <= DEBUG_LINE_LIMIT:
+                        print(f"DEBUG: Pi line {len(pi_labels)} loaded: {pi_labels[-1]}, {len(pi_data[-1])} values")
+
                 total_sequences += 1
-                print(f"DEBUG: Theta line {len(theta_labels)} loaded: {theta_labels[-1]}, {len(theta_data[-1])} values")
-            elif 'filtered_pi' in lines[i]:
-                values = lines[i + 1].strip().replace('NA', 'nan')
-                pi_labels.append(lines[i][1:].strip())
-                pi_data.append(np.fromstring(values, sep=',', dtype=np.float32))
-                total_sequences += 1
-                print(f"DEBUG: Pi line {len(pi_labels)} loaded: {pi_labels[-1]}, {len(pi_data[-1])} values")
+                pbar.update(2)
+        print(f"INFO: Parsed {line_count} lines from {file_path} in {time.time() - start_time:.2f}s")
     
     print(f"INFO: Loaded {len(theta_labels)} theta and {len(pi_labels)} pi lines (total {total_sequences}) in {time.time() - start_time:.2f}s")
     return (np.array(theta_labels, dtype=object), np.array(theta_data, dtype=object)), \
@@ -69,23 +85,26 @@ def process_data(data_values, max_dist=5000):
     max_seq_len = 0
     
     for idx, values in enumerate(tqdm(filtered_data_values, desc="Processing sequences", unit="seq")):
-        print(f"DEBUG: Sequence {idx + 1}: Length = {len(values)}")
+        if idx < DEBUG_SEQUENCE_LIMIT:
+            print(f"DEBUG: Sequence {idx + 1}: Length = {len(values)}")
         seq_len = len(values)
         max_seq_len = max(max_seq_len, seq_len)
         positions = np.arange(seq_len, dtype=np.int32)
         dists = compute_distances(positions, seq_len)
-        
+
         # Filter for distances <= some number
         mask = dists <= max_dist
         dists = dists[mask]
         values = values[mask]
-        print(f"DEBUG: Sequence {idx + 1}: {len(dists)} points within {max_dist} from edge")
-        
+        if idx < DEBUG_SEQUENCE_LIMIT:
+            print(f"DEBUG: Sequence {idx + 1}: {len(dists)} points within {max_dist} from edge")
+
         valid = ~np.isnan(values)
         nz = valid & (values != 0)
         zeros = valid & (values == 0)
-        print(f"DEBUG: Sequence {idx + 1}: {np.sum(valid)} valid, {np.sum(nz)} non-zero, {np.sum(zeros)} zeros")
-        
+        if idx < DEBUG_SEQUENCE_LIMIT:
+            print(f"DEBUG: Sequence {idx + 1}: {np.sum(valid)} valid, {np.sum(nz)} non-zero, {np.sum(zeros)} zeros")
+
         if np.any(nz):
             nz_dists = dists[nz]
             nz_vals = values[nz]
@@ -95,21 +114,25 @@ def process_data(data_values, max_dist=5000):
             all_nz_vals.append(nz_vals)
             all_closest.append(nz_dists == np.min(nz_dists))
             all_furthest.append(nz_dists == np.max(nz_dists))
-            print(f"DEBUG: Sequence {idx + 1}: Added {len(nz_dists)} non-zero points")
+            if idx < DEBUG_SEQUENCE_LIMIT:
+                print(f"DEBUG: Sequence {idx + 1}: Added {len(nz_dists)} non-zero points")
         else:
             line_nz_data.append((np.array([], dtype=np.float32), np.array([], dtype=np.float32)))
-            print(f"DEBUG: Sequence {idx + 1}: No non-zero data")
-        
+            if idx < DEBUG_SEQUENCE_LIMIT:
+                print(f"DEBUG: Sequence {idx + 1}: No non-zero data")
+
         if np.any(valid):
             valid_dists = dists[valid]
             valid_vals = values[valid]
             zero_density = (valid_vals == 0).astype(np.float32)
             sort_idx = np.argsort(valid_dists)
             line_zero_data.append((valid_dists[sort_idx], zero_density[sort_idx]))
-            print(f"DEBUG: Sequence {idx + 1}: Added {len(valid_dists)} zero-density points")
+            if idx < DEBUG_SEQUENCE_LIMIT:
+                print(f"DEBUG: Sequence {idx + 1}: Added {len(valid_dists)} zero-density points")
         else:
             line_zero_data.append((np.array([], dtype=np.float32), np.array([], dtype=np.float32)))
-            print(f"DEBUG: Sequence {idx + 1}: No valid data for zero-density")
+            if idx < DEBUG_SEQUENCE_LIMIT:
+                print(f"DEBUG: Sequence {idx + 1}: No valid data for zero-density")
     
     all_nz_dists = np.concatenate(all_nz_dists) if all_nz_dists else np.array([], dtype=np.float32)
     all_nz_vals = np.concatenate(all_nz_vals) if all_nz_vals else np.array([], dtype=np.float32)
