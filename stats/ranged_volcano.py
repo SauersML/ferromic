@@ -10,7 +10,7 @@ from matplotlib.patches import FancyArrowPatch
 from matplotlib import colors as mcolors
 
 INPUT_FILE = "phewas_results.tsv"
-OUTPUT_PDF = "phewas_volcano.pdf"
+OUTPUT_PDF = "phewas_volcano_ranged.pdf"
 
 # --------------------------- Appearance ---------------------------
 
