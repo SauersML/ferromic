@@ -23,6 +23,7 @@ import os
 import sys
 import math
 import warnings
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from decimal import Context, Decimal, localcontext
 from fnmatch import fnmatch
@@ -105,17 +106,19 @@ DECIMAL_CONTEXT = Context(prec=50, Emin=-999999, Emax=999999)
 
 # Logistic models occasionally reach extremely large coefficient estimates when the
 # outcome is nearly separated.  ``MAX_ABS_DOSAGE_BETA`` bounds what we consider a
-# numerically stable dosage coefficient; larger values trigger progressively
-# stronger L2 penalties until the estimate returns to a reasonable scale.
+# numerically stable dosage coefficient; larger values trigger detailed
+# diagnostics so that the root cause can be investigated instead of applying
+# ever-stronger penalties.
 MAX_ABS_DOSAGE_BETA = 15.0
-REGULARIZATION_ALPHAS: Sequence[float] = (
-    1e-4,
-    1e-3,
-    1e-2,
-    1e-1,
-    1.0,
-    10.0,
-    100.0,
+
+# Optimisation strategies attempted when fitting logistic regressions.  The
+# ``label`` is used for logging, while ``options`` are forwarded to
+# :meth:`statsmodels.discrete.discrete_model.Logit.fit`.
+LOGIT_SOLVER_CANDIDATES: Sequence[tuple[str, dict[str, object]]] = (
+    ("logit_newton", {"method": "newton", "maxiter": 200, "tol": 1e-8, "warn_convergence": True}),
+    ("logit_bfgs", {"method": "bfgs", "maxiter": 500, "tol": 1e-8, "warn_convergence": True}),
+    ("logit_lbfgs", {"method": "lbfgs", "maxiter": 500, "tol": 1e-8, "warn_convergence": True}),
+    ("logit_powell", {"method": "powell", "maxiter": 500, "warn_convergence": True}),
 )
 
 
@@ -245,13 +248,6 @@ def _summarise_design_matrix(X: pd.DataFrame, y: pd.Series | None = None) -> str
                     pieces.append("examples=" + ", ".join(map(str, examples)))
                 if pieces:
                     lines.append(f"Non-finite values in {column}: " + "; ".join(pieces))
-        example_rows = diagnostics.get("non_finite_examples")
-        if example_rows:
-            lines.append(
-                "Example participants removed for non-finite covariates: "
-                + "; ".join(str(row) for row in example_rows)
-            )
-
     return "\n".join(lines)
 
 
@@ -414,16 +410,371 @@ def _logit_result_converged(result) -> bool:
     return bool(converged)
 
 
-def _logit_result_is_stable(result, term: str = "dosage") -> bool:
+def _evaluate_result_stability(
+    result, term: str = "dosage"
+) -> tuple[bool, list[str], dict[str, object]]:
+    issues: list[str] = []
+    metrics: dict[str, object] = {}
+
     if not _logit_result_converged(result):
-        return False
+        issues.append("optimizer reported non-convergence")
+
     beta = _extract_parameter(result, term)
+    metrics["beta"] = beta
+    if not math.isfinite(beta):
+        issues.append("dosage beta is not finite")
+    elif abs(beta) > MAX_ABS_DOSAGE_BETA:
+        issues.append(
+            f"dosage beta magnitude {beta:.6g} exceeds stability threshold {MAX_ABS_DOSAGE_BETA}"
+        )
+
     se = _compute_standard_error(result, term)
-    if not math.isfinite(beta) or not math.isfinite(se) or se <= 0:
-        return False
-    if abs(beta) > MAX_ABS_DOSAGE_BETA:
-        return False
-    return True
+    metrics["se"] = se
+    if not math.isfinite(se) or se <= 0:
+        issues.append("dosage standard error is not positive and finite")
+
+    p_value = _extract_series_value(result, "pvalues", term)
+    if math.isfinite(p_value) and p_value > 0:
+        metrics["p_value"] = float(p_value)
+
+    llf = getattr(result, "llf", None)
+    if llf is not None and math.isfinite(llf):
+        metrics["loglike"] = float(llf)
+
+    nobs = getattr(result, "nobs", None)
+    if nobs is not None and math.isfinite(nobs):
+        metrics["nobs"] = float(nobs)
+
+    retvals = getattr(result, "mle_retvals", {})
+    if isinstance(retvals, dict):
+        iterations = retvals.get("iterations")
+        if iterations is not None:
+            metrics["iterations"] = float(iterations)
+
+        warnflag_issue = _interpret_warnflag(retvals.get("warnflag"))
+        if warnflag_issue:
+            issues.append(warnflag_issue)
+            warnflag_value = retvals.get("warnflag")
+            if warnflag_value is not None:
+                try:
+                    metrics["warnflag"] = float(warnflag_value)
+                except (TypeError, ValueError):
+                    metrics["warnflag"] = warnflag_value
+
+        for key in ("score_norm", "grad", "score"):
+            if key in retvals and f"{key}_norm" not in metrics:
+                norm_value = _safe_vector_norm(retvals.get(key))
+                if norm_value is not None:
+                    metrics[f"{key}_norm"] = norm_value
+                    if norm_value > 1e-4:
+                        issues.append(f"{key} norm {norm_value:.6g} remains above tolerance 1e-4")
+
+        determinant = retvals.get("determinant")
+        if determinant is not None:
+            try:
+                determinant_value = float(determinant)
+            except (TypeError, ValueError):
+                determinant_value = math.nan
+            if math.isfinite(determinant_value):
+                metrics["determinant"] = determinant_value
+                if abs(determinant_value) < 1e-12:
+                    issues.append("observed information matrix determinant near zero")
+
+    try:
+        params = np.asarray(getattr(result, "params", []), dtype=np.float64)
+        if params.size:
+            gradient = result.model.score(params)
+        else:
+            gradient = None
+    except Exception:
+        gradient = None
+
+    gradient_norm = _safe_vector_norm(gradient)
+    if gradient_norm is not None:
+        metrics.setdefault("gradient_norm", gradient_norm)
+        if gradient_norm > 1e-4:
+            issues.append(
+                f"gradient norm {gradient_norm:.6g} indicates estimates may not be at optimum"
+            )
+
+    try:
+        params = np.asarray(getattr(result, "params", []), dtype=np.float64)
+        if params.size:
+            hessian = np.asarray(result.model.hessian(params), dtype=np.float64)
+        else:
+            hessian = np.array([])
+    except Exception:
+        hessian = np.array([])
+
+    if hessian.size:
+        cond = _compute_condition_number(hessian)
+        if math.isfinite(cond):
+            metrics["hessian_cond"] = cond
+            if cond > 1e12:
+                issues.append(
+                    f"model Hessian condition number {cond:.6g} suggests severe ill-conditioning"
+                )
+
+    return not issues, issues, metrics
+
+
+def _logit_result_is_stable(result, term: str = "dosage") -> bool:
+    stable, _, _ = _evaluate_result_stability(result, term)
+    return stable
+
+
+def _format_warning_records(records: Sequence[warnings.WarningMessage]) -> list[str]:
+    messages: list[str] = []
+    for record in records:
+        category = getattr(record.category, "__name__", str(record.category))
+        messages.append(f"{category}: {record.message}")
+    return messages
+
+
+def _safe_vector_norm(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        array = np.asarray(value, dtype=np.float64)
+    except Exception:
+        return None
+    if array.size == 0:
+        return 0.0
+    if not np.isfinite(array).all():
+        return None
+    return float(np.linalg.norm(array))
+
+
+def _interpret_warnflag(flag: int | float | None) -> str | None:
+    if flag in (None, 0):
+        return None
+    try:
+        code = int(flag)
+    except (TypeError, ValueError):
+        return f"optimizer warnflag={flag}"
+
+    mapping = {
+        1: "iteration limit reached before convergence",
+        2: "optimizer detected approximate singularity in the Hessian",
+        3: "line search failed to improve objective",
+    }
+    message = mapping.get(code)
+    if message is None:
+        return f"optimizer warnflag={code}"
+    return message
+
+
+def _format_value_counts(series: pd.Series, *, limit: int = 5, digits: int = 6) -> str:
+    if series.empty:
+        return "<empty>"
+
+    rounded = series.round(digits)
+    counts = rounded.value_counts(dropna=False).head(limit)
+    total = len(series)
+    pieces: list[str] = []
+    for value, count in counts.items():
+        if pd.isna(value):
+            label = "NaN"
+        else:
+            label = f"{float(value):.6g}"
+        proportion = (count / total) * 100 if total else float("nan")
+        pieces.append(f"{label} ({count}/{total} = {proportion:.2f}%)")
+
+    if series.nunique(dropna=True) > limit:
+        pieces.append("…")
+
+    return "; ".join(pieces)
+
+
+def _detect_dosage_separation(cases: pd.Series, controls: pd.Series) -> str | None:
+    case_vals = cases.replace([np.inf, -np.inf], np.nan).dropna()
+    control_vals = controls.replace([np.inf, -np.inf], np.nan).dropna()
+
+    if case_vals.empty or control_vals.empty:
+        return None
+
+    case_min = float(case_vals.min())
+    case_max = float(case_vals.max())
+    control_min = float(control_vals.min())
+    control_max = float(control_vals.max())
+
+    if case_min >= control_max:
+        return (
+            "All case dosages are greater than or equal to the maximum control dosage; "
+            "perfect separation detected."
+        )
+    if case_max <= control_min:
+        return (
+            "All case dosages are less than or equal to the minimum control dosage; "
+            "perfect separation detected."
+        )
+
+    case_p05 = float(case_vals.quantile(0.05))
+    case_p95 = float(case_vals.quantile(0.95))
+    control_p05 = float(control_vals.quantile(0.05))
+    control_p95 = float(control_vals.quantile(0.95))
+
+    if case_p05 > control_p95:
+        return (
+            "95% of control dosages are below the lowest 5% of case dosages; "
+            "near-perfect separation suspected."
+        )
+    if case_p95 < control_p05:
+        return (
+            "95% of case dosages are below the lowest 5% of control dosages; "
+            "near-perfect separation suspected."
+        )
+
+    return None
+
+
+def _describe_dosage_distribution(X: pd.DataFrame, y: pd.Series) -> list[str]:
+    if "dosage" not in X.columns:
+        return ["Design matrix missing 'dosage' column during instability diagnostics."]
+
+    dosage = pd.to_numeric(X["dosage"], errors="coerce")
+    total = int(len(dosage))
+    finite_count = int(dosage.replace([np.inf, -np.inf], np.nan).notna().sum())
+    lines: list[str] = [
+        f"Dosage finite observations after filtering: {finite_count}/{total}; unique={dosage.nunique(dropna=False)}",
+        "Dosage summary (all participants): " + _format_summary_dict(_summarise_column(dosage)),
+    ]
+
+    y_bool = y.astype(bool)
+    case_vals = dosage.loc[y_bool]
+    control_vals = dosage.loc[~y_bool]
+
+    if not case_vals.empty:
+        lines.append(
+            "Dosage summary (cases): " + _format_summary_dict(_summarise_column(case_vals))
+        )
+    if not control_vals.empty:
+        lines.append(
+            "Dosage summary (controls): " + _format_summary_dict(_summarise_column(control_vals))
+        )
+
+    non_zero_cases = int((case_vals != 0).sum()) if not case_vals.empty else 0
+    non_zero_controls = int((control_vals != 0).sum()) if not control_vals.empty else 0
+    lines.append(
+        "Non-zero dosage counts: "
+        f"cases={non_zero_cases}/{len(case_vals)}; controls={non_zero_controls}/{len(control_vals)}"
+    )
+
+    separation_message = _detect_dosage_separation(case_vals, control_vals)
+    if separation_message:
+        lines.append(separation_message)
+
+    if not case_vals.empty:
+        lines.append(
+            "Most common case dosages (rounded): " + _format_value_counts(case_vals, limit=5)
+        )
+    if not control_vals.empty:
+        lines.append(
+            "Most common control dosages (rounded): "
+            + _format_value_counts(control_vals, limit=5)
+        )
+
+    dosage_vector = dosage.to_numpy(dtype=np.float64, copy=False)
+    outcome_vector = y.to_numpy(dtype=np.float64, copy=False)
+    if dosage_vector.size and outcome_vector.size and np.std(dosage_vector) > 0:
+        corr_matrix = np.corrcoef(dosage_vector, outcome_vector)
+        if corr_matrix.size == 4 and np.isfinite(corr_matrix[0, 1]):
+            lines.append(
+                "Point-biserial correlation between dosage and outcome: "
+                f"{float(corr_matrix[0, 1]):.6g}"
+            )
+
+    collinear: list[str] = []
+    dosage_series = dosage
+    for column in X.columns:
+        if column in {"dosage", "const"}:
+            continue
+        other = pd.to_numeric(X[column], errors="coerce")
+        if other.nunique(dropna=True) <= 1:
+            continue
+        corr = dosage_series.corr(other)
+        if pd.notna(corr) and abs(corr) > 0.99:
+            collinear.append(f"{column} (corr={corr:.3f})")
+
+    if collinear:
+        lines.append(
+            "Covariates nearly collinear with dosage: " + ", ".join(sorted(collinear))
+        )
+
+    return lines
+
+
+def _describe_covariate_columns(X: pd.DataFrame) -> list[str]:
+    total = len(X)
+    if total == 0:
+        return ["Design matrix is empty; no covariates available for diagnostics."]
+
+    lines: list[str] = []
+    for column in X.columns:
+        series = pd.to_numeric(X[column], errors="coerce")
+        finite_series = series.replace([np.inf, -np.inf], np.nan)
+        finite_mask = finite_series.notna()
+        finite_count = int(finite_mask.sum())
+        finite_pct = (finite_count / total) * 100 if total else float("nan")
+        nan_count = int(series.isna().sum())
+        pos_inf_count = int(np.isposinf(series.to_numpy(dtype=np.float64, copy=False)).sum())
+        neg_inf_count = int(np.isneginf(series.to_numpy(dtype=np.float64, copy=False)).sum())
+        zero_count = int((finite_series == 0).sum())
+        non_zero_count = int(((finite_series != 0) & finite_mask).sum())
+        unique_finite = int(finite_series.nunique(dropna=True))
+
+        summary_stats = _summarise_column(series)
+        metrics: dict[str, object] = {
+            "finite": f"{finite_count}/{total}",
+            "finite_pct": finite_pct,
+            "nan": nan_count,
+            "+inf": pos_inf_count,
+            "-inf": neg_inf_count,
+            "zeros": zero_count,
+            "non_zero": non_zero_count,
+            "unique_finite": unique_finite,
+        }
+        metrics.update(summary_stats)
+        lines.append(f"{column}: " + _format_summary_dict(metrics))
+
+    return lines
+
+
+def _report_model_instability(
+    label: str,
+    issues: list[str],
+    metrics: dict[str, object],
+    X: pd.DataFrame,
+    y: pd.Series,
+    warning_records: Sequence[warnings.WarningMessage],
+    *,
+    include_design: bool = True,
+) -> None:
+    if issues:
+        warn(f"{label} logistic fit unstable: {'; '.join(issues)}")
+    else:
+        warn(f"{label} logistic fit unstable for unknown reasons")
+
+    if metrics:
+        metric_summary = _format_summary_dict(metrics)
+        warn(f"{label} dosage coefficient diagnostics: {metric_summary}")
+
+    if warning_records:
+        warn(
+            f"{label} emitted convergence warnings: "
+            + "; ".join(_format_warning_records(warning_records))
+        )
+
+    if include_design:
+        for line in _describe_dosage_distribution(X, y):
+            warn(f"{label} dosage diagnostic: {line}")
+
+        design_lines = _summarise_design_matrix(X, y).splitlines()
+        for line in design_lines:
+            warn(f"{label} design diagnostic: {line}")
+
+        for line in _describe_covariate_columns(X):
+            warn(f"{label} covariate diagnostic: {line}")
 
 
 def _summarise_term(result, term: str) -> dict[str, float | str | None]:
@@ -724,59 +1075,119 @@ def _build_category_controls(scores: pd.DataFrame) -> dict[str, pd.DataFrame]:
 
 def _fit_logistic(X: pd.DataFrame, y: pd.Series):
     model = sm.Logit(y, X)
-    try:
-        initial_error: Exception | None = None
-        try:
-            result = model.fit(disp=False, maxiter=100)
-            if _logit_result_is_stable(result):
-                return result, "logit_mle"
-            warn(
-                "Logit MLE converged but produced an unstable dosage estimate; "
-                "retrying with L2-regularised fits."
-            )
-            initial_error = RuntimeError("Unstable dosage estimate after logit MLE fit")
-        except (PerfectSeparationError, np.linalg.LinAlgError, ValueError) as exc:
-            warn(
-                "Logit MLE failed – retrying with L2-regularised fit. "
-                f"(reason: {exc})"
-            )
-            initial_error = exc
-        if initial_error is None:
-            raise RuntimeError("Unexpected state: logit fit neither returned nor failed.")
+    attempts: list[tuple[str, Exception]] = []
+    diagnostics_reported = False
 
-        regularization_errors: list[str] = []
-        last_error: Exception | None = initial_error
-        for alpha in REGULARIZATION_ALPHAS:
+    for label, solver_options in LOGIT_SOLVER_CANDIDATES:
+        fit_kwargs = dict(solver_options)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", ConvergenceWarning)
+            warnings.simplefilter("always", RuntimeWarning)
             try:
-                # ``fit_regularized`` only supports solvers geared towards L1
-                # penalties.  Setting ``L1_wt`` to 0 switches the problem to
-                # pure L2 regularisation while keeping the available solvers
-                # satisfied.
-                result = model.fit_regularized(alpha=alpha, L1_wt=0.0, maxiter=200)
-            except Exception as exc:  # pragma: no cover - defensive branch
-                regularization_errors.append(f"alpha={alpha:g}: {exc}")
-                last_error = exc
+                result = model.fit(disp=False, **fit_kwargs)
+            except (PerfectSeparationError, np.linalg.LinAlgError, ValueError) as exc:
+                warn(f"{label} solver failed: {exc}")
+                include_design = not diagnostics_reported
+                _report_model_instability(
+                    label,
+                    [f"solver raised {exc}"],
+                    {},
+                    X,
+                    y,
+                    caught,
+                    include_design=include_design,
+                )
+                if include_design:
+                    diagnostics_reported = True
+                attempts.append((label, exc))
                 continue
-            if _logit_result_is_stable(result):
-                return result, f"logit_l2_alpha_{alpha:g}"
-            beta = _extract_parameter(result, "dosage")
-            warn(
-                "Regularised logit fit with alpha={alpha:g} remained unstable "
-                f"(beta={beta!r}); increasing penalty.".format(alpha=alpha, beta=beta)
+            except Exception as exc:  # pragma: no cover - defensive branch
+                warn(f"{label} solver failed with unexpected error: {exc}")
+                include_design = not diagnostics_reported
+                _report_model_instability(
+                    label,
+                    [f"unexpected solver error: {exc}"],
+                    {},
+                    X,
+                    y,
+                    caught,
+                    include_design=include_design,
+                )
+                if include_design:
+                    diagnostics_reported = True
+                attempts.append((label, exc))
+                continue
+
+        stable, issues, metrics = _evaluate_result_stability(result)
+        if stable:
+            if caught:
+                warn(
+                    f"{label} emitted convergence warnings despite stability: "
+                    + "; ".join(_format_warning_records(caught))
+                )
+            return result, label
+
+        include_design = not diagnostics_reported
+        _report_model_instability(
+            label,
+            issues or ["dosage estimate flagged as unstable"],
+            metrics,
+            X,
+            y,
+            caught,
+            include_design=include_design,
+        )
+        if include_design:
+            diagnostics_reported = True
+        issue_message = "; ".join(issues) if issues else "unstable dosage estimate"
+        attempts.append((label, RuntimeError(issue_message)))
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", ConvergenceWarning)
+        warnings.simplefilter("always", RuntimeWarning)
+        try:
+            glm_model = sm.GLM(y, X, family=sm.families.Binomial())
+            glm_result = glm_model.fit(maxiter=500, tol=1e-8)
+        except Exception as exc:
+            warn(f"glm_binomial solver failed: {exc}")
+            include_design = not diagnostics_reported
+            _report_model_instability(
+                "glm_binomial",
+                [f"solver raised {exc}"],
+                {},
+                X,
+                y,
+                caught,
+                include_design=include_design,
             )
-        message = _format_logistic_failure(last_error or initial_error, X, y)
-        if regularization_errors:
-            message += "\n    Regularisation attempts: " + "; ".join(regularization_errors)
-        message += f"\n    Initial MLE failure: {initial_error}"
-        raise RuntimeError(message)
-    except Exception as exc:
-        attempts.append(("glm_binomial", exc))
-    else:
-        if _fit_has_converged(glm_result):
-            warn("Falling back to GLM binomial fit for converged estimates.")
-            return glm_result, "glm_binomial"
-        _report_fit_diagnostics(glm_result, "GLM binomial")
-        attempts.append(("glm_binomial", RuntimeError("did not converge")))
+            if include_design:
+                diagnostics_reported = True
+            attempts.append(("glm_binomial", exc))
+        else:
+            stable, issues, metrics = _evaluate_result_stability(glm_result)
+            if stable:
+                if caught:
+                    warn(
+                        "glm_binomial emitted convergence warnings despite stability: "
+                        + "; ".join(_format_warning_records(caught))
+                    )
+                warn("Falling back to GLM binomial fit for converged estimates.")
+                return glm_result, "glm_binomial"
+
+            include_design = not diagnostics_reported
+            _report_model_instability(
+                "glm_binomial",
+                issues or ["dosage estimate flagged as unstable"],
+                metrics,
+                X,
+                y,
+                caught,
+                include_design=include_design,
+            )
+            if include_design:
+                diagnostics_reported = True
+            issue_message = "; ".join(issues) if issues else "unstable dosage estimate"
+            attempts.append(("glm_binomial", RuntimeError(issue_message)))
 
     if attempts:
         failure_lines = [f"{label}: {exc}" for label, exc in attempts]
@@ -974,18 +1385,6 @@ def _build_design_matrix(
     if not finite_mask.all():
         failing_rows = out.loc[~finite_mask]
         non_finite_details: dict[str, dict[str, object]] = {}
-        example_rows: list[str] = []
-        for pid, row in failing_rows.head(5).iterrows():
-            issues: list[str] = []
-            for column, value in row.items():
-                if pd.isna(value):
-                    issues.append(f"{column}=NaN")
-                elif np.isposinf(value):
-                    issues.append(f"{column}=+inf")
-                elif np.isneginf(value):
-                    issues.append(f"{column}=-inf")
-            if issues:
-                example_rows.append(f"{pid}: {', '.join(issues)}")
 
         for column in out.columns:
             column_values = failing_rows[column]
@@ -1014,9 +1413,6 @@ def _build_design_matrix(
         diagnostics["dropped_non_finite"] = dropped
         if non_finite_details:
             diagnostics["non_finite_details"] = non_finite_details
-        if example_rows:
-            diagnostics["non_finite_examples"] = example_rows
-
         message_lines = [
             f"Dropped {dropped:,} participants with non-finite covariates.",
         ]
@@ -1034,8 +1430,6 @@ def _build_design_matrix(
                     column_summaries.append(f"{column} ({', '.join(pieces)})")
             if column_summaries:
                 message_lines.append("Problem columns: " + "; ".join(column_summaries))
-        if example_rows:
-            message_lines.append("Example participants: " + "; ".join(example_rows))
         warn("\n".join(message_lines))
 
         if out.empty:
@@ -1196,6 +1590,203 @@ def _load_case_status(
     return series
 
 
+def _log_lines(prefix: str, message: str, *, level: str = "info") -> None:
+    for line in message.splitlines():
+        text = f"[{prefix}] {line}"
+        if level == "info":
+            info(text)
+        else:
+            warn(text)
+
+
+def _format_summary_dict(stats: Mapping[str, object]) -> str:
+    pieces: list[str] = []
+    for key, value in stats.items():
+        if isinstance(value, (float, np.floating)):
+            pieces.append(f"{key}={float(value):.6g}")
+        else:
+            pieces.append(f"{key}={value}")
+    return ", ".join(pieces)
+
+
+def _analyse_single_phenotype(
+    *,
+    cfg: "PhenotypeRun",
+    inv: str,
+    core: pd.DataFrame,
+    anc_dummies: pd.DataFrame,
+    reference_ancestry: str | None,
+    custom_controls: pd.DataFrame,
+    definitions: pd.DataFrame,
+    cdr_id: str,
+    project_id: str,
+    scores_path: Path,
+) -> tuple[dict[str, object] | None, list[str]]:
+    prefix = f"{cfg.phenotype}"
+    _log_lines(prefix, f"Initialising analysis for inversion {inv} (category: {cfg.category})")
+
+    _ensure_pheno_cache(
+        definitions,
+        cfg.phenotype,
+        cdr_id,
+        core.index.astype(str),
+        project_id,
+    )
+
+    try:
+        design = _build_design_matrix(
+            core,
+            anc_dummies,
+            custom_controls,
+            reference_ancestry,
+        )
+    except RuntimeError as exc:
+        _log_lines(prefix, f"Skipping phenotype due to design matrix issue: {exc}", level="warn")
+        return None, []
+
+    cdr_codename = cdr_id.split(".")[-1]
+    phenotype_status = _load_case_status(
+        cfg.phenotype,
+        cdr_codename,
+        design.index,
+    )
+
+    n_cases = int(phenotype_status.sum())
+    n_total = int(len(phenotype_status))
+    n_ctrls = n_total - n_cases
+
+    if n_cases == 0 or n_ctrls == 0:
+        _log_lines(
+            prefix,
+            f"Insufficient cases ({n_cases}) or controls ({n_ctrls}); skipping.",
+            level="warn",
+        )
+        return None, []
+
+    _log_lines(
+        prefix,
+        f"Participants available after filtering: {n_total} (cases={n_cases}, controls={n_ctrls})",
+    )
+
+    y = phenotype_status.loc[design.index].astype(np.int8)
+    X = design.copy()
+
+    dosage_stats = _summarise_column(X["dosage"])
+    _log_lines(prefix, "Dosage summary: " + _format_summary_dict(dosage_stats))
+
+    custom_cols = [c for c in X.columns if c.upper().startswith(CUSTOM_CONTROL_PREFIX.upper())]
+    if custom_cols:
+        _log_lines(prefix, f"Custom covariates in design: {', '.join(custom_cols)}")
+        for covar in custom_cols:
+            covar_stats = _summarise_column(X[covar])
+            _log_lines(prefix, f"{covar} summary: " + _format_summary_dict(covar_stats))
+    else:
+        _log_lines(prefix, "No custom covariates present after alignment.")
+
+    _log_lines(
+        prefix,
+        _summarise_design_matrix(X, y),
+    )
+
+    for line in _describe_covariate_columns(X):
+        _log_lines(prefix, f"Covariate diagnostic: {line}")
+
+    intercept = "const" in X.columns
+    ordered_terms = [col for col in X.columns if col != "const"]
+    if "dosage" in ordered_terms:
+        ordered_terms.insert(0, ordered_terms.pop(ordered_terms.index("dosage")))
+    formula_terms: list[str] = []
+    if intercept:
+        formula_terms.append("1")
+    formula_terms.extend(ordered_terms)
+    formula_repr = " + ".join(formula_terms) if formula_terms else "<empty design>"
+    _log_lines(
+        prefix,
+        f"Model specification: logit(P({cfg.phenotype}=1)) ~ {formula_repr}",
+    )
+
+    try:
+        fit, fit_method = _fit_logistic(X, y)
+    except RuntimeError as exc:
+        _log_lines(prefix, f"Logistic regression failed: {exc}", level="warn")
+        return None, []
+
+    term_summary = _summarise_term(fit, "dosage")
+    beta = float(term_summary.get("beta", math.nan))
+    if math.isnan(beta):
+        _log_lines(prefix, "Dosage coefficient was not estimated; skipping.", level="warn")
+        return None, []
+    se = float(term_summary.get("se", math.nan))
+    p_value = term_summary.get("p_value", math.nan)
+    odds_ratio = term_summary.get("odds_ratio", math.nan)
+    ci_lower = term_summary.get("ci_lower", math.nan)
+    ci_upper = term_summary.get("ci_upper", math.nan)
+    log_p_value = term_summary.get("log_p")
+    if log_p_value is None or not math.isfinite(log_p_value):
+        log_p_value = math.nan
+
+    baseline_summary = _empty_term_summary()
+    baseline_method: str | None = None
+    baseline_design = X.drop(columns=custom_cols, errors="ignore")
+    try:
+        baseline_fit, baseline_method = _fit_logistic(baseline_design, y.loc[baseline_design.index])
+        baseline_summary = _summarise_term(baseline_fit, "dosage")
+    except RuntimeError as exc:
+        _log_lines(
+            prefix,
+            f"Baseline logistic regression (without custom PGS covariates) failed: {exc}",
+            level="warn",
+        )
+
+    baseline_log_p = baseline_summary.get("log_p")
+    if baseline_log_p is None or not math.isfinite(baseline_log_p):
+        baseline_log_p = math.nan
+
+    summary_lines = [
+        f"Analysis complete using {fit_method}; observations={n_total}, cases={n_cases}, controls={n_ctrls}, case_prevalence={n_cases / n_total:.6g}",
+        (
+            f"Dosage OR={odds_ratio} (95% CI: {ci_lower}, {ci_upper}); "
+            f"beta={beta:.6g}, SE={se:.6g}"
+        ),
+        f"p-value={p_value} (log_p={log_p_value})",
+    ]
+    if baseline_method:
+        summary_lines.append(
+            (
+                f"Baseline ({baseline_method}) OR={baseline_summary.get('odds_ratio', math.nan)} "
+                f"(95% CI: {baseline_summary.get('ci_lower', math.nan)}, {baseline_summary.get('ci_upper', math.nan)}); "
+                f"p-value={baseline_summary.get('p_value', math.nan)}"
+            )
+        )
+
+    result: dict[str, object] = {
+        "Phenotype": cfg.phenotype,
+        "Category": cfg.category,
+        "Inversion": inv,
+        "N_Total": n_total,
+        "N_Cases": n_cases,
+        "N_Controls": n_ctrls,
+        "Beta": beta,
+        "SE": se,
+        "OR": odds_ratio,
+        "OR_95CI_Lower": ci_lower,
+        "OR_95CI_Upper": ci_upper,
+        "P_Value": p_value,
+        "Log_P_Value": log_p_value,
+        "Fit_Method": fit_method,
+        "Control_File": str(scores_path),
+        "Custom_Covariates": ",".join(custom_cols),
+        "OR_NoCustomControls": baseline_summary.get("odds_ratio", math.nan),
+        "OR_NoCustomControls_95CI_Lower": baseline_summary.get("ci_lower", math.nan),
+        "OR_NoCustomControls_95CI_Upper": baseline_summary.get("ci_upper", math.nan),
+        "P_Value_NoCustomControls": baseline_summary.get("p_value", math.nan),
+        "Log_P_Value_NoCustomControls": baseline_log_p,
+        "Fit_Method_NoCustomControls": baseline_method,
+    }
+
+    return result, summary_lines
+
+
 def run() -> None:
     warnings.filterwarnings("ignore", category=FutureWarning)
     project_id = os.getenv("GOOGLE_PROJECT")
@@ -1214,8 +1805,6 @@ def run() -> None:
     category_controls = _build_category_controls(scores_table)
 
     results = []
-    cdr_codename = cdr_id.split(".")[-1]
-
     for inv in TARGET_INVERSIONS:
         info(f"Preparing inversion {inv}")
         inversion_df = _load_inversion(inv)
@@ -1225,130 +1814,47 @@ def run() -> None:
         if "dosage" not in core.columns:
             raise KeyError(f"Inversion column '{inv}' missing after join")
 
-        for cfg in target_runs:
-            info(f"Running phenotype '{cfg.phenotype}' (category: {cfg.category})")
-            custom_controls = category_controls.get(cfg.category)
-            if custom_controls is None:
-                warn(
-                    f"No custom controls found for category '{cfg.category}'; skipping {cfg.phenotype}."
+        pending: dict[Future, PhenotypeRun] = {}
+        with ThreadPoolExecutor(
+            max_workers=max(1, min(len(target_runs), os.cpu_count() or 1))
+        ) as executor:
+            for cfg in target_runs:
+                custom_controls = category_controls.get(cfg.category)
+                if custom_controls is None:
+                    warn(
+                        f"No custom controls found for category '{cfg.category}'; skipping {cfg.phenotype}."
+                    )
+                    continue
+
+                future = executor.submit(
+                    _analyse_single_phenotype,
+                    cfg=cfg,
+                    inv=inv,
+                    core=core,
+                    anc_dummies=anc_dummies,
+                    reference_ancestry=reference_ancestry,
+                    custom_controls=custom_controls,
+                    definitions=definitions,
+                    cdr_id=cdr_id,
+                    project_id=project_id,
+                    scores_path=scores_path,
                 )
-                continue
+                pending[future] = cfg
 
-            _ensure_pheno_cache(
-                definitions,
-                cfg.phenotype,
-                cdr_id,
-                core.index.astype(str),
-                project_id,
-            )
+            for future in as_completed(pending):
+                cfg = pending[future]
+                try:
+                    result, summary_lines = future.result()
+                except Exception as exc:  # pragma: no cover - defensive guard
+                    warn(f"Unhandled error in {cfg.phenotype} analysis: {exc}")
+                    continue
 
-            try:
-                design = _build_design_matrix(
-                    core,
-                    anc_dummies,
-                    custom_controls,
-                    reference_ancestry,
-                )
-            except RuntimeError as exc:
-                warn(f"Skipping {cfg.phenotype}: {exc}")
-                continue
-            phenotype_status = _load_case_status(
-                cfg.phenotype,
-                cdr_codename,
-                design.index,
-            )
+                if not result:
+                    continue
 
-            n_cases = int(phenotype_status.sum())
-            n_total = int(len(phenotype_status))
-            n_ctrls = n_total - n_cases
-
-            if n_cases == 0 or n_ctrls == 0:
-                warn(
-                    f"Skipping {cfg.phenotype}: insufficient cases ({n_cases}) or controls ({n_ctrls})."
-                )
-                continue
-
-            y = phenotype_status.loc[design.index].astype(np.int8)
-            X = design.copy()
-
-            intercept = "const" in X.columns
-            ordered_terms = [col for col in X.columns if col != "const"]
-            if "dosage" in ordered_terms:
-                ordered_terms.insert(0, ordered_terms.pop(ordered_terms.index("dosage")))
-            formula_terms: list[str] = []
-            if intercept:
-                formula_terms.append("1")
-            formula_terms.extend(ordered_terms)
-            formula_repr = " + ".join(formula_terms) if formula_terms else "<empty design>"
-            info(
-                "Model specification: logit(P("
-                f"{cfg.phenotype}=1)) ~ {formula_repr}"
-            )
-
-            try:
-                fit, fit_method = _fit_logistic(X, y)
-            except RuntimeError as exc:
-                warn(f"Logistic regression failed for {cfg.phenotype}: {exc}")
-                continue
-
-            term_summary = _summarise_term(fit, "dosage")
-            beta = float(term_summary.get("beta", math.nan))
-            if math.isnan(beta):
-                warn(f"Model for {cfg.phenotype} did not estimate a dosage coefficient.")
-                continue
-            se = float(term_summary.get("se", math.nan))
-            p_value = term_summary.get("p_value", math.nan)
-            odds_ratio = term_summary.get("odds_ratio", math.nan)
-            ci_lower = term_summary.get("ci_lower", math.nan)
-            ci_upper = term_summary.get("ci_upper", math.nan)
-            log_p_value = term_summary.get("log_p")
-            if log_p_value is None or not math.isfinite(log_p_value):
-                log_p_value = math.nan
-
-            custom_cols = [c for c in X.columns if c.upper().startswith(CUSTOM_CONTROL_PREFIX.upper())]
-
-            baseline_summary = _empty_term_summary()
-            baseline_method: str | None = None
-            baseline_design = X.drop(columns=custom_cols, errors="ignore")
-            try:
-                baseline_fit, baseline_method = _fit_logistic(baseline_design, y.loc[baseline_design.index])
-                baseline_summary = _summarise_term(baseline_fit, "dosage")
-            except RuntimeError as exc:
-                warn(
-                    "Normal-control logistic regression (without custom PGS covariates) failed for "
-                    f"{cfg.phenotype}: {exc}"
-                )
-
-            baseline_log_p = baseline_summary.get("log_p")
-            if baseline_log_p is None or not math.isfinite(baseline_log_p):
-                baseline_log_p = math.nan
-
-            results.append(
-                {
-                    "Phenotype": cfg.phenotype,
-                    "Category": cfg.category,
-                    "Inversion": inv,
-                    "N_Total": n_total,
-                    "N_Cases": n_cases,
-                    "N_Controls": n_ctrls,
-                    "Beta": beta,
-                    "SE": se,
-                    "OR": odds_ratio,
-                    "OR_95CI_Lower": ci_lower,
-                    "OR_95CI_Upper": ci_upper,
-                    "P_Value": p_value,
-                    "Log_P_Value": log_p_value,
-                    "Fit_Method": fit_method,
-                    "Control_File": str(scores_path),
-                    "Custom_Covariates": ",".join(custom_cols),
-                    "OR_NoCustomControls": baseline_summary.get("odds_ratio", math.nan),
-                    "OR_NoCustomControls_95CI_Lower": baseline_summary.get("ci_lower", math.nan),
-                    "OR_NoCustomControls_95CI_Upper": baseline_summary.get("ci_upper", math.nan),
-                    "P_Value_NoCustomControls": baseline_summary.get("p_value", math.nan),
-                    "Log_P_Value_NoCustomControls": baseline_log_p,
-                    "Fit_Method_NoCustomControls": baseline_method,
-                }
-            )
+                results.append(result)
+                for line in summary_lines:
+                    _log_lines(cfg.phenotype, line)
 
     if not results:
         warn("No successful analyses were produced; skipping output file.")
