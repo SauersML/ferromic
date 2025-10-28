@@ -187,6 +187,12 @@ def _summarise_design_matrix(X: pd.DataFrame, y: pd.Series | None = None) -> str
         dropped_non_finite = diagnostics.get("dropped_non_finite", 0)
         if dropped_non_finite:
             lines.append(f"Rows dropped for non-finite covariates: {dropped_non_finite}")
+        dropped_missing_ancestry = diagnostics.get("dropped_missing_ancestry", 0)
+        if dropped_missing_ancestry:
+            lines.append(
+                "Rows dropped for missing ancestry covariates: "
+                f"{dropped_missing_ancestry}"
+            )
         for key in ("dropped_constant", "dropped_duplicates", "dropped_collinear"):
             values = diagnostics.get(key)
             if values:
@@ -445,7 +451,17 @@ def _load_shared_covariates() -> tuple[pd.DataFrame, pd.DataFrame, str | None]:
         LABELS_URI=PCS_URI,
         lock_dir=str(LOCK_DIR),
     )
-    anc_series = ancestry_df.reindex(shared.index)["ANCESTRY"].astype(str)
+    anc_series = ancestry_df.reindex(shared.index)["ANCESTRY"]
+    missing_ancestry = anc_series.isna()
+    if missing_ancestry.any():
+        dropped = int(missing_ancestry.sum())
+        warn(
+            "Dropping participants lacking ancestry labels; unable to adjust "
+            f"population structure for {dropped:,} individuals."
+        )
+        anc_series = anc_series.loc[~missing_ancestry]
+        shared = shared.loc[anc_series.index]
+
     anc_cat = pd.Categorical(anc_series)
     anc_dummies = pd.get_dummies(
         anc_cat,
@@ -462,6 +478,16 @@ def _load_shared_covariates() -> tuple[pd.DataFrame, pd.DataFrame, str | None]:
     # stratum, even when other ancestries were present.  Reapply the ``shared`` index
     # so that ancestry indicators stay aligned with the rest of the covariates.
     anc_dummies.index = anc_series.index.astype(str)
+
+    if anc_dummies.shape[1] > 0:
+        # Rows corresponding to previously dropped participants are no longer
+        # present, but ``anc_series`` may still contain sporadic missing values if
+        # the underlying cache was incomplete.  Propagate those NaNs into the dummy
+        # matrix so that downstream logic can detect and remove them instead of
+        # silently assigning individuals to the reference ancestry stratum.
+        missing_rows = anc_series.isna()
+        if missing_rows.any():
+            anc_dummies.loc[missing_rows] = np.nan
 
     reference_ancestry: str | None
     if anc_cat.categories.size:
@@ -502,19 +528,32 @@ def _build_design_matrix(
     if missing:
         raise KeyError(f"Missing required covariate columns: {missing}")
 
-    design = df[covar_cols].astype(np.float32, copy=False)
-    design["const"] = np.float32(1.0)
-
-    anc_slice = ancestry_dummies.reindex(design.index).fillna(0.0).astype(np.float32)
-    out = pd.concat([design, anc_slice], axis=1)
-
     diagnostics: dict[str, object] = {
         "dropped_non_finite": 0,
         "dropped_constant": [],
         "dropped_duplicates": [],
         "dropped_collinear": [],
         "ancestry_constants": [],
+        "dropped_missing_ancestry": 0,
     }
+
+    design = df[covar_cols].astype(np.float32, copy=False)
+    design["const"] = np.float32(1.0)
+
+    anc_slice = ancestry_dummies.reindex(design.index)
+    if anc_slice.shape[1] > 0:
+        missing_mask = anc_slice.isna().all(axis=1)
+        if missing_mask.any():
+            count_missing = int(missing_mask.sum())
+            diagnostics["dropped_missing_ancestry"] = count_missing
+            design = design.loc[~missing_mask]
+            anc_slice = anc_slice.loc[~missing_mask]
+            warn(
+                "Dropped participants lacking ancestry covariates after alignment: "
+                f"{count_missing:,}"
+            )
+    anc_slice = anc_slice.fillna(0.0).astype(np.float32)
+    out = pd.concat([design, anc_slice], axis=1)
 
     if not custom_controls.empty:
         aligned_custom = custom_controls.reindex(out.index)
