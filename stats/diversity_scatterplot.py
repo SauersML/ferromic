@@ -13,32 +13,43 @@ def load_data(file_path, max_dist=10000, max_sequences=500):
     theta_dists, theta_vals = [], []
     pi_dists, pi_vals = [], []
     
-    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-        lines = f.readlines()
-        total_lines = len(lines)
-        print(f"INFO: File read: {total_lines} lines in {time.time() - start_time:.2f}s")
-        
-        seq_count = 0
-        i = 0
-        with tqdm(total=min(total_lines - 1, max_sequences * 2), desc="Parsing lines") as pbar:
-            while i < total_lines - 1 and seq_count < max_sequences:
-                if 'filtered_theta' in lines[i] or 'filtered_pi' in lines[i]:
-                    values = np.fromstring(lines[i + 1].strip().replace('NA', 'nan'), sep=',', dtype=np.float32)
-                    seq_len = len(values)
-                    positions = np.arange(seq_len, dtype=np.float32)
-                    dists = np.minimum(positions, seq_len - 1 - positions)
-                    mask = dists <= max_dist
-                    
-                    if 'filtered_theta' in lines[i]:
-                        theta_dists.extend(dists[mask])
-                        theta_vals.extend(values[mask])
-                    else:
-                        pi_dists.extend(dists[mask])
-                        pi_vals.extend(values[mask])
-                    
-                    seq_count += 1
-                    pbar.update(2)  # Update for header + data line
-                i += 1
+    seq_count = 0
+    line_count = 0
+    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f, \
+            tqdm(total=max_sequences, desc="Parsing sequences") as pbar:
+        while seq_count < max_sequences:
+            header = f.readline()
+            if not header:
+                break
+            line_count += 1
+            if 'filtered_theta' not in header and 'filtered_pi' not in header:
+                continue
+
+            data_line = f.readline()
+            if not data_line:
+                break
+            line_count += 1
+
+            values = np.fromstring(data_line.strip().replace('NA', 'nan'), sep=',', dtype=np.float32)
+            if values.size == 0:
+                continue
+
+            seq_len = len(values)
+            positions = np.arange(seq_len, dtype=np.float32)
+            dists = np.minimum(positions, seq_len - 1 - positions)
+            mask = dists <= max_dist
+
+            if 'filtered_theta' in header:
+                theta_dists.extend(dists[mask])
+                theta_vals.extend(values[mask])
+            else:
+                pi_dists.extend(dists[mask])
+                pi_vals.extend(values[mask])
+
+            seq_count += 1
+            pbar.update(1)
+
+    print(f"INFO: Parsed {line_count} lines, processed {seq_count} sequences in {time.time() - start_time:.2f}s")
     
     # Convert to arrays only once
     theta_dists = np.array(theta_dists, dtype=np.float32)
