@@ -124,12 +124,52 @@ jobs:
 
           FIGURES_ROOT=$(find "$SEARCH_ROOT" -type d -path "*/artifacts/figures" -print -quit)
           if [ -z "$FIGURES_ROOT" ]; then
-            FIGURES_ROOT=$(find "$SEARCH_ROOT" -maxdepth 5 -type d -name figures -print -quit)
+            FIGURES_ROOT=$(find "$SEARCH_ROOT" -maxdepth 8 -type d -name figures -print -quit)
+          fi
+
+          if [ -z "$FIGURES_ROOT" ]; then
+            export SEARCH_ROOT
+            FIGURES_ROOT=$(python3 - <<'PY'
+import os
+from pathlib import Path
+
+ALLOWED = {".png", ".pdf", ".svg"}
+search_root = Path(os.environ["SEARCH_ROOT"])
+figure_files = []
+
+for path in search_root.rglob("*"):
+    if path.is_file() and path.suffix.lower() in ALLOWED:
+        figure_files.append(path)
+        if len(figure_files) > 512:
+            break
+
+if figure_files:
+    def find_named_figures_root(path: Path):
+        for parent in path.parents:
+            if parent.name == "figures":
+                return parent
+        return None
+
+    chosen = None
+    for fig in figure_files:
+        chosen = find_named_figures_root(fig)
+        if chosen:
+            break
+
+    if not chosen:
+        common = Path(os.path.commonpath([str(p.parent) for p in figure_files]))
+        chosen = common
+
+    print(chosen.as_posix())
+PY
+)
           fi
 
           if [ -z "$FIGURES_ROOT" ]; then
             echo "Figures directory not found in artifact; generating empty manifest."
             FIGURES_ROOT=$(mktemp -d)
+          else
+            echo "Using figures root: $FIGURES_ROOT"
           fi
 
           python3 scripts/prepare_figures_manifest.py \
