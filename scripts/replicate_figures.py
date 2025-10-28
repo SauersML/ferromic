@@ -11,6 +11,7 @@ root.
 from __future__ import annotations
 
 import argparse
+import importlib
 import os
 import shutil
 import subprocess
@@ -109,6 +110,7 @@ class FigureTask:
     outputs: Sequence[Union[Path, str]]
     dependencies: Sequence[str]
     optional_dependencies: Sequence[str] = field(default_factory=tuple)
+    python_dependencies: Sequence[str] = field(default_factory=tuple)
     required: bool = True
     note: str = ""
     long_running: bool = False
@@ -229,6 +231,9 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         script=Path("stats/diversity_scatterplot.py"),
         outputs=(HOME / "distance_plots_10K_beautiful.png",),
         dependencies=("per_site_diversity_output.falsta",),
+        python_dependencies=("tqdm",),
+        required=False,
+        note="Requires the tqdm Python package; install it to generate this figure.",
         long_running=True,
     ),
     FigureTask(
@@ -246,6 +251,9 @@ FIGURE_TASKS: Sequence[FigureTask] = (
             HOME / "distance_plot_pi_some number.png",
         ),
         dependencies=("per_site_diversity_output.falsta",),
+        python_dependencies=("numba", "tqdm"),
+        required=False,
+        note="Requires optional Python packages numba and tqdm to accelerate processing.",
         long_running=True,
     ),
     FigureTask(
@@ -256,9 +264,9 @@ FIGURE_TASKS: Sequence[FigureTask] = (
             Path("length_norm_trend_fast_normed/pi_vs_inversion_edge_bp_cap100kb_grouped_mean.pdf"),
             Path("length_norm_trend_fast_normed/pi_vs_inversion_edge_proportion_grouped_median.pdf"),
             Path("length_norm_trend_fast_normed/pi_vs_inversion_edge_bp_cap100kb_grouped_median.pdf"),
-            Path("length_norm_trend_fast_normed/fst_vs_inversion_edge_proportion_grouped_pooled.pdf"),
+            Path("length_norm_trend_fast_normed/fst_vs_inversion_edge_proportion_grouped_mean.pdf"),
             Path("length_norm_trend_fast_normed/fst_vs_inversion_edge_proportion_grouped_median.pdf"),
-            Path("length_norm_trend_fast_normed/fst_vs_inversion_edge_bp_cap100kb_grouped_pooled.pdf"),
+            Path("length_norm_trend_fast_normed/fst_vs_inversion_edge_bp_cap100kb_grouped_mean.pdf"),
             Path("length_norm_trend_fast_normed/fst_vs_inversion_edge_bp_cap100kb_grouped_median.pdf"),
         ),
         dependencies=(
@@ -280,7 +288,7 @@ FIGURE_TASKS: Sequence[FigureTask] = (
     FigureTask(
         name="Per-inversion distance trends",
         script=Path("stats/each_per_site.py"),
-        outputs=("per_inversion_trends/*.png",),
+        outputs=("per_inversion_trends/**/*.png",),
         dependencies=(
             "per_site_diversity_output.falsta",
             "per_site_fst_output.falsta",
@@ -310,12 +318,6 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         outputs=("fst_analysis_results_exact_mf_quadrants/total_*/fst_mf_quadrant_violins_total_*.pdf",),
         dependencies=("per_site_fst_output.falsta", "inv_info.tsv"),
         long_running=True,
-    ),
-    FigureTask(
-        name="Flanking region Hudson FST bar plot",
-        script=Path("stats/dist_fst_by_type.py"),
-        outputs=(Path("fst_flanking_regions_bar_plot.png"),),
-        dependencies=("per_site_fst_output.falsta", "inv_info.tsv"),
     ),
     FigureTask(
         name="Inversion event rate vs diversity",
@@ -536,6 +538,15 @@ def run_task(task: FigureTask, env: Dict[str, str]) -> tuple[str, str]:
         if invalid:
             parts.append("invalid inputs: " + ", ".join(invalid))
         return "missing_inputs", "; ".join(parts)
+
+    missing_python: List[str] = []
+    for module in task.python_dependencies:
+        try:
+            importlib.import_module(module)
+        except ModuleNotFoundError:
+            missing_python.append(module)
+    if missing_python:
+        return "missing_inputs", "missing python packages: " + ", ".join(sorted(missing_python))
 
     optional_missing = [
         dep
