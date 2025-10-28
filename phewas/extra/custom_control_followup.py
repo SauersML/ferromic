@@ -24,6 +24,7 @@ import sys
 import math
 import warnings
 from dataclasses import dataclass
+from decimal import Context, Decimal, localcontext
 from fnmatch import fnmatch
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -31,6 +32,7 @@ from typing import Iterable, Sequence
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
+from scipy.special import log_ndtr
 from statsmodels.tools.sm_exceptions import PerfectSeparationError
 
 from .. import iox as io
@@ -89,6 +91,11 @@ CUSTOM_CONTROL_PREFIX = "PGS"
 OUTPUT_PATH = Path("custom_control_follow_ups.tsv")
 
 NUM_PCS = PIPELINE_NUM_PCS
+
+CONFIDENCE_Z = 1.959963984540054  # scipy.stats.norm.ppf(0.975)
+MIN_LOG_FLOAT = math.log(sys.float_info.min)
+MAX_LOG_FLOAT = math.log(sys.float_info.max)
+DECIMAL_CONTEXT = Context(prec=50, Emin=-999999, Emax=999999)
 
 
 def _base_covariate_columns(num_pcs: int = NUM_PCS) -> list[str]:
@@ -197,6 +204,173 @@ def _summarise_design_matrix(X: pd.DataFrame, y: pd.Series | None = None) -> str
                 "Ancestry dummies constant after alignment: "
                 + ", ".join(diagnostics["ancestry_constants"])
             )
+
+
+def _decimal_to_string(value: Decimal) -> str:
+    normalized = value.normalize() if value != 0 else value
+    if normalized == 0:
+        return "0"
+    exponent = normalized.adjusted()
+    if -6 <= exponent <= 6:
+        return format(normalized, "f")
+    return format(normalized, "E")
+
+
+def _exp_decimal(value: float) -> Decimal | None:
+    if not math.isfinite(value):
+        return None
+    with localcontext(DECIMAL_CONTEXT):
+        return Decimal(str(value)).exp()
+
+
+def _log_value_to_decimal(log_value: float) -> Decimal | None:
+    if math.isnan(log_value):
+        return None
+    if log_value == float("-inf"):
+        return Decimal(0)
+    if not math.isfinite(log_value):
+        return None
+    with localcontext(DECIMAL_CONTEXT):
+        return Decimal(str(log_value)).exp()
+
+
+def _format_probability_from_log(log_value: float | None) -> float | str:
+    if log_value is None or math.isnan(log_value):
+        return math.nan
+    if log_value >= MIN_LOG_FLOAT:
+        return math.exp(log_value)
+    decimal_value = _log_value_to_decimal(log_value)
+    if decimal_value is None:
+        return math.nan
+    return _decimal_to_string(decimal_value)
+
+
+def _format_exp(value: float) -> float | str:
+    if not math.isfinite(value):
+        return math.nan
+    if MIN_LOG_FLOAT <= value <= MAX_LOG_FLOAT:
+        return math.exp(value)
+    decimal_value = _exp_decimal(value)
+    if decimal_value is None:
+        return math.nan
+    return _decimal_to_string(decimal_value)
+
+
+def _get_term_index(result, term: str) -> int | None:
+    params = getattr(result, "params", None)
+    if isinstance(params, pd.Series):
+        try:
+            return int(params.index.get_loc(term))
+        except KeyError:
+            pass
+    exog_names = getattr(getattr(result, "model", None), "exog_names", None)
+    if exog_names and term in exog_names:
+        return int(exog_names.index(term))
+    return None
+
+
+def _extract_parameter(result, term: str) -> float:
+    params = getattr(result, "params", None)
+    if isinstance(params, pd.Series):
+        value = params.get(term)
+        if value is None:
+            return math.nan
+        return float(value)
+    if isinstance(params, np.ndarray):
+        index = _get_term_index(result, term)
+        if index is not None and 0 <= index < len(params):
+            return float(params[index])
+    return math.nan
+
+
+def _compute_standard_error(result, term: str) -> float:
+    se = math.nan
+    bse = getattr(result, "bse", None)
+    if isinstance(bse, pd.Series):
+        candidate = bse.get(term)
+        if candidate is not None:
+            se = float(candidate)
+    elif isinstance(bse, np.ndarray):
+        index = _get_term_index(result, term)
+        if index is not None and 0 <= index < len(bse):
+            se = float(bse[index])
+    if math.isfinite(se) and se > 0:
+        return se
+
+    try:
+        cov = result.cov_params()
+    except Exception:
+        cov = None
+    index = _get_term_index(result, term)
+    if cov is not None and index is not None:
+        if isinstance(cov, pd.DataFrame):
+            if term in cov.index and term in cov.columns:
+                variance = float(cov.loc[term, term])
+                if variance >= 0:
+                    return math.sqrt(variance)
+        else:
+            matrix = np.asarray(cov, dtype=np.float64)
+            if 0 <= index < matrix.shape[0]:
+                variance = float(matrix[index, index])
+                if variance >= 0:
+                    return math.sqrt(variance)
+
+    if index is not None:
+        try:
+            params = getattr(result, "params", None)
+            vector = np.asarray(params, dtype=np.float64)
+            hessian = getattr(result.model, "hessian")
+            hess_matrix = np.asarray(hessian(vector), dtype=np.float64)
+            if hess_matrix.size:
+                cov = np.linalg.pinv(-hess_matrix)
+                variance = float(cov[index, index])
+                if variance >= 0:
+                    return math.sqrt(variance)
+        except Exception:
+            pass
+
+    return math.nan
+
+
+def _summarise_term(result, term: str) -> dict[str, float | str | None]:
+    beta = _extract_parameter(result, term)
+    se = _compute_standard_error(result, term)
+    log_p: float | None = None
+    z_value = float("nan")
+    if math.isfinite(beta) and math.isfinite(se) and se > 0:
+        z_value = beta / se
+        if math.isfinite(z_value):
+            log_sf = float(log_ndtr(-abs(z_value)))
+            log_p = math.log(2.0) + log_sf
+
+    summary: dict[str, float | str | None] = {
+        "beta": beta,
+        "se": se,
+        "p_value": _format_probability_from_log(log_p),
+        "odds_ratio": _format_exp(beta) if math.isfinite(beta) else math.nan,
+        "ci_lower": math.nan,
+        "ci_upper": math.nan,
+        "log_p": log_p,
+    }
+
+    if math.isfinite(beta) and math.isfinite(se) and se > 0:
+        half_width = CONFIDENCE_Z * se
+        summary["ci_lower"] = _format_exp(beta - half_width)
+        summary["ci_upper"] = _format_exp(beta + half_width)
+
+    return summary
+
+
+def _empty_term_summary() -> dict[str, float | str | None]:
+    return {
+        "beta": math.nan,
+        "se": math.nan,
+        "p_value": math.nan,
+        "odds_ratio": math.nan,
+        "ci_lower": math.nan,
+        "ci_upper": math.nan,
+        "log_p": None,
+    }
 
     preview_columns = []
     for col in X.columns:
@@ -778,16 +952,37 @@ def run() -> None:
                 warn(f"Logistic regression failed for {cfg.phenotype}: {exc}")
                 continue
 
-            params = fit.params
-            beta = float(params.get("dosage", np.nan))
-            se = float(fit.bse.get("dosage", np.nan)) if hasattr(fit, "bse") else np.nan
+            term_summary = _summarise_term(fit, "dosage")
+            beta = float(term_summary.get("beta", math.nan))
             if math.isnan(beta):
                 warn(f"Model for {cfg.phenotype} did not estimate a dosage coefficient.")
                 continue
-            p_value = float(fit.pvalues.get("dosage", np.nan)) if hasattr(fit, "pvalues") else np.nan
-            odds_ratio = float(math.exp(beta)) if math.isfinite(beta) else np.nan
+            se = float(term_summary.get("se", math.nan))
+            p_value = term_summary.get("p_value", math.nan)
+            odds_ratio = term_summary.get("odds_ratio", math.nan)
+            ci_lower = term_summary.get("ci_lower", math.nan)
+            ci_upper = term_summary.get("ci_upper", math.nan)
+            log_p_value = term_summary.get("log_p")
+            if log_p_value is None or not math.isfinite(log_p_value):
+                log_p_value = math.nan
 
             custom_cols = [c for c in X.columns if c.upper().startswith(CUSTOM_CONTROL_PREFIX.upper())]
+
+            baseline_summary = _empty_term_summary()
+            baseline_method: str | None = None
+            baseline_design = X.drop(columns=custom_cols, errors="ignore")
+            try:
+                baseline_fit, baseline_method = _fit_logistic(baseline_design, y.loc[baseline_design.index])
+                baseline_summary = _summarise_term(baseline_fit, "dosage")
+            except RuntimeError as exc:
+                warn(
+                    "Unadjusted logistic regression failed for "
+                    f"{cfg.phenotype}: {exc}"
+                )
+
+            baseline_log_p = baseline_summary.get("log_p")
+            if baseline_log_p is None or not math.isfinite(baseline_log_p):
+                baseline_log_p = math.nan
 
             results.append(
                 {
@@ -800,10 +995,19 @@ def run() -> None:
                     "Beta": beta,
                     "SE": se,
                     "OR": odds_ratio,
+                    "OR_95CI_Lower": ci_lower,
+                    "OR_95CI_Upper": ci_upper,
                     "P_Value": p_value,
+                    "Log_P_Value": log_p_value,
                     "Fit_Method": fit_method,
                     "Control_File": str(scores_path),
                     "Custom_Covariates": ",".join(custom_cols),
+                    "OR_Unadjusted": baseline_summary.get("odds_ratio", math.nan),
+                    "OR_Unadjusted_95CI_Lower": baseline_summary.get("ci_lower", math.nan),
+                    "OR_Unadjusted_95CI_Upper": baseline_summary.get("ci_upper", math.nan),
+                    "P_Value_Unadjusted": baseline_summary.get("p_value", math.nan),
+                    "Log_P_Value_Unadjusted": baseline_log_p,
+                    "Fit_Method_Unadjusted": baseline_method,
                 }
             )
 
