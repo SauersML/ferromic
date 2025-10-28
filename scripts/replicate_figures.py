@@ -18,7 +18,7 @@ import sys
 import textwrap
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Union
 from urllib.parse import urljoin, urlparse
 
 # ---------------------------------------------------------------------------
@@ -78,6 +78,7 @@ REMOTE_PATHS: Sequence[str] = [
     "public_internet/inversion_statistical_results.csv",
     "public_internet/inv_info.csv",
     "public_internet/output.csv",
+    "public_internet/phewas_results.tsv",
     # Additional large derived artefacts referenced by multiple figure scripts.
     "public_internet/all_pairwise_results.csv",
     "public_internet/per_site_diversity_output.falsta",
@@ -101,7 +102,7 @@ class FigureTask:
 
     name: str
     script: Path
-    outputs: Sequence[Path]
+    outputs: Sequence[Union[Path, str]]
     dependencies: Sequence[str]
     optional_dependencies: Sequence[str] = field(default_factory=tuple)
     required: bool = True
@@ -194,6 +195,128 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         required=False,
         note="Generates a suite of plots when Weir & Cockerham summaries are available in output.csv.",
     ),
+    FigureTask(
+        name="Per-site diversity/FST trends by category",
+        script=Path("stats/category_per_site.py"),
+        outputs=(
+            Path("length_norm_trend_fast/pi_vs_inversion_edge_proportion_grouped_mean.pdf"),
+            Path("length_norm_trend_fast/pi_vs_inversion_edge_proportion_grouped_mean_overall_only.pdf"),
+            Path("length_norm_trend_fast/pi_vs_inversion_edge_bp_cap100kb_grouped_mean.pdf"),
+            Path("length_norm_trend_fast/pi_vs_inversion_edge_bp_cap100kb_grouped_mean_overall_only.pdf"),
+            Path("length_norm_trend_fast/pi_vs_inversion_edge_proportion_grouped_median.pdf"),
+            Path("length_norm_trend_fast/pi_vs_inversion_edge_proportion_grouped_median_overall_only.pdf"),
+            Path("length_norm_trend_fast/pi_vs_inversion_edge_bp_cap100kb_grouped_median.pdf"),
+            Path("length_norm_trend_fast/pi_vs_inversion_edge_bp_cap100kb_grouped_median_overall_only.pdf"),
+            Path("length_norm_trend_fast/fst_vs_inversion_edge_proportion_grouped_pooled.pdf"),
+            Path("length_norm_trend_fast/fst_vs_inversion_edge_proportion_grouped_median.pdf"),
+            Path("length_norm_trend_fast/fst_vs_inversion_edge_bp_cap100kb_grouped_pooled.pdf"),
+            Path("length_norm_trend_fast/fst_vs_inversion_edge_bp_cap100kb_grouped_median.pdf"),
+        ),
+        dependencies=(
+            "per_site_diversity_output.falsta",
+            "per_site_fst_output.falsta",
+            "inv_info.tsv",
+        ),
+    ),
+    FigureTask(
+        name="Normalized per-site diversity/FST trends",
+        script=Path("stats/category_per_site_normed.py"),
+        outputs=(
+            Path("length_norm_trend_fast_normed/pi_vs_inversion_edge_proportion_grouped_mean.pdf"),
+            Path("length_norm_trend_fast_normed/pi_vs_inversion_edge_bp_cap100kb_grouped_mean.pdf"),
+            Path("length_norm_trend_fast_normed/pi_vs_inversion_edge_proportion_grouped_median.pdf"),
+            Path("length_norm_trend_fast_normed/pi_vs_inversion_edge_bp_cap100kb_grouped_median.pdf"),
+            Path("length_norm_trend_fast_normed/fst_vs_inversion_edge_proportion_grouped_pooled.pdf"),
+            Path("length_norm_trend_fast_normed/fst_vs_inversion_edge_proportion_grouped_median.pdf"),
+            Path("length_norm_trend_fast_normed/fst_vs_inversion_edge_bp_cap100kb_grouped_pooled.pdf"),
+            Path("length_norm_trend_fast_normed/fst_vs_inversion_edge_bp_cap100kb_grouped_median.pdf"),
+        ),
+        dependencies=(
+            "per_site_diversity_output.falsta",
+            "per_site_fst_output.falsta",
+            "inv_info.tsv",
+        ),
+    ),
+    FigureTask(
+        name="Per-inversion distance trends",
+        script=Path("stats/each_per_site.py"),
+        outputs=("per_inversion_trends/*.png",),
+        dependencies=(
+            "per_site_diversity_output.falsta",
+            "per_site_fst_output.falsta",
+        ),
+    ),
+    FigureTask(
+        name="Middle vs flank π quadrant violins",
+        script=Path("stats/middle_vs_flank_pi.py"),
+        outputs=("pi_analysis_results_exact_mf_quadrants/total_*/pi_mf_quadrant_violins_total_*.pdf",),
+        dependencies=("per_site_diversity_output.falsta", "inv_info.tsv"),
+    ),
+    FigureTask(
+        name="Middle vs flank π recurrence violins",
+        script=Path("stats/middle_vs_flank_pi_recurrence.py"),
+        outputs=(
+            "pi_analysis_results_exact_mf_quadrants/total_*/pi_mf_recurrence_violins_total_*.pdf",
+            "pi_analysis_results_exact_mf_quadrants/total_*/pi_mf_overall_violins_total_*.pdf",
+        ),
+        dependencies=("per_site_diversity_output.falsta", "inv_info.tsv"),
+    ),
+    FigureTask(
+        name="Middle vs flank FST quadrant violins",
+        script=Path("stats/middle_vs_flank_fst.py"),
+        outputs=("fst_analysis_results_exact_mf_quadrants/total_*/fst_mf_quadrant_violins_total_*.pdf",),
+        dependencies=("per_site_fst_output.falsta", "inv_info.tsv"),
+    ),
+    FigureTask(
+        name="Flanking region Hudson FST bar plot",
+        script=Path("stats/dist_fst_by_type.py"),
+        outputs=(Path("fst_flanking_regions_bar_plot.png"),),
+        dependencies=("per_site_fst_output.falsta", "inv_info.tsv"),
+    ),
+    FigureTask(
+        name="Inversion event rate vs diversity",
+        script=Path("stats/events_rate_diversity.py"),
+        outputs=(
+            Path("logfc_vs_formation_rate.pdf"),
+            Path("logfc_vs_nrecur.pdf"),
+            Path("fst_vs_formation_rate.pdf"),
+            Path("fst_vs_nrecur.pdf"),
+        ),
+        dependencies=("output.csv", "inv_info.tsv"),
+    ),
+    FigureTask(
+        name="PheWAS volcano plot",
+        script=Path("stats/volcano.py"),
+        outputs=(Path("phewas_volcano.pdf"),),
+        dependencies=("phewas_results.tsv", "inv_info.tsv"),
+        required=False,
+        note="Requires phewas_results.tsv, which is produced by the BigQuery-backed PheWAS pipeline.",
+    ),
+    FigureTask(
+        name="PheWAS ranged volcano plot",
+        script=Path("stats/ranged_volcano.py"),
+        outputs=(Path("phewas_volcano_ranged.pdf"),),
+        dependencies=("phewas_results.tsv",),
+        required=False,
+        note="Requires phewas_results.tsv, which is produced by the BigQuery-backed PheWAS pipeline.",
+    ),
+    FigureTask(
+        name="PheWAS Manhattan panels",
+        script=Path("stats/manhattan_phe.py"),
+        outputs=("phewas_plots/*.pdf",),
+        dependencies=("phewas_results.tsv",),
+        optional_dependencies=("inv_info.tsv",),
+        required=False,
+        note="Requires phewas_results.tsv exported from the production pipeline.",
+    ),
+    FigureTask(
+        name="PheWAS odds ratio matrix",
+        script=Path("stats/OR_matrix.py"),
+        outputs=(Path("phewas_heatmap.pdf"), Path("phewas_heatmap.svg")),
+        dependencies=("phewas_results.tsv",),
+        required=False,
+        note="Requires phewas_results.tsv exported from the production pipeline.",
+    ),
 )
 
 # ---------------------------------------------------------------------------
@@ -266,6 +389,24 @@ def is_valid_data_file(path: Path) -> bool:
     if b"accessdenied" in lowered or b"forbidden" in lowered:
         return False
     return True
+
+
+def has_expected_output(target: Union[Path, str]) -> bool:
+    """Check whether the requested output artefact exists."""
+
+    text = str(target)
+    if any(ch in text for ch in "*?[]"):
+        matches = [p for p in REPO_ROOT.glob(text) if p.is_file()]
+        return any(is_valid_data_file(match) for match in matches)
+
+    path = REPO_ROOT / Path(text)
+    if path.is_dir():
+        for candidate in path.rglob("*"):
+            if candidate.is_file() and is_valid_data_file(candidate):
+                return True
+        return False
+
+    return is_valid_data_file(path)
 
 
 def ensure_local_copy(name: str, index: Dict[str, List[Path]]) -> Optional[Path]:
@@ -387,7 +528,7 @@ def run_task(task: FigureTask, env: Dict[str, str]) -> tuple[str, str]:
     missing_outputs = [
         str(path)
         for path in task.outputs
-        if not is_valid_data_file(REPO_ROOT / path)
+        if not has_expected_output(path)
     ]
     if missing_outputs:
         return "missing_outputs", "expected outputs not found: " + ", ".join(missing_outputs)
