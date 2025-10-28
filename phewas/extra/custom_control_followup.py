@@ -10,8 +10,9 @@ down to a minimal, targeted workflow:
   ``<PGS_ID>_AVG`` columns matched case-insensitively.
 * P-values are adjusted for multiple testing via the Benjamini–Hochberg FDR procedure.
 
-All configuration is expressed as module-level globals; there is no CLI entry
-point by design.
+All configuration is expressed as module-level globals; invoke :func:`run` via
+``python -m phewas.extra.custom_control_followup`` for an in-repo CLI entry
+point.
 
 The output table ``custom_control_follow_ups.tsv`` is written to the current
 working directory.
@@ -23,7 +24,7 @@ import os
 import sys
 import math
 import warnings
-from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from decimal import Context, Decimal, localcontext
 from fnmatch import fnmatch
@@ -34,9 +35,11 @@ import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 from scipy.special import log_ndtr
+from scipy.stats import norm
 from statsmodels.stats.multitest import multipletests
 from statsmodels.tools.sm_exceptions import ConvergenceWarning, PerfectSeparationError
-from patsy import dmatrix
+
+from google.cloud import bigquery
 
 from .. import iox as io
 from .. import pheno
@@ -112,26 +115,9 @@ DECIMAL_CONTEXT = Context(prec=50, Emin=-999999, Emax=999999)
 # diagnostics so that the root cause can be investigated instead of applying
 # ever-stronger penalties.
 MAX_ABS_DOSAGE_BETA = 15.0
-AGE_BSPLINE_DF = 4
 RIDGE_ALPHA = 1e-6
 GRADIENT_NORM_THRESHOLD = 1e-6
-HESSIAN_CONDITION_THRESHOLD = 1e12
-
-# Optimisation strategies attempted when fitting logistic regressions.  The
-# ``label`` is used for logging, while ``options`` are forwarded to
-# :meth:`statsmodels.discrete.discrete_model.Logit.fit`.
-LOGIT_SOLVER_CANDIDATES: Sequence[tuple[str, dict[str, object]]] = (
-    ("logit_newton", {"method": "newton", "maxiter": 200, "tol": 1e-8, "warn_convergence": True}),
-    ("logit_bfgs", {"method": "bfgs", "maxiter": 500, "tol": 1e-8, "warn_convergence": True}),
-    ("logit_lbfgs", {"method": "lbfgs", "maxiter": 500, "tol": 1e-8, "warn_convergence": True}),
-    ("logit_powell", {"method": "powell", "maxiter": 500, "warn_convergence": True}),
-)
-
-
-def _base_covariate_columns(num_pcs: int = NUM_PCS) -> list[str]:
-    """Return the baseline covariate columns used in the main PheWAS pipeline."""
-
-    return ["sex", *[f"PC{i}" for i in range(1, num_pcs + 1)], "AGE_c", "AGE_c_sq"]
+HESSIAN_CONDITION_THRESHOLD = 1e8
 
 # ---------------------------------------------------------------------------
 # Data source configuration (mirrors ``phewas.run`` defaults)
@@ -746,43 +732,6 @@ def _describe_covariate_columns(X: pd.DataFrame) -> list[str]:
     return lines
 
 
-def _report_model_instability(
-    label: str,
-    issues: list[str],
-    metrics: dict[str, object],
-    X: pd.DataFrame,
-    y: pd.Series,
-    warning_records: Sequence[warnings.WarningMessage],
-    *,
-    include_design: bool = True,
-) -> None:
-    if issues:
-        warn(f"{label} logistic fit unstable: {'; '.join(issues)}")
-    else:
-        warn(f"{label} logistic fit unstable for unknown reasons")
-
-    if metrics:
-        metric_summary = _format_summary_dict(metrics)
-        warn(f"{label} dosage coefficient diagnostics: {metric_summary}")
-
-    if warning_records:
-        warn(
-            f"{label} emitted convergence warnings: "
-            + "; ".join(_format_warning_records(warning_records))
-        )
-
-    if include_design:
-        for line in _describe_dosage_distribution(X, y):
-            warn(f"{label} dosage diagnostic: {line}")
-
-        design_lines = _summarise_design_matrix(X, y).splitlines()
-        for line in design_lines:
-            warn(f"{label} design diagnostic: {line}")
-
-        for line in _describe_covariate_columns(X):
-            warn(f"{label} covariate diagnostic: {line}")
-
-
 def _summarise_term(result, term: str) -> dict[str, float | str | None]:
     beta = _extract_parameter(result, term)
     se = _extract_series_value(result, "bse", term)
@@ -868,125 +817,12 @@ def _empty_term_summary() -> dict[str, float | str | None]:
         "log_p": None,
     }
 
-    preview_columns = []
-    for col in X.columns:
-        preview_columns.append(f"{col} -> {_summarise_column(X[col])}")
-    lines.extend(preview_columns)
-    return "\n".join(lines)
-
-
-def _remove_collinear_columns(
-    df: pd.DataFrame,
-    *,
-    tolerance: float = 1e-8,
-    protected: Sequence[str] = ("dosage",),
-) -> tuple[pd.DataFrame, list[str]]:
-    if df.shape[1] <= 1:
-        return df, []
-
-    values = df.to_numpy(dtype=np.float64, copy=False)
-    columns = list(df.columns)
-    removed: list[str] = []
-
-    for idx, column in enumerate(columns):
-        if column in removed or column == "const":
-            continue
-
-        others = [i for i, col in enumerate(columns) if col != column and col not in removed]
-        if not others:
-            continue
-
-        predictors = values[:, others]
-        target = values[:, idx]
-        if predictors.size == 0:
-            continue
-
-        try:
-            solution, *_ = np.linalg.lstsq(predictors, target, rcond=None)
-        except np.linalg.LinAlgError:
-            continue
-
-        approximation = predictors @ solution
-        target_norm = np.linalg.norm(target)
-        residual_norm = np.linalg.norm(target - approximation)
-        relative_error = residual_norm / max(target_norm, 1.0)
-
-        if relative_error <= tolerance:
-            if column in protected:
-                raise RuntimeError(
-                    f"{column!r} covariate is a linear combination of other predictors after alignment."
-                )
-            removed.append(column)
-
-    if removed:
-        df = df.drop(columns=removed)
-
-    return df, removed
-
 
 def _format_logistic_failure(exc: Exception, X: pd.DataFrame, y: pd.Series) -> str:
     summary_lines = _summarise_design_matrix(X, y).splitlines()
     indented = "\n    ".join(summary_lines)
     return f"Logistic regression failed: {exc}\n    {indented}"
 
-
-def _collect_convergence_metadata(result) -> dict[str, object]:
-    metadata: dict[str, object] = {}
-    for attr in ("mle_retvals", "fit_history"):
-        value = getattr(result, attr, None)
-        if isinstance(value, Mapping):
-            for key, item in value.items():
-                metadata.setdefault(str(key), item)
-    converged_attr = getattr(result, "converged", None)
-    if converged_attr is not None:
-        metadata.setdefault("converged", bool(converged_attr))
-    return metadata
-
-
-def _fit_has_converged(result) -> bool:
-    metadata = _collect_convergence_metadata(result)
-    converged = metadata.get("converged")
-    if isinstance(converged, (bool, np.bool_)):
-        return bool(converged)
-    return True
-
-
-def _report_fit_diagnostics(result, label: str) -> None:
-    metadata = _collect_convergence_metadata(result)
-    converged = metadata.get("converged")
-    if isinstance(converged, (bool, np.bool_)) and converged:
-        return
-
-    warnflag = metadata.get("warnflag")
-    reason_parts: list[str] = []
-    if isinstance(warnflag, (int, np.integer)):
-        warnflag_map = {
-            1: "iteration limit reached before convergence",
-            2: "parameter change below tolerance but gradient not close to zero",
-            3: "likelihood failed to increase; possible separation or collinearity",
-        }
-        reason_parts.append(warnflag_map.get(int(warnflag), f"warnflag={warnflag}"))
-    for key in ("iterations", "criterion", "deviance", "score", "score_norm", "step"):
-        value = metadata.get(key)
-        if value is None:
-            continue
-        if isinstance(value, (float, np.floating)):
-            reason_parts.append(f"{key}={float(value):.3e}")
-        else:
-            reason_parts.append(f"{key}={value}")
-
-    try:
-        score_vec = result.model.score(result.params)  # type: ignore[call-arg]
-        score_norm = float(np.linalg.norm(np.asarray(score_vec, dtype=np.float64)))
-        if math.isfinite(score_norm):
-            reason_parts.append(f"score_norm={score_norm:.3e}")
-    except Exception:
-        pass
-
-    if not reason_parts:
-        reason_parts.append("no convergence diagnostics available")
-
-    warn(f"{label} logistic fit did not converge ({'; '.join(reason_parts)})")
 
 def _normalize_label(value: str) -> str:
     return " ".join(str(value).lower().replace("_", " ").split())
@@ -1109,6 +945,45 @@ def _collect_fit_diagnostics(
     return diagnostics
 
 
+class PenalizedLogitResult:
+    """Minimal result wrapper exposing Wald diagnostics for penalized fits."""
+
+    def __init__(self, model: sm.Logit, params: np.ndarray, cov: np.ndarray) -> None:
+        names = list(model.exog_names)
+        self.model = model
+        self.params = pd.Series(np.asarray(params, dtype=np.float64), index=names)
+        self._cov = pd.DataFrame(np.asarray(cov, dtype=np.float64), index=names, columns=names)
+        self.bse = pd.Series(np.sqrt(np.diag(self._cov.to_numpy())), index=names)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            z_values = self.params.to_numpy(dtype=np.float64) / self.bse.to_numpy(dtype=np.float64)
+        self.tvalues = pd.Series(z_values, index=names)
+        sqrt_two = math.sqrt(2.0)
+        pvals = [
+            math.erfc(abs(z) / sqrt_two) if math.isfinite(z) else math.nan
+            for z in z_values
+        ]
+        self.pvalues = pd.Series(pvals, index=names)
+        try:
+            self.llf = float(model.loglike(self.params.to_numpy(dtype=np.float64)))
+        except Exception:
+            self.llf = math.nan
+        try:
+            self.nobs = float(model.endog.shape[0])
+        except Exception:
+            self.nobs = math.nan
+        self.mle_retvals = {"converged": True, "method": "ridge"}
+        self.converged = True
+
+    def cov_params(self) -> pd.DataFrame:
+        return self._cov
+
+    def conf_int(self, alpha: float = 0.05) -> pd.DataFrame:
+        z_value = float(norm.ppf(1 - alpha / 2))
+        lower = self.params - z_value * self.bse
+        upper = self.params + z_value * self.bse
+        return pd.DataFrame({0: lower, 1: upper})
+
+
 def _fit_logistic(X: pd.DataFrame, y: pd.Series):
     if X.shape[0] != y.shape[0]:
         raise RuntimeError("Design matrix and response vector have incompatible shapes.")
@@ -1192,22 +1067,34 @@ def _fit_logistic(X: pd.DataFrame, y: pd.Series):
             "Triggering ridge fallback due to convergence diagnostics "
             f"(gradient_norm={gradient_norm}, hessian_condition={hessian_cond}, max_abs_eta={max_abs_eta})."
         )
+        pen_weight = np.ones(X.shape[1], dtype=np.float64)
+        pen_weight[0] = 0.0  # do not penalize intercept
         penalized = logit_model.fit_regularized(
             start_params=start_params,
             method="lbfgs",
             maxiter=200,
             alpha=RIDGE_ALPHA,
             L1_wt=0.0,
+            pen_weight=pen_weight,
         )
-        result = logit_model.fit(
-            start_params=penalized.params,
-            method="lbfgs",
-            maxiter=200,
-            tol=1e-8,
-            disp=False,
-        )
-        method = "logit_lbfgs (ridge restart)"
+        params = np.asarray(penalized.params, dtype=np.float64)
+        try:
+            hessian = np.asarray(logit_model.hessian(params), dtype=np.float64)
+        except Exception:
+            hessian = np.array([], dtype=np.float64)
+        if hessian.size:
+            penalty_matrix = np.diag(pen_weight * RIDGE_ALPHA)
+            try:
+                adjusted = -hessian + penalty_matrix
+                cov = np.linalg.pinv(adjusted)
+            except np.linalg.LinAlgError:
+                cov = np.full((len(params), len(params)), np.nan, dtype=np.float64)
+        else:
+            cov = np.full((len(params), len(params)), np.nan, dtype=np.float64)
+        result = PenalizedLogitResult(logit_model, params, cov)
+        method = "logit_lbfgs (ridge penalty)"
         diagnostics = _collect_fit_diagnostics(result, X)
+        diagnostics["penalized"] = True
 
     return result, method, diagnostics
 
@@ -1218,20 +1105,14 @@ class PhenotypeRun:
     category: str
 
 
-def _load_shared_covariates() -> tuple[pd.DataFrame, pd.DataFrame, str | None]:
-    project_id = os.getenv("GOOGLE_PROJECT")
-    cdr_id = os.getenv("WORKSPACE_CDR")
-    if not project_id or not cdr_id:
-        die(
-            "Both GOOGLE_PROJECT and WORKSPACE_CDR environment variables must be set"
-        )
-
-    from google.cloud import bigquery
-
+def _load_shared_covariates(
+    *,
+    client: bigquery.Client,
+    project_id: str,
+    cdr_id: str,
+) -> tuple[pd.DataFrame, pd.DataFrame, str | None]:
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     LOCK_DIR.mkdir(parents=True, exist_ok=True)
-
-    client = bigquery.Client(project=project_id)
     cdr_codename = cdr_id.split(".")[-1]
 
     demographics_cache = CACHE_DIR / f"demographics_{cdr_codename}.parquet"
@@ -1350,7 +1231,7 @@ def _load_inversion(target: str) -> pd.DataFrame:
 class DesignPreconditioner:
     index: pd.Index
     dosage: pd.Series
-    age_basis: pd.DataFrame
+    age_terms: pd.DataFrame
     sex: pd.Series | None
     pcs_resid: pd.DataFrame
     scaled_controls: pd.DataFrame
@@ -1384,7 +1265,7 @@ class DesignPreconditioner:
 
         frames: list[pd.DataFrame] = [
             self.dosage.loc[subset_index].to_frame(name="dosage"),
-            self.age_basis.loc[subset_index],
+            self.age_terms.loc[subset_index],
         ]
         if include_sex and self.sex is not None:
             frames.append(self.sex.loc[subset_index].to_frame(name=self.sex.name))
@@ -1556,15 +1437,13 @@ def _fit_design_preconditioner(
     pcs_residual = pcs_z.to_numpy(dtype=np.float64) - projection_basis @ (projection_pinv @ pcs_z.to_numpy(dtype=np.float64))
     pcs_resid_df = pd.DataFrame(pcs_residual, index=df.index, columns=pc_columns)
 
-    age_decades = df["AGE"].astype(np.float64) / 10.0
-    age_basis = dmatrix(
-        f"bs(age, df={AGE_BSPLINE_DF}, degree=3, include_intercept=False)",
-        {"age": age_decades},
-        return_type="dataframe",
+    age_years = df["AGE"].astype(np.float64)
+    age_centered = (age_years - age_years.mean()) / 10.0
+    age_basis = pd.DataFrame(
+        {"AGE_c": age_centered, "AGE_c_sq": age_centered ** 2},
+        index=df.index,
+        dtype=np.float64,
     )
-    age_basis.index = df.index
-    age_basis = age_basis.astype(np.float64)
-    age_basis.columns = [f"AGE_BS_{i}" for i in range(age_basis.shape[1])]
 
     if control_columns:
         controls = df[control_columns].astype(np.float64)
@@ -1632,7 +1511,7 @@ def _fit_design_preconditioner(
     return DesignPreconditioner(
         index=df.index,
         dosage=dosage.astype(np.float64),
-        age_basis=age_basis.astype(np.float64),
+        age_terms=age_basis.astype(np.float64),
         sex=sex_series.astype(np.float64) if sex_series is not None else None,
         pcs_resid=pcs_resid_df.astype(np.float64),
         scaled_controls=scaled_controls.astype(np.float64),
@@ -1655,16 +1534,14 @@ def _ensure_pheno_cache(
     cdr_id: str,
     core_index: pd.Index,
     project_id: str,
+    *,
+    client: bigquery.Client,
 ) -> None:
     match = definitions.loc[definitions["sanitized_name"] == phenotype]
     if match.empty:
         raise KeyError(f"Phenotype '{phenotype}' not present in definitions table.")
     if len(match) > 1:
         raise RuntimeError(f"Multiple definition rows found for phenotype '{phenotype}'.")
-
-    from google.cloud import bigquery
-
-    client = bigquery.Client(project=project_id)
     cdr_codename = cdr_id.split(".")[-1]
     row = match.iloc[0].to_dict()
     row.update({"cdr_codename": cdr_codename, "cache_dir": str(CACHE_DIR)})
@@ -1723,19 +1600,10 @@ def _analyse_single_phenotype(
     custom_control_names: Sequence[str],
     definitions: pd.DataFrame,
     cdr_id: str,
-    project_id: str,
     scores_path: Path,
 ) -> tuple[dict[str, object] | None, list[str]]:
     prefix = f"{cfg.phenotype}"
     _log_lines(prefix, f"Initialising analysis for inversion {inv} (category: {cfg.category})")
-
-    _ensure_pheno_cache(
-        definitions,
-        cfg.phenotype,
-        cdr_id,
-        preconditioner.index.astype(str),
-        project_id,
-    )
 
     analysis_index = preconditioner.index
     include_sex = True
@@ -1952,6 +1820,7 @@ def _analyse_single_phenotype(
     return result, summary_lines
 
 
+
 def run() -> None:
     warnings.filterwarnings("ignore", category=FutureWarning)
     project_id = os.getenv("GOOGLE_PROJECT")
@@ -1959,111 +1828,146 @@ def run() -> None:
     if not project_id or not cdr_id:
         die("GOOGLE_PROJECT and WORKSPACE_CDR must be defined in the environment.")
 
-    shared_covariates, anc_dummies, reference_ancestry = _load_shared_covariates()
-    definitions = pheno.load_definitions(PHENOTYPE_DEFINITIONS_URL)
-    target_runs = _resolve_target_runs(definitions)
-    if not target_runs:
-        warn("No phenotypes selected for analysis; exiting.")
-        return
-
-    scores_table, scores_path = _load_scores_table()
-    category_controls = _build_category_controls(scores_table)
-
-    results = []
-    for inv in TARGET_INVERSIONS:
-        info(f"Preparing inversion {inv}")
-        inversion_df = _load_inversion(inv)
-        core = shared_covariates.join(inversion_df, how="inner")
-        core = core.rename(columns={inv: "dosage"}) if inv in core.columns else core
-
-        if "dosage" not in core.columns:
-            raise KeyError(f"Inversion column '{inv}' missing after join")
-
-        control_frames: list[pd.DataFrame] = []
-        category_control_names: dict[str, list[str]] = {}
-        for category, controls in category_controls.items():
-            aligned = controls.reindex(core.index)
-            control_frames.append(aligned)
-            category_control_names[category] = list(aligned.columns)
-
-        if control_frames:
-            all_controls = pd.concat(control_frames, axis=1)
-            all_controls = all_controls.loc[:, ~all_controls.columns.duplicated()]
-            all_controls = all_controls.reindex(core.index)
-        else:
-            all_controls = pd.DataFrame(index=core.index)
-
-        try:
-            preconditioner = _fit_design_preconditioner(core, anc_dummies, reference_ancestry, all_controls)
-        except RuntimeError as exc:
-            warn(f"Skipping inversion {inv} due to conditioning failure: {exc}")
-            continue
-
-        info(
-            "Preconditioned cohort: "
-            f"{len(preconditioner.index):,} participants (condition_number={preconditioner.diagnostics.get('condition_number', float('nan')):.6g})"
+    client = bigquery.Client(project=project_id)
+    try:
+        shared_covariates, anc_dummies, reference_ancestry = _load_shared_covariates(
+            client=client,
+            project_id=project_id,
+            cdr_id=cdr_id,
         )
+        definitions = pheno.load_definitions(PHENOTYPE_DEFINITIONS_URL)
+        target_runs = _resolve_target_runs(definitions)
+        if not target_runs:
+            warn("No phenotypes selected for analysis; exiting.")
+            return
 
-        for category, columns in category_control_names.items():
-            category_control_names[category] = [
-                col for col in columns if col in preconditioner.scaled_controls.columns
-            ]
+        scores_table, scores_path = _load_scores_table()
+        category_controls = _build_category_controls(scores_table)
 
-        pending: dict[Future, PhenotypeRun] = {}
-        with ThreadPoolExecutor(
-            max_workers=max(1, min(4, len(target_runs), os.cpu_count() or 1))
-        ) as executor:
+        results: list[dict[str, object]] = []
+        for inv in TARGET_INVERSIONS:
+            info(f"Preparing inversion {inv}")
+            inversion_df = _load_inversion(inv)
+            core = shared_covariates.join(inversion_df, how="inner")
+            core = core.rename(columns={inv: "dosage"}) if inv in core.columns else core
+
+            if "dosage" not in core.columns:
+                raise KeyError(f"Inversion column '{inv}' missing after join")
+
+            control_frames: list[pd.DataFrame] = []
+            category_control_names: dict[str, list[str]] = {}
+            for category, controls in category_controls.items():
+                aligned = controls.reindex(core.index)
+                control_frames.append(aligned)
+                category_control_names[category] = list(aligned.columns)
+
+            if control_frames:
+                all_controls = pd.concat(control_frames, axis=1)
+                all_controls = all_controls.loc[:, ~all_controls.columns.duplicated()]
+                all_controls = all_controls.reindex(core.index)
+            else:
+                all_controls = pd.DataFrame(index=core.index)
+
+            try:
+                preconditioner = _fit_design_preconditioner(
+                    core,
+                    anc_dummies,
+                    reference_ancestry,
+                    all_controls,
+                )
+            except RuntimeError as exc:
+                warn(f"Skipping inversion {inv} due to conditioning failure: {exc}")
+                continue
+
+            info(
+                "Preconditioned cohort: "
+                f"{len(preconditioner.index):,} participants (condition_number={preconditioner.diagnostics.get('condition_number', float('nan')):.6g})"
+            )
+
+            for category, columns in category_control_names.items():
+                category_control_names[category] = [
+                    col for col in columns if col in preconditioner.scaled_controls.columns
+                ]
+
+            ready_runs: list[tuple[PhenotypeRun, list[str]]] = []
             for cfg in target_runs:
                 control_names = category_control_names.get(cfg.category)
-                if control_names is None:
+                if not control_names:
                     warn(
-                        f"No custom controls found for category '{cfg.category}'; skipping {cfg.phenotype}."
+                        f"No custom controls available for category '{cfg.category}'; skipping {cfg.phenotype}."
                     )
                     continue
-
-                future = executor.submit(
-                    _analyse_single_phenotype,
-                    cfg=cfg,
-                    inv=inv,
-                    preconditioner=preconditioner,
-                    custom_control_names=control_names,
-                    definitions=definitions,
-                    cdr_id=cdr_id,
-                    project_id=project_id,
-                    scores_path=scores_path,
-                )
-                pending[future] = cfg
-
-            for future in as_completed(pending):
-                cfg = pending[future]
                 try:
-                    result, summary_lines = future.result()
-                except Exception as exc:  # pragma: no cover - defensive guard
-                    warn(f"Unhandled error in {cfg.phenotype} analysis: {exc}")
+                    _ensure_pheno_cache(
+                        definitions,
+                        cfg.phenotype,
+                        cdr_id,
+                        preconditioner.index.astype(str),
+                        project_id,
+                        client=client,
+                    )
+                except Exception as exc:
+                    warn(
+                        f"Failed to prepare phenotype cache for {cfg.phenotype}: {exc}; skipping."
+                    )
                     continue
+                ready_runs.append((cfg, control_names))
 
-                if not result:
-                    continue
+            if not ready_runs:
+                warn(f"No analysable phenotypes remained for inversion {inv}; skipping.")
+                continue
 
-                results.append(result)
-                for line in summary_lines:
-                    _log_lines(cfg.phenotype, line)
+            pending: dict[Future, PhenotypeRun] = {}
+            with ProcessPoolExecutor(
+                max_workers=max(1, min(4, len(ready_runs), os.cpu_count() or 1))
+            ) as executor:
+                for cfg, control_names in ready_runs:
+                    future = executor.submit(
+                        _analyse_single_phenotype,
+                        cfg=cfg,
+                        inv=inv,
+                        preconditioner=preconditioner,
+                        custom_control_names=control_names,
+                        definitions=definitions,
+                        cdr_id=cdr_id,
+                        scores_path=scores_path,
+                    )
+                    pending[future] = cfg
 
-    if not results:
-        warn("No successful analyses were produced; skipping output file.")
-        return
+                for future in as_completed(pending):
+                    cfg = pending[future]
+                    try:
+                        result, summary_lines = future.result()
+                    except Exception as exc:  # pragma: no cover - defensive guard
+                        warn(f"Unhandled error in {cfg.phenotype} analysis: {exc}")
+                        continue
 
-    output_df = pd.DataFrame(results)
-    pvals = pd.to_numeric(output_df.get("P_Value"), errors="coerce")
-    output_df["BH_FDR_Q"] = np.nan
-    mask = pvals.notna() & np.isfinite(pvals)
-    if mask.any():
-        _, qvals, _, _ = multipletests(pvals.loc[mask], alpha=0.05, method="fdr_bh")
-        output_df.loc[mask, "BH_FDR_Q"] = qvals
+                    if not result:
+                        continue
 
-    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    output_df.to_csv(OUTPUT_PATH, sep="\t", index=False)
-    info(f"Wrote {len(output_df)} rows to {OUTPUT_PATH}")
+                    results.append(result)
+                    for line in summary_lines:
+                        _log_lines(cfg.phenotype, line)
+
+        if not results:
+            warn("No successful analyses were produced; skipping output file.")
+            return
+
+        output_df = pd.DataFrame(results)
+        pvals = pd.to_numeric(output_df.get("P_Value"), errors="coerce")
+        output_df["BH_FDR_Q"] = np.nan
+        mask = pvals.notna() & np.isfinite(pvals)
+        if mask.any():
+            _, qvals, _, _ = multipletests(pvals.loc[mask], alpha=0.05, method="fdr_bh")
+            output_df.loc[mask, "BH_FDR_Q"] = qvals
+
+        OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = OUTPUT_PATH.with_name(OUTPUT_PATH.name + ".tmp")
+        output_df.to_csv(tmp_path, sep="\t", index=False)
+        tmp_path.replace(OUTPUT_PATH)
+        info(f"Wrote {len(output_df)} rows to {OUTPUT_PATH}")
+    finally:
+        client.close()
 
 
 if __name__ == "__main__":  # pragma: no cover - manual execution only
