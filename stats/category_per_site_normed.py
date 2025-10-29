@@ -181,6 +181,44 @@ TRANSFORM_SPECS: Tuple[TransformSpec, ...] = (
     ),
 )
 
+# -------------------- OUTPUT POST-PROCESSING HELPERS --------------
+
+def _promote_normalised_outputs(src_dir: Path, suffix: str, dest_dir: Path) -> None:
+    """Copy normalised artefacts into ``dest_dir`` without the suffix.
+
+    Historic automation expects the z-score deliverables to live directly in
+    ``OUTDIR`` using filenames without the ``_znorm`` suffix.  To stay
+    compatible without re-running the heavy analysis multiple times we copy the
+    generated files from the transform-specific directory while stripping the
+    suffix from their stems.
+    """
+
+    if not suffix:
+        # Nothing to strip; the files are already in their canonical location.
+        return
+
+    if not src_dir.exists():
+        log.warning(f"Normalised output directory missing: {src_dir}")
+        return
+
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    for pattern in ("*.pdf", "*.tsv"):
+        for path in src_dir.glob(pattern):
+            stem = path.stem
+            if not stem.endswith(suffix):
+                continue
+
+            dest_stem = stem[: -len(suffix)]
+            dest_path = dest_dir / f"{dest_stem}{path.suffix}"
+
+            try:
+                shutil.copy2(path, dest_path)
+            except OSError as exc:
+                log.error(f"Failed to duplicate {path} → {dest_path}: {exc}")
+            else:
+                log.debug(f"Back-compat copy: {path} → {dest_path}")
+
 # -------------------- INVERSION MAPPING --------------
 
 def _load_inv_mapping(INV_TSV: Path) -> pd.DataFrame:
@@ -1268,25 +1306,10 @@ def main():
     for spec in TRANSFORM_SPECS:
         log.info("=" * 72)
         log.info(f"Running transform '{spec.key}': {spec.description}")
-        if spec.key == "znorm":
-            # The publication-figure expectations (and our replicate_figures
-            # harness) look for the z-score-normalised outputs directly inside
-            # ``OUTDIR`` with the historical filenames.  Earlier refactors
-            # accidentally tucked them into a ``znorm`` subdirectory and kept
-            # the ``_znorm`` suffix, meaning the orchestration script could not
-            # locate the deliverables even though the plots were generated.
-            #
-            # To retain backwards-compatible paths we emit the z-score results
-            # at the top level with the original filenames, while any
-            # additional transforms (e.g. log2 fold-change) continue to live in
-            # their own subdirectories with an identifying suffix.
-            spec_dir = OUTDIR
-            spec_dir.mkdir(parents=True, exist_ok=True)
-            suffix = ""
-        else:
-            spec_dir = OUTDIR / spec.key
-            spec_dir.mkdir(parents=True, exist_ok=True)
-            suffix = spec.file_suffix
+
+        spec_dir = OUTDIR / spec.key
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        suffix = spec.file_suffix
         label_suffix = spec.label_suffix
 
         # π (diversity)
@@ -1352,6 +1375,9 @@ def main():
         )
 
         log.info(f"Completed transform '{spec.key}'.")
+
+        if spec.key == "znorm":
+            _promote_normalised_outputs(spec_dir, suffix=spec.file_suffix, dest_dir=OUTDIR)
 
 if __name__ == "__main__":
     mp.freeze_support()
