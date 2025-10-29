@@ -7,7 +7,25 @@ import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from matplotlib.patches import FancyArrowPatch
-from adjustText import adjust_text as ADJUST_TEXT  # required
+import warnings
+
+try:  # optional dependency used for nicer label placement
+    from adjustText import adjust_text as ADJUST_TEXT
+    _ADJUST_TEXT_AVAILABLE = True
+except ModuleNotFoundError:  # pragma: no cover - optional soft dependency
+    _ADJUST_TEXT_AVAILABLE = False
+
+    def ADJUST_TEXT(*args, **kwargs):  # type: ignore[override]
+        """Fallback when adjustText is unavailable (no-op)."""
+
+        return []
+
+    warnings.warn(
+        "adjustText is not installed; proceeding without label collision adjustment.",
+        RuntimeWarning,
+        stacklevel=2,
+    )
+
 matplotlib.use('Agg')
 
 from _inv_common import map_inversion_series
@@ -605,6 +623,12 @@ def plot_one_inversion(
 def main():
     if not os.path.exists(INFILE): sys.exit(f"ERROR: Cannot find {INFILE}")
     if not os.path.exists(PHECODE_FILE): sys.exit(f"ERROR: Cannot find {PHECODE_FILE}")
+
+    if not _ADJUST_TEXT_AVAILABLE:
+        print(
+            "[WARN] adjustText package not available; proceeding without label adjustment.",
+            file=sys.stderr,
+        )
 
     df = pd.read_csv(INFILE, sep="\t", dtype=str)
     for col in [PHENO_COL, INV_COL, P_Q_COL]:
