@@ -2884,7 +2884,7 @@ def lrt_overall_worker(task):
                 fit_full_use if fit_full_use is not None else fit_full,
                 reason_full,
             )
-        if penalized:
+        if penalized and not p_valid:
             out.update(
                 {
                     "P_LRT_Overall": np.nan,
@@ -4132,7 +4132,8 @@ def lrt_followup_worker(task):
                     fit_full_use if fit_full_use is not None else fit_full,
                     reason_full,
                 )
-            if penalized_inference:
+            candidate_p_valid = bool(np.isfinite(p_val) and (p_source in ALLOWED_P_SOURCES))
+            if penalized_inference and not candidate_p_valid:
                 p_val = np.nan
                 p_source = None
                 ci_method = None
