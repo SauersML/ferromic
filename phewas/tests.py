@@ -52,6 +52,7 @@ import phewas.cli as cli
 import phewas.iox as io
 import phewas.pheno as pheno
 import phewas.models as models
+import phewas.pipes as pipes
 import phewas.categories as categories
 from scipy.special import expit as sigmoid
 
@@ -1857,6 +1858,37 @@ def test_lrt_overall_meta_idempotency(test_ctx):
         models.lrt_overall_worker(task)
         assert f.stat().st_mtime == m0
         shm.close(); shm.unlink()
+
+
+def test_cached_lrt_result_accepts_score_fallback():
+    payload = {
+        "Phenotype": "X",
+        "P_LRT_Overall": float("nan"),
+        "P_Overall_Valid": True,
+        "P_Value": 0.01,
+        "P_Source": "score_chi2",
+    }
+    assert pipes._cached_lrt_result_is_usable(payload)
+
+
+def test_cached_lrt_result_accepts_fail_reason():
+    payload = {
+        "Phenotype": "X",
+        "P_LRT_Overall": float("nan"),
+        "P_Overall_Valid": False,
+        "LRT_Overall_Reason": "fit_failed",
+    }
+    assert pipes._cached_lrt_result_is_usable(payload)
+
+
+def test_cached_lrt_result_rejects_corrupted_payload():
+    payload = {
+        "Phenotype": "X",
+        "P_LRT_Overall": "not-a-number",
+        "P_Overall_Valid": True,
+        "P_Value": "also-bad",
+    }
+    assert not pipes._cached_lrt_result_is_usable(payload)
 
 def test_final_results_has_ci_and_ancestry_fields():
     with temp_workspace() as tmpdir, preserve_run_globals():
