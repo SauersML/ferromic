@@ -1268,9 +1268,25 @@ def main():
     for spec in TRANSFORM_SPECS:
         log.info("=" * 72)
         log.info(f"Running transform '{spec.key}': {spec.description}")
-        spec_dir = OUTDIR / spec.key
-        spec_dir.mkdir(parents=True, exist_ok=True)
-        suffix = spec.file_suffix
+        if spec.key == "znorm":
+            # The publication-figure expectations (and our replicate_figures
+            # harness) look for the z-score-normalised outputs directly inside
+            # ``OUTDIR`` with the historical filenames.  Earlier refactors
+            # accidentally tucked them into a ``znorm`` subdirectory and kept
+            # the ``_znorm`` suffix, meaning the orchestration script could not
+            # locate the deliverables even though the plots were generated.
+            #
+            # To retain backwards-compatible paths we emit the z-score results
+            # at the top level with the original filenames, while any
+            # additional transforms (e.g. log2 fold-change) continue to live in
+            # their own subdirectories with an identifying suffix.
+            spec_dir = OUTDIR
+            spec_dir.mkdir(parents=True, exist_ok=True)
+            suffix = ""
+        else:
+            spec_dir = OUTDIR / spec.key
+            spec_dir.mkdir(parents=True, exist_ok=True)
+            suffix = spec.file_suffix
         label_suffix = spec.label_suffix
 
         # π (diversity)
