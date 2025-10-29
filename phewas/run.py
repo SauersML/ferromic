@@ -642,6 +642,10 @@ gbj_draws = _maybe_parse_env("CAT_GBJ_B", int)
 if gbj_draws is not None:
     _cat_env_overrides["CAT_GBJ_B"] = max(int(gbj_draws), 1)
 
+gbj_max_draws = _maybe_parse_env("CAT_GBJ_MAX", int)
+if gbj_max_draws is not None:
+    _cat_env_overrides["CAT_GBJ_MAX"] = max(int(gbj_max_draws), 1)
+
 z_cap = _maybe_parse_env("CAT_Z_CAP", float)
 if z_cap is not None:
     _cat_env_overrides["CAT_Z_CAP"] = float(z_cap)
@@ -1234,12 +1238,21 @@ def _pipeline_once():
                                         tctx.get("CAT_Z_CAP")
                                     )
 
+                                    base_draws = int(tctx.get("CAT_GBJ_B", 5000))
+                                    max_draws_cfg = int(
+                                        tctx.get(
+                                            "CAT_GBJ_MAX",
+                                            max(base_draws * 10, base_draws),
+                                        )
+                                    )
+
                                     cat_df = categories.compute_category_metrics(
                                         inv_df,
                                         p_col=p_col,
                                         beta_col="Beta",
                                         null_structures=null_structs,
-                                        gbj_draws=int(tctx.get("CAT_GBJ_B", 5000)),
+                                        gbj_draws=base_draws,
+                                        gbj_max_draws=max_draws_cfg,
                                         z_cap=z_cap_value,
                                         rng_seed=seed,
                                         min_k=min_k,
