@@ -14,7 +14,7 @@ import resource
 from unittest.mock import patch, MagicMock
 import warnings
 import math
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import pytest
 
@@ -2292,9 +2292,9 @@ def test_category_metrics_optional_z_cap_changes_meta_z(monkeypatch):
 
     captures: List[Optional[float]] = []
 
-    def fake_sim(stat, corr, draws, rng, *, z_cap):
+    def fake_sim(stat, corr, draws, rng, *, z_cap, max_draws=None):
         captures.append(z_cap)
-        return 0.123
+        return 0.123, draws
 
     monkeypatch.setattr(categories, "_simulate_gbj_pvalue", fake_sim)
 
@@ -2324,6 +2324,54 @@ def test_category_metrics_optional_z_cap_changes_meta_z(monkeypatch):
     assert out_capped.loc[0, "Z_Cap"] == 8.0
     assert np.isnan(out_uncapped.loc[0, "Z_Cap"])
     assert abs(out_uncapped.loc[0, "T_GLS"]) > abs(out_capped.loc[0, "T_GLS"])
+
+
+def test_category_metrics_adaptive_gbj_draws_controls_fdr():
+    null_structs: Dict[str, categories.CategoryNull] = {}
+    rows: List[Dict[str, object]] = []
+    n_null = 40
+
+    for i in range(n_null):
+        name = f"ph_null_{i}"
+        cat = f"Cat_{i}"
+        rows.append({"Phenotype": name, "P_EMP": 0.5, "Beta": 0.0})
+        null_structs[cat] = categories.CategoryNull(
+            phenotypes=[name],
+            correlation=np.array([[1.0]], dtype=np.float64),
+            method="unit",
+            shrinkage="ridge",
+            lambda_value=0.05,
+            n_individuals=1000,
+        )
+
+    rows.append({"Phenotype": "ph_sig", "P_EMP": 1e-8, "Beta": 0.2})
+    null_structs["Cat_sig"] = categories.CategoryNull(
+        phenotypes=["ph_sig"],
+        correlation=np.array([[1.0]], dtype=np.float64),
+        method="unit",
+        shrinkage="ridge",
+        lambda_value=0.05,
+        n_individuals=1000,
+    )
+
+    inv = pd.DataFrame(rows)
+
+    out = categories.compute_category_metrics(
+        inv,
+        p_col="P_EMP",
+        beta_col="Beta",
+        null_structures=null_structs,
+        gbj_draws=2000,
+        gbj_max_draws=64000,
+        z_cap=None,
+        rng_seed=1234,
+        min_k=1,
+    )
+
+    assert not out.empty
+    sig_row = out[out["Category"] == "Cat_sig"].iloc[0]
+    assert sig_row["Q_GBJ"] < 0.05
+    assert sig_row["GBJ_Draws"] > 2000
 
 
 def test_plan_category_sets_respects_min_k_and_dedup(tmp_path):
