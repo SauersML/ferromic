@@ -406,7 +406,11 @@ def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, anc_series, phenos_
                         _valid = False
                         try:
                             _pf = float(_p)
-                            _valid = math.isfinite(_pf) and (0.0 < _pf < 1.0)
+                            # Accept cached p-values on the closed interval [0, 1].
+                            # Extremely small p-values can underflow to exactly 0.0
+                            # when serialized to JSON, and some well-formed results
+                            # (e.g. saturated models) legitimately produce p == 1.0.
+                            _valid = math.isfinite(_pf) and (0.0 <= _pf <= 1.0)
                         except Exception:
                             _valid = False
                         if not _valid:
