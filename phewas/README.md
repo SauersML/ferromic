@@ -19,6 +19,11 @@ for it in tree:
 
 ## Running the PheWAS pipeline from the command line
 
+The default phewas pipeline can be launched with:
+```
+python3 -m phewas.run
+```
+
 The pipeline can be launched with overrides for common configuration values via the
 `phewas.cli` module:
 
