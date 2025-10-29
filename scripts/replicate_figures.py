@@ -97,6 +97,10 @@ REMOTE_PATHS: Sequence[RemoteResource] = [
     "public_internet/inv_info.csv",
     "public_internet/output.csv",
     "public_internet/phewas_results.tsv",
+    (
+        "phecodeX.csv",
+        "https://raw.githubusercontent.com/PheWAS/PhecodeX/refs/heads/main/phecodeX_R_labels.csv",
+    ),
     # Additional large derived artefacts referenced by multiple figure scripts.
     "public_internet/all_pairwise_results.csv",
     "public_internet/per_site_diversity_output.falsta",
