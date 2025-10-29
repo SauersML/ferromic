@@ -29,16 +29,9 @@ data_dir.mkdir(exist_ok=True)
 
 BASE_URL = "https://raw.githubusercontent.com/SauersML/ferromic/refs/heads/main/data/"
 
-category_files = [
-    "phewas v2 - chr10-79542902-INV-674513_category_summary.tsv",
-    "phewas v2 - chr12-46897663-INV-16289_category_summary.tsv",
-    "phewas v2 - chr17-45585160-INV-706887_category_summary.tsv",
-    "phewas v2 - chr21-13992018-INV-65632_category_summary.tsv",
-    "phewas v2 - chr4-33098029-INV-7075_category_summary.tsv",
-    "phewas v2 - chr6-141867315-INV-29159_category_summary.tsv",
-    "phewas v2 - chr6-76111919-INV-44661_category_summary.tsv",
-    "phewas v2 - chr7-57835189-INV-284465_category_summary.tsv",
-]
+# Data files
+category_file = "phewas v2 - categories.tsv"
+mapping_file_name = "balanced_recurrence_results.tsv"
 
 # Custom category order (organ systems → pathological)
 CATEGORY_ORDER = [
@@ -76,19 +69,18 @@ def download_all_files():
     print("Downloading files...\n")
     
     # Download coordinate mapping file
-    print("  balanced_recurrence_results.tsv...", end=" ")
-    download_file("balanced_recurrence_results.tsv")
+    print(f"  {mapping_file_name}...", end=" ")
+    download_file(mapping_file_name)
     print("done")
     
-    # Download category summary files
-    for filename in category_files:
-        print(f"  {filename}...", end=" ")
-        download_file(filename)
-        print("done")
+    # Download category data file
+    print(f"  {category_file}...", end=" ")
+    download_file(category_file)
+    print("done")
 
 def load_coordinate_mapping():
     """Load inversion ID to coordinate mapping"""
-    mapping_file = data_dir / "balanced_recurrence_results.tsv"
+    mapping_file = data_dir / mapping_file_name
     df = pd.read_csv(mapping_file, sep='\t')
     
     # Create mapping dictionary: Inversion_ID -> (Chromosome, Start, End)
@@ -103,29 +95,23 @@ def load_coordinate_mapping():
     
     return mapping
 
-def extract_inversion_id(filename):
-    """Extract Inversion_ID from filename"""
-    # Format: "phewas v2 - chr6-141867315-INV-29159_category_summary.tsv"
-    parts = filename.replace("phewas v2 - ", "").replace("_category_summary.tsv", "")
-    return parts
-
 def format_variant_label(chrom, start, end):
     """Format variant label as chr:start-end with comma separators"""
     return f"{chrom}:{start:,}-{end:,}"
 
 def load_all_data():
-    """Load all category summary files into a combined dataframe"""
+    """Load category data file into a dataframe with coordinate information"""
     # Load coordinate mapping
     coord_map = load_coordinate_mapping()
     
-    all_data = []
+    # Load category data
+    local_path = data_dir / category_file
+    df = pd.read_csv(local_path, sep='\t')
     
-    for filename in category_files:
-        local_path = data_dir / filename
-        df = pd.read_csv(local_path, sep='\t')
-        
-        # Extract inversion ID and get coordinates
-        inv_id = extract_inversion_id(filename)
+    # Add coordinate information for each inversion
+    coords_data = []
+    for _, row in df.iterrows():
+        inv_id = row['Inversion']
         
         if inv_id in coord_map:
             coords = coord_map[inv_id]
@@ -133,25 +119,37 @@ def load_all_data():
             start = coords['start']
             end = coords['end']
             
-            # Add columns
-            df['inversion_id'] = inv_id
-            df['chromosome'] = chrom
-            df['start'] = start
-            df['end'] = end
-            df['variant_label'] = format_variant_label(chrom, start, end)
-            
-            # For sorting: extract chromosome number
+            # Extract chromosome number for sorting
             chrom_num = int(chrom.replace('chr', '')) if chrom.replace('chr', '').isdigit() else 99
-            df['chrom_num'] = chrom_num
             
-            all_data.append(df)
+            coords_data.append({
+                'chromosome': chrom,
+                'start': start,
+                'end': end,
+                'variant_label': format_variant_label(chrom, start, end),
+                'chrom_num': chrom_num
+            })
         else:
             print(f"Warning: {inv_id} not found in coordinate mapping")
+            coords_data.append({
+                'chromosome': None,
+                'start': None,
+                'end': None,
+                'variant_label': None,
+                'chrom_num': 999
+            })
     
-    combined = pd.concat(all_data, ignore_index=True)
-    combined['-log10_P_GBJ'] = -np.log10(combined['P_GBJ'])
+    # Add coordinate columns to dataframe
+    coords_df = pd.DataFrame(coords_data)
+    df = pd.concat([df, coords_df], axis=1)
     
-    return combined
+    # Remove rows without coordinate information
+    df = df[df['variant_label'].notna()]
+    
+    # Calculate -log10(P_GBJ) for reference
+    df['-log10_P_GBJ'] = -np.log10(df['P_GBJ'])
+    
+    return df
 
 def create_phewas_heatmap(df, output_file='phewas_category_heatmap.pdf'):
     """Create the main visualization"""
