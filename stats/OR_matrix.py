@@ -10,6 +10,32 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle as MplRectangle
 from matplotlib.transforms import blended_transform_factory
 
+
+def compute_bh_q_values(p_values: pd.Series) -> pd.Series:
+    """Benjamini–Hochberg FDR correction for a column of p-values."""
+
+    numeric = pd.to_numeric(p_values, errors="coerce")
+    result = pd.Series(np.nan, index=p_values.index, dtype=float)
+
+    valid = numeric.dropna()
+    if valid.empty:
+        return result
+
+    sorted_idx = valid.sort_values().index
+    sorted_p = valid.loc[sorted_idx].to_numpy(dtype=float)
+    m = float(len(sorted_p))
+    adjusted = np.empty(len(sorted_p), dtype=float)
+    prev = 1.0
+    for i in range(len(sorted_p) - 1, -1, -1):
+        rank = i + 1
+        value = (sorted_p[i] * m) / rank
+        prev = min(prev, value)
+        adjusted[i] = prev
+
+    adjusted = np.clip(adjusted, 0.0, 1.0)
+    result.loc[sorted_idx] = adjusted
+    return result
+
 from _inv_common import map_inversion_series
 
 # =========================
@@ -259,8 +285,25 @@ def main():
         raise FileNotFoundError(f"Input file not found: {in_path}")
 
     df = pd.read_csv(in_path, sep="\t", dtype=str)
-    for c in ["OR", "P_Value", "BH_q"]:
+
+    for c in ["OR", "P_Value"]:
+        if c not in df.columns:
+            raise KeyError(f"Input file missing required column '{c}'")
         df[c] = pd.to_numeric(df[c], errors="coerce")
+
+    q_source = None
+    for candidate in ("BH_q", "Q_GLOBAL"):
+        if candidate in df.columns:
+            q_source = candidate
+            break
+
+    if q_source is not None:
+        if q_source != "BH_q":
+            print(f"[INFO] Using column '{q_source}' as 'BH_q'.")
+        df["BH_q"] = pd.to_numeric(df[q_source], errors="coerce")
+    else:
+        print("[INFO] Column 'BH_q' not found; computing Benjamini–Hochberg q-values.")
+        df["BH_q"] = compute_bh_q_values(df["P_Value"])
 
     df = df.dropna(subset=["Inversion", "Phenotype", "OR"])
     df = df[df["OR"] > 0]
