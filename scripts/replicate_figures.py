@@ -42,6 +42,13 @@ REPO_ROOT = _detect_repo_root(SCRIPT_DIR)
 DOWNLOAD_ROOT = REPO_ROOT / "analysis_downloads"
 BASE_URL = "https://sharedspace.s3.msi.umn.edu/"
 
+# Repository-local directories that may already contain required data files.
+LOCAL_DATA_DIRECTORIES: Sequence[Path] = (
+    REPO_ROOT / "data",
+    REPO_ROOT / "phewas",
+    REPO_ROOT / "cds",
+)
+
 # Files mirrored from the run_analysis GitHub Actions workflow plus a few
 # additional artefacts that the figure scripts expect.
 HOME = Path.home()
@@ -437,6 +444,27 @@ def is_valid_data_file(path: Path) -> bool:
     return True
 
 
+def find_local_data_file(name: str) -> Optional[Path]:
+    """Return a repository-local data file matching ``name`` if available."""
+
+    for directory in LOCAL_DATA_DIRECTORIES:
+        if not directory.exists():
+            continue
+        # Prefer a direct lookup before performing an expensive recursive search.
+        direct_candidate = directory / name
+        if direct_candidate.exists() and is_valid_data_file(direct_candidate):
+            return direct_candidate
+        for candidate in directory.rglob(name):
+            if candidate.is_file() and is_valid_data_file(candidate):
+                return candidate
+
+    candidate = REPO_ROOT / name
+    if candidate.exists() and is_valid_data_file(candidate):
+        return candidate
+
+    return None
+
+
 def has_expected_output(target: Union[Path, str]) -> bool:
     """Check whether the requested output artefact exists."""
 
@@ -499,7 +527,7 @@ def build_file_index(plan: Dict[str, str]) -> Dict[str, List[Path]]:
                 index.setdefault(path.name, []).append(path)
 
     # Index known local data directories that ship with the repository.
-    for local_dir in (REPO_ROOT / "data", REPO_ROOT / "phewas", REPO_ROOT / "cds"):
+    for local_dir in LOCAL_DATA_DIRECTORIES:
         if local_dir.exists():
             for path in local_dir.rglob("*"):
                 if path.is_file():
@@ -631,6 +659,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             target = DOWNLOAD_ROOT / Path(rel_path)
             if target.exists():
                 download_results.append(DownloadResult(url=url, destination=target, ok=True, message="cached"))
+                continue
+            local_copy = find_local_data_file(Path(rel_path).name)
+            if local_copy is not None:
+                try:
+                    local_display = local_copy.relative_to(REPO_ROOT)
+                except ValueError:
+                    local_display = local_copy
+                download_results.append(
+                    DownloadResult(url=url, destination=local_copy, ok=True, message="using local copy")
+                )
+                print(f"[LOCAL] {url} -> {local_display} (using local copy)")
                 continue
             result = download_file(url, target)
             download_results.append(result)
