@@ -19,7 +19,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install .[test]
-          pip install seaborn matplotlib
+          pip install seaborn matplotlib requests
 
       - name: Download analysis artefacts
         shell: bash
