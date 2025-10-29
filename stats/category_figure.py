@@ -4,7 +4,7 @@ Creates a heatmap showing GBJ enrichment (outlines) and GLS directionality (arro
 for inversion variants across disease categories.
 """
 
-import requests
+import shutil
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -12,6 +12,7 @@ import matplotlib.patches as mpatches
 from matplotlib.patches import Rectangle
 from pathlib import Path
 from urllib.parse import quote
+from urllib.request import Request, urlopen
 
 # Set font globally
 plt.rcParams.update({
@@ -64,11 +65,9 @@ def download_file(filename):
     url = BASE_URL + encoded_filename
     local_path = data_dir / filename
     
-    response = requests.get(url)
-    response.raise_for_status()
-    
-    with open(local_path, 'w') as f:
-        f.write(response.text)
+    request = Request(url, headers={"User-Agent": "ferromic-replication/1.0"})
+    with urlopen(request) as response, local_path.open("wb") as f:
+        shutil.copyfileobj(response, f)
     
     return local_path
 
