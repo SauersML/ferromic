@@ -46,6 +46,44 @@ def cgroup_available_gb():
 # Cache helpers
 # ---------------------------------------------------------------------------
 
+def _prob_is_valid(value) -> bool:
+    """Return True if *value* is a finite probability in [0, 1]."""
+    try:
+        prob = float(value)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(prob) and (0.0 <= prob <= 1.0)
+
+
+def _cached_lrt_result_is_usable(res_obj: dict) -> bool:
+    """Determine whether a cached Stage-1 LRT result should be reused."""
+    if not isinstance(res_obj, dict):
+        return False
+
+    if _prob_is_valid(res_obj.get("P_LRT_Overall")):
+        return True
+
+    # Results with explicit failure/skip reasons should not be evicted—the rerun
+    # would simply reproduce the same outcome.
+    if res_obj.get("LRT_Overall_Reason"):
+        return True
+
+    p_overall_valid = res_obj.get("P_Overall_Valid")
+    if p_overall_valid is False:
+        return True
+
+    if p_overall_valid:
+        if _prob_is_valid(res_obj.get("P_Value")):
+            source = res_obj.get("P_Source") or res_obj.get("P_Method")
+            if isinstance(source, str):
+                source = source.lower()
+            allowed_sources = getattr(models, "ALLOWED_P_SOURCES", set())
+            if source in allowed_sources:
+                return True
+
+    return False
+
+
 def _evict_if_ctx_mismatch(meta_path, res_path, ctx, expected_target):
     """Remove stale metadata/results when the recorded context no longer matches."""
     if not os.path.exists(meta_path):
@@ -402,18 +440,7 @@ def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, anc_series, phenos_
                     if os.path.exists(_res_path) and os.path.exists(_meta_path):
                         with open(_res_path, "r") as _rf:
                             _res_obj = json.load(_rf)
-                        _p = _res_obj.get("P_LRT_Overall", None)
-                        _valid = False
-                        try:
-                            _pf = float(_p)
-                            # Accept cached p-values on the closed interval [0, 1].
-                            # Extremely small p-values can underflow to exactly 0.0
-                            # when serialized to JSON, and some well-formed results
-                            # (e.g. saturated models) legitimately produce p == 1.0.
-                            _valid = math.isfinite(_pf) and (0.0 <= _pf <= 1.0)
-                        except Exception:
-                            _valid = False
-                        if not _valid:
+                        if not _cached_lrt_result_is_usable(_res_obj):
                             try:
                                 os.remove(_meta_path)
                                 print(f"\n[cache POLICY] Invalid or missing P_LRT_Overall for '{task['name']}'. Forcing re-run by removing meta.", flush=True)
