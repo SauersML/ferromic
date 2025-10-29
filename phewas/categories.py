@@ -332,12 +332,13 @@ def _simulate_gbj_pvalue(
     rng: np.random.Generator,
     *,
     z_cap: Optional[float] = None,
-) -> float:
+    max_draws: Optional[int] = None,
+) -> Tuple[float, int]:
     if draws <= 0:
-        return float("nan")
+        return float("nan"), 0
     p = correlation.shape[0]
     if p == 0:
-        return float("nan")
+        return float("nan"), 0
     try:
         chol = np.linalg.cholesky(correlation)
     except np.linalg.LinAlgError:
@@ -346,16 +347,35 @@ def _simulate_gbj_pvalue(
         cov_pd = (eigvecs @ np.diag(eigvals)) @ eigvecs.T
         chol = np.linalg.cholesky(cov_pd)
     stats_obs = 0
+    total_draws = 0
     ceiling = _sanitize_z_cap(z_cap)
-    for _ in range(draws):
-        sample = chol @ rng.standard_normal(p)
+    batch_size = max(int(draws), 1)
+    if max_draws is None:
+        ceiling_draws = batch_size * 10
+    else:
+        ceiling_draws = max(int(max_draws), 1)
+    max_draws = max(batch_size, ceiling_draws)
+
+    while total_draws < max_draws:
+        remaining = max_draws - total_draws
+        current = min(batch_size, remaining)
+        samples = chol @ rng.standard_normal((p, current))
         if ceiling is not None:
-            sample = np.clip(sample, -ceiling, ceiling)
-        pvals = 2.0 * stats.norm.sf(np.abs(sample))
-        stat = _gbj_statistic(pvals)
-        if stat >= observed_stat:
-            stats_obs += 1
-    return float((stats_obs + 1) / (draws + 1))
+            np.clip(samples, -ceiling, ceiling, out=samples)
+        for col in range(current):
+            sample = samples[:, col]
+            pvals = 2.0 * stats.norm.sf(np.abs(sample))
+            stat = _gbj_statistic(pvals)
+            if stat >= observed_stat:
+                stats_obs += 1
+        total_draws += current
+        if stats_obs > 0:
+            break
+        batch_size = min(batch_size * 2, max_draws - total_draws)
+        if batch_size <= 0:
+            break
+
+    return float((stats_obs + 1) / (total_draws + 1)), int(total_draws)
 
 
 def _directional_meta_z(z_scores: np.ndarray, correlation: np.ndarray) -> Tuple[float, float]:
@@ -382,6 +402,7 @@ def compute_category_metrics(
     beta_col: str,
     null_structures: Mapping[str, CategoryNull],
     gbj_draws: int = 5000,
+    gbj_max_draws: Optional[int] = None,
     z_cap: Optional[float] = None,
     rng_seed: Optional[int] = None,
     min_k: int = 3,
@@ -471,12 +492,13 @@ def compute_category_metrics(
         gbj_corr = corr_full[np.ix_(gbj_indices, gbj_indices)]
         gbj_pvals = 2.0 * stats.norm.sf(np.asarray(gbj_z, dtype=np.float64))
         gbj_stat = _gbj_statistic(gbj_pvals)
-        gbj_p = _simulate_gbj_pvalue(
+        gbj_p, gbj_draw_total = _simulate_gbj_pvalue(
             gbj_stat,
             gbj_corr,
             int(gbj_draws),
             rng,
             z_cap=ceiling,
+            max_draws=gbj_max_draws,
         )
 
         gls_stat = float("nan")
@@ -503,7 +525,7 @@ def compute_category_metrics(
             "Lambda": struct.lambda_value,
             "N_Individuals": struct.n_individuals,
             "Z_Cap": float(ceiling) if ceiling is not None else float("nan"),
-            "GBJ_Draws": int(gbj_draws),
+            "GBJ_Draws": int(gbj_draw_total),
             "Dropped": ";".join(struct.dropped + missing),
             "Phenotypes": ";".join(gbj_names),
             "Phenotypes_GLS": ";".join(dir_names),

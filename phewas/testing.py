@@ -15,6 +15,7 @@ DEFAULTS = {
     "MAX_CONCURRENT_INVERSIONS_BOOT": 8,
     "CAT_METHOD": "fast_phi",
     "CAT_GBJ_B": 5000,
+    "CAT_GBJ_MAX": 50000,
     "CAT_Z_CAP": None,
     "CAT_SHRINKAGE": "ridge",
     "CAT_LAMBDA": 0.05,
