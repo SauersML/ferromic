@@ -17,7 +17,7 @@ export interface SpecialGalleryProps {
   generatedAt: string | null;
 }
 
-const BASE_PATH = 'figures/special';
+const BASE_PATH = 'figures';
 
 function formatGeneratedAt(timestamp: string | null): string {
   if (!timestamp) {
