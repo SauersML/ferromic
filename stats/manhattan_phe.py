@@ -1,4 +1,5 @@
 import os, re, sys, math, subprocess
+import urllib.request
 from collections import Counter
 
 import numpy as np
@@ -32,7 +33,8 @@ from _inv_common import map_inversion_series
 
 # ---------- Config ----------
 INFILE = "phewas_results.tsv"
-PHECODE_FILE = "phecodeX.csv"
+PHECODE_FILE = "phecodeX_R_labels.csv"
+PHECODE_URL = "https://raw.githubusercontent.com/PheWAS/PhecodeX/refs/heads/main/phecodeX_R_labels.csv"
 OUTDIR = "phewas_plots"
 
 PHENO_COL = "Phenotype"
@@ -90,6 +92,25 @@ ADJ_FORCE_PNTS  = (0.07, 0.32)
 
 plt.rcParams['pdf.fonttype'] = 42
 plt.rcParams['ps.fonttype'] = 42
+
+# ---------- Data prep ----------
+def ensure_phecode_file(path: str, url: str) -> None:
+    """Ensure the PheCode category file exists locally, downloading if needed."""
+    if os.path.exists(path):
+        return
+
+    print(f"[INFO] Downloading {url} → {path}")
+    try:
+        with urllib.request.urlopen(url) as resp:
+            data = resp.read()
+    except Exception as exc:  # pragma: no cover - network failure
+        sys.exit(f"ERROR: Failed to download PheCodeX labels from {url}: {exc}")
+
+    try:
+        with open(path, "wb") as fh:
+            fh.write(data)
+    except OSError as exc:  # pragma: no cover - filesystem failure
+        sys.exit(f"ERROR: Could not write downloaded PheCodeX labels to {path}: {exc}")
 
 # ---------- Helpers ----------
 def canonicalize_name(s: str) -> str:
@@ -204,9 +225,28 @@ def px_step_to_data(ax, dx_px, dy_px):
 def load_category_map(phecode_csv: str) -> pd.DataFrame:
     if not os.path.exists(phecode_csv): sys.exit(f"ERROR: Cannot find {phecode_csv}")
     pc = pd.read_csv(phecode_csv, dtype=str)
-    need = {"phecode_string","phecode_category","category_num"}
-    if not need.issubset(set(pc.columns)):
-        sys.exit(f"ERROR: {phecode_csv} must contain {sorted(need)}")
+
+    column_set = set(pc.columns)
+    legacy_cols = {"phecode_string", "phecode_category", "category_num"}
+    phecodex_cols = {"description", "group", "groupnum"}
+
+    if legacy_cols.issubset(column_set):
+        pass
+    elif phecodex_cols.issubset(column_set):
+        pc = pc.rename(
+            columns={
+                "description": "phecode_string",
+                "group": "phecode_category",
+                "groupnum": "category_num",
+            }
+        )
+    else:
+        need = sorted(legacy_cols)
+        alt = sorted(phecodex_cols)
+        sys.exit(
+            f"ERROR: {phecode_csv} must contain columns {need} or the PheCodeX columns {alt}"
+        )
+
     pc["clean_name"] = pc["phecode_string"].map(canonicalize_name)
     grp = pc.groupby("clean_name", dropna=False)[["phecode_category","category_num"]]
     rows=[]
@@ -622,7 +662,7 @@ def plot_one_inversion(
 # ---------- Main ----------
 def main():
     if not os.path.exists(INFILE): sys.exit(f"ERROR: Cannot find {INFILE}")
-    if not os.path.exists(PHECODE_FILE): sys.exit(f"ERROR: Cannot find {PHECODE_FILE}")
+    ensure_phecode_file(PHECODE_FILE, PHECODE_URL)
 
     if not _ADJUST_TEXT_AVAILABLE:
         print(
@@ -714,3 +754,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
