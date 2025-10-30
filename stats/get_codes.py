@@ -11,7 +11,7 @@ from scipy import optimize
 # =============================================================================
 
 # Primary PheCodeX mapping file.
-PHECODE_MAP_URL = "https://raw.githubusercontent.com/nhgritctran/PheTK/main/src/PheTK/phecode/phecodeX.csv"
+PHECODE_MAP_URL = "https://raw.githubusercontent.com/PheWAS/PhecodeX/refs/heads/main/phecodeX_R_labels.csv"
 
 # UK Biobank "phenocode" mappings for enrichment.
 UKBB_ICD10_MAP_URL = "https://raw.githubusercontent.com/atgu/ukbb_pan_ancestry/refs/heads/master/data/UKB_PHENOME_ICD10_PHECODE_MAP_20200109.txt"
@@ -755,34 +755,71 @@ def main():
     try:
         # --- PheCodeX
         print(f"Downloading PheCodeX data from: {PHECODE_MAP_URL}")
-        phecodex_df = pd.read_csv(
+        phecodex_raw = pd.read_csv(
             PHECODE_MAP_URL,
             dtype={
-                "phecode": "string",
-                "ICD": "string",
-                "flag": "Int64",
-                "phecode_string": "string",
-                "category_num": "string",
-                "phecode_category": "string",
-                "sex": "string",
+                "phenotype": "string",
+                "description": "string",
                 "icd10_only": "Int64",
-                "code_val": "string",
-            }
-        )[["phecode", "ICD", "flag", "phecode_string", "phecode_category"]]
+                "groupnum": "Int64",
+                "group": "string",
+                "color": "string",
+            },
+        )
+
+        rename_map = {
+            "phenotype": "phecode",
+            "description": "phecode_string",
+            "group": "phecode_category",
+            "groupnum": "category_num",
+            "color": "phecode_color",
+        }
+        missing_cols = sorted(set(rename_map).difference(phecodex_raw.columns))
+        if missing_cols:
+            raise ValueError(
+                "PheCodeX labels file is missing expected columns: "
+                + ", ".join(missing_cols)
+            )
+
+        phecodex_df = phecodex_raw.rename(columns=rename_map)
+        for col in ("phecode", "phecode_string", "phecode_category"):
+            phecodex_df[col] = phecodex_df[col].astype("string")
+        if "category_num" in phecodex_df.columns:
+            phecodex_df["category_num"] = phecodex_df["category_num"].astype("Int64")
+        if "icd10_only" in phecodex_df.columns:
+            phecodex_df["icd10_only"] = phecodex_df["icd10_only"].astype("Int64")
+        if "phecode_color" in phecodex_df.columns:
+            phecodex_df["phecode_color"] = phecodex_df["phecode_color"].astype("string")
 
         # --- UKBB ICD→PheCode maps
         print("Downloading UKBB ICD-to-Phenocode maps...")
         icd10_map = pd.read_csv(
-            UKBB_ICD10_MAP_URL, sep="\t", engine="python",
-            dtype={"ICD10": "string", "phecode": "string"}
-        )[["ICD10", "phecode"]].rename(columns={"ICD10": "ICD", "phecode": "ukbb_phenocode"})
+            UKBB_ICD10_MAP_URL,
+            sep="\t",
+            engine="python",
+            dtype={"ICD10": "string", "phecode": "string"},
+        )
+        icd10_map = icd10_map.rename(columns={"ICD10": "ICD"})
+        icd10_map["flag"] = 10
+        icd10_map["ukbb_phenocode"] = icd10_map["phecode"].astype("string")
+        icd10_map = icd10_map[["phecode", "ICD", "ukbb_phenocode", "flag"]]
 
         icd9_map = pd.read_csv(
-            UKBB_ICD9_MAP_URL, sep="\t", engine="python",
-            dtype={"ICD9": "string", "phecode": "string"}
-        )[["ICD9", "phecode"]].rename(columns={"ICD9": "ICD", "phecode": "ukbb_phenocode"})
+            UKBB_ICD9_MAP_URL,
+            sep="\t",
+            engine="python",
+            dtype={"ICD9": "string", "phecode": "string"},
+        )
+        icd9_map = icd9_map.rename(columns={"ICD9": "ICD"})
+        icd9_map["flag"] = 9
+        icd9_map["ukbb_phenocode"] = icd9_map["phecode"].astype("string")
+        icd9_map = icd9_map[["phecode", "ICD", "ukbb_phenocode", "flag"]]
 
-        ukbb_lookup_df = pd.concat([icd9_map, icd10_map], ignore_index=True).drop_duplicates()
+        ukbb_lookup_df = (
+            pd.concat([icd9_map, icd10_map], ignore_index=True)
+            .drop_duplicates()
+        )
+        ukbb_lookup_df["flag"] = ukbb_lookup_df["flag"].astype("Int64")
         print("Created a unified UKBB lookup table.")
 
         # --- Heritability manifest (liability-only; no observed fallback)
@@ -873,12 +910,9 @@ def main():
             per_pheno["eur_h2_mean"] = np.nan
 
         # Diagnostics: mapped-but-missing phenocodes (optional write)
-        mapped_set = set(
-            ukbb_lookup_df.loc[
-                ukbb_lookup_df["ICD"].isin(phecodex_df["ICD"].dropna().astype(str)),
-                "ukbb_phenocode"
-            ].dropna().astype(str).unique().tolist()
-        )
+        phecode_set = set(phecodex_df["phecode"].dropna().astype(str))
+        ukbb_pheno_series = ukbb_lookup_df["ukbb_phenocode"].dropna().astype(str)
+        mapped_set = set(ukbb_pheno_series[ukbb_pheno_series.isin(phecode_set)].unique().tolist())
         considered_set = set(per_pheno.loc[per_pheno["p_any_acat"].notna(), "phenocode"].astype(str).unique().tolist())
         manifest_preqc_set = set(h2_pre_qc_df["phenocode"].dropna().astype(str).unique().tolist())
         missing_set = sorted(mapped_set - considered_set)
@@ -914,7 +948,7 @@ def main():
     print("Enriching data with UKBB PheCodes and Heritability stats...")
 
     # Map ICD -> PheCodes into PheCodeX rows
-    base_df = phecodex_df.merge(ukbb_lookup_df, on="ICD", how="left")
+    base_df = phecodex_df.merge(ukbb_lookup_df, on="phecode", how="left")
 
     grouping_cols = ["phecode", "phecode_string", "phecode_category"]
 
