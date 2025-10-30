@@ -93,7 +93,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  height: clamp(380px, 62vw, 720px);
+  height: clamp(600px, 75vw, 900px);
   padding: 1rem;
 }
 
@@ -134,6 +134,6 @@
   }
 
   .preview {
-    height: clamp(340px, 75vw, 640px);
+    height: clamp(500px, 85vw, 800px);
   }
 }
