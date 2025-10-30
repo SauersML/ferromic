@@ -13,6 +13,7 @@ from matplotlib.patches import Rectangle
 from pathlib import Path
 from urllib.parse import quote
 from urllib.request import Request, urlopen
+from category_utils import correct_category_list
 
 # Set font globally
 plt.rcParams.update({
@@ -257,7 +258,9 @@ def create_phewas_heatmap(df, output_file='phewas_category_heatmap.pdf'):
     ax.set_xticks(np.arange(n_categories) + 0.5)
     ax.set_yticks(np.arange(n_variants) + 0.5)
     
-    ax.set_xticklabels(categories, rotation=45, ha='right', fontsize=24)
+    # Apply spelling corrections to category labels for display
+    corrected_categories = correct_category_list(categories)
+    ax.set_xticklabels(corrected_categories, rotation=45, ha='right', fontsize=24)
     ax.set_yticklabels(variants, fontsize=24)
     
     # Remove tick marks
