@@ -28,7 +28,7 @@ The pipeline can be launched with overrides for common configuration values via 
 `phewas.cli` module:
 
 ```
-python3 -m phewas.cli [--min-cases-controls N] [--pop-label POPULATION]
+python3 -m phewas.cli [--min-cases-controls N] [--pop-label POPULATION] [--pheno PHENOTYPE]
 ```
 
 * `--min-cases-controls` sets the minimum number of cases and controls required for a
