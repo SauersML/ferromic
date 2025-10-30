@@ -117,7 +117,7 @@ def main():
     """Main function to run the analysis."""
     start_time = time.time()
     
-    file_path = Path('per_site_output.falsta')
+    file_path = Path('per_site_diversity_output.falsta')
     if not file_path.exists():
         print(f"ERROR: {file_path} not found!")
         return
