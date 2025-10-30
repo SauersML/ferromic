@@ -33,10 +33,9 @@ export function SpecialGallery({ groups, generatedAt }: SpecialGalleryProps) {
   return (
     <div className={styles.container}>
       <header className={styles.header}>
-        <h1>Special Figure Collection</h1>
+        <h1>Figure Collection</h1>
         <p>
-          Curated Ferromic figures requested for the specialised gallery. All previews
-          render directly from the source PDF files.
+          Auto-generated figures for each analysis.
         </p>
         <p className={styles.timestamp}>Last updated: {formatGeneratedAt(generatedAt)}</p>
       </header>
