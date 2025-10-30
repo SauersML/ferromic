@@ -562,6 +562,13 @@ _pop_filter_env = os.getenv("FERROMIC_POPULATION_FILTER")
 if _pop_filter_env is not None:
     POPULATION_FILTER = _pop_filter_env.strip() or "all"
 
+# --- Phenotype filter ---
+PHENOTYPE_FILTER: Optional[str] = None
+
+_pheno_filter_env = os.getenv("FERROMIC_PHENOTYPE_FILTER")
+if _pheno_filter_env is not None:
+    PHENOTYPE_FILTER = _pheno_filter_env.strip() or None
+
 
 def _normalize_population_label(label: Optional[str]) -> str:
     """Return a canonical, lower-case population label suitable for comparisons."""
@@ -1076,6 +1083,10 @@ def _pipeline_once():
                 # --- Build Stage-1 testing worklist without running main PheWAS ---
                 phenos_list = []
                 for row in shared_data['pheno_defs'][['sanitized_name','disease_category']].to_dict('records'):
+                    # Apply phenotype filter if specified
+                    if PHENOTYPE_FILTER is not None and row['sanitized_name'] != PHENOTYPE_FILTER:
+                        continue
+                    
                     info = {
                         'sanitized_name': row['sanitized_name'],
                         'disease_category': row['disease_category'],
