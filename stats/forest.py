@@ -524,6 +524,77 @@ def plot_forest(df: pd.DataFrame, out_pdf=OUT_PDF, out_png=OUT_PNG):
     axR.set_xticks(tick_pos)
     axR.set_xticklabels(tick_lbl)
 
+    # 4) Add custom legend box in top right corner of the plot
+    from matplotlib.patches import FancyBboxPatch
+    
+    # Get q-value range for legend examples
+    all_q = [row["Q_GLOBAL"] for sec in sections for row in sec["rows"]]
+    q_min, q_max = float(np.min(all_q)), float(np.max(all_q))
+    
+    # Legend positioning (in axes fraction coordinates)
+    legend_x = 0.97  # right edge
+    legend_y = 0.02  # top edge (remember y-axis is inverted, so small y = top)
+    legend_width = 0.32
+    legend_height_per_item = 0.09
+    
+    # Create 3 example significance levels
+    legend_q_values = [q_min, (q_min + q_max) / 2, q_max]
+    legend_labels = [
+        f"Most sig. (q={format_plain_decimal(q_min)})",
+        f"Moderate (q={format_plain_decimal((q_min + q_max) / 2)})",
+        f"Least sig. (q={format_plain_decimal(q_max)})"
+    ]
+    
+    n_items = len(legend_q_values)
+    legend_height = 0.16 + n_items * legend_height_per_item
+    
+    # Draw background box
+    box_x = legend_x - legend_width
+    box_y = legend_y
+    box = FancyBboxPatch(
+        (box_x, box_y), legend_width, legend_height,
+        boxstyle="round,pad=0.015", 
+        transform=axR.transAxes,
+        facecolor='white', edgecolor='#555555',
+        linewidth=1.5, alpha=0.96, zorder=50
+    )
+    axR.add_patch(box)
+    
+    # Title
+    axR.text(legend_x - legend_width/2, legend_y + 0.025, 
+             "Point Size & Color", 
+             ha='center', va='bottom', fontsize=12, fontweight='bold',
+             transform=axR.transAxes, zorder=51)
+    
+    # Subtitle explaining the encoding
+    axR.text(legend_x - legend_width/2, legend_y + 0.055, 
+             "by q-value (FDR)", 
+             ha='center', va='bottom', fontsize=9.5, style='italic', color='#444444',
+             transform=axR.transAxes, zorder=51)
+    
+    # Use a neutral color for legend examples
+    legend_base_color = "#4C78A8"
+    
+    # Draw example dots and labels
+    for i, (q_val, label) in enumerate(zip(legend_q_values, legend_labels)):
+        y_pos = legend_y + 0.09 + (i + 0.5) * legend_height_per_item
+        
+        # Get size and color for this q-value
+        size_pt2, facecolor = point_style_for_q(q_val, legend_base_color)
+        
+        # Draw dot (in axes coordinates) - slightly larger for visibility in legend
+        dot_x = box_x + 0.045
+        axR.scatter([dot_x], [y_pos], s=size_pt2 * 1.2, 
+                   facecolor=facecolor, edgecolor='black',
+                   linewidth=POINT_EDGE_LW, alpha=0.97, 
+                   transform=axR.transAxes, zorder=52, clip_on=False)
+        
+        # Draw label
+        text_x = dot_x + 0.055
+        axR.text(text_x, y_pos, label,
+                ha='left', va='center', fontsize=10,
+                transform=axR.transAxes, zorder=52)
+
     # --- Overlap detection & iterative lift for header labels ---
     # Move each header UP in small steps until it no longer overlaps any row text in its section,
     # or until it reaches the minimal top pad.
