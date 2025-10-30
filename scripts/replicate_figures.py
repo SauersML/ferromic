@@ -117,7 +117,6 @@ REMOTE_PATHS: Sequence[RemoteResource] = [
     "public_internet/all_pairwise_results.csv",
     "public_internet/per_site_diversity_output.falsta",
     "public_internet/per_site_fst_output.falsta",
-    "public_internet/per_site_output.falsta",
 ]
 
 
@@ -332,9 +331,9 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         name="Long-region per-site π overview",
         script=Path("stats/regions_plot.py"),
         outputs=(Path("filtered_pi_beginning_middle_end.png"),),
-        dependencies=("per_site_output.falsta",),
+        dependencies=("per_site_diversity_output.falsta",),
         required=False,
-        note="Requires per_site_output.falsta, which is not included in the public archive.",
+        note="Requires per_site_diversity_output.falsta, which is not included in the public archive.",
         long_running=True,
     ),
     FigureTask(
