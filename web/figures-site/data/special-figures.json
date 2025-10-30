@@ -1,0 +1,119 @@
+{
+  "generatedAt": null,
+  "groups": [
+    {
+      "title": "Diversity and FST Profiles",
+      "slug": "diversity-fst",
+      "figures": [
+        {
+          "title": "Nucleotide Diversity by Category",
+          "filename": "pi_comparison_violins.pdf",
+          "description": "Pairwise violin-and-line plot comparing direct and inverted haplotypes across single-event and recurrent inversions."
+        },
+        {
+          "title": "Hudson FST by Recurrence Status",
+          "filename": "hudson_fst.pdf",
+          "description": "Hudson's FST violin plot split by single-event and recurrent inversion groups."
+        },
+        {
+          "title": "Median π vs. Distance to Breakpoints (100 kb)",
+          "filename": "pi_vs_inversion_edge_bp_cap100kb_grouped_median.pdf",
+          "description": "Median per-site nucleotide diversity as a function of distance from inversion breakpoints (100 kb window)."
+        },
+        {
+          "title": "Hudson FST (Pooled Ratio) vs. Distance (100 kb)",
+          "filename": "fst_vs_inversion_edge_bp_cap100kb_grouped_pooled.pdf",
+          "description": "Hudson's FST pooled ratio-of-sums trend relative to inversion breakpoints (100 kb window)."
+        },
+        {
+          "title": "Mean π: Flanks vs. Middle (10 kb flanks / 20 kb middle)",
+          "filename": "pi_mf_quadrant_violins_total_40kb.pdf",
+          "description": "Two-violin comparison of mean nucleotide diversity between flanking and middle windows with paired connections."
+        },
+        {
+          "title": "Mean π by Category: Flanks vs. Middle",
+          "filename": "pi_mf_recurrence_violins_total_40kb.pdf",
+          "description": "Four-panel flank versus middle comparison stratified by recurrence status and orientation."
+        }
+      ]
+    },
+    {
+      "title": "Coding Sequence Analyses",
+      "slug": "coding-sequences",
+      "figures": [
+        {
+          "title": "CDS Conservation by Haplotype Category",
+          "filename": "cds_proportion_identical_by_category_violin.pdf",
+          "description": "Distribution of CDS conservation levels across inverted/direct and recurrent/single-event categories."
+        },
+        {
+          "title": "CDS Conservation Volcano",
+          "filename": "cds_conservation_volcano.pdf",
+          "description": "Volcano plot of differential CDS conservation between inverted and direct haplotypes, coloured by inversion recurrence."
+        },
+        {
+          "title": "MAPT Coding Sequence Polymorphism",
+          "filename": "mapt_cds_polymorphism_heatmap.pdf",
+          "description": "MAPT CDS alignment highlighting fixed and polymorphic sites for direct versus inverted haplotypes."
+        }
+      ]
+    },
+    {
+      "title": "PheWAS Analyses",
+      "slug": "phewas",
+      "figures": [
+        {
+          "title": "PheWAS Manhattan — chr6:76,109,081-76,158,474",
+          "filename": "phewas_chr6_76_109_081-76_158_474.pdf",
+          "description": "Phenome-wide association plot for the 49 kbp inversion at chr6:76,109,081-76,158,474."
+        },
+        {
+          "title": "PheWAS Manhattan — chr10:79,542,901-80,217,413",
+          "filename": "phewas_chr10_79_542_901-80_217_413.pdf",
+          "description": "Phenome-wide association plot for the 67 kbp inversion at chr10:79,542,901-80,217,413."
+        },
+        {
+          "title": "PheWAS Manhattan — chr12:46,896,694-46,915,975",
+          "filename": "phewas_chr12_46_896_694-46_915_975.pdf",
+          "description": "Phenome-wide association plot for the 19 kbp inversion at chr12:46,896,694-46,915,975."
+        },
+        {
+          "title": "PheWAS Manhattan — chr17:45,585,159-46,292,045",
+          "filename": "phewas_chr17_45_585_159-46_292_045.pdf",
+          "description": "Phenome-wide association plot for the 706 kbp inversion at chr17:45,585,159-46,292,045."
+        },
+        {
+          "title": "PheWAS Forest of Significant Associations",
+          "filename": "phewas_forest.pdf",
+          "description": "Forest plot summarising significant inversion–phenotype associations with odds ratios and confidence intervals."
+        },
+        {
+          "title": "PheWAS Odds Ratios Forest (Significant Hits)",
+          "filename": "phewas_forest.pdf",
+          "description": "Detail view of the significant PheWAS hits highlighting odds ratios and 95% confidence intervals."
+        },
+        {
+          "title": "PheWAS Volcano of Differential Effects",
+          "filename": "phewas_volcano_ranged.pdf",
+          "description": "Volcano plot of odds ratios across 1,096 phecodes with inset showing the full odds-ratio scale."
+        },
+        {
+          "title": "PheWAS Category Summary Heatmap",
+          "filename": "phewas_category_heatmap.pdf",
+          "description": "Category grid showing disease systems, inversion loci, GBJ enrichment, and GLS directionality."
+        }
+      ]
+    },
+    {
+      "title": "Genotyping Performance",
+      "slug": "genotyping",
+      "figures": [
+        {
+          "title": "Inversion Imputation Performance",
+          "filename": "inversion_r_plot.pdf",
+          "description": "Imputation r² values for each inversion."
+        }
+      ]
+    }
+  ]
+}
