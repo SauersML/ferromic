@@ -49,6 +49,18 @@ LOCAL_DATA_DIRECTORIES: Sequence[Path] = (
     REPO_ROOT / "cds",
 )
 
+# Some figure scripts have historically referenced files using legacy names.
+# ``DEPENDENCY_ALIASES`` maps the expected filename to one or more alternative
+# locations/basenames that should be treated as equivalent sources.
+DEPENDENCY_ALIASES: Dict[str, Sequence[str]] = {
+    # The imputation performance plot shipped with the manuscript consumes the
+    # ``imputation_results.tsv`` artefact.  In the public repository the data
+    # were published as ``phewas_results.tsv`` inside ``data/``; provide both
+    # the basename and the relative path so we can resolve either form without
+    # requiring a duplicate copy of the large TSV.
+    "imputation_results.tsv": ("phewas_results.tsv", "data/phewas_results.tsv"),
+}
+
 # Files mirrored from the run_analysis GitHub Actions workflow plus a few
 # additional artefacts that the figure scripts expect.
 HOME = Path.home()
@@ -499,23 +511,50 @@ def is_valid_data_file(path: Path) -> bool:
     return True
 
 
+def _iter_dependency_aliases(name: str) -> Sequence[str]:
+    """Yield ``name`` and any alternative identifiers without duplicates."""
+
+    seen: set[str] = set()
+    ordered: List[str] = []
+    for candidate in (name, *DEPENDENCY_ALIASES.get(name, ())):
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        ordered.append(candidate)
+    return tuple(ordered)
+
+
 def find_local_data_file(name: str) -> Optional[Path]:
     """Return a repository-local data file matching ``name`` if available."""
 
-    for directory in LOCAL_DATA_DIRECTORIES:
-        if not directory.exists():
-            continue
-        # Prefer a direct lookup before performing an expensive recursive search.
-        direct_candidate = directory / name
-        if direct_candidate.exists() and is_valid_data_file(direct_candidate):
-            return direct_candidate
-        for candidate in directory.rglob(name):
-            if candidate.is_file() and is_valid_data_file(candidate):
-                return candidate
+    for candidate_name in _iter_dependency_aliases(name):
+        candidate_path = Path(candidate_name)
 
-    candidate = REPO_ROOT / name
-    if candidate.exists() and is_valid_data_file(candidate):
-        return candidate
+        # If the alias includes a directory component, check that exact path
+        # relative to the repository root before scanning the standard data
+        # directories.
+        if candidate_path.parent != Path("."):
+            resolved = (REPO_ROOT / candidate_path).resolve()
+            try:
+                if resolved.exists() and is_valid_data_file(resolved):
+                    return resolved
+            except FileNotFoundError:
+                pass
+
+        for directory in LOCAL_DATA_DIRECTORIES:
+            if not directory.exists():
+                continue
+            # Prefer a direct lookup before performing an expensive recursive search.
+            direct_candidate = directory / candidate_path.name
+            if direct_candidate.exists() and is_valid_data_file(direct_candidate):
+                return direct_candidate
+            for candidate in directory.rglob(candidate_path.name):
+                if candidate.is_file() and is_valid_data_file(candidate):
+                    return candidate
+
+        candidate = REPO_ROOT / candidate_path.name
+        if candidate.exists() and is_valid_data_file(candidate):
+            return candidate
 
     return None
 
@@ -567,6 +606,23 @@ def ensure_local_copy(name: str, index: Dict[str, List[Path]]) -> Optional[Path]
             # Fall back to copying if symlinks are unsupported.
             shutil.copy2(candidate, target)
             return target
+    for alias in DEPENDENCY_ALIASES.get(name, ()):  # pragma: no branch - tiny loop
+        for candidate in index.get(Path(alias).name, []):
+            if not candidate.exists() or not is_valid_data_file(candidate):
+                continue
+            try:
+                candidate_resolved = candidate.resolve()
+                target_resolved = target.resolve()
+            except FileNotFoundError:
+                continue
+            if candidate_resolved == target_resolved:
+                continue
+            try:
+                target.symlink_to(candidate_resolved)
+                return target
+            except OSError:
+                shutil.copy2(candidate_resolved, target)
+                return target
     return None
 
 
@@ -599,6 +655,37 @@ def build_file_index(plan: Dict[str, str]) -> Dict[str, List[Path]]:
         path = DOWNLOAD_ROOT / Path(rel_path)
         if path.is_file():
             index.setdefault(path.name, []).append(path)
+
+    # Register alias mappings so downstream dependency checks can locate files
+    # that ship under alternative names.
+    for dest, aliases in DEPENDENCY_ALIASES.items():
+        dest_list = index.setdefault(dest, [])
+        seen: set[Path] = set()
+        for existing in dest_list:
+            try:
+                seen.add(existing.resolve())
+            except FileNotFoundError:
+                continue
+        for alias in aliases:
+            alias_path = Path(alias)
+            for candidate in index.get(alias_path.name, []):
+                try:
+                    resolved = candidate.resolve()
+                except FileNotFoundError:
+                    continue
+                if resolved in seen:
+                    continue
+                dest_list.append(candidate)
+                seen.add(resolved)
+            resolved_alias = REPO_ROOT / alias_path
+            if resolved_alias.exists() and is_valid_data_file(resolved_alias):
+                try:
+                    resolved = resolved_alias.resolve()
+                except FileNotFoundError:
+                    continue
+                if resolved not in seen:
+                    dest_list.append(resolved_alias)
+                    seen.add(resolved)
 
     return index
 
