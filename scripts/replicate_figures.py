@@ -117,6 +117,9 @@ REMOTE_PATHS: Sequence[RemoteResource] = [
     "public_internet/all_pairwise_results.csv",
     "public_internet/per_site_diversity_output.falsta",
     "public_internet/per_site_fst_output.falsta",
+    # MAPT PHYLIP files for CDS polymorphism heatmap
+    "public_internet/group0_MAPT_ENSG00000186868.18_ENST00000262410.10_chr17_cds_start45962338_cds_end46024168_inv_start45585159_inv_end46292045.phy",
+    "public_internet/group1_MAPT_ENSG00000186868.18_ENST00000262410.10_chr17_cds_start45962338_cds_end46024168_inv_start45585159_inv_end46292045.phy",
 ]
 
 
