@@ -791,6 +791,16 @@ def _pipeline_once():
         with Timer() as t_setup:
             print("\n--- Loading shared data... ---")
             pheno_defs_df = pheno.load_definitions(PHENOTYPE_DEFINITIONS_URL)
+            
+            # Apply phenotype filter if specified
+            if PHENOTYPE_FILTER is not None:
+                original_count = len(pheno_defs_df)
+                pheno_defs_df = pheno_defs_df[pheno_defs_df['sanitized_name'] == PHENOTYPE_FILTER].copy()
+                filtered_count = len(pheno_defs_df)
+                if filtered_count == 0:
+                    raise ValueError(f"No phenotype found matching filter: '{PHENOTYPE_FILTER}'")
+                print(f"[Config] Phenotype filter applied: '{PHENOTYPE_FILTER}' ({filtered_count}/{original_count} phenotypes)", flush=True)
+            
             bootstrap_draw_cap = _infer_bootstrap_ceiling(
                 num_phenotypes=pheno_defs_df.shape[0],
                 num_inversions=len(run.TARGET_INVERSIONS),
@@ -1083,10 +1093,6 @@ def _pipeline_once():
                 # --- Build Stage-1 testing worklist without running main PheWAS ---
                 phenos_list = []
                 for row in shared_data['pheno_defs'][['sanitized_name','disease_category']].to_dict('records'):
-                    # Apply phenotype filter if specified
-                    if PHENOTYPE_FILTER is not None and row['sanitized_name'] != PHENOTYPE_FILTER:
-                        continue
-                    
                     info = {
                         'sanitized_name': row['sanitized_name'],
                         'disease_category': row['disease_category'],
