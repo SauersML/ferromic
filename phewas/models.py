@@ -810,11 +810,29 @@ def _fit_logit_ladder(
     def _maybe_firth(path_tags):
         if not prefer_firth_on_ridge:
             return None
+        
+        # Print Firth entry
+        pheno_name = kwargs.get("pheno_name", CTX.get("current_phenotype", "unknown"))
+        print(
+            f"[FIRTH-ENTER] name={pheno_name} site=_fit_logit_ladder "
+            f"path={'|'.join(path_tags)} seeded=false reason=after_ridge_or_gate",
+            flush=True
+        )
+        
         firth_res = _firth_refit(X, y)
         if firth_res is None:
             return None
         tags = list(path_tags)
         tags.append("firth_refit")
+        
+        # Print Firth success
+        pll = getattr(firth_res, "llf", float("nan"))
+        print(
+            f"[FIRTH-OK] name={pheno_name} site=_fit_logit_ladder "
+            f"used_firth=true pll={pll:.4f} path={'|'.join(tags)}",
+            flush=True
+        )
+        
         # Firth refits triggered from the ridge pathway should allow inference.
         # Mark that ridge was in the path, but don't suppress Firth inference.
         setattr(firth_res, "_ridge_in_path", True)
@@ -856,6 +874,11 @@ def _fit_logit_ladder(
                         ("newton", {"maxiter": 200, "tol": 1e-8}),
                         ("bfgs", {"maxiter": 400, "gtol": 1e-8}),
                     ):
+                        print(
+                            f"[MLE-REFIT-FROM-FIRTH] name={pheno_name} site=_fit_logit_ladder "
+                            f"method={method} start=from_firth",
+                            flush=True
+                        )
                         try:
                             refit = _logit_fit(
                                 sm.Logit(y, X),
@@ -864,17 +887,33 @@ def _fit_logit_ladder(
                                 **fit_kwargs,
                                 **solver_kwargs,
                             )
-                        except (Exception, PerfectSeparationWarning):
+                        except (Exception, PerfectSeparationWarning) as e:
+                            print(
+                                f"[MLE-REFIT-FAIL] name={pheno_name} site=_fit_logit_ladder "
+                                f"method={method} reason={type(e).__name__}",
+                                flush=True
+                            )
                             continue
                         if _converged(refit) and _ok_mle_fit(
                             refit, X, y, target_ix=target_ix
                         ):
+                            print(
+                                f"[MLE-REFIT-SUCCESS] name={pheno_name} site=_fit_logit_ladder "
+                                f"method={method} ok_mle_fit=true",
+                                flush=True
+                            )
                             setattr(refit, "_final_is_mle", True)
                             setattr(refit, "_ridge_in_path", True)
                             setattr(refit, "_firth_in_path", True)
                             setattr(refit, "_path_reasons", tags + ["firth_seeded_refit"])
                             setattr(refit, "_firth_seeded_refit", True)
                             return refit, "firth_seeded_refit"
+                        else:
+                            print(
+                                f"[MLE-REFIT-FAIL] name={pheno_name} site=_fit_logit_ladder "
+                                f"method={method} reason=_ok_mle_fit=false",
+                                flush=True
+                            )
         return firth_res, "firth_refit"
 
     if not ridge_ok:
@@ -1016,6 +1055,19 @@ def _fit_logit_ladder(
         neff_gate = float(CTX.get("MLE_REFIT_MIN_NEFF", 0.0))
         gate_tags = _ridge_gate_reasons(max_abs_linpred, frac_lo, frac_hi, n_eff, neff_gate)
         blocked_by_gate = ((max_abs_linpred > 15.0) or (frac_lo > 0.02) or (frac_hi > 0.02) or (neff_gate > 0 and n_eff < neff_gate))
+        
+        # Print ridge gate details if gated or not allowing MLE
+        if gate_tags or not allow_mle:
+            pheno_name = kwargs.get("pheno_name", CTX.get("current_phenotype", "unknown"))
+            zero_penalty_info = f"{len(ridge_zero_penalty_ixs)}" if ridge_zero_penalty_ixs else "0"
+            print(
+                f"[RIDGE-GATE] name={pheno_name} site=_fit_logit_ladder "
+                f"reasons={'|'.join(gate_tags) if gate_tags else 'none'} "
+                f"max|Xb|={max_abs_linpred:.4f} frac_p_lo={frac_lo:.4f} frac_p_hi={frac_hi:.4f} "
+                f"neff={n_eff:.2f} alpha={alpha:.6f} "
+                f"penalized_params={X.shape[1]} zero_penalty_ixs={zero_penalty_info}",
+                flush=True
+            )
         ridge_unpenalized_tag = "ridge_unpenalized_terms" if valid_zero_ixs else None
         path_prefix = ["ridge_reached"]
         if ridge_unpenalized_tag is not None:
@@ -1445,7 +1497,31 @@ def _apply_sex_restriction(X: pd.DataFrame, y: pd.Series, pheno_name: str = None
             note_parts.append(f"sex_majority_restricted_to_{int(dominant_sex)}")
 
     note = ";".join(note_parts)
-    return X.loc[keep].drop(columns=['sex']), y.loc[keep], note, None
+    
+    # Calculate pre/post restriction counts
+    N_pre = len(X)
+    C_pre = int((y == 1).sum())
+    K_pre = int((y == 0).sum())
+    X_post = X.loc[keep].drop(columns=['sex'])
+    y_post = y.loc[keep]
+    N_post = len(X_post)
+    C_post = int((y_post == 1).sum())
+    K_post = int((y_post == 0).sum())
+    
+    # Print sex restriction details
+    mode_str = str(CTX.get("SEX_RESTRICT_MODE", "majority"))
+    thr_str = str(CTX.get("SEX_RESTRICT_PROP", DEFAULT_SEX_RESTRICT_PROP))
+    print(
+        f"[SEX-RESTRICT] name={pheno_name or 'unknown'} site=_apply_sex_restriction "
+        f"dominant_sex={int(dominant_sex)} forced={str(force_restriction).lower()} "
+        f"mode={mode_str} thr={thr_str} "
+        f"pre_N/Cases/Ctrls={N_pre}/{C_pre}/{K_pre} "
+        f"post_N/Cases/Ctrls={N_post}/{C_post}/{K_post} "
+        f"note={note}",
+        flush=True
+    )
+    
+    return X_post, y_post, note, None
 
 
 
@@ -2522,6 +2598,15 @@ def lrt_overall_worker(task):
                 inference_family = "firth"
                 fit_full_use = fit_full_firth
                 fit_red_use = fit_red_firth
+                
+                # Print inference choice
+                full_path = getattr(fit_full, "_path_reasons", ["unknown"])
+                red_path = getattr(fit_red, "_path_reasons", ["unknown"])
+                print(
+                    f"[INFERENCE-CHOICE] name={s_name} site=bootstrap_overall_worker "
+                    f"choice=firth full_fit={'|'.join(full_path)} red_fit={'|'.join(red_path)}",
+                    flush=True
+                )
 
         p_value = np.nan
         p_source = None
@@ -2542,6 +2627,18 @@ def lrt_overall_worker(task):
                 ci_method = ci_info.get("method")
                 ci_sided = ci_info.get("sided", "two")
                 ci_valid = bool(ci_info.get("valid", False))
+                
+                # Print CI profile penalized details if using profile_penalized method
+                if ci_method == "profile_penalized":
+                    beta_hat = getattr(fit_full_use, "params", [np.nan])[target_ix] if hasattr(fit_full_use, "params") else np.nan
+                    lo_or_val = np.exp(ci_info.get("lo", np.nan)) if np.isfinite(ci_info.get("lo", np.nan)) else np.nan
+                    hi_or_val = np.exp(ci_info.get("hi", np.nan)) if np.isfinite(ci_info.get("hi", np.nan)) else np.nan
+                    print(
+                        f"[CI-PROFILE-PENALIZED] name={s_name} site=bootstrap_overall_worker "
+                        f"sided={ci_sided} lo_or={lo_or_val:.4f} hi_or={hi_or_val:.4f} "
+                        f"valid={str(ci_valid).lower()} beta_hat={beta_hat:.4f} note={ci_info.get('note', '')}",
+                        flush=True
+                    )
                 if ci_valid:
                     lo_beta = ci_info.get("lo")
                     hi_beta = ci_info.get("hi")
@@ -2791,6 +2888,15 @@ def lrt_overall_worker(task):
                     ci_hi_or = float(wald["hi_or"])
                     or_ci95 = _fmt_ci(ci_lo_or, ci_hi_or)
                     ci_label = "fallback (no p-value)"
+                    
+                    # Print Firth CI fallback details
+                    beta_val = getattr(firth_for_ci, "params", [np.nan])[target_ix] if hasattr(firth_for_ci, "params") else np.nan
+                    print(
+                        f"[FIRTH-CI-FALLBACK] name={s_name} site=bootstrap_overall_worker "
+                        f"ci_method=wald_firth_fallback lo_or={ci_lo_or:.4f} hi_or={ci_hi_or:.4f} "
+                        f"beta={beta_val:.4f} note=no_p_value",
+                        flush=True
+                    )
                     params_firth = getattr(firth_for_ci, "params", None)
                     if params_firth is not None:
                         try:
@@ -2927,6 +3033,19 @@ def lrt_overall_worker(task):
                 reason_full,
             )
         if penalized and not p_valid:
+            # Print p-value blocked due to penalized fit
+            full_path = getattr(fit_full_use if fit_full_use is not None else fit_full, "_path_reasons", ["unknown"])
+            red_path = getattr(fit_red_use if fit_red_use is not None else fit_red, "_path_reasons", ["unknown"])
+            attempted_sources = []
+            if p_source:
+                attempted_sources.append(f"{p_source}:{p_value if np.isfinite(p_value) else 'nan'}")
+            print(
+                f"[P-BLOCKED-PENALIZED] name={s_name} site=bootstrap_overall_worker "
+                f"reason=penalized_fit_in_path full_path={'|'.join(full_path)} red_path={'|'.join(red_path)} "
+                f"attempted_p_sources={';'.join(attempted_sources) if attempted_sources else 'none'}",
+                flush=True
+            )
+            
             out.update(
                 {
                     "P_LRT_Overall": np.nan,
@@ -3249,6 +3368,12 @@ def bootstrap_overall_worker(task):
 
         if red_used_ridge or reduced_fit_type == "ridge":
             p_reason = "penalized_reduced_null"
+            # Print bootstrap null penalized
+            print(
+                f"[BOOT-NULL-PENALIZED] name={s_name} site=bootstrap_overall_worker "
+                f"reduced_fit_type=ridge action=skip_empirical_p",
+                flush=True
+            )
         elif reduced_fit_type == "mle" and red_final_is_mle and not red_used_firth:
             if p_hat is None or W is None:
                 p_reason = "missing_mle_probabilities"
