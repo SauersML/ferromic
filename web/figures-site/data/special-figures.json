@@ -17,22 +17,22 @@
         },
         {
           "title": "Median π vs. Distance to Breakpoints (100 kb)",
-          "filename": "pi_vs_inversion_edge_bp_cap100kb_grouped_median.pdf",
+          "filename": "length_norm_trend_fast/pi_vs_inversion_edge_bp_cap100kb_grouped_median.pdf",
           "description": "Median per-site nucleotide diversity as a function of distance from inversion breakpoints (100 kb window)."
         },
         {
           "title": "Hudson FST (Pooled Ratio) vs. Distance (100 kb)",
-          "filename": "fst_vs_inversion_edge_bp_cap100kb_grouped_pooled.pdf",
+          "filename": "length_norm_trend_fast/fst_vs_inversion_edge_bp_cap100kb_grouped_pooled.pdf",
           "description": "Hudson's FST pooled ratio-of-sums trend relative to inversion breakpoints (100 kb window)."
         },
         {
           "title": "Mean π: Flanks vs. Middle (10 kb flanks / 20 kb middle)",
-          "filename": "pi_mf_quadrant_violins_total_40kb.pdf",
+          "filename": "pi_analysis_results_exact_mf_quadrants/total_40kb/pi_mf_quadrant_violins_total_40kb.pdf",
           "description": "Two-violin comparison of mean nucleotide diversity between flanking and middle windows with paired connections."
         },
         {
           "title": "Mean π by Category: Flanks vs. Middle",
-          "filename": "pi_mf_recurrence_violins_total_40kb.pdf",
+          "filename": "pi_analysis_results_exact_mf_quadrants/total_40kb/pi_mf_recurrence_violins_total_40kb.pdf",
           "description": "Four-panel flank versus middle comparison stratified by recurrence status and orientation."
         }
       ]
@@ -64,22 +64,22 @@
       "figures": [
         {
           "title": "PheWAS Manhattan — chr6:76,109,081-76,158,474",
-          "filename": "phewas_chr6_76_109_081-76_158_474.pdf",
+          "filename": "phewas_plots/phewas_chr6_76_109_081-76_158_474.pdf",
           "description": "Phenome-wide association plot for the 49 kbp inversion at chr6:76,109,081-76,158,474."
         },
         {
           "title": "PheWAS Manhattan — chr10:79,542,901-80,217,413",
-          "filename": "phewas_chr10_79_542_901-80_217_413.pdf",
+          "filename": "phewas_plots/phewas_chr10_79_542_901-80_217_413.pdf",
           "description": "Phenome-wide association plot for the 67 kbp inversion at chr10:79,542,901-80,217,413."
         },
         {
           "title": "PheWAS Manhattan — chr12:46,896,694-46,915,975",
-          "filename": "phewas_chr12_46_896_694-46_915_975.pdf",
+          "filename": "phewas_plots/phewas_chr12_46_896_694-46_915_975.pdf",
           "description": "Phenome-wide association plot for the 19 kbp inversion at chr12:46,896,694-46,915,975."
         },
         {
           "title": "PheWAS Manhattan — chr17:45,585,159-46,292,045",
-          "filename": "phewas_chr17_45_585_159-46_292_045.pdf",
+          "filename": "phewas_plots/phewas_chr17_45_585_159-46_292_045.pdf",
           "description": "Phenome-wide association plot for the 706 kbp inversion at chr17:45,585,159-46,292,045."
         },
         {
