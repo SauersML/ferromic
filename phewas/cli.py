@@ -39,6 +39,14 @@ def build_parser() -> argparse.ArgumentParser:
             "Matches the ancestry labels produced during shared setup."
         ),
     )
+    parser.add_argument(
+        "--pheno",
+        type=str,
+        help=(
+            "Filter to analyze only a single phenotype by name. "
+            "All other phenotypes will be excluded from the analysis."
+        ),
+    )
     return parser
 
 
@@ -66,6 +74,14 @@ def apply_cli_configuration(args: argparse.Namespace) -> None:
     else:
         run.POPULATION_FILTER = "all"
         os.environ.pop("FERROMIC_POPULATION_FILTER", None)
+
+    pheno_name = getattr(args, "pheno", None)
+    if pheno_name is not None:
+        run.PHENOTYPE_FILTER = pheno_name.strip()
+        os.environ["FERROMIC_PHENOTYPE_FILTER"] = run.PHENOTYPE_FILTER
+    else:
+        run.PHENOTYPE_FILTER = None
+        os.environ.pop("FERROMIC_PHENOTYPE_FILTER", None)
 
 
 def main(argv: Sequence[str] | None = None) -> None:
