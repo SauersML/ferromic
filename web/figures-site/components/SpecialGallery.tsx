@@ -17,7 +17,7 @@ export interface SpecialGalleryProps {
   generatedAt: string | null;
 }
 
-const BASE_PATH = '/figures';
+const BASE_PATH = '/ferromic/figures';
 
 function formatGeneratedAt(timestamp: string | null): string {
   if (!timestamp) {
