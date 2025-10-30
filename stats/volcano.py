@@ -13,19 +13,34 @@ from _inv_common import map_inversion_series
 
 INPUT_FILE = "phewas_results.tsv"
 OUTPUT_PDF = "phewas_volcano.pdf"
+OUTPUT_PNG = "phewas_volcano.png"
 
 # Ensure PDF/SVG outputs remain vectorized with editable text
 plt.rcParams['pdf.fonttype'] = 42
 plt.rcParams['ps.fonttype'] = 42
 plt.rcParams['svg.fonttype'] = 'none'
 
-NON_SIG_COLOR = "#b8b8b8"
 NON_SIG_SIZE = 18
-NON_SIG_ALPHA = 0.55
+NON_SIG_ALPHA = 0.25  # More transparent for non-significant points
+NON_SIG_DESAT = 0.70  # Desaturation factor (0=gray, 1=original color)
 SIG_POINT_SIZE = 85
 EXTREME_ARROW_SIZE = 110
 
 # --------------------------- Color / markers ---------------------------
+
+def desaturate_color(color, desat_factor=0.70):
+    """
+    Desaturate a color by blending it toward gray.
+    desat_factor: 0.0 = fully gray, 1.0 = original color
+    """
+    import colorsys
+    r, g, b = mcolors.to_rgb(color)
+    h, l, s = colorsys.rgb_to_hls(r, g, b)
+    # Reduce saturation
+    s = s * desat_factor
+    r2, g2, b2 = colorsys.hls_to_rgb(h, l, s)
+    return (r2, g2, b2)
+
 
 def non_orange_colors(n, seed=21):
     """Generate n distinct colors excluding orange and yellow-green to avoid similar colors."""
@@ -347,10 +362,12 @@ def plot_volcano(df, out_pdf):
         sig_ext = sub[sub["is_significant"] & sub["is_extreme"]]
 
         if not non_sig.empty:
+            # Use desaturated inversion color for non-significant points
+            non_sig_color = desaturate_color(color_map[inv], NON_SIG_DESAT)
             ax.scatter(
                 non_sig["lnOR"].to_numpy(), non_sig["y_plot"].to_numpy(),
                 s=NON_SIG_SIZE, alpha=NON_SIG_ALPHA, marker='o',
-                facecolor=NON_SIG_COLOR, edgecolor='none',
+                facecolor=non_sig_color, edgecolor='none',
                 rasterized=rasterize
             )
 
@@ -390,10 +407,13 @@ def plot_volcano(df, out_pdf):
                label=str(inv))
         for inv in legend_inv_levels
     ]
+    # Use a representative desaturated color for the non-sig legend entry
+    # (pick first inversion color as example)
+    example_non_sig_color = desaturate_color(color_map[legend_inv_levels[0]], NON_SIG_DESAT) if legend_inv_levels else '#b8b8b8'
     non_sig_handle = Line2D(
         [], [], linestyle='None', marker='o', markersize=6,
-        markerfacecolor=NON_SIG_COLOR, markeredgecolor='none', alpha=NON_SIG_ALPHA,
-        label='Not significant'
+        markerfacecolor=example_non_sig_color, markeredgecolor='none', alpha=NON_SIG_ALPHA,
+        label='Not significant (desaturated)'
     )
     fdr_handle = Line2D([], [], linestyle=':', color='black', linewidth=1.2, label=fdr_label)
     handles = [non_sig_handle] + inv_handles + ([fdr_handle] if np.isfinite(y_fdr) else [])
@@ -466,15 +486,20 @@ def plot_volcano(df, out_pdf):
         if t is None or (not t.get_visible()):
             continue
         inv = str(df.loc[idx, "Inversion"])
-        col = color_map.get(inv, (0, 0, 0)) if bool(df.loc[idx, "is_significant"]) else NON_SIG_COLOR
+        if bool(df.loc[idx, "is_significant"]):
+            col = color_map.get(inv, (0, 0, 0))
+        else:
+            # Use desaturated color for non-significant connectors
+            col = desaturate_color(color_map.get(inv, (0.7, 0.7, 0.7)), NON_SIG_DESAT)
         _add_connector(ax, t, point_px[idx], color=col, linewidth=0.9, alpha=0.9)
 
     # Save
+    fig.tight_layout()
     with PdfPages(OUTPUT_PDF) as pdf:
-        fig.tight_layout()
         pdf.savefig(fig, dpi=300)
+    fig.savefig(OUTPUT_PNG, dpi=300, bbox_inches='tight')
     plt.close(fig)
-    print(f"Saved: {OUTPUT_PDF}")
+    print(f"Saved: {OUTPUT_PDF} and {OUTPUT_PNG}")
 
 # --------------------------- Entrypoint ---------------------------
 
