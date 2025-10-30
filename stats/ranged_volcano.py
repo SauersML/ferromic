@@ -33,13 +33,20 @@ plt.rcParams.update({
     "svg.fonttype": 'none',
 })
 
+NON_SIG_COLOR = "#b8b8b8"
+NON_SIG_SIZE = 18
+NON_SIG_ALPHA = 0.55
+SIG_POINT_SIZE = 85
+
 # --------------------------- Color / markers ---------------------------
 
 def non_orange_colors(n, seed=21):
-    """Generate n distinct colors excluding orange hues."""
+    """Generate n distinct colors excluding orange and yellow-green to avoid similar colors."""
     if n <= 0:
         return []
-    gaps = [(0.0, 0.055), (0.125, 1.0)]  # skip ~20°–45° (orange) in HSV
+    # Skip orange (~20-45°) and yellow-green (~60-150°) to avoid two similar greens
+    # Use: Red (0-20°), Cyan-Blue (150-240°), Magenta (240-360°)
+    gaps = [(0.0, 0.055), (0.42, 0.67), (0.67, 1.0)]
     total = sum(b - a for a, b in gaps)
     sv = [(0.80, 0.85), (0.65, 0.90), (0.75, 0.70), (0.55, 0.80)]
     cols = []
@@ -266,16 +273,32 @@ def plot_volcano(df, out_pdf):
     if np.isfinite(y_fdr):
         ax.axhline(y_fdr, linestyle=":", color="black", linewidth=1.2)
 
-    # Draw ALL points
+    # Mark significant points
+    df["is_significant"] = np.isfinite(y_fdr) & (df["y_plot"] >= y_fdr)
+
+    # Draw ALL points - non-significant in gray, significant in color
     N = df.shape[0]
     rasterize = N > 60000
     for inv in inv_levels:
         sub = df[df["Inversion"] == inv]
-        if not sub.empty:
+        non_sig = sub[~sub["is_significant"]]
+        sig = sub[sub["is_significant"]]
+        
+        # Non-significant points in gray
+        if not non_sig.empty:
             ax.scatter(
-                sub["lnOR"].to_numpy(), sub["y_plot"].to_numpy(),
-                s=22, alpha=0.75, marker=marker_map[inv],
-                facecolor=color_map[inv], edgecolor="black", linewidth=0.3,
+                non_sig["lnOR"].to_numpy(), non_sig["y_plot"].to_numpy(),
+                s=NON_SIG_SIZE, alpha=NON_SIG_ALPHA, marker=marker_map[inv],
+                facecolor=NON_SIG_COLOR, edgecolor='none',
+                rasterized=rasterize
+            )
+        
+        # Significant points in color
+        if not sig.empty:
+            ax.scatter(
+                sig["lnOR"].to_numpy(), sig["y_plot"].to_numpy(),
+                s=SIG_POINT_SIZE, alpha=0.85, marker=marker_map[inv],
+                facecolor=color_map[inv], edgecolor="black", linewidth=0.4,
                 rasterized=rasterize
             )
 
@@ -294,8 +317,11 @@ def plot_volcano(df, out_pdf):
                label=str(inv))
         for inv in inv_levels
     ]
+    non_sig_handle = Line2D([], [], linestyle='None', marker='o', markersize=6,
+                            markerfacecolor=NON_SIG_COLOR, markeredgecolor='none', alpha=NON_SIG_ALPHA,
+                            label="Non-significant")
     fdr_handle = Line2D([], [], linestyle=':', color='black', linewidth=1.2, label=fdr_label)
-    handles = inv_handles + ([fdr_handle] if np.isfinite(y_fdr) else [])
+    handles = inv_handles + [non_sig_handle] + ([fdr_handle] if np.isfinite(y_fdr) else [])
     n_inv = len(inv_levels)
     ncol = 1 if n_inv <= 12 else (2 if n_inv <= 30 else 3)
     ax.legend(
