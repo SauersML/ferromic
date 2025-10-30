@@ -1258,6 +1258,17 @@ def test_sex_restriction_policy(test_ctx):
     X = pd.DataFrame({'sex': [0,0,1,1,1,1]}); y = pd.Series([1,1,0,0,0,0])
     _, _, _, skip = models._apply_sex_restriction(X.loc[y.index != 2], y.loc[y.index != 2])
     assert skip is not None
+    
+    # Test forced sex restriction for sex-specific phenotypes
+    # 60% female cases, 40% male cases - normally wouldn't restrict (below 99% threshold)
+    X = pd.DataFrame({'sex': [0,0,0,0,0,0,1,1,1,1]})
+    y = pd.Series([1,1,1,1,1,1,0,0,0,0])  # 6 female cases, 4 male cases
+    # Without phenotype name, should NOT restrict (60% < 99%)
+    X_res, y_res, note, skip = models._apply_sex_restriction(X, y)
+    assert skip is None and note == "" and len(X_res) == 10
+    # With sex-specific phenotype name, SHOULD restrict to females (majority)
+    X_res, y_res, note, skip = models._apply_sex_restriction(X, y, pheno_name="Amenorrhea")
+    assert skip is None and 'sex_forced_restriction_to_0' in note and len(X_res) == 6 and 'sex' not in X_res.columns
 
 def test_penalized_fit_ci_and_pval_suppression(test_ctx):
     """Verifies that CIs and P-values are suppressed for penalized (ridge) fits."""
