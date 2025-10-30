@@ -91,7 +91,15 @@ jobs:
           done < analysis_downloads/.downloaded_files
 
       - name: Run replicate_figures.py
-        run: python scripts/replicate_figures.py --skip-downloads
+        id: run-figures
+        shell: bash
+        run: |
+          status=0
+          python scripts/replicate_figures.py --skip-downloads || status=$?
+          echo "replicate_figures_exit_code=$status" >> "$GITHUB_OUTPUT"
+          if [[ $status -ne 0 ]]; then
+            echo "replicate_figures.py exited with status $status but continuing to allow artifact upload."
+          fi
 
       - name: Post-run diagnostics
         if: always()
