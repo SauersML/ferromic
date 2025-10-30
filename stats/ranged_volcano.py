@@ -8,6 +8,11 @@ from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.lines import Line2D
 from matplotlib.patches import FancyArrowPatch
 from matplotlib import colors as mcolors
+from volcano_shared import (
+    desaturate_color, assign_colors_and_markers, bh_fdr_cutoff,
+    create_legend_handles, NON_SIG_SIZE, NON_SIG_ALPHA, NON_SIG_DESAT,
+    SIG_POINT_SIZE
+)
 
 INPUT_FILE = "phewas_results.tsv"
 OUTPUT_PDF = "phewas_volcano_ranged.pdf"
@@ -32,62 +37,6 @@ plt.rcParams.update({
     "ps.fonttype": 42,
     "svg.fonttype": 'none',
 })
-
-NON_SIG_COLOR = "#b8b8b8"
-NON_SIG_SIZE = 18
-NON_SIG_ALPHA = 0.55
-SIG_POINT_SIZE = 85
-
-# --------------------------- Color / markers ---------------------------
-
-def non_orange_colors(n, seed=21):
-    """Generate n distinct colors excluding orange and yellow-green to avoid similar colors."""
-    if n <= 0:
-        return []
-    # Skip orange (~20-45°) and yellow-green (~60-150°) to avoid two similar greens
-    # Use: Red (0-20°), Cyan-Blue (150-240°), Magenta (240-360°)
-    gaps = [(0.0, 0.055), (0.42, 0.67), (0.67, 1.0)]
-    total = sum(b - a for a, b in gaps)
-    sv = [(0.80, 0.85), (0.65, 0.90), (0.75, 0.70), (0.55, 0.80)]
-    cols = []
-    for i in range(n):
-        t = (i + 0.5) / n * total
-        for a, b in gaps:
-            w = b - a
-            if t <= w:
-                h = a + t
-                break
-            t -= w
-        s, v = sv[i % len(sv)]
-        cols.append(mcolors.hsv_to_rgb((h, s, v)))
-    return [tuple(c) for c in cols]
-
-def assign_colors_and_markers(levels):
-    n = len(levels)
-    colors = non_orange_colors(n)
-    if n > 1:
-        colors = colors[1:] + colors[:1]
-    marker_cycle = ['o', 's', 'D', 'P', 'X', '*', 'v', '<', '>', 'h', 'H', 'd']
-    marker_map = {lvl: marker_cycle[i % len(marker_cycle)] for i, lvl in enumerate(levels)}
-    color_map  = {lvl: colors[i] for i, lvl in enumerate(levels)}
-    return color_map, marker_map
-
-# --------------------------- Stats ---------------------------
-
-def bh_fdr_cutoff(pvals, alpha=0.05):
-    p = np.asarray(pvals, dtype=float)
-    p = p[np.isfinite(p)]
-    m = p.size
-    if m == 0:
-        return np.nan
-    order = np.argsort(p)
-    p_sorted = p[order]
-    ranks = np.arange(1, m + 1, dtype=float)
-    crit = ranks / m * alpha
-    ok = p_sorted <= crit
-    if not np.any(ok):
-        return np.nan
-    return p_sorted[np.where(ok)[0].max()]
 
 # --------------------------- Data ---------------------------
 
@@ -276,7 +225,7 @@ def plot_volcano(df, out_pdf):
     # Mark significant points
     df["is_significant"] = np.isfinite(y_fdr) & (df["y_plot"] >= y_fdr)
 
-    # Draw ALL points - non-significant in gray, significant in color
+    # Draw ALL points - non-significant in desaturated color, significant in full color
     N = df.shape[0]
     rasterize = N > 60000
     for inv in inv_levels:
@@ -284,20 +233,21 @@ def plot_volcano(df, out_pdf):
         non_sig = sub[~sub["is_significant"]]
         sig = sub[sub["is_significant"]]
         
-        # Non-significant points in gray
+        # Non-significant points in desaturated inversion color (keep same marker shape)
         if not non_sig.empty:
+            non_sig_color = desaturate_color(color_map[inv], NON_SIG_DESAT)
             ax.scatter(
                 non_sig["lnOR"].to_numpy(), non_sig["y_plot"].to_numpy(),
                 s=NON_SIG_SIZE, alpha=NON_SIG_ALPHA, marker=marker_map[inv],
-                facecolor=NON_SIG_COLOR, edgecolor='none',
+                facecolor=non_sig_color, edgecolor='none',
                 rasterized=rasterize
             )
         
-        # Significant points in color
+        # Significant points in full color
         if not sig.empty:
             ax.scatter(
                 sig["lnOR"].to_numpy(), sig["y_plot"].to_numpy(),
-                s=SIG_POINT_SIZE, alpha=0.85, marker=marker_map[inv],
+                s=SIG_POINT_SIZE, alpha=0.9, marker=marker_map[inv],
                 facecolor=color_map[inv], edgecolor="black", linewidth=0.4,
                 rasterized=rasterize
             )
@@ -310,20 +260,14 @@ def plot_volcano(df, out_pdf):
         ax.set_xticks(xticks)
         ax.set_xticklabels(xlabels)
 
-    # Legend
-    inv_handles = [
-        Line2D([], [], linestyle='None', marker=marker_map[inv], markersize=9,
-               markerfacecolor=color_map[inv], markeredgecolor="black", markeredgewidth=0.6,
-               label=str(inv))
-        for inv in inv_levels
+    # Legend - use shared function for consistency
+    sig_inv_levels = [
+        inv for inv in inv_levels
+        if not df[(df["Inversion"] == inv) & df["is_significant"]].empty
     ]
-    non_sig_handle = Line2D([], [], linestyle='None', marker='o', markersize=6,
-                            markerfacecolor=NON_SIG_COLOR, markeredgecolor='none', alpha=NON_SIG_ALPHA,
-                            label="Non-significant")
-    fdr_handle = Line2D([], [], linestyle=':', color='black', linewidth=1.2, label=fdr_label)
-    handles = inv_handles + [non_sig_handle] + ([fdr_handle] if np.isfinite(y_fdr) else [])
-    n_inv = len(inv_levels)
-    ncol = 1 if n_inv <= 12 else (2 if n_inv <= 30 else 3)
+    handles, ncol = create_legend_handles(
+        inv_levels, color_map, marker_map, fdr_label, y_fdr, sig_inv_levels
+    )
     ax.legend(
         handles=handles, title="Key",
         loc="upper right", frameon=False, ncol=ncol,

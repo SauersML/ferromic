@@ -10,6 +10,11 @@ from matplotlib.patches import FancyArrowPatch
 from matplotlib import colors as mcolors
 
 from _inv_common import map_inversion_series
+from volcano_shared import (
+    desaturate_color, assign_colors_and_markers, bh_fdr_cutoff,
+    create_legend_handles, NON_SIG_SIZE, NON_SIG_ALPHA, NON_SIG_DESAT,
+    SIG_POINT_SIZE, EXTREME_ARROW_SIZE
+)
 
 INPUT_FILE = "phewas_results.tsv"
 OUTPUT_PDF = "phewas_volcano.pdf"
@@ -19,77 +24,6 @@ OUTPUT_PNG = "phewas_volcano.png"
 plt.rcParams['pdf.fonttype'] = 42
 plt.rcParams['ps.fonttype'] = 42
 plt.rcParams['svg.fonttype'] = 'none'
-
-NON_SIG_SIZE = 18
-NON_SIG_ALPHA = 0.25  # More transparent for non-significant points
-NON_SIG_DESAT = 0.70  # Desaturation factor (0=gray, 1=original color)
-SIG_POINT_SIZE = 85
-EXTREME_ARROW_SIZE = 110
-
-# --------------------------- Color / markers ---------------------------
-
-def desaturate_color(color, desat_factor=0.70):
-    """
-    Desaturate a color by blending it toward gray.
-    desat_factor: 0.0 = fully gray, 1.0 = original color
-    """
-    import colorsys
-    r, g, b = mcolors.to_rgb(color)
-    h, l, s = colorsys.rgb_to_hls(r, g, b)
-    # Reduce saturation
-    s = s * desat_factor
-    r2, g2, b2 = colorsys.hls_to_rgb(h, l, s)
-    return (r2, g2, b2)
-
-
-def non_orange_colors(n, seed=21):
-    """Generate n distinct colors excluding orange and yellow-green to avoid similar colors."""
-    if n <= 0:
-        return []
-    # Skip orange (~20-45°) and yellow-green (~60-150°) to avoid two similar greens
-    # Use: Red (0-20°), Cyan-Blue (150-240°), Magenta (240-360°)
-    gaps = [(0.0, 0.055), (0.42, 0.67), (0.67, 1.0)]
-    total = sum(b - a for a, b in gaps)
-    sv = [(0.80, 0.85), (0.65, 0.90), (0.75, 0.70), (0.55, 0.80)]
-    cols = []
-    for i in range(n):
-        t = (i + 0.5) / n * total
-        for a, b in gaps:
-            w = b - a
-            if t <= w:
-                h = a + t
-                break
-            t -= w
-        s, v = sv[i % len(sv)]
-        cols.append(mcolors.hsv_to_rgb((h, s, v)))
-    return [tuple(c) for c in cols]
-
-def assign_colors_and_markers(levels):
-    n = len(levels)
-    colors = non_orange_colors(n)
-    if n > 1:
-        colors = colors[1:] + colors[:1]
-    marker_cycle = ['o', 's', 'D', '^', 'v', '<', '>', 'P', 'X', '*', 'h', 'H', 'd', 'p', '8']
-    marker_map = {lvl: marker_cycle[i % len(marker_cycle)] for i, lvl in enumerate(levels)}
-    color_map  = {lvl: colors[i] for i, lvl in enumerate(levels)}
-    return color_map, marker_map
-
-# --------------------------- Stats ---------------------------
-
-def bh_fdr_cutoff(pvals, alpha=0.05):
-    p = np.asarray(pvals, dtype=float)
-    p = p[np.isfinite(p)]
-    m = p.size
-    if m == 0:
-        return np.nan
-    order = np.argsort(p)
-    p_sorted = p[order]
-    ranks = np.arange(1, m + 1, dtype=float)
-    crit = ranks / m * alpha
-    ok = p_sorted <= crit
-    if not np.any(ok):
-        return np.nan
-    return p_sorted[np.where(ok)[0].max()]
 
 # --------------------------- Data ---------------------------
 
@@ -362,11 +296,11 @@ def plot_volcano(df, out_pdf):
         sig_ext = sub[sub["is_significant"] & sub["is_extreme"]]
 
         if not non_sig.empty:
-            # Use desaturated inversion color for non-significant points
+            # Use desaturated inversion color for non-significant points (keep marker shape)
             non_sig_color = desaturate_color(color_map[inv], NON_SIG_DESAT)
             ax.scatter(
                 non_sig["lnOR"].to_numpy(), non_sig["y_plot"].to_numpy(),
-                s=NON_SIG_SIZE, alpha=NON_SIG_ALPHA, marker='o',
+                s=NON_SIG_SIZE, alpha=NON_SIG_ALPHA, marker=marker_map[inv],
                 facecolor=non_sig_color, edgecolor='none',
                 rasterized=rasterize
             )
@@ -400,25 +334,9 @@ def plot_volcano(df, out_pdf):
         inv for inv in inv_levels
         if not df[(df["Inversion"] == inv) & df["is_significant"]].empty
     ]
-    legend_inv_levels = sig_inv_levels if sig_inv_levels else inv_levels
-    inv_handles = [
-        Line2D([], [], linestyle='None', marker=marker_map[inv], markersize=9,
-               markerfacecolor=color_map[inv], markeredgecolor="black", markeredgewidth=0.6,
-               label=str(inv))
-        for inv in legend_inv_levels
-    ]
-    # Use a representative desaturated color for the non-sig legend entry
-    # (pick first inversion color as example)
-    example_non_sig_color = desaturate_color(color_map[legend_inv_levels[0]], NON_SIG_DESAT) if legend_inv_levels else '#b8b8b8'
-    non_sig_handle = Line2D(
-        [], [], linestyle='None', marker='o', markersize=6,
-        markerfacecolor=example_non_sig_color, markeredgecolor='none', alpha=NON_SIG_ALPHA,
-        label='Not significant (desaturated)'
+    handles, ncol = create_legend_handles(
+        inv_levels, color_map, marker_map, fdr_label, y_fdr, sig_inv_levels
     )
-    fdr_handle = Line2D([], [], linestyle=':', color='black', linewidth=1.2, label=fdr_label)
-    handles = [non_sig_handle] + inv_handles + ([fdr_handle] if np.isfinite(y_fdr) else [])
-    n_items = len(handles)
-    ncol = 1 if n_items <= 12 else (2 if n_items <= 30 else 3)
     ax.legend(
         handles=handles, title="Key",
         loc="upper right", frameon=False, ncol=ncol,
