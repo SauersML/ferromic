@@ -36,6 +36,8 @@ python3 -m phewas.cli [--min-cases-controls N] [--pop-label POPULATION]
   defaults defined in `phewas.run`.
 * `--pop-label` restricts the run to participants matching the provided population label
   generated during shared setup.
+* `--pheno` restricts the analysis to the specified phenotype.
+
 
 Omitting these options keeps the existing default behaviour of the pipeline.
 
