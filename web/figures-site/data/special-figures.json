@@ -1,5 +1,5 @@
 {
-  "generatedAt": null,
+  "generatedAt": "2025-10-30T18:30:00Z",
   "groups": [
     {
       "title": "Diversity and FST Profiles",
@@ -88,11 +88,6 @@
           "description": "Forest plot summarising significant inversion–phenotype associations with odds ratios and confidence intervals."
         },
         {
-          "title": "PheWAS Odds Ratios Forest (Significant Hits)",
-          "filename": "phewas_forest.pdf",
-          "description": "Detail view of the significant PheWAS hits highlighting odds ratios and 95% confidence intervals."
-        },
-        {
           "title": "PheWAS Volcano of Differential Effects",
           "filename": "phewas_volcano_ranged.pdf",
           "description": "Volcano plot of odds ratios across 1,096 phecodes with inset showing the full odds-ratio scale."
@@ -103,17 +98,6 @@
           "description": "Category grid showing disease systems, inversion loci, GBJ enrichment, and GLS directionality."
         }
       ]
-    },
-    {
-      "title": "Genotyping Performance",
-      "slug": "genotyping",
-      "figures": [
-        {
-          "title": "Inversion Imputation Performance",
-          "filename": "inversion_r_plot.pdf",
-          "description": "Imputation r² values for each inversion."
-        }
-      ]
-    }
+
   ]
 }
