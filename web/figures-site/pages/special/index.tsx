@@ -1,0 +1,79 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import type { GetStaticProps } from 'next';
+import Head from 'next/head';
+
+import {
+  SpecialGallery,
+  type SpecialFigureGroup,
+} from '../../components/SpecialGallery';
+
+interface SpecialManifest {
+  generatedAt: string | null;
+  groups: SpecialFigureGroup[];
+}
+
+interface SpecialPageProps {
+  manifest: SpecialManifest;
+  manifestError: string | null;
+}
+
+const MANIFEST_PATH = path.join(process.cwd(), 'data', 'special-figures.json');
+
+export const getStaticProps: GetStaticProps<SpecialPageProps> = async () => {
+  try {
+    const raw = await fs.readFile(MANIFEST_PATH, 'utf-8');
+    const manifest = JSON.parse(raw) as SpecialManifest;
+    return {
+      props: {
+        manifest,
+        manifestError: null,
+      },
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    return {
+      props: {
+        manifest: { generatedAt: null, groups: [] },
+        manifestError: `Unable to read special manifest: ${message}`,
+      },
+    };
+  }
+};
+
+export default function SpecialPage({ manifest, manifestError }: SpecialPageProps) {
+  return (
+    <>
+      <Head>
+        <title>Special Figure Collection • Ferromic</title>
+        <meta
+          name="description"
+          content="Dedicated gallery of requested Ferromic PDF figures."
+        />
+      </Head>
+      {manifestError ? (
+        <div style={{ maxWidth: '720px', margin: '4rem auto', padding: '0 1rem' }}>
+          <h1>Special Figure Collection</h1>
+          <p>
+            Unable to load the special figure manifest. Ensure that
+            <code style={{ margin: '0 0.35rem' }}>data/special-figures.json</code>
+            exists and contains valid JSON.
+          </p>
+          <pre
+            style={{
+              background: 'rgba(220, 38, 38, 0.1)',
+              borderRadius: '8px',
+              padding: '1rem',
+              overflowX: 'auto',
+              color: '#991b1b',
+            }}
+          >
+            {manifestError}
+          </pre>
+        </div>
+      ) : (
+        <SpecialGallery groups={manifest.groups} generatedAt={manifest.generatedAt} />
+      )}
+    </>
+  );
+}
