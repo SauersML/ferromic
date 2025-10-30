@@ -50,6 +50,17 @@ export default function SpecialPage({ manifest, manifestError }: SpecialPageProp
           name="description"
           content="Dedicated gallery of requested Ferromic PDF figures."
         />
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              if (typeof window !== 'undefined' && window['pdfjs-dist/build/pdf']) {
+                window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 
+                  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+              }
+            `,
+          }}
+        />
       </Head>
       {manifestError ? (
         <div style={{ maxWidth: '720px', margin: '4rem auto', padding: '0 1rem' }}>
