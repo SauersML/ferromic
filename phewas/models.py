@@ -1377,9 +1377,34 @@ def _validate_ctx(ctx):
 
 
 
-def _apply_sex_restriction(X: pd.DataFrame, y: pd.Series):
+# Phenotypes that always require sex restriction to the majority sex
+SEX_SPECIFIC_PHENOTYPES = {
+    "Amenorrhea",
+    "Antepartum_hemorrhage",
+    "Bleeding_in_pregnancy",
+    "Complications_of_labor_and_delivery_NEC",
+    "Decreased_fetal_movements_affecting_management_of_mother",
+    "Disorders_of_the_breast_associated_with_childbirth_and_disorders_of_lactation",
+    "Drugs_and_alcohol_during_pregnancy",
+    "Ectopic_pregnancy",
+    "Dysmenorrhea",
+    "Estrogen_receptor_positive_status_ER+",
+    "Estrogen_receptor_status",
+    "Excessive_vomiting_in_pregnancy",
+    "Excessive_fetal_growth",
+    "High_risk_human_papillomavirus_HPV_DNA_test_positive",
+    "Malignant_neoplasm_of_male_genitalia",
+    "Other_drug_use_during_pregnancy",
+    "Recurrent_pregnancy_loss",
+}
+
+def _apply_sex_restriction(X: pd.DataFrame, y: pd.Series, pheno_name: str = None):
     """
     Returns: (X2, y2, note:str, skip_reason:str|None)
+    
+    Applies sex restriction based on case distribution. For certain sex-specific
+    phenotypes, restriction is always applied to the majority sex regardless of
+    the proportion threshold.
     """
     if 'sex' not in X.columns:
         return X, y, "", None
@@ -1387,20 +1412,37 @@ def _apply_sex_restriction(X: pd.DataFrame, y: pd.Series):
     total_cases = int(tab.loc[0.0, 1] + tab.loc[1.0, 1])
     if total_cases <= 0:
         return X, y, "", None
-    thr = float(CTX.get("SEX_RESTRICT_PROP", DEFAULT_SEX_RESTRICT_PROP))
+    
     cases_by_sex = {0.0: int(tab.loc[0.0, 1]), 1.0: int(tab.loc[1.0, 1])}
     dominant_sex = 0.0 if cases_by_sex[0.0] >= cases_by_sex[1.0] else 1.0
-    frac = (cases_by_sex[dominant_sex] / total_cases) if total_cases > 0 else 0.0
-    if frac < thr:
+    
+    # Check if this is a sex-specific phenotype that always requires restriction
+    force_restriction = pheno_name in SEX_SPECIFIC_PHENOTYPES if pheno_name else False
+    
+    if force_restriction:
+        # Always restrict to majority sex for sex-specific phenotypes
+        should_restrict = True
+    else:
+        # Normal threshold-based logic
+        thr = float(CTX.get("SEX_RESTRICT_PROP", DEFAULT_SEX_RESTRICT_PROP))
+        frac = (cases_by_sex[dominant_sex] / total_cases) if total_cases > 0 else 0.0
+        should_restrict = frac >= thr
+    
+    if not should_restrict:
         return X, y, "", None
+    
     if int(tab.loc[dominant_sex, 0]) == 0:
         return X, y, "", "sex_no_controls_in_case_sex"
 
     keep = X['sex'].eq(dominant_sex)
     note_parts = [f"sex_restricted_to_{int(dominant_sex)}"]
-    mode = str(CTX.get("SEX_RESTRICT_MODE", "majority")).lower()
-    if mode == "majority":
-        note_parts.append(f"sex_majority_restricted_to_{int(dominant_sex)}")
+    
+    if force_restriction:
+        note_parts.append(f"sex_forced_restriction_to_{int(dominant_sex)}")
+    else:
+        mode = str(CTX.get("SEX_RESTRICT_MODE", "majority")).lower()
+        if mode == "majority":
+            note_parts.append(f"sex_majority_restricted_to_{int(dominant_sex)}")
 
     note = ";".join(note_parts)
     return X.loc[keep].drop(columns=['sex']), y.loc[keep], note, None
@@ -2213,7 +2255,7 @@ def lrt_overall_worker(task):
         n_ctrls_pre = int(len(y_series) - n_cases_pre)
         n_total_pre = int(len(y_series))
 
-        Xb, yb, note, skip = _apply_sex_restriction(X_base, y_series)
+        Xb, yb, note, skip = _apply_sex_restriction(X_base, y_series, pheno_name=s_name)
         n_total_used, n_cases_used, n_ctrls_used = len(yb), int(yb.sum()), len(yb) - int(yb.sum())
 
         used_index_fp = _index_fingerprint(Xb.index)
@@ -3107,7 +3149,7 @@ def bootstrap_overall_worker(task):
         n_ctrls_pre = int(len(y_series) - n_cases_pre)
         n_total_pre = int(len(y_series))
 
-        Xb, yb, note, skip = _apply_sex_restriction(X_base, y_series)
+        Xb, yb, note, skip = _apply_sex_restriction(X_base, y_series, pheno_name=s_name)
         n_total_used, n_cases_used = len(yb), int(yb.sum())
         n_ctrls_used = n_total_used - n_cases_used
 
@@ -3523,7 +3565,7 @@ def lrt_followup_worker(task):
         ).astype(np.float64, copy=False)
         y_series = pd.Series(np.where(case_mask[valid_mask], 1, 0), index=X_base_df.index, dtype=np.int8)
 
-        Xb, yb, note, skip = _apply_sex_restriction(X_base_df, y_series)
+        Xb, yb, note, skip = _apply_sex_restriction(X_base_df, y_series, pheno_name=s_name)
         anc_vec = worker_anc_series.reindex(Xb.index)
         if anc_vec.isna().all():
             skip = skip or "no_ancestry_labels"
