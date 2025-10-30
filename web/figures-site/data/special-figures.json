@@ -88,9 +88,14 @@
           "description": "Forest plot summarising significant inversion–phenotype associations with odds ratios and confidence intervals."
         },
         {
-          "title": "PheWAS Volcano of Differential Effects",
+          "title": "PheWAS Volcano (Full Scale)",
+          "filename": "phewas_volcano.pdf",
+          "description": "Volcano plot showing all odds ratios across 1,096 phecodes with full x-axis scale."
+        },
+        {
+          "title": "PheWAS Volcano (Ranged Scale)",
           "filename": "phewas_volcano_ranged.pdf",
-          "description": "Volcano plot of odds ratios across 1,096 phecodes with inset showing the full odds-ratio scale."
+          "description": "Volcano plot of odds ratios across 1,096 phecodes focused on OR 0.5-2.0 range with inset showing full scale."
         },
         {
           "title": "PheWAS Category Summary Heatmap",

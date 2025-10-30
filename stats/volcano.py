@@ -28,10 +28,12 @@ EXTREME_ARROW_SIZE = 110
 # --------------------------- Color / markers ---------------------------
 
 def non_orange_colors(n, seed=21):
-    """Generate n distinct colors excluding orange hues."""
+    """Generate n distinct colors excluding orange and yellow-green to avoid similar colors."""
     if n <= 0:
         return []
-    gaps = [(0.0, 0.055), (0.125, 1.0)]  # skip ~20°–45° (orange) in HSV
+    # Skip orange (~20-45°) and yellow-green (~60-150°) to avoid two similar greens
+    # Use: Red (0-20°), Cyan-Blue (150-240°), Magenta (240-360°)
+    gaps = [(0.0, 0.055), (0.42, 0.67), (0.67, 1.0)]
     total = sum(b - a for a, b in gaps)
     sv = [(0.80, 0.85), (0.65, 0.90), (0.75, 0.70), (0.55, 0.80)]
     cols = []

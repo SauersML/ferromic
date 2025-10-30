@@ -1,7 +1,7 @@
 .container {
-  max-width: 1920px;
+  max-width: 2400px;
   margin: 0 auto;
-  padding: 2rem 1rem 4rem;
+  padding: 2rem 1.5rem 4rem;
 }
 
 .header {
@@ -64,8 +64,8 @@
 
 .grid {
   display: grid;
-  gap: 1rem;
-  grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+  gap: 1.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(700px, 1fr));
 }
 
 .figure {
