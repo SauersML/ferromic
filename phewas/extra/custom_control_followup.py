@@ -21,7 +21,6 @@ working directory.
 from __future__ import annotations
 
 import os
-import re
 
 # ---------------------------------------------------------------------------
 # Cap native BLAS/OpenMP threads before importing NumPy/SciPy.
@@ -62,6 +61,7 @@ from statsmodels.tools.sm_exceptions import ConvergenceWarning, PerfectSeparatio
 from google.cloud import bigquery
 
 from .. import iox as io
+from .. import logging_utils
 from .. import pheno
 from ..run import (
     CACHE_DIR as PIPELINE_CACHE_DIR,
@@ -182,36 +182,6 @@ LOCK_DIR = Path(PIPELINE_LOCK_DIR)
 PCS_URI = PIPELINE_PCS_URI
 SEX_URI = PIPELINE_SEX_URI
 RELATEDNESS_URI = PIPELINE_RELATEDNESS_URI
-
-# Directory for phenotype-specific logs relative to the working directory.
-LOG_OUTPUT_DIR = Path("logs")
-_LOG_SANITIZE_RE = re.compile(r"[^A-Za-z0-9._-]+")
-_CLEARED_LOG_PATHS: set[Path] = set()
-
-# ---------------------------------------------------------------------------
-# Simple logging helpers
-# ---------------------------------------------------------------------------
-
-
-def _phenotype_log_path(prefix: str) -> Path:
-    LOG_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    sanitized = _LOG_SANITIZE_RE.sub("_", prefix)
-    sanitized = sanitized.strip("._-") or "phenotype"
-    if len(sanitized) > 128:
-        sanitized = sanitized[:128]
-    return LOG_OUTPUT_DIR / f"{sanitized}.log"
-
-
-def _initialise_pheno_log(prefix: str) -> None:
-    path = _phenotype_log_path(prefix)
-    if path in _CLEARED_LOG_PATHS:
-        return
-    try:
-        path.unlink()
-    except FileNotFoundError:
-        pass
-    _CLEARED_LOG_PATHS.add(path)
-
 
 def info(message: str) -> None:
     print(f"[custom-followup] {message}", flush=True)
@@ -1848,7 +1818,7 @@ def _ensure_pheno_cache(
 
     pheno_path = CACHE_DIR / f"pheno_{phenotype}_{cdr_codename}.parquet"
     if not pheno_path.exists():
-        info(f"Caching phenotype '{phenotype}' via BigQuery fetch…")
+        _log_lines(phenotype, "Caching phenotype '{phenotype}' via BigQuery fetch…")
         pheno._query_single_pheno_bq(
             row,
             cdr_id,
@@ -1874,18 +1844,16 @@ def _load_case_status(
 
 
 def _log_lines(prefix: str, message: str, *, level: str = "info") -> None:
-    lines = message.splitlines()
-    if not lines:
-        lines = [""]
-    log_path = _phenotype_log_path(prefix)
-    with log_path.open("a", encoding="utf-8") as handle:
-        for line in lines:
-            text = f"[{prefix}] {line}"
-            if level == "info":
-                info(text)
-            else:
-                warn(text)
-            handle.write(text + "\n")
+    lines = message.splitlines() or [""]
+    for line in lines:
+        body = f"[{prefix}] {line}" if line else f"[{prefix}]"
+        if level.lower() == "warn":
+            formatted = f"[custom-followup][WARN] {body}"
+        else:
+            formatted = f"[custom-followup] {body}"
+        print(formatted, flush=True)
+        if not logging_utils.is_logging_active_for(prefix):
+            logging_utils.append_line(prefix, formatted)
 
 
 def _format_summary_dict(stats: Mapping[str, object]) -> str:
@@ -1909,7 +1877,28 @@ def _analyse_single_phenotype(
     scores_path: Path,
 ) -> tuple[dict[str, object] | None, list[str]]:
     prefix = f"{cfg.phenotype}"
-    _initialise_pheno_log(prefix)
+    with logging_utils.phenotype_logging(prefix):
+        return _analyse_single_phenotype_impl(
+            cfg=cfg,
+            inv=inv,
+            preconditioner=preconditioner,
+            custom_control_names=custom_control_names,
+            definitions=definitions,
+            cdr_id=cdr_id,
+            scores_path=scores_path,
+        )
+
+def _analyse_single_phenotype_impl(
+    *,
+    cfg: "PhenotypeRun",
+    inv: str,
+    preconditioner: DesignPreconditioner,
+    custom_control_names: Sequence[str],
+    definitions: pd.DataFrame,
+    cdr_id: str,
+    scores_path: Path,
+) -> tuple[dict[str, object] | None, list[str]]:
+    prefix = f"{cfg.phenotype}"
     _log_lines(prefix, f"Initialising analysis for inversion {inv} (category: {cfg.category})")
 
     analysis_index = preconditioner.index
@@ -2313,8 +2302,10 @@ def run() -> None:
             for cfg in target_runs:
                 control_names = category_control_names.get(cfg.category)
                 if not control_names:
-                    warn(
-                        f"No custom controls available for category '{cfg.category}'; skipping {cfg.phenotype}."
+                    _log_lines(
+                        cfg.phenotype,
+                        f"No custom controls available for category '{cfg.category}'; skipping {cfg.phenotype}.",
+                        level="warn",
                     )
                     continue
                 try:
@@ -2327,8 +2318,10 @@ def run() -> None:
                         client=client,
                     )
                 except Exception as exc:
-                    warn(
-                        f"Failed to prepare phenotype cache for {cfg.phenotype}: {exc}; skipping."
+                    _log_lines(
+                        cfg.phenotype,
+                        f"Failed to prepare phenotype cache for {cfg.phenotype}: {exc}; skipping.",
+                        level="warn",
                     )
                     continue
                 ready_runs.append((cfg, control_names))
@@ -2359,7 +2352,11 @@ def run() -> None:
                             scores_path=scores_path,
                         )
                     except Exception as exc:  # pragma: no cover - defensive guard
-                        warn(f"Unhandled error in {cfg.phenotype} analysis: {exc}")
+                        _log_lines(
+                            cfg.phenotype,
+                            f"Unhandled error in {cfg.phenotype} analysis: {exc}",
+                            level="warn",
+                        )
                         continue
 
                     if not result:
@@ -2393,7 +2390,11 @@ def run() -> None:
                         try:
                             result, summary_lines = future.result()
                         except Exception as exc:  # pragma: no cover - defensive guard
-                            warn(f"Unhandled error in {cfg.phenotype} analysis: {exc}")
+                            _log_lines(
+                                cfg.phenotype,
+                                f"Unhandled error in {cfg.phenotype} analysis: {exc}",
+                                level="warn",
+                            )
                             continue
 
                         if not result:
