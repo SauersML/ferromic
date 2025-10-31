@@ -18,6 +18,21 @@ from pandas.api.types import is_numeric_dtype
 CACHE_VERSION_TAG = "phewas_v1"
 
 
+class LowVarianceInversionError(RuntimeError):
+    """Raised when an inversion dosage column lacks sufficient variability."""
+
+    def __init__(self, target: str, std: float, threshold: float):
+        self.target = target
+        self.std = std
+        self.threshold = threshold
+        super().__init__(
+            f"Inversion '{target}' has low variance (std={std!r} < {threshold})."
+        )
+
+
+LOW_VARIANCE_STD_THRESHOLD = 0.1
+
+
 def stable_hash(obj: Any, digest_size: int = 8) -> str:
     """Return a short, stable hash for arbitrary JSON-serializable payloads."""
     try:
@@ -756,7 +771,13 @@ def load_inversions(TARGET_INVERSION: str, INVERSION_DOSAGES_FILE: str) -> pd.Da
                 "Inversion dosage table produced non-unique person_id values even after "
                 "deduplication."
             )
+        dosage = result[TARGET_INVERSION]
+        std = float(dosage.std(skipna=True)) if dosage.notna().any() else float("nan")
+        if not np.isfinite(std) or std < LOW_VARIANCE_STD_THRESHOLD:
+            raise LowVarianceInversionError(TARGET_INVERSION, std, LOW_VARIANCE_STD_THRESHOLD)
         return result
+    except LowVarianceInversionError:
+        raise
     except Exception as e:
         raise RuntimeError(f"Failed to load inversion data: {e}") from e
 

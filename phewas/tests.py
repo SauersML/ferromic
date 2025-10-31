@@ -172,6 +172,21 @@ def test_load_inversions_deduplicates_person_ids(tmp_path):
     assert joined.loc["p1", target] == pytest.approx(0.1)
 
 
+def test_load_inversions_rejects_low_variance(tmp_path):
+    target = TEST_TARGET_INVERSION
+    inversion_records = pd.DataFrame(
+        {
+            "SampleID": ["p1", "p2", "p3"],
+            target: [0.0, 0.01, 0.02],
+        }
+    )
+    inversion_path = tmp_path / "low_var.tsv"
+    inversion_records.to_csv(inversion_path, sep="\t", index=False)
+
+    with pytest.raises(io.LowVarianceInversionError, match="low variance"):
+        io.load_inversions(target, str(inversion_path))
+
+
 def test_drop_rank_deficient_respects_uniform_scaling():
     rng = np.random.default_rng(2024)
     n = 60
