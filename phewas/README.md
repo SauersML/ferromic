@@ -45,3 +45,7 @@ Run extras like this (custom control example):
 ```
 python3 -m phewas.extra.custom_control_followup
 ```
+
+Inversion dosage histograms:
+<img width="1489" height="4490" alt="image" src="https://github.com/user-attachments/assets/d7e6edc1-d87b-4726-b6b6-fd675ab1181b" />
+
