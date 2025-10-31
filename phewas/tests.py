@@ -585,6 +585,184 @@ def test_cli_population_filter_matches_followup_effects():
                 assert eur_or == pytest.approx(stage1_or, abs=0.01)
 
 
+def test_cli_pheno_filter_limits_stage1_worklist():
+    with temp_workspace() as tmpdir, preserve_run_globals():
+        core_data, phenos = make_synth_cohort(N=40, NUM_PCS=4, seed=7)
+
+        cache_root = Path(tmpdir) / "phewas_cache"
+        run.CACHE_DIR = str(cache_root)
+        run.LOCK_DIR = os.path.join(run.CACHE_DIR, "locks")
+        run.TARGET_INVERSIONS = [TEST_TARGET_INVERSION]
+        run.NUM_PCS = core_data["pcs"].shape[1]
+        run.MIN_NEFF_FILTER = 0
+        run.MLE_REFIT_MIN_NEFF = 0
+        run.FDR_ALPHA = 1.0
+        run.LRT_SELECT_ALPHA = 1.0
+        run.MIN_CASES_FILTER = 0
+        run.MIN_CONTROLS_FILTER = 0
+        run.MASTER_RESULTS_CSV = str(Path(tmpdir) / "master.tsv")
+        run.INVERSION_DOSAGES_FILE = str(Path(tmpdir) / "dosages.tsv")
+
+        dosages_df = (
+            core_data["inversion_main"].reset_index().rename(columns={"person_id": "SampleID"})
+        )
+        write_tsv(run.INVERSION_DOSAGES_FILE, dosages_df)
+
+        defs_df = prime_all_caches_for_run(
+            core_data,
+            phenos,
+            TEST_CDR_CODENAME,
+            TEST_TARGET_INVERSION,
+            cache_dir=run.CACHE_DIR,
+        )
+        local_defs = make_local_pheno_defs_tsv(defs_df, tmpdir)
+        run.PHENOTYPE_DEFINITIONS_URL = str(local_defs)
+
+        target_pheno = defs_df["sanitized_name"].iloc[0]
+        captured_worklists: list[list[str]] = []
+
+        def fake_run_overall(
+            core_df_with_const,
+            allowed_mask_by_cat,
+            anc_series,
+            phenos_list,
+            name_to_cat,
+            cdr_codename,
+            target_inversion,
+            ctx,
+            min_available_memory_gb,
+            on_pool_started=None,
+            mode=None,
+        ):
+            captured_worklists.append(list(phenos_list))
+            return None
+
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch("phewas.run.bigquery.Client", MagicMock()))
+            stack.enter_context(patch("phewas.run.io.load_related_to_remove", return_value=set()))
+            stack.enter_context(patch("phewas.pheno.populate_caches_prepass", lambda *_, **__: None))
+            stack.enter_context(patch("phewas.pheno.deduplicate_phenotypes", lambda *_, **__: None))
+            stack.enter_context(patch("phewas.pheno._prequeue_should_run", lambda *_, **__: True))
+            stack.enter_context(patch("phewas.testing.run_overall", fake_run_overall))
+            stack.enter_context(patch("phewas.run.supervisor_main", lambda: run._pipeline_once()))
+
+            cli.main(["--pheno", target_pheno])
+
+        assert captured_worklists, "Stage-1 testing did not run during the pipeline"
+        assert captured_worklists == [[target_pheno]], captured_worklists
+
+
+def test_cli_pheno_filter_uses_isolated_cache_tags():
+    with temp_workspace() as tmpdir, preserve_run_globals():
+        core_data, phenos = make_synth_cohort(N=40, NUM_PCS=4, seed=11)
+
+        cache_root = Path(tmpdir) / "phewas_cache"
+        run.CACHE_DIR = str(cache_root)
+        run.LOCK_DIR = os.path.join(run.CACHE_DIR, "locks")
+        run.TARGET_INVERSIONS = [TEST_TARGET_INVERSION]
+        run.NUM_PCS = core_data["pcs"].shape[1]
+        run.MIN_NEFF_FILTER = 0
+        run.MLE_REFIT_MIN_NEFF = 0
+        run.FDR_ALPHA = 1.0
+        run.LRT_SELECT_ALPHA = 1.0
+        run.MIN_CASES_FILTER = 0
+        run.MIN_CONTROLS_FILTER = 0
+        run.MASTER_RESULTS_CSV = str(Path(tmpdir) / "master.tsv")
+        run.INVERSION_DOSAGES_FILE = str(Path(tmpdir) / "dosages.tsv")
+
+        dosages_df = (
+            core_data["inversion_main"].reset_index().rename(columns={"person_id": "SampleID"})
+        )
+        write_tsv(run.INVERSION_DOSAGES_FILE, dosages_df)
+
+        defs_df = prime_all_caches_for_run(
+            core_data,
+            phenos,
+            TEST_CDR_CODENAME,
+            TEST_TARGET_INVERSION,
+            cache_dir=run.CACHE_DIR,
+        )
+        local_defs = make_local_pheno_defs_tsv(defs_df, tmpdir)
+        run.PHENOTYPE_DEFINITIONS_URL = str(local_defs)
+
+        sanitized_names = defs_df["sanitized_name"].tolist()
+        target_pheno = sanitized_names[0]
+
+        def write_stage1_results(phenos_list, ctx):
+            results_dir = Path(ctx["RESULTS_CACHE_DIR"])
+            lrt_dir = Path(ctx["LRT_OVERALL_CACHE_DIR"])
+            results_dir.mkdir(parents=True, exist_ok=True)
+            lrt_dir.mkdir(parents=True, exist_ok=True)
+            meta = {
+                "ctx_tag": ctx.get("CTX_TAG"),
+                "cdr_codename": ctx.get("cdr_codename"),
+                "target": ctx.get("TARGET_INVERSION"),
+            }
+            for name in phenos_list:
+                payload = {
+                    "Phenotype": name,
+                    "P_Value": 1.0,
+                    "OR": 1.0,
+                    "Beta": 0.0,
+                    "N_Total": 100,
+                    "N_Cases": 40,
+                    "N_Controls": 60,
+                }
+                io.atomic_write_json(results_dir / f"{name}.json", payload)
+                io.atomic_write_json(results_dir / f"{name}.meta.json", meta)
+                lrt_payload = {
+                    "P_LRT_Overall": 1.0,
+                    "P_Value": 1.0,
+                    "P_Overall_Valid": True,
+                    "P_Source": "lrt",
+                    "P_Method": "lrt",
+                }
+                io.atomic_write_json(lrt_dir / f"{name}.json", lrt_payload)
+                io.atomic_write_json(lrt_dir / f"{name}.meta.json", meta)
+
+        def stage1_stub(
+            core_df_with_const,
+            allowed_mask_by_cat,
+            anc_series,
+            phenos_list,
+            name_to_cat,
+            cdr_codename,
+            target_inversion,
+            ctx,
+            min_available_memory_gb,
+            on_pool_started=None,
+            mode=None,
+        ):
+            write_stage1_results(phenos_list, ctx)
+            return None
+
+        patches = [
+            patch("phewas.run.bigquery.Client", MagicMock()),
+            patch("phewas.run.io.load_related_to_remove", return_value=set()),
+            patch("phewas.pheno.populate_caches_prepass", lambda *_, **__: None),
+            patch("phewas.pheno.deduplicate_phenotypes", lambda *_, **__: None),
+            patch("phewas.pheno._prequeue_should_run", lambda *_, **__: True),
+            patch("phewas.testing.run_overall", stage1_stub),
+            patch("phewas.run.supervisor_main", lambda: run._pipeline_once()),
+            patch("phewas.pipes.run_lrt_followup", lambda *_, **__: None),
+        ]
+
+        with contextlib.ExitStack() as stack:
+            for p in patches:
+                stack.enter_context(p)
+            cli.main([])
+
+        with contextlib.ExitStack() as stack:
+            for p in patches:
+                stack.enter_context(p)
+            cli.main(["--pheno", target_pheno])
+
+        master_path = Path(run.MASTER_RESULTS_CSV)
+        assert master_path.exists(), "Master results file not produced"
+        master_df = pd.read_csv(master_path, sep="\t")
+        assert set(master_df["Phenotype"].astype(str)) == {target_pheno}
+
+
 def test_shared_covariates_reject_duplicate_indices():
     with temp_workspace() as tmpdir, preserve_run_globals():
         core_data, _ = make_synth_cohort(N=50, NUM_PCS=5)
