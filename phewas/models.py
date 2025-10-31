@@ -344,35 +344,6 @@ def _check_bootstrap_instability(invalid_count, total_draws, mc_se_p, reasons, p
         )
 
 
-def _check_effect_flip(beta_init, beta_final, se_init, pheno_name="unknown", site="ladder_compare"):
-    """Check for effect sign/scale flip between initial and final estimates."""
-    if not np.isfinite(beta_init) or not np.isfinite(beta_final) or not np.isfinite(se_init) or se_init <= 0:
-        return
-    
-    delta_beta = abs(beta_final - beta_init)
-    jump = delta_beta / se_init if se_init > 0 else 0.0
-    sign_flip = (beta_init * beta_final) < 0
-    z_init = beta_init / se_init if se_init > 0 else 0.0
-    
-    if sign_flip or jump >= 2.0:
-        # Guess suspected cause
-        if abs(beta_final) > abs(beta_init) * 3:
-            suspected = "separation"
-        elif jump > 5.0:
-            suspected = "leverage"
-        else:
-            suspected = "collinearity"
-        
-        print(
-            f"[EFFECT-FLIP] name={pheno_name} site={site} "
-            f"beta_init={beta_init:.4f} beta_final={beta_final:.4f} "
-            f"se_init={se_init:.4f} z_init={z_init:.2f} "
-            f"flip={str(sign_flip).lower()} jump=|Δβ|/SE0={jump:.2f} "
-            f"suspected_cause={suspected}",
-            flush=True
-        )
-
-
 def _clopper_pearson_interval(successes, total, alpha=0.01):
     if total <= 0:
         return 0.0, 1.0
@@ -1057,19 +1028,6 @@ def _fit_logit_ladder(
             f"used_firth=true pll={pll:.4f} path={'|'.join(tags)}",
             flush=True
         )
-        
-        # Check for effect flip from ridge to Firth
-        if target_ix is not None and "ridge_reached" in path_tags:
-            try:
-                # Get ridge params from earlier in the path (stored in ridge_fit if available)
-                # This is a simplified check - in practice ridge_fit may not be in scope
-                firth_params = getattr(firth_res, "params", None)
-                if firth_params is not None and len(firth_params) > target_ix:
-                    beta_firth = float(firth_params[target_ix])
-                    # We don't have ridge params easily accessible here, so skip detailed comparison
-                    # This would need refactoring to pass ridge_fit through
-            except:
-                pass
         
         # Firth refits triggered from the ridge pathway should allow inference.
         # Mark that ridge was in the path, but don't suppress Firth inference.
