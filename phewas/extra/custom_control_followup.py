@@ -21,6 +21,7 @@ working directory.
 from __future__ import annotations
 
 import os
+import re
 
 # ---------------------------------------------------------------------------
 # Cap native BLAS/OpenMP threads before importing NumPy/SciPy.
@@ -182,9 +183,34 @@ PCS_URI = PIPELINE_PCS_URI
 SEX_URI = PIPELINE_SEX_URI
 RELATEDNESS_URI = PIPELINE_RELATEDNESS_URI
 
+# Directory for phenotype-specific logs relative to the working directory.
+LOG_OUTPUT_DIR = Path("logs")
+_LOG_SANITIZE_RE = re.compile(r"[^A-Za-z0-9._-]+")
+_CLEARED_LOG_PATHS: set[Path] = set()
+
 # ---------------------------------------------------------------------------
 # Simple logging helpers
 # ---------------------------------------------------------------------------
+
+
+def _phenotype_log_path(prefix: str) -> Path:
+    LOG_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    sanitized = _LOG_SANITIZE_RE.sub("_", prefix)
+    sanitized = sanitized.strip("._-") or "phenotype"
+    if len(sanitized) > 128:
+        sanitized = sanitized[:128]
+    return LOG_OUTPUT_DIR / f"{sanitized}.log"
+
+
+def _initialise_pheno_log(prefix: str) -> None:
+    path = _phenotype_log_path(prefix)
+    if path in _CLEARED_LOG_PATHS:
+        return
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+    _CLEARED_LOG_PATHS.add(path)
 
 
 def info(message: str) -> None:
@@ -1848,12 +1874,18 @@ def _load_case_status(
 
 
 def _log_lines(prefix: str, message: str, *, level: str = "info") -> None:
-    for line in message.splitlines():
-        text = f"[{prefix}] {line}"
-        if level == "info":
-            info(text)
-        else:
-            warn(text)
+    lines = message.splitlines()
+    if not lines:
+        lines = [""]
+    log_path = _phenotype_log_path(prefix)
+    with log_path.open("a", encoding="utf-8") as handle:
+        for line in lines:
+            text = f"[{prefix}] {line}"
+            if level == "info":
+                info(text)
+            else:
+                warn(text)
+            handle.write(text + "\n")
 
 
 def _format_summary_dict(stats: Mapping[str, object]) -> str:
@@ -1877,6 +1909,7 @@ def _analyse_single_phenotype(
     scores_path: Path,
 ) -> tuple[dict[str, object] | None, list[str]]:
     prefix = f"{cfg.phenotype}"
+    _initialise_pheno_log(prefix)
     _log_lines(prefix, f"Initialising analysis for inversion {inv} (category: {cfg.category})")
 
     analysis_index = preconditioner.index
