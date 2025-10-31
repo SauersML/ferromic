@@ -59,20 +59,52 @@ def load_data() -> pd.DataFrame:
     for c in to_int:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce")
-    # exact-only
+
+    if "transcript_id" not in df.columns:
+        sys.exit("ERROR: transcript_id missing.")
     if "inv_exact_match" not in df.columns:
         sys.exit("ERROR: inv_exact_match column missing (needed for exact-only).")
+
+    # ids (computed early so we can track exclusions consistently)
+    df["cds_id"] = df["transcript_id"].astype(str)
+
+    def format_inv_id(row: pd.Series) -> str:
+        chr_ = row.get("chr", "")
+        try:
+            start = int(row["inv_start"])
+            end = int(row["inv_end"])
+        except (TypeError, ValueError):
+            return f"{chr_}:{row['inv_start']}-{row['inv_end']}"
+        return f"{chr_}:{start}-{end}"
+
+    df["inv_id"] = df.apply(format_inv_id, axis=1)
+
+    # exact-only
     df = df[df["inv_exact_match"] == 1].copy()
+
     # keep informative
     df = df[(df["n_pairs"] > 0) & (df["n_identical_pairs"].notna()) & (df["n_sequences"] >= 2)]
     if df.empty:
         sys.exit("No rows after exact-only & n_pairs>0 filter.")
 
-    # ids
-    if "transcript_id" not in df.columns:
-        sys.exit("ERROR: transcript_id missing.")
-    df["cds_id"] = df["transcript_id"].astype(str)
-    df["inv_id"] = df.apply(lambda r: f"{r['chr']}:{int(r['inv_start'])}-{int(r['inv_end'])}", axis=1)
+    # Ensure fair orientation comparisons: keep a CDS only when both orientations are present
+    orient_counts = (
+        df.groupby(["inv_id", "cds_id", "consensus"])["phy_group"]
+        .nunique()
+        .reset_index(name="n_orientations")
+    )
+    valid_keys = orient_counts[orient_counts["n_orientations"] == 2][["inv_id", "cds_id", "consensus"]]
+    df = df.merge(valid_keys.assign(_keep=1), on=["inv_id", "cds_id", "consensus"], how="left")
+    removal_mask = df["_keep"].isna()
+    removed = int(removal_mask.sum())
+    if removed:
+        print(
+            f"Removing {removed} CDS records lacking matched orientation entries for fair comparison."
+        )
+    df = df.loc[~removal_mask].copy()
+    if df.empty:
+        sys.exit("No rows remaining after enforcing matched orientation entries.")
+    df.drop(columns="_keep", inplace=True)
 
     # counts & covariates
     df["y"] = df["n_identical_pairs"].astype(int)
