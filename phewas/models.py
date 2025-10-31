@@ -158,9 +158,9 @@ def _check_separation_in_strata(X, y, target_col, pheno_name="unknown"):
     # Check overall 2x2 table
     carrier = X[target_col].to_numpy()
     cases = y.to_numpy()
-    
-    car_case = int(np.sum((carrier == 1) & (cases == 1)))
-    car_ctrl = int(np.sum((carrier == 1) & (cases == 0)))
+
+    car_case = int(np.sum((carrier > 0) & (cases == 1)))
+    car_ctrl = int(np.sum((carrier > 0) & (cases == 0)))
     noncar_case = int(np.sum((carrier == 0) & (cases == 1)))
     noncar_ctrl = int(np.sum((carrier == 0) & (cases == 0)))
     
@@ -181,9 +181,9 @@ def _check_separation_in_strata(X, y, target_col, pheno_name="unknown"):
                 continue
             car_sex = carrier[mask]
             case_sex = cases[mask]
-            
-            car_case_s = int(np.sum((car_sex == 1) & (case_sex == 1)))
-            car_ctrl_s = int(np.sum((car_sex == 1) & (case_sex == 0)))
+
+            car_case_s = int(np.sum((car_sex > 0) & (case_sex == 1)))
+            car_ctrl_s = int(np.sum((car_sex > 0) & (case_sex == 0)))
             noncar_case_s = int(np.sum((car_sex == 0) & (case_sex == 1)))
             noncar_ctrl_s = int(np.sum((car_sex == 0) & (case_sex == 0)))
             
