@@ -167,14 +167,19 @@ def _check_separation_in_strata(X, y, target_col, pheno_name="unknown"):
         flush=True
     )
 
-    # Carrier counts under multiple definitions
-    n_gt0 = int(np.sum(target > 0))
-    n_gte05 = int(np.sum(target >= 0.5))
-    n_eq1 = int(np.sum(target == 1))
-    n_eq2 = int(np.sum(target == 2))
+    # Dosage statistics by case/control status
+    case_mask = (cases == 1)
+    ctrl_mask = (cases == 0)
+
+    dosage_case_mean = np.mean(target[case_mask]) if case_mask.sum() > 0 else 0.0
+    dosage_case_std = np.std(target[case_mask]) if case_mask.sum() > 0 else 0.0
+    dosage_ctrl_mean = np.mean(target[ctrl_mask]) if ctrl_mask.sum() > 0 else 0.0
+    dosage_ctrl_std = np.std(target[ctrl_mask]) if ctrl_mask.sum() > 0 else 0.0
+
     print(
-        f"[CARRIER-COUNTS] name={pheno_name} stratum=overall "
-        f"gt0={n_gt0} gte0.5={n_gte05} eq1={n_eq1} eq2={n_eq2}",
+        f"[DOSAGE-STATS] name={pheno_name} stratum=overall "
+        f"cases_n={int(case_mask.sum())} cases_mean={dosage_case_mean:.4g} cases_std={dosage_case_std:.4g} "
+        f"ctrls_n={int(ctrl_mask.sum())} ctrls_mean={dosage_ctrl_mean:.4g} ctrls_std={dosage_ctrl_std:.4g}",
         flush=True
     )
 
@@ -183,25 +188,8 @@ def _check_separation_in_strata(X, y, target_col, pheno_name="unknown"):
         unique_val = target[0]
         print(
             f"[SEPARATION-STRATUM] name={pheno_name} site=design_check "
-            f"stratum=overall target_constant={unique_val:.3g} carrier_def=gt0 "
+            f"stratum=overall target_constant={unique_val:.3g} "
             f"driver=target action=gate_to_penalized",
-            flush=True
-        )
-    else:
-        # Show 2x2 table using carrier_def=">0"
-        car = target > 0
-        car_case = int(np.sum(car & (cases == 1)))
-        car_ctrl = int(np.sum(car & (cases == 0)))
-        noncar_case = int(np.sum((~car) & (cases == 1)))
-        noncar_ctrl = int(np.sum((~car) & (cases == 0)))
-        zero_cells = (0 in [car_case, car_ctrl, noncar_case, noncar_ctrl])
-
-        print(
-            f"[SEPARATION-STRATUM] name={pheno_name} site=design_check "
-            f"stratum=overall carrier_def=gt0 zero_cells={zero_cells} "
-            f"cells={{car_case:{car_case},car_ctrl:{car_ctrl},"
-            f"noncar_case:{noncar_case},noncar_ctrl:{noncar_ctrl}}} "
-            f"driver=target",
             flush=True
         )
 
@@ -214,12 +202,19 @@ def _check_separation_in_strata(X, y, target_col, pheno_name="unknown"):
             target_stratum = target[mask]
             cases_stratum = cases[mask]
 
-            # Carrier counts in stratum
-            n_gt0_s = int(np.sum(target_stratum > 0))
-            n_gte05_s = int(np.sum(target_stratum >= 0.5))
+            # Dosage statistics in stratum
+            case_mask_s = (cases_stratum == 1)
+            ctrl_mask_s = (cases_stratum == 0)
+
+            dosage_case_mean_s = np.mean(target_stratum[case_mask_s]) if case_mask_s.sum() > 0 else 0.0
+            dosage_case_std_s = np.std(target_stratum[case_mask_s]) if case_mask_s.sum() > 0 else 0.0
+            dosage_ctrl_mean_s = np.mean(target_stratum[ctrl_mask_s]) if ctrl_mask_s.sum() > 0 else 0.0
+            dosage_ctrl_std_s = np.std(target_stratum[ctrl_mask_s]) if ctrl_mask_s.sum() > 0 else 0.0
+
             print(
-                f"[CARRIER-COUNTS] name={pheno_name} stratum=sex={int(sex_val)} "
-                f"gt0={n_gt0_s} gte0.5={n_gte05_s}",
+                f"[DOSAGE-STATS] name={pheno_name} stratum=sex={int(sex_val)} "
+                f"cases_n={int(case_mask_s.sum())} cases_mean={dosage_case_mean_s:.4g} cases_std={dosage_case_std_s:.4g} "
+                f"ctrls_n={int(ctrl_mask_s.sum())} ctrls_mean={dosage_ctrl_mean_s:.4g} ctrls_std={dosage_ctrl_std_s:.4g}",
                 flush=True
             )
 
@@ -227,24 +222,8 @@ def _check_separation_in_strata(X, y, target_col, pheno_name="unknown"):
                 unique_val = target_stratum[0]
                 print(
                     f"[SEPARATION-STRATUM] name={pheno_name} site=design_check "
-                    f"stratum=sex={int(sex_val)} target_constant={unique_val:.3g} carrier_def=gt0 "
+                    f"stratum=sex={int(sex_val)} target_constant={unique_val:.3g} "
                     f"driver=target action=gate_to_penalized",
-                    flush=True
-                )
-            else:
-                car_s = target_stratum > 0
-                car_case_s = int(np.sum(car_s & (cases_stratum == 1)))
-                car_ctrl_s = int(np.sum(car_s & (cases_stratum == 0)))
-                noncar_case_s = int(np.sum((~car_s) & (cases_stratum == 1)))
-                noncar_ctrl_s = int(np.sum((~car_s) & (cases_stratum == 0)))
-                zero_cells_s = (0 in [car_case_s, car_ctrl_s, noncar_case_s, noncar_ctrl_s])
-
-                print(
-                    f"[SEPARATION-STRATUM] name={pheno_name} site=design_check "
-                    f"stratum=sex={int(sex_val)} carrier_def=gt0 zero_cells={zero_cells_s} "
-                    f"cells={{car_case:{car_case_s},car_ctrl:{car_ctrl_s},"
-                    f"noncar_case:{noncar_case_s},noncar_ctrl:{noncar_ctrl_s}}} "
-                    f"driver=target",
                     flush=True
                 )
 
