@@ -947,6 +947,7 @@ def _pipeline_once():
             "dosages": dosages_key,
             "covars": covar_key,
             "population_filter": population_filter_label,
+            "phenotype_filter": PHENOTYPE_FILTER,
         }
 
         def _inversion_cache_path(inv: str) -> str:
@@ -980,6 +981,7 @@ def _pipeline_once():
                 "BOOT_SEED_BASE": tctx.get("BOOT_SEED_BASE"),
                 "DATA_KEYS": data_keys,
                 "POPULATION_FILTER": population_filter_label,
+                "PHENOTYPE_FILTER": PHENOTYPE_FILTER,
             }
             return io.stable_hash(payload)
 
@@ -1043,6 +1045,7 @@ def _pipeline_once():
                     "STAGE1_MATCH_PHEWAS_DESIGN": True,
                     "STAGE1_EMIT_PHEWAS_EXTRAS": True,
                     "POPULATION_FILTER": population_filter_label,
+                    "PHENOTYPE_FILTER": PHENOTYPE_FILTER,
                     "ALLOW_ANCESTRY_FOLLOWUP": allow_ancestry_followups,
                 }
                 pheno.configure_from_ctx(ctx)
@@ -1520,9 +1523,11 @@ def _pipeline_once():
                     "SELECTION": tctx.get("SELECTION"),
                     "TARGET_INVERSION": target_inversion,
                     "CTX_TAG": ctx_tag_by_inversion.get(target_inversion),
+                    "DATA_KEYS": data_keys,
                     "STAGE1_REPORTS_FINAL": True,
                     "STAGE1_MATCH_PHEWAS_DESIGN": True,
                     "STAGE1_EMIT_PHEWAS_EXTRAS": True,
+                    "PHENOTYPE_FILTER": PHENOTYPE_FILTER,
                 }
 
                 pheno.configure_from_ctx(ctx)
