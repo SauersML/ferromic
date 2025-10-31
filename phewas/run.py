@@ -991,6 +991,8 @@ def _pipeline_once():
 
         category_summary_frames: list[pd.DataFrame] = []
         category_summary_lock = threading.Lock()
+        skipped_low_variance_inversions: set[str] = set()
+        skipped_low_variance_lock = threading.Lock()
         
         def run_single_inversion(target_inversion: str, baseline_rss_gb: float, shared_data: dict):
             inv_safe_name = models.safe_basename(target_inversion)
@@ -1049,14 +1051,25 @@ def _pipeline_once():
                     "ALLOW_ANCESTRY_FOLLOWUP": allow_ancestry_followups,
                 }
                 pheno.configure_from_ctx(ctx)
-                inversion_df = io.get_cached_or_generate(
-                    _inversion_cache_path(target_inversion),
-                    io.load_inversions,
-                    target_inversion,
-                    dosages_resolved,
-                    validate_target=target_inversion,
-                    lock_dir=LOCK_DIR,
-                )
+                try:
+                    inversion_df = io.get_cached_or_generate(
+                        _inversion_cache_path(target_inversion),
+                        io.load_inversions,
+                        target_inversion,
+                        dosages_resolved,
+                        validate_target=target_inversion,
+                        lock_dir=LOCK_DIR,
+                    )
+                except io.LowVarianceInversionError as exc:
+                    std_repr = "nan" if not np.isfinite(exc.std) else f"{exc.std:.4f}"
+                    print(
+                        f"{log_prefix} [WARN] Skipping inversion due to low variance "
+                        f"(std={std_repr}, threshold={exc.threshold}).",
+                        flush=True,
+                    )
+                    with skipped_low_variance_lock:
+                        skipped_low_variance_inversions.add(target_inversion)
+                    return
                 inversion_df.index = inversion_df.index.astype(str)
                 core_df = shared_data['covariates'].join(inversion_df, how="inner")
                 if not core_df.index.is_unique:
@@ -1404,6 +1417,13 @@ def _pipeline_once():
 
         all_results_from_disk = []
         for target_inversion in run.TARGET_INVERSIONS:
+            if target_inversion in skipped_low_variance_inversions:
+                inv_safe_name = models.safe_basename(target_inversion)
+                print(
+                    f"[INV {inv_safe_name}] Skipping consolidation due to low-variance dosage column.",
+                    flush=True,
+                )
+                continue
             inversion_cache_dir = os.path.join(CACHE_DIR, models.safe_basename(target_inversion))
             results_cache_dir = os.path.join(inversion_cache_dir, "results_atomic")
             result_files = [f for f in os.listdir(results_cache_dir) if f.endswith(".json") and not f.endswith(".meta.json")]
@@ -1426,7 +1446,10 @@ def _pipeline_once():
             print("No results found to process.")
         else:
             df = pd.DataFrame(all_results_from_disk)
-            print(f"Successfully consolidated {len(df)} results across {len(run.TARGET_INVERSIONS)} inversions.")
+            processed_inversion_count = len(set(run.TARGET_INVERSIONS) - skipped_low_variance_inversions)
+            print(
+                f"Successfully consolidated {len(df)} results across {processed_inversion_count} inversions."
+            )
 
             if "OR_CI95" not in df.columns: df["OR_CI95"] = np.nan
             def _compute_overall_or_ci(beta_val, p_val):
@@ -1445,7 +1468,7 @@ def _pipeline_once():
 
             df, _ = testing.consolidate_and_select(
                 df,
-                run.TARGET_INVERSIONS,
+                sorted(set(run.TARGET_INVERSIONS) - skipped_low_variance_inversions),
                 CACHE_DIR,
                 alpha=FDR_ALPHA,
                 mode=tctx["MODE"],
@@ -1461,16 +1484,35 @@ def _pipeline_once():
             name_to_cat = pheno_defs_df.set_index('sanitized_name')['disease_category'].to_dict()
 
             for target_inversion in run.TARGET_INVERSIONS:
+                if target_inversion in skipped_low_variance_inversions:
+                    inv_safe_name = models.safe_basename(target_inversion)
+                    print(
+                        f"[INV {inv_safe_name}] Skipping follow-up due to low-variance dosage column.",
+                        flush=True,
+                    )
+                    continue
                 # Re-create the inversion-specific context and data to ensure correct follow-up
                 dosages_path = _find_upwards(INVERSION_DOSAGES_FILE)
-                inversion_df = io.get_cached_or_generate(
-                    _inversion_cache_path(target_inversion),
-                    io.load_inversions,
-                    target_inversion,
-                    dosages_path,
-                    validate_target=target_inversion,
-                    lock_dir=LOCK_DIR,
-                )
+                try:
+                    inversion_df = io.get_cached_or_generate(
+                        _inversion_cache_path(target_inversion),
+                        io.load_inversions,
+                        target_inversion,
+                        dosages_path,
+                        validate_target=target_inversion,
+                        lock_dir=LOCK_DIR,
+                    )
+                except io.LowVarianceInversionError as exc:
+                    inv_safe_name = models.safe_basename(target_inversion)
+                    std_repr = "nan" if not np.isfinite(exc.std) else f"{exc.std:.4f}"
+                    print(
+                        f"[INV {inv_safe_name}] Skipping follow-up due to low variance "
+                        f"(std={std_repr}, threshold={exc.threshold}).",
+                        flush=True,
+                    )
+                    with skipped_low_variance_lock:
+                        skipped_low_variance_inversions.add(target_inversion)
+                    continue
                 inversion_df.index = inversion_df.index.astype(str)
 
                 core_df = shared_covariates_df.join(inversion_df, how="inner")
@@ -1549,6 +1591,13 @@ def _pipeline_once():
                 print("\n--- Consolidating all Stage-2 follow-up results ---")
                 follow_records = []
                 for target_inversion in run.TARGET_INVERSIONS:
+                    if target_inversion in skipped_low_variance_inversions:
+                        inv_safe_name = models.safe_basename(target_inversion)
+                        print(
+                            f"[INV {inv_safe_name}] Skipping follow-up consolidation due to low-variance dosage column.",
+                            flush=True,
+                        )
+                        continue
                     lrt_followup_cache_dir = os.path.join(CACHE_DIR, models.safe_basename(target_inversion), "lrt_followup")
                     if not os.path.isdir(lrt_followup_cache_dir): continue
                     files_follow = [f for f in os.listdir(lrt_followup_cache_dir) if f.endswith(".json") and not f.endswith(".meta.json")]
