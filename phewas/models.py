@@ -16,6 +16,7 @@ from scipy.special import expit
 from statsmodels.tools.sm_exceptions import ConvergenceWarning, PerfectSeparationWarning
 
 from . import iox as io
+from . import logging_utils
 
 CTX = {}  # Worker context with constants from run.py
 allowed_fp_by_cat = {}
@@ -2456,6 +2457,21 @@ def _pos_in_current(orig_ix, current_ix_array):
 
 def lrt_overall_worker(task):
     """Worker for Stage-1 overall LRT. Uses array-based pipeline."""
+    s_name = task["name"]
+    previous_pheno = CTX.get("current_phenotype")
+    with logging_utils.phenotype_logging(s_name):
+        try:
+            CTX["current_phenotype"] = s_name
+            return _lrt_overall_worker_impl(task)
+        finally:
+            if previous_pheno is None:
+                CTX.pop("current_phenotype", None)
+            else:
+                CTX["current_phenotype"] = previous_pheno
+
+
+def _lrt_overall_worker_impl(task):
+    """Worker for Stage-1 overall LRT. Uses array-based pipeline."""
     s_name, cat, target = task["name"], task["category"], task["target"]
     s_name_safe = safe_basename(s_name)
     result_path = os.path.join(CTX["LRT_OVERALL_CACHE_DIR"], f"{s_name_safe}.json")
@@ -3407,6 +3423,21 @@ def lrt_overall_worker(task):
         gc.collect()
 
 def bootstrap_overall_worker(task):
+    """Stage-1 parametric bootstrap worker with phenotype-specific logging."""
+    s_name = task["name"]
+    previous_pheno = CTX.get("current_phenotype")
+    with logging_utils.phenotype_logging(s_name):
+        try:
+            CTX["current_phenotype"] = s_name
+            return _bootstrap_overall_worker_impl(task)
+        finally:
+            if previous_pheno is None:
+                CTX.pop("current_phenotype", None)
+            else:
+                CTX["current_phenotype"] = previous_pheno
+
+
+def _bootstrap_overall_worker_impl(task):
     s_name, cat, target = task["name"], task["category"], task["target"]
     s_name_safe = safe_basename(s_name)
     boot_dir = CTX["BOOT_OVERALL_CACHE_DIR"]
@@ -3840,6 +3871,21 @@ def bootstrap_overall_worker(task):
         gc.collect()
 
 def lrt_followup_worker(task):
+    """Stage-2 LRT follow-up worker with phenotype-specific logging."""
+    s_name = task["name"]
+    previous_pheno = CTX.get("current_phenotype")
+    with logging_utils.phenotype_logging(s_name):
+        try:
+            CTX["current_phenotype"] = s_name
+            return _lrt_followup_worker_impl(task)
+        finally:
+            if previous_pheno is None:
+                CTX.pop("current_phenotype", None)
+            else:
+                CTX["current_phenotype"] = previous_pheno
+
+
+def _lrt_followup_worker_impl(task):
     """Worker for Stage-2 ancestry×dosage LRT and per-ancestry splits. Uses array-based pipeline."""
     s_name, category, target = task["name"], task["category"], task["target"]
     s_name_safe = safe_basename(s_name)
