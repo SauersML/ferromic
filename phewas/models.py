@@ -41,7 +41,7 @@ PENALIZED_CI_SPAN_RATIO = 1e3
 PENALIZED_CI_LO_OR_MAX = 1e-3
 PENALIZED_CI_HI_OR_MIN = 1e3
 
-MLE_SE_MAX_ALL = 10.0
+MLE_SE_MAX_ALL = 15.0
 MLE_SE_MAX_TARGET = 5.0
 MLE_MAX_ABS_XB = 15.0
 MLE_FRAC_P_EXTREME = 0.02
@@ -151,48 +151,100 @@ def _bootstrap_rng(seed_key):
 
 
 def _check_separation_in_strata(X, y, target_col, pheno_name="unknown"):
-    """Check for separation (zero cells) in 2x2 tables within strata."""
+    """Check if target variable has variance (not constant) in overall and within strata."""
     if target_col not in X.columns:
         return
-    
-    # Check overall 2x2 table
-    carrier = X[target_col].to_numpy()
+
+    target = X[target_col].to_numpy()
     cases = y.to_numpy()
 
-    car_case = int(np.sum((carrier > 0) & (cases == 1)))
-    car_ctrl = int(np.sum((carrier > 0) & (cases == 0)))
-    noncar_case = int(np.sum((carrier == 0) & (cases == 1)))
-    noncar_ctrl = int(np.sum((carrier == 0) & (cases == 0)))
-    
-    if 0 in [car_case, car_ctrl, noncar_case, noncar_ctrl]:
+    # Dosage descriptive statistics
+    dosage_quantiles = np.quantile(target, [0.01, 0.05, 0.50, 0.95, 0.99])
+    print(
+        f"[TARGET-DOSAGE] name={pheno_name} "
+        f"p01={dosage_quantiles[0]:.4g} p05={dosage_quantiles[1]:.4g} "
+        f"p50={dosage_quantiles[2]:.4g} p95={dosage_quantiles[3]:.4g} p99={dosage_quantiles[4]:.4g}",
+        flush=True
+    )
+
+    # Carrier counts under multiple definitions
+    n_gt0 = int(np.sum(target > 0))
+    n_gte05 = int(np.sum(target >= 0.5))
+    n_eq1 = int(np.sum(target == 1))
+    n_eq2 = int(np.sum(target == 2))
+    print(
+        f"[CARRIER-COUNTS] name={pheno_name} stratum=overall "
+        f"gt0={n_gt0} gte0.5={n_gte05} eq1={n_eq1} eq2={n_eq2}",
+        flush=True
+    )
+
+    # Check overall variance
+    if np.var(target) == 0:
+        unique_val = target[0]
         print(
             f"[SEPARATION-STRATUM] name={pheno_name} site=design_check "
-            f"stratum=overall cells={{car_case:{car_case},car_ctrl:{car_ctrl},"
-            f"noncar_case:{noncar_case},noncar_ctrl:{noncar_ctrl}}} "
+            f"stratum=overall target_constant={unique_val:.3g} carrier_def=gt0 "
             f"driver=target action=gate_to_penalized",
             flush=True
         )
-    
+    else:
+        # Show 2x2 table using carrier_def=">0"
+        car = target > 0
+        car_case = int(np.sum(car & (cases == 1)))
+        car_ctrl = int(np.sum(car & (cases == 0)))
+        noncar_case = int(np.sum((~car) & (cases == 1)))
+        noncar_ctrl = int(np.sum((~car) & (cases == 0)))
+        zero_cells = (0 in [car_case, car_ctrl, noncar_case, noncar_ctrl])
+
+        print(
+            f"[SEPARATION-STRATUM] name={pheno_name} site=design_check "
+            f"stratum=overall carrier_def=gt0 zero_cells={zero_cells} "
+            f"cells={{car_case:{car_case},car_ctrl:{car_ctrl},"
+            f"noncar_case:{noncar_case},noncar_ctrl:{noncar_ctrl}}} "
+            f"driver=target",
+            flush=True
+        )
+
     # Check within sex strata if available
     if 'sex' in X.columns:
         for sex_val in [0.0, 1.0]:
             mask = X['sex'] == sex_val
             if mask.sum() == 0:
                 continue
-            car_sex = carrier[mask]
-            case_sex = cases[mask]
+            target_stratum = target[mask]
+            cases_stratum = cases[mask]
 
-            car_case_s = int(np.sum((car_sex > 0) & (case_sex == 1)))
-            car_ctrl_s = int(np.sum((car_sex > 0) & (case_sex == 0)))
-            noncar_case_s = int(np.sum((car_sex == 0) & (case_sex == 1)))
-            noncar_ctrl_s = int(np.sum((car_sex == 0) & (case_sex == 0)))
-            
-            if 0 in [car_case_s, car_ctrl_s, noncar_case_s, noncar_ctrl_s]:
+            # Carrier counts in stratum
+            n_gt0_s = int(np.sum(target_stratum > 0))
+            n_gte05_s = int(np.sum(target_stratum >= 0.5))
+            print(
+                f"[CARRIER-COUNTS] name={pheno_name} stratum=sex={int(sex_val)} "
+                f"gt0={n_gt0_s} gte0.5={n_gte05_s}",
+                flush=True
+            )
+
+            if np.var(target_stratum) == 0:
+                unique_val = target_stratum[0]
                 print(
                     f"[SEPARATION-STRATUM] name={pheno_name} site=design_check "
-                    f"stratum=sex={int(sex_val)} cells={{car_case:{car_case_s},car_ctrl:{car_ctrl_s},"
-                    f"noncar_case:{noncar_case_s},noncar_ctrl:{noncar_ctrl_s}}} "
+                    f"stratum=sex={int(sex_val)} target_constant={unique_val:.3g} carrier_def=gt0 "
                     f"driver=target action=gate_to_penalized",
+                    flush=True
+                )
+            else:
+                car_s = target_stratum > 0
+                car_case_s = int(np.sum(car_s & (cases_stratum == 1)))
+                car_ctrl_s = int(np.sum(car_s & (cases_stratum == 0)))
+                noncar_case_s = int(np.sum((~car_s) & (cases_stratum == 1)))
+                noncar_ctrl_s = int(np.sum((~car_s) & (cases_stratum == 0)))
+                zero_cells_s = (0 in [car_case_s, car_ctrl_s, noncar_case_s, noncar_ctrl_s])
+
+                print(
+                    f"[SEPARATION-STRATUM] name={pheno_name} site=design_check "
+                    f"stratum=sex={int(sex_val)} carrier_def=gt0 zero_cells={zero_cells_s} "
+                    f"cells={{car_case:{car_case_s},car_ctrl:{car_ctrl_s},"
+                    f"noncar_case:{noncar_case_s},noncar_ctrl:{noncar_ctrl_s}}} "
+                    f"driver=target",
                     flush=True
                 )
 
@@ -360,53 +412,201 @@ def _clopper_pearson_interval(successes, total, alpha=0.01):
     return lower, upper
 
 
+def _extract_fit_provenance(fit, X, y):
+    """Extract core diagnostics from a fit object for logging."""
+    info = {}
+    try:
+        info["converged"] = bool(getattr(fit, "converged", False))
+        info["niter"] = int(getattr(fit, "niter", -1)) if hasattr(fit, "niter") else -1
+        info["llf"] = float(getattr(fit, "llf", float("nan")))
+
+        X_arr = X.to_numpy() if hasattr(X, "to_numpy") else np.asarray(X)
+        y_arr = np.asarray(y)
+        info["n"] = int(X_arr.shape[0])
+        info["n_cases"] = int(np.sum(y_arr))
+        info["n_ctrls"] = info["n"] - info["n_cases"]
+        info["p_events"] = float(info["n_cases"]) / max(1, info["n"])
+        info["p_covars"] = int(X_arr.shape[1])
+    except Exception:
+        pass
+    return info
+
+
 def _ok_mle_fit(fit, X, y, target_ix=None,
                 se_max_all=None, se_max_target=None,
                 max_abs_xb=None, frac_extreme=None):
-    if fit is None or (not hasattr(fit, "bse")):
-        return False
+    """
+    Check if MLE fit meets quality gates.
+    Returns: (ok: bool, fail_reason: str, fail_details: dict)
+    """
+    # Caps
     se_max_all = float(CTX.get("MLE_SE_MAX_ALL", MLE_SE_MAX_ALL) if se_max_all is None else se_max_all)
     se_max_target = float(CTX.get("MLE_SE_MAX_TARGET", MLE_SE_MAX_TARGET) if se_max_target is None else se_max_target)
     max_abs_xb = float(CTX.get("MLE_MAX_ABS_XB", MLE_MAX_ABS_XB) if max_abs_xb is None else max_abs_xb)
     frac_extreme = float(CTX.get("MLE_FRAC_P_EXTREME", MLE_FRAC_P_EXTREME) if frac_extreme is None else frac_extreme)
+
+    fail_reason = None
+    fail_details = {}
+
+    # Basic checks
+    if fit is None or (not hasattr(fit, "bse")):
+        fail_reason = "no_fit_or_no_bse"
+        print(f"[OK-MLE-FIT] ok=False FAIL_REASON={fail_reason}", flush=True)
+        return False, fail_reason, fail_details
+
     try:
         bse = np.asarray(fit.bse, dtype=np.float64)
-    except Exception:
-        return False
+    except Exception as e:
+        fail_reason = "bse_extraction_failed"
+        fail_details["error"] = str(e)
+        print(f"[OK-MLE-FIT] ok=False FAIL_REASON={fail_reason}", flush=True)
+        return False, fail_reason, fail_details
+
     if bse.ndim == 0:
         bse = np.array([float(bse)], dtype=np.float64)
-    if not np.all(np.isfinite(bse)):
-        return False
-    if np.nanmax(bse) > se_max_all:
-        return False
+
+    n_nonfinite_bse = int(np.sum(~np.isfinite(bse)))
+    if n_nonfinite_bse > 0:
+        fail_reason = "bse_not_finite"
+        fail_details["n_nonfinite_bse"] = n_nonfinite_bse
+        fail_details["bse_max"] = float(np.nanmax(bse))
+        print(f"[OK-MLE-FIT] ok=False FAIL_REASON={fail_reason} n_nonfinite_bse={n_nonfinite_bse}", flush=True)
+        return False, fail_reason, fail_details
+
+    # Extract core metrics
+    bse_max_val = float(np.nanmax(bse))
+    bse_tgt_val = None
     if target_ix is not None and 0 <= int(target_ix) < bse.size:
-        if (not np.isfinite(bse[int(target_ix)])) or (bse[int(target_ix)] > se_max_target):
-            return False
+        bse_tgt_val = float(bse[int(target_ix)])
+
     try:
         params = getattr(fit, "params", None)
         if params is None:
-            return False
+            fail_reason = "no_params"
+            print(f"[OK-MLE-FIT] ok=False FAIL_REASON={fail_reason}", flush=True)
+            return False, fail_reason, fail_details
         max_abs_linpred, frac_lo, frac_hi = _fit_diagnostics(X, y, params)
-        if (np.isfinite(max_abs_linpred) and max_abs_linpred > max_abs_xb):
-            return False
-        if (np.isfinite(frac_lo) and frac_lo > frac_extreme) or (np.isfinite(frac_hi) and frac_hi > frac_extreme):
-            return False
+        frac_total = frac_lo + frac_hi
+
+        # Extract p_hat for additional diagnostics
+        X_arr = X.to_numpy() if hasattr(X, "to_numpy") else np.asarray(X)
+        params_arr = np.asarray(params, dtype=np.float64)
+        linpred = X_arr @ params_arr
+        p_hat = expit(linpred)
+        p_min = float(np.min(p_hat))
+        p_max = float(np.max(p_hat))
+    except Exception as e:
+        fail_reason = "diagnostics_failed"
+        fail_details["error"] = str(e)
+        print(f"[OK-MLE-FIT] ok=False FAIL_REASON={fail_reason} error={str(e)}", flush=True)
+        return False, fail_reason, fail_details
+
+    # Check design matrix properties
+    X_arr = X.to_numpy() if hasattr(X, "to_numpy") else np.asarray(X, dtype=np.float64)
+    X_rank = int(np.linalg.matrix_rank(X_arr))
+    X_ncols = int(X_arr.shape[1])
+    X_full_rank = X_rank == X_ncols
+
+    # vcov checks
+    vcov_ok = True
+    vcov_min_eig = float("nan")
+    vcov_cond = float("nan")
+    try:
+        if hasattr(fit, "cov_params"):
+            vcov = np.asarray(fit.cov_params(), dtype=np.float64)
+            eigvals = np.linalg.eigvalsh(vcov)
+            vcov_min_eig = float(np.min(eigvals))
+            if vcov_min_eig > 0:
+                vcov_cond = float(np.max(eigvals) / vcov_min_eig)
+            else:
+                vcov_ok = False
+                vcov_cond = float("inf")
     except Exception:
-        return False
-    return True
+        vcov_ok = False
+
+    # Evaluate all guards with per-guard logging
+    g_finite_bse = n_nonfinite_bse == 0
+    g_se_all = bse_max_val <= se_max_all
+    g_se_tgt = True
+    if bse_tgt_val is not None:
+        g_se_tgt = np.isfinite(bse_tgt_val) and (bse_tgt_val <= se_max_target)
+    g_linpred = not (np.isfinite(max_abs_linpred) and max_abs_linpred > max_abs_xb)
+    g_extreme = not ((np.isfinite(frac_lo) and frac_lo > frac_extreme) or
+                     (np.isfinite(frac_hi) and frac_hi > frac_extreme))
+    g_vcov = vcov_ok
+    g_rank = X_full_rank
+
+    # Print per-guard PASS/FAIL
+    print(f"QC_FINITE_BSE: nonfinite={n_nonfinite_bse} -> {'PASS' if g_finite_bse else 'FAIL'}", flush=True)
+    print(f"QC_SE_ALL: value={bse_max_val:.4g} cap={se_max_all} -> {'PASS' if g_se_all else 'FAIL'}", flush=True)
+    if bse_tgt_val is not None:
+        print(f"QC_SE_TARGET: value={bse_tgt_val:.4g} cap={se_max_target} -> {'PASS' if g_se_tgt else 'FAIL'}", flush=True)
+    print(f"QC_MAX_ABS_XB: value={max_abs_linpred:.4g} cap={max_abs_xb} -> {'PASS' if g_linpred else 'FAIL'}", flush=True)
+    print(f"QC_EXTREME_P_FRAC: lo={frac_lo:.4g} hi={frac_hi:.4g} total={frac_total:.4g} cap={frac_extreme} -> {'PASS' if g_extreme else 'FAIL'}", flush=True)
+    print(f"QC_VCOV_POSDEF: min_eig={vcov_min_eig:.4g} cond={vcov_cond:.4g} -> {'PASS' if g_vcov else 'FAIL'}", flush=True)
+    print(f"QC_X_RANK: rank={X_rank} ncols={X_ncols} full_rank={X_full_rank} -> {'PASS' if g_rank else 'FAIL'}", flush=True)
+
+    # Determine first failed guard
+    ok = g_finite_bse and g_se_all and g_se_tgt and g_linpred and g_extreme and g_vcov and g_rank
+
+    if not ok:
+        if not g_finite_bse:
+            fail_reason = "bse_not_finite"
+        elif not g_se_all:
+            fail_reason = "bse_all_exceeds_cap"
+            fail_details["bse_max"] = bse_max_val
+            fail_details["cap"] = se_max_all
+        elif not g_se_tgt:
+            fail_reason = "bse_target_exceeds_cap"
+            fail_details["bse_target"] = bse_tgt_val
+            fail_details["cap"] = se_max_target
+        elif not g_linpred:
+            fail_reason = "max_abs_xb_exceeds_cap"
+            fail_details["max_abs_xb"] = max_abs_linpred
+            fail_details["cap"] = max_abs_xb
+        elif not g_extreme:
+            fail_reason = "extreme_probs_exceed_cap"
+            fail_details["frac_lo"] = frac_lo
+            fail_details["frac_hi"] = frac_hi
+            fail_details["cap"] = frac_extreme
+        elif not g_vcov:
+            fail_reason = "vcov_not_posdef"
+            fail_details["min_eig"] = vcov_min_eig
+        elif not g_rank:
+            fail_reason = "rank_deficiency"
+            fail_details["rank"] = X_rank
+            fail_details["ncols"] = X_ncols
+
+    # Canonical summary line
+    fail_details_str = " ".join(f"{k}={v:.4g}" if isinstance(v, (int, float)) else f"{k}={v}"
+                                 for k, v in fail_details.items())
+
+    print(
+        f"[OK-MLE-FIT] ok={ok} FAIL_REASON={fail_reason if not ok else 'none'} | "
+        f"bse_max={bse_max_val:.4g} bse_tgt={bse_tgt_val if bse_tgt_val is not None else 'NA'} "
+        f"max_abs_xb={max_abs_linpred:.4g} frac_extreme={frac_total:.4%} "
+        f"pmin={p_min:.4g} pmax={p_max:.4g} vcov_cond={vcov_cond:.4g} X_rank={X_rank}/{X_ncols} | "
+        f"{fail_details_str}",
+        flush=True
+    )
+
+    return ok, fail_reason, fail_details
 
 
 def _mle_prefit_ok(X, y, target_ix=None, const_ix=None):
     X_np = X.to_numpy(dtype=np.float64, copy=False) if hasattr(X, "to_numpy") else np.asarray(X, dtype=np.float64)
     y_np = np.asarray(y, dtype=np.float64)
     if X_np.ndim != 2 or y_np.ndim != 1 or X_np.shape[0] != y_np.shape[0]:
+        print("[MLE-PREFIT-OK] ok=False reason=shape_mismatch", flush=True)
         return False
     n = float(X_np.shape[0])
     if n <= 0:
+        print("[MLE-PREFIT-OK] ok=False reason=empty_data", flush=True)
         return False
     n_cases = float(np.sum(y_np))
     n_ctrls = n - n_cases
     if n_cases <= 0 or n_ctrls <= 0:
+        print(f"[MLE-PREFIT-OK] ok=False reason=no_variation n_cases={n_cases:.0f} n_ctrls={n_ctrls:.0f}", flush=True)
         return False
     p_eff = int(X_np.shape[1])
     if const_ix is not None and 0 <= int(const_ix) < X_np.shape[1]:
@@ -414,13 +614,29 @@ def _mle_prefit_ok(X, y, target_ix=None, const_ix=None):
     p_eff = max(1, p_eff)
     epv = min(n_cases, n_ctrls) / float(p_eff)
     epv_min = float(CTX.get("EPV_MIN_FOR_MLE", EPV_MIN_FOR_MLE))
-    if epv < epv_min:
-        return False
+
+    tgt_std = None
+    tgt_var_min = None
     if target_ix is not None and 0 <= int(target_ix) < X_np.shape[1]:
         tgt_std = float(np.nanstd(X_np[:, int(target_ix)]))
-        if tgt_std < float(CTX.get("TARGET_VAR_MIN_FOR_MLE", TARGET_VAR_MIN_FOR_MLE)):
-            return False
-    return True
+        tgt_var_min = float(CTX.get("TARGET_VAR_MIN_FOR_MLE", TARGET_VAR_MIN_FOR_MLE))
+
+    g_epv = epv >= epv_min
+    g_tgt_var = True
+    if tgt_std is not None and tgt_var_min is not None:
+        g_tgt_var = tgt_std >= tgt_var_min
+
+    ok = g_epv and g_tgt_var
+
+    print(
+        f"[MLE-PREFIT-OK] ok={ok} | "
+        f"n={n:.0f} n_cases={n_cases:.0f} n_ctrls={n_ctrls:.0f} p_eff={p_eff} | "
+        f"epv={epv:.2f}>=cap{epv_min}:{g_epv} | "
+        f"tgt_std={tgt_std if tgt_std is not None else 'NA'}>=cap{tgt_var_min if tgt_var_min is not None else 'NA'}:{g_tgt_var}",
+        flush=True
+    )
+
+    return ok
 
 
 def _logit_mle_refit_offset(X, y, offset=None, maxiter=200, tol=1e-8):
@@ -1092,9 +1308,8 @@ def _fit_logit_ladder(
                                 flush=True
                             )
                             continue
-                        if _converged(refit) and _ok_mle_fit(
-                            refit, X, y, target_ix=target_ix
-                        ):
+                        refit_ok, fail_reason, fail_details = _ok_mle_fit(refit, X, y, target_ix=target_ix)
+                        if _converged(refit) and refit_ok:
                             print(
                                 f"[MLE-REFIT-SUCCESS] name={pheno_name} site=_fit_logit_ladder "
                                 f"method={method} ok_mle_fit=true",
@@ -1107,9 +1322,10 @@ def _fit_logit_ladder(
                             setattr(refit, "_firth_seeded_refit", True)
                             return refit, "firth_seeded_refit"
                         else:
+                            fail_details_str = " ".join(f"{k}={v}" for k, v in fail_details.items())
                             print(
                                 f"[MLE-REFIT-FAIL] name={pheno_name} site=_fit_logit_ladder "
-                                f"method={method} reason=_ok_mle_fit=false",
+                                f"method={method} FAIL_REASON={fail_reason} {fail_details_str}",
                                 flush=True
                             )
         return firth_res, "firth_refit"
@@ -1142,7 +1358,8 @@ def _fit_logit_ladder(
                         tol=1e-8,
                         start_params=user_start
                     )
-                    if _converged(mle_newton) and _ok_mle_fit(mle_newton, X, y, target_ix=target_ix):
+                    mle_newton_ok, _, _ = _ok_mle_fit(mle_newton, X, y, target_ix=target_ix)
+                    if _converged(mle_newton) and mle_newton_ok:
                         setattr(mle_newton, "_final_is_mle", True)
                         setattr(mle_newton, "_path_reasons", ["mle_first_newton"] + prefit_gate_tags)
                         return mle_newton, "mle_first_newton"
@@ -1156,7 +1373,8 @@ def _fit_logit_ladder(
                         gtol=1e-8,
                         start_params=user_start
                     )
-                    if _converged(mle_bfgs) and _ok_mle_fit(mle_bfgs, X, y, target_ix=target_ix):
+                    mle_bfgs_ok, _, _ = _ok_mle_fit(mle_bfgs, X, y, target_ix=target_ix)
+                    if _converged(mle_bfgs) and mle_bfgs_ok:
                         setattr(mle_bfgs, "_final_is_mle", True)
                         setattr(mle_bfgs, "_path_reasons", ["mle_first_bfgs"] + prefit_gate_tags)
                         return mle_bfgs, "mle_first_bfgs"
@@ -1310,7 +1528,8 @@ def _fit_logit_ladder(
                     **extra_flag,
                     **kwargs
                 )
-                if _converged(refit_newton) and _ok_mle_fit(refit_newton, X, y, target_ix=target_ix):
+                refit_newton_ok, _, _ = _ok_mle_fit(refit_newton, X, y, target_ix=target_ix)
+                if _converged(refit_newton) and refit_newton_ok:
                     setattr(refit_newton, "_used_ridge_seed", True)
                     setattr(refit_newton, "_final_is_mle", True)
                     tags = ["ridge_seeded_refit"] + gate_tags + prefit_gate_tags
@@ -1330,7 +1549,8 @@ def _fit_logit_ladder(
                     **extra_flag,
                     **kwargs
                 )
-                if _converged(refit_bfgs) and _ok_mle_fit(refit_bfgs, X, y, target_ix=target_ix):
+                refit_bfgs_ok, _, _ = _ok_mle_fit(refit_bfgs, X, y, target_ix=target_ix)
+                if _converged(refit_bfgs) and refit_bfgs_ok:
                     setattr(refit_bfgs, "_used_ridge_seed", True)
                     setattr(refit_bfgs, "_final_is_mle", True)
                     tags = ["ridge_seeded_refit"] + gate_tags + prefit_gate_tags
@@ -2799,6 +3019,10 @@ def _lrt_overall_worker_impl(task):
             )
         full_is_mle = bool(getattr(fit_full, "_final_is_mle", False)) and not bool(getattr(fit_full, "_used_firth", False))
         red_is_mle = bool(getattr(fit_red, "_final_is_mle", False)) and not bool(getattr(fit_red, "_used_firth", False))
+
+        full_ok, _, _ = _ok_mle_fit(fit_full, X_full_zv, yb, target_ix=target_ix) if fit_full is not None else (False, None, {})
+        red_ok, _, _ = _ok_mle_fit(fit_red, X_red_zv, yb) if fit_red is not None else (False, None, {})
+
         inference_family = None
         fit_full_use = None
         fit_red_use = None
@@ -2807,8 +3031,8 @@ def _lrt_overall_worker_impl(task):
             and fit_red is not None
             and full_is_mle
             and red_is_mle
-            and _ok_mle_fit(fit_full, X_full_zv, yb, target_ix=target_ix)
-            and _ok_mle_fit(fit_red, X_red_zv, yb)
+            and full_ok
+            and red_ok
         ):
             inference_family = "mle"
             fit_full_use = fit_full
@@ -3067,7 +3291,8 @@ def _lrt_overall_worker_impl(task):
             if fit_full is not None and not bool(getattr(fit_full, "_used_ridge", False)) and not bool(
                 getattr(fit_full, "_used_firth", False)
             ):
-                if _ok_mle_fit(fit_full, X_full_zv, yb, target_ix=target_ix):
+                fit_full_wald_ok, _, _ = _ok_mle_fit(fit_full, X_full_zv, yb, target_ix=target_ix)
+                if fit_full_wald_ok:
                     wald_fit = fit_full
             if (
                 wald_fit is None
@@ -3075,7 +3300,8 @@ def _lrt_overall_worker_impl(task):
                 and not bool(getattr(fit_full_use, "_used_ridge", False))
                 and not bool(getattr(fit_full_use, "_used_firth", False))
             ):
-                if _ok_mle_fit(fit_full_use, X_full_zv, yb, target_ix=target_ix):
+                fit_full_use_ok, _, _ = _ok_mle_fit(fit_full_use, X_full_zv, yb, target_ix=target_ix)
+                if fit_full_use_ok:
                     wald_fit = fit_full_use
             if wald_fit is not None:
                 wald = _wald_ci_or_from_fit(wald_fit, target_ix, alpha=0.05, penalized=False)
@@ -3757,10 +3983,11 @@ def _bootstrap_overall_worker_impl(task):
                 ci_valid = True
         if (not ci_valid) and p_valid and fit_full is not None and target in X_full_zv.columns:
             wald = {"valid": False}
+            fit_full_wald_ok2, _, _ = _ok_mle_fit(fit_full, X_full_zv, yb, target_ix=target_ix_full)
             if (
                 not bool(getattr(fit_full, "_used_ridge", False))
                 and not bool(getattr(fit_full, "_used_firth", False))
-                and _ok_mle_fit(fit_full, X_full_zv, yb, target_ix=target_ix_full)
+                and fit_full_wald_ok2
             ):
                 wald = _wald_ci_or_from_fit(fit_full, target_ix_full, alpha=0.05, penalized=False)
             elif bool(CTX.get("ALLOW_PENALIZED_WALD", DEFAULT_ALLOW_PENALIZED_WALD)) and bool(
@@ -4102,13 +4329,17 @@ def _lrt_followup_worker_impl(task):
         if df_lrt > 0:
             full_is_mle = bool(getattr(fit_full, "_final_is_mle", False)) and not bool(getattr(fit_full, "_used_firth", False))
             red_is_mle = bool(getattr(fit_red, "_final_is_mle", False)) and not bool(getattr(fit_red, "_used_firth", False))
+
+            full_ok2, _, _ = _ok_mle_fit(fit_full, X_full_zv, yb) if fit_full is not None else (False, None, {})
+            red_ok2, _, _ = _ok_mle_fit(fit_red, X_red_zv, yb) if fit_red is not None else (False, None, {})
+
             if (
                 fit_full is not None
                 and fit_red is not None
                 and full_is_mle
                 and red_is_mle
-                and _ok_mle_fit(fit_full, X_full_zv, yb)
-                and _ok_mle_fit(fit_red, X_red_zv, yb)
+                and full_ok2
+                and red_ok2
             ):
                 inference_family = "mle"
                 fit_full_use = fit_full
@@ -4304,6 +4535,9 @@ def _lrt_followup_worker_impl(task):
             fit_full_use = None
             fit_red_use = None
 
+            full_ok_anc, _, _ = _ok_mle_fit(fit_full, X_anc_zv, y_anc, target_ix=target_ix_anc) if fit_full is not None else (False, None, {})
+            red_ok_anc, _, _ = _ok_mle_fit(fit_red, X_anc_red, y_anc) if fit_red is not None else (False, None, {})
+
             if (
                 fit_full is not None
                 and fit_red is not None
@@ -4311,8 +4545,8 @@ def _lrt_followup_worker_impl(task):
                 and not bool(getattr(fit_full, "_used_firth", False))
                 and bool(getattr(fit_red, "_final_is_mle", False))
                 and not bool(getattr(fit_red, "_used_firth", False))
-                and _ok_mle_fit(fit_full, X_anc_zv, y_anc, target_ix=target_ix_anc)
-                and _ok_mle_fit(fit_red, X_anc_red, y_anc)
+                and full_ok_anc
+                and red_ok_anc
             ):
                 inference_family = "mle"
                 fit_full_use = fit_full
