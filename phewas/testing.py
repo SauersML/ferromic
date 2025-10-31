@@ -126,8 +126,12 @@ def consolidate_and_select(df, inversions, cache_root, alpha=0.05,
                     if meta.get("target") != inv:
                         continue
                     rec = pd.read_json(os.path.join(lrt_dir, fn), typ="series").to_dict()
+                    phenotype_val = rec.get("Phenotype")
+                    if phenotype_val is None or pd.isna(phenotype_val):
+                        phenotype_val = os.path.splitext(fn)[0]
+                    phenotype_key = str(phenotype_val)
                     rows.append({
-                        "Phenotype": os.path.splitext(fn)[0],
+                        "Phenotype": phenotype_key,
                         "Inversion": inv,
                         "P_LRT_Overall": pd.to_numeric(rec.get("P_LRT_Overall"), errors="coerce"),
                         "P_Value": pd.to_numeric(rec.get("P_Value"), errors="coerce"),
@@ -186,8 +190,12 @@ def consolidate_and_select(df, inversions, cache_root, alpha=0.05,
                 if meta.get("target") != inv:
                     continue
                 rec = pd.read_json(os.path.join(boot_dir, fn), typ="series").to_dict()
+                phenotype_val = rec.get("Phenotype")
+                if phenotype_val is None or pd.isna(phenotype_val):
+                    phenotype_val = os.path.splitext(fn)[0]
+                phenotype_key = str(phenotype_val)
                 rows.append({
-                    "Phenotype": os.path.splitext(fn)[0],
+                    "Phenotype": phenotype_key,
                     "Inversion": inv,
                     "P_EMP": pd.to_numeric(rec.get("P_EMP"), errors="coerce"),
                     "T_OBS": pd.to_numeric(rec.get("T_OBS"), errors="coerce"),
