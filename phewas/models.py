@@ -77,6 +77,7 @@ def _write_meta(meta_path, kind, s_name, category, target, core_cols, core_idx_f
         "cdr_codename": CTX.get("cdr_codename"),
         "mode": CTX.get("MODE"),
         "selection": CTX.get("SELECTION"),
+        "phenotype_filter": CTX.get("PHENOTYPE_FILTER"),
     }
     data_keys = CTX.get("DATA_KEYS")
     if data_keys:
