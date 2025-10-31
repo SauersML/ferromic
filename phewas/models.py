@@ -352,6 +352,7 @@ def _ok_mle_fit(fit, X, y, target_ix=None,
                 se_max_all=None, se_max_target=None,
                 max_abs_xb=None, frac_extreme=None):
     if fit is None or (not hasattr(fit, "bse")):
+        print("[OK-MLE-FIT] ok=False reason=no_fit_or_no_bse", flush=True)
         return False
     se_max_all = float(CTX.get("MLE_SE_MAX_ALL", MLE_SE_MAX_ALL) if se_max_all is None else se_max_all)
     se_max_target = float(CTX.get("MLE_SE_MAX_TARGET", MLE_SE_MAX_TARGET) if se_max_target is None else se_max_target)
@@ -360,41 +361,74 @@ def _ok_mle_fit(fit, X, y, target_ix=None,
     try:
         bse = np.asarray(fit.bse, dtype=np.float64)
     except Exception:
+        print("[OK-MLE-FIT] ok=False reason=bse_extraction_failed", flush=True)
         return False
     if bse.ndim == 0:
         bse = np.array([float(bse)], dtype=np.float64)
     if not np.all(np.isfinite(bse)):
+        print(f"[OK-MLE-FIT] ok=False reason=bse_not_finite bse_max={np.nanmax(bse):.4g}", flush=True)
         return False
-    if np.nanmax(bse) > se_max_all:
-        return False
+
+    bse_max_val = float(np.nanmax(bse))
+    bse_tgt_val = None
     if target_ix is not None and 0 <= int(target_ix) < bse.size:
-        if (not np.isfinite(bse[int(target_ix)])) or (bse[int(target_ix)] > se_max_target):
-            return False
+        bse_tgt_val = float(bse[int(target_ix)])
+
+    max_abs_linpred = None
+    frac_lo = None
+    frac_hi = None
+    frac_total = None
+
     try:
         params = getattr(fit, "params", None)
         if params is None:
+            print("[OK-MLE-FIT] ok=False reason=no_params", flush=True)
             return False
         max_abs_linpred, frac_lo, frac_hi = _fit_diagnostics(X, y, params)
-        if (np.isfinite(max_abs_linpred) and max_abs_linpred > max_abs_xb):
-            return False
-        if (np.isfinite(frac_lo) and frac_lo > frac_extreme) or (np.isfinite(frac_hi) and frac_hi > frac_extreme):
-            return False
-    except Exception:
+        frac_total = frac_lo + frac_hi
+    except Exception as e:
+        print(f"[OK-MLE-FIT] ok=False reason=diagnostics_failed error={str(e)}", flush=True)
         return False
-    return True
+
+    # Evaluate all guards
+    g_se_all = bse_max_val <= se_max_all
+    g_se_tgt = True
+    if bse_tgt_val is not None:
+        g_se_tgt = np.isfinite(bse_tgt_val) and (bse_tgt_val <= se_max_target)
+    g_linpred = not (np.isfinite(max_abs_linpred) and max_abs_linpred > max_abs_xb)
+    g_extreme = not ((np.isfinite(frac_lo) and frac_lo > frac_extreme) or
+                     (np.isfinite(frac_hi) and frac_hi > frac_extreme))
+
+    ok = g_se_all and g_se_tgt and g_linpred and g_extreme
+
+    # Print comprehensive diagnostics
+    print(
+        f"[OK-MLE-FIT] ok={ok} | "
+        f"se_all={bse_max_val:.4g}<=cap{se_max_all}:{g_se_all} | "
+        f"se_tgt={bse_tgt_val if bse_tgt_val is not None else 'NA'}<=cap{se_max_target}:{g_se_tgt} | "
+        f"max|Xb|={max_abs_linpred:.4g}<=cap{max_abs_xb}:{g_linpred} | "
+        f"frac_extreme={frac_total:.4%}<=cap{100*frac_extreme:.1f}%:{g_extreme} | "
+        f"frac_lo={frac_lo:.4%} frac_hi={frac_hi:.4%}",
+        flush=True
+    )
+
+    return ok
 
 
 def _mle_prefit_ok(X, y, target_ix=None, const_ix=None):
     X_np = X.to_numpy(dtype=np.float64, copy=False) if hasattr(X, "to_numpy") else np.asarray(X, dtype=np.float64)
     y_np = np.asarray(y, dtype=np.float64)
     if X_np.ndim != 2 or y_np.ndim != 1 or X_np.shape[0] != y_np.shape[0]:
+        print("[MLE-PREFIT-OK] ok=False reason=shape_mismatch", flush=True)
         return False
     n = float(X_np.shape[0])
     if n <= 0:
+        print("[MLE-PREFIT-OK] ok=False reason=empty_data", flush=True)
         return False
     n_cases = float(np.sum(y_np))
     n_ctrls = n - n_cases
     if n_cases <= 0 or n_ctrls <= 0:
+        print(f"[MLE-PREFIT-OK] ok=False reason=no_variation n_cases={n_cases:.0f} n_ctrls={n_ctrls:.0f}", flush=True)
         return False
     p_eff = int(X_np.shape[1])
     if const_ix is not None and 0 <= int(const_ix) < X_np.shape[1]:
@@ -402,13 +436,29 @@ def _mle_prefit_ok(X, y, target_ix=None, const_ix=None):
     p_eff = max(1, p_eff)
     epv = min(n_cases, n_ctrls) / float(p_eff)
     epv_min = float(CTX.get("EPV_MIN_FOR_MLE", EPV_MIN_FOR_MLE))
-    if epv < epv_min:
-        return False
+
+    tgt_std = None
+    tgt_var_min = None
     if target_ix is not None and 0 <= int(target_ix) < X_np.shape[1]:
         tgt_std = float(np.nanstd(X_np[:, int(target_ix)]))
-        if tgt_std < float(CTX.get("TARGET_VAR_MIN_FOR_MLE", TARGET_VAR_MIN_FOR_MLE)):
-            return False
-    return True
+        tgt_var_min = float(CTX.get("TARGET_VAR_MIN_FOR_MLE", TARGET_VAR_MIN_FOR_MLE))
+
+    g_epv = epv >= epv_min
+    g_tgt_var = True
+    if tgt_std is not None and tgt_var_min is not None:
+        g_tgt_var = tgt_std >= tgt_var_min
+
+    ok = g_epv and g_tgt_var
+
+    print(
+        f"[MLE-PREFIT-OK] ok={ok} | "
+        f"n={n:.0f} n_cases={n_cases:.0f} n_ctrls={n_ctrls:.0f} p_eff={p_eff} | "
+        f"epv={epv:.2f}>=cap{epv_min}:{g_epv} | "
+        f"tgt_std={tgt_std if tgt_std is not None else 'NA'}>=cap{tgt_var_min if tgt_var_min is not None else 'NA'}:{g_tgt_var}",
+        flush=True
+    )
+
+    return ok
 
 
 def _logit_mle_refit_offset(X, y, offset=None, maxiter=200, tol=1e-8):
