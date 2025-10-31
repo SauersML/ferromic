@@ -330,12 +330,8 @@ def plot_volcano(df, out_pdf):
         ax.set_xticklabels(xlabels, fontsize=15)
 
     # Legend inside top-right; include dotted FDR sample
-    sig_inv_levels = [
-        inv for inv in inv_levels
-        if not df[(df["Inversion"] == inv) & df["is_significant"]].empty
-    ]
     handles, ncol = create_legend_handles(
-        inv_levels, color_map, marker_map, fdr_label, y_fdr, sig_inv_levels
+        inv_levels, color_map, marker_map, fdr_label, y_fdr
     )
     ax.legend(
         handles=handles, title="Key",

@@ -138,8 +138,7 @@ def bh_fdr_cutoff(pvals, alpha=0.05):
 
 # --------------------------- Legend Creation ---------------------------
 
-def create_legend_handles(inv_levels, color_map, marker_map, fdr_label, y_fdr, 
-                          sig_inv_levels=None):
+def create_legend_handles(inv_levels, color_map, marker_map, fdr_label, y_fdr):
     """Create consistent legend handles for volcano plots.
     
     Parameters
@@ -154,8 +153,6 @@ def create_legend_handles(inv_levels, color_map, marker_map, fdr_label, y_fdr,
         Label for FDR line
     y_fdr : float
         FDR threshold value (or nan)
-    sig_inv_levels : list, optional
-        Subset of inversions with significant hits (if None, uses all)
         
     Returns
     -------
@@ -164,22 +161,19 @@ def create_legend_handles(inv_levels, color_map, marker_map, fdr_label, y_fdr,
     ncol : int
         Recommended number of columns for legend
     """
-    # Determine which inversions to show in legend
-    legend_inv_levels = sig_inv_levels if sig_inv_levels else inv_levels
-    
     # Create inversion handles
     inv_handles = [
         Line2D([], [], linestyle='None', marker=marker_map[inv], markersize=9,
                markerfacecolor=color_map[inv], markeredgecolor="black", markeredgewidth=0.6,
                label=str(inv))
-        for inv in legend_inv_levels
+        for inv in inv_levels
     ]
-    
+
     # Create non-significant handle (use first inversion color as example)
     example_non_sig_color = desaturate_color(
-        color_map[legend_inv_levels[0]], NON_SIG_DESAT
-    ) if legend_inv_levels else '#b8b8b8'
-    
+        color_map[inv_levels[0]], NON_SIG_DESAT
+    ) if inv_levels else '#b8b8b8'
+
     non_sig_handle = Line2D(
         [], [], linestyle='None', marker='o', markersize=6,
         markerfacecolor=example_non_sig_color, markeredgecolor='none', alpha=NON_SIG_ALPHA,
