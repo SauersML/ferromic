@@ -41,7 +41,7 @@ PENALIZED_CI_SPAN_RATIO = 1e3
 PENALIZED_CI_LO_OR_MAX = 1e-3
 PENALIZED_CI_HI_OR_MIN = 1e3
 
-MLE_SE_MAX_ALL = 10.0
+MLE_SE_MAX_ALL = 15.0
 MLE_SE_MAX_TARGET = 5.0
 MLE_MAX_ABS_XB = 15.0
 MLE_FRAC_P_EXTREME = 0.02
@@ -151,47 +151,35 @@ def _bootstrap_rng(seed_key):
 
 
 def _check_separation_in_strata(X, y, target_col, pheno_name="unknown"):
-    """Check for separation (zero cells) in 2x2 tables within strata."""
+    """Check if target variable has variance (not constant) in overall and within strata."""
     if target_col not in X.columns:
         return
-    
-    # Check overall 2x2 table
-    carrier = X[target_col].to_numpy()
-    cases = y.to_numpy()
 
-    car_case = int(np.sum((carrier > 0) & (cases == 1)))
-    car_ctrl = int(np.sum((carrier > 0) & (cases == 0)))
-    noncar_case = int(np.sum((carrier == 0) & (cases == 1)))
-    noncar_ctrl = int(np.sum((carrier == 0) & (cases == 0)))
-    
-    if 0 in [car_case, car_ctrl, noncar_case, noncar_ctrl]:
+    target = X[target_col].to_numpy()
+
+    # Check overall variance
+    if np.var(target) == 0:
+        unique_val = target[0]
         print(
             f"[SEPARATION-STRATUM] name={pheno_name} site=design_check "
-            f"stratum=overall cells={{car_case:{car_case},car_ctrl:{car_ctrl},"
-            f"noncar_case:{noncar_case},noncar_ctrl:{noncar_ctrl}}} "
+            f"stratum=overall target_constant={unique_val:.3g} "
             f"driver=target action=gate_to_penalized",
             flush=True
         )
-    
+
     # Check within sex strata if available
     if 'sex' in X.columns:
         for sex_val in [0.0, 1.0]:
             mask = X['sex'] == sex_val
             if mask.sum() == 0:
                 continue
-            car_sex = carrier[mask]
-            case_sex = cases[mask]
+            target_stratum = target[mask]
 
-            car_case_s = int(np.sum((car_sex > 0) & (case_sex == 1)))
-            car_ctrl_s = int(np.sum((car_sex > 0) & (case_sex == 0)))
-            noncar_case_s = int(np.sum((car_sex == 0) & (case_sex == 1)))
-            noncar_ctrl_s = int(np.sum((car_sex == 0) & (case_sex == 0)))
-            
-            if 0 in [car_case_s, car_ctrl_s, noncar_case_s, noncar_ctrl_s]:
+            if np.var(target_stratum) == 0:
+                unique_val = target_stratum[0]
                 print(
                     f"[SEPARATION-STRATUM] name={pheno_name} site=design_check "
-                    f"stratum=sex={int(sex_val)} cells={{car_case:{car_case_s},car_ctrl:{car_ctrl_s},"
-                    f"noncar_case:{noncar_case_s},noncar_ctrl:{noncar_ctrl_s}}} "
+                    f"stratum=sex={int(sex_val)} target_constant={unique_val:.3g} "
                     f"driver=target action=gate_to_penalized",
                     flush=True
                 )
