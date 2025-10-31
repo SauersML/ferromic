@@ -1485,14 +1485,21 @@ def _load_shared_covariates(
 
 def _load_inversion(target: str) -> pd.DataFrame:
     dosages_path = pipeline_find_upwards(INVERSION_DOSAGES_FILE)
-    inversion_df = io.get_cached_or_generate(
-        str(CACHE_DIR / f"inversion_{io.stable_hash(target)}.parquet"),
-        io.load_inversions,
-        target,
-        dosages_path,
-        validate_target=target,
-        lock_dir=str(LOCK_DIR),
-    )
+    try:
+        inversion_df = io.get_cached_or_generate(
+            str(CACHE_DIR / f"inversion_{io.stable_hash(target)}.parquet"),
+            io.load_inversions,
+            target,
+            dosages_path,
+            validate_target=target,
+            lock_dir=str(LOCK_DIR),
+        )
+    except io.LowVarianceInversionError as exc:
+        std_repr = "nan" if not np.isfinite(exc.std) else f"{exc.std:.4f}"
+        warn(
+            f"Skipping inversion {target} due to low variance (std={std_repr}, threshold={exc.threshold})."
+        )
+        raise
     inversion_df.index = inversion_df.index.astype(str)
     return inversion_df[[target]].rename(columns={target: "dosage"})
 
@@ -2256,7 +2263,10 @@ def run() -> None:
         results: list[dict[str, object]] = []
         for inv in TARGET_INVERSIONS:
             info(f"Preparing inversion {inv}")
-            inversion_df = _load_inversion(inv)
+            try:
+                inversion_df = _load_inversion(inv)
+            except io.LowVarianceInversionError:
+                continue
             core = shared_covariates.join(inversion_df, how="inner")
             core = core.rename(columns={inv: "dosage"}) if inv in core.columns else core
 
