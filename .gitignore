@@ -26,6 +26,7 @@ env/
 *.pdf
 *.txt
 .DS_Store
+web/figures-site/public/downloads/supplementary_tables.xlsx
 
 # Node/Next.js artifacts
 node_modules/
