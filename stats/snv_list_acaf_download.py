@@ -44,8 +44,67 @@ def run_gsutil(args: List[str], capture: bool = True, text: bool = True) -> subp
     return subprocess.run(cmd, check=True, capture_output=capture, text=text)
 
 def gsutil_ls(pattern: str) -> List[str]:
-    out = run_gsutil(["ls", pattern]).stdout.strip()
-    return sorted([ln for ln in out.splitlines() if ln.strip()]) if out else []
+    """List GCS objects matching pattern, with detailed diagnostics."""
+    print(f"\n[gsutil_ls] DIAGNOSTIC START", file=sys.stderr)
+    print(f"[gsutil_ls] Input pattern: {pattern}", file=sys.stderr)
+    print(f"[gsutil_ls] Project ID: {require_project()}", file=sys.stderr)
+    
+    # Strategy: avoid wildcards entirely, list directory then filter
+    if pattern.endswith("/*.bim") or pattern.endswith("*.bim"):
+        # Extract directory path
+        if pattern.endswith("/*.bim"):
+            dir_path = pattern[:-6]
+        else:
+            dir_path = pattern.rsplit("*.bim", 1)[0].rstrip("/")
+        
+        print(f"[gsutil_ls] Detected wildcard pattern, listing directory: {dir_path}", file=sys.stderr)
+        cmd = ["gsutil", "-u", require_project(), "ls", dir_path]
+    else:
+        print(f"[gsutil_ls] Using pattern as-is (no wildcard detected)", file=sys.stderr)
+        cmd = ["gsutil", "-u", require_project(), "ls", pattern]
+    
+    print(f"[gsutil_ls] Command: {' '.join(cmd)}", file=sys.stderr)
+    print(f"[gsutil_ls] Executing subprocess...", file=sys.stderr)
+    
+    try:
+        result = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=60)
+        print(f"[gsutil_ls] Return code: {result.returncode}", file=sys.stderr)
+        print(f"[gsutil_ls] STDOUT length: {len(result.stdout)} chars", file=sys.stderr)
+        print(f"[gsutil_ls] STDERR length: {len(result.stderr)} chars", file=sys.stderr)
+        
+        if result.returncode != 0:
+            print(f"[gsutil_ls] ERROR OUTPUT:", file=sys.stderr)
+            print(result.stderr, file=sys.stderr)
+            print(f"[gsutil_ls] Raising CalledProcessError", file=sys.stderr)
+            raise subprocess.CalledProcessError(result.returncode, cmd, result.stdout, result.stderr)
+        
+        out = result.stdout.strip()
+        print(f"[gsutil_ls] Raw output (first 500 chars): {out[:500]}", file=sys.stderr)
+        
+        # Filter for .bim files if we listed a directory
+        all_lines = [ln.strip() for ln in out.splitlines() if ln.strip()]
+        if pattern.endswith("/*.bim") or pattern.endswith("*.bim"):
+            filtered = [ln for ln in all_lines if ln.endswith('.bim')]
+            print(f"[gsutil_ls] Total lines: {len(all_lines)}, .bim files: {len(filtered)}", file=sys.stderr)
+        else:
+            filtered = all_lines
+            print(f"[gsutil_ls] Total lines: {len(filtered)}", file=sys.stderr)
+        
+        sorted_result = sorted(filtered)
+        print(f"[gsutil_ls] Returning {len(sorted_result)} results", file=sys.stderr)
+        if sorted_result:
+            print(f"[gsutil_ls] First result: {sorted_result[0]}", file=sys.stderr)
+            print(f"[gsutil_ls] Last result: {sorted_result[-1]}", file=sys.stderr)
+        print(f"[gsutil_ls] DIAGNOSTIC END\n", file=sys.stderr)
+        
+        return sorted_result
+        
+    except subprocess.TimeoutExpired:
+        print(f"[gsutil_ls] TIMEOUT after 60 seconds!", file=sys.stderr)
+        raise
+    except Exception as e:
+        print(f"[gsutil_ls] EXCEPTION: {type(e).__name__}: {e}", file=sys.stderr)
+        raise
 
 def gsutil_stat_size(gs_uri: str) -> int:
     out = run_gsutil(["stat", gs_uri]).stdout
