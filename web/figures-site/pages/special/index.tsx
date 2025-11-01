@@ -20,18 +20,20 @@ interface SpecialPageProps {
 }
 
 const MANIFEST_PATH = path.join(process.cwd(), 'data', 'special-figures.json');
-const SUPPLEMENTARY_RELATIVE_PATH = path.join(
+const SUPPLEMENTARY_FILENAME = 'supplementary_tables.xlsx';
+const SUPPLEMENTARY_PUBLIC_PATH = path.join(
   process.cwd(),
   'public',
   'downloads',
-  'supplementary_tables.xlsx',
+  SUPPLEMENTARY_FILENAME,
 );
+const SUPPLEMENTARY_WEB_PATH = path.posix.join('downloads', SUPPLEMENTARY_FILENAME);
 
 export const getStaticProps: GetStaticProps<SpecialPageProps> = async () => {
   let supplementaryHref: string | null = null;
   try {
-    await fs.access(SUPPLEMENTARY_RELATIVE_PATH);
-    supplementaryHref = '/downloads/supplementary_tables.xlsx';
+    await fs.access(SUPPLEMENTARY_PUBLIC_PATH);
+    supplementaryHref = `/${SUPPLEMENTARY_WEB_PATH}`;
   } catch (error) {
     supplementaryHref = null;
   }

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/router';
 import styles from '../styles/SpecialGallery.module.css';
 
 export interface SpecialFigureItem {
@@ -18,8 +19,6 @@ export interface SpecialGalleryProps {
   generatedAt: string | null;
   supplementaryHref?: string | null;
 }
-
-const BASE_PATH = '/ferromic/figures';
 
 function PDFPreview({ assetPath, title }: { assetPath: string; title: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -81,6 +80,18 @@ function formatGeneratedAt(timestamp: string | null): string {
 }
 
 export function SpecialGallery({ groups, generatedAt, supplementaryHref }: SpecialGalleryProps) {
+  const router = useRouter();
+  const rawBasePath = router?.basePath ?? '';
+  const basePath = rawBasePath === '/' ? '' : rawBasePath;
+  const withBasePath = (suffix: string) => {
+    const normalizedSuffix = suffix.startsWith('/') ? suffix : `/${suffix}`;
+    if (!basePath) {
+      return normalizedSuffix;
+    }
+    return `${basePath}${normalizedSuffix}`;
+  };
+  const downloadHref = supplementaryHref ? withBasePath(supplementaryHref) : null;
+
   return (
     <div className={styles.container}>
       <header className={styles.header}>
@@ -89,9 +100,9 @@ export function SpecialGallery({ groups, generatedAt, supplementaryHref }: Speci
           Auto-generated figures for each analysis.
         </p>
         <p className={styles.timestamp}>Last updated: {formatGeneratedAt(generatedAt)}</p>
-        {supplementaryHref ? (
+        {downloadHref ? (
           <p className={styles.downloadLink}>
-            <a href={supplementaryHref} download>
+            <a href={downloadHref} download>
               Download supplementary tables (XLSX)
             </a>
           </p>
@@ -118,7 +129,7 @@ export function SpecialGallery({ groups, generatedAt, supplementaryHref }: Speci
             <h2>{group.title}</h2>
             <div className={styles.grid}>
               {group.figures.map((figure) => {
-                const assetPath = `${BASE_PATH}/${figure.filename}`;
+                const assetPath = withBasePath(`figures/${figure.filename}`);
                 return (
                   <figure key={`${group.slug}-${figure.filename}`} className={styles.figure}>
                     <figcaption>{figure.title}</figcaption>
