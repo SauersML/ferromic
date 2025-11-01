@@ -172,42 +172,39 @@ def looks_like_chr(path: str, chr_norm: str) -> bool:
 
 class RangeFetcher:
     """
-    Persistent HTTP range fetcher using google-cloud-storage with Requester Pays.
-    Falls back to 'gsutil cat -r start-end' if client import/auth fails.
-    'end' is inclusive.
+    Persistent HTTP range fetcher with retry logic.
+    Falls back to gsutil if GCS client fails.
     """
     def __init__(self):
-        self.mode = "gsutil"
-        self.client = None
         self.project = require_project()
-        try:
-            from google.cloud import storage  # lazy import
-            self.client = storage.Client(project=self.project)
-            self.mode = "gcs"
-        except Exception as e:
-            tqdm.write(f"[RangeFetcher] Using gsutil fallback (client unavailable: {e})")
-            self.client = None
-            self.mode = "gsutil"
-
-    def _blob(self, gs_uri: str):
-        from google.cloud import storage  # type: ignore
-        if not gs_uri.startswith("gs://"):
-            raise ValueError(f"Not a gs:// URI: {gs_uri}")
-        _, _, rest = gs_uri.partition("gs://")
-        bucket_name, _, blob_name = rest.partition("/")
-        if not bucket_name or not blob_name:
-            raise ValueError(f"Malformed GCS URI: {gs_uri}")
-        bucket = self.client.bucket(bucket_name, user_project=self.project)  # Requester Pays
-        return bucket.blob(blob_name)
-
-    def fetch(self, gs_uri: str, start: int, end: int) -> bytes:
-        if self.mode == "gcs":
+        self.mode = "gsutil"  # Always use gsutil - it handles requester-pays correctly
+        
+    def fetch(self, gs_uri: str, start: int, end: int, max_retries: int = 5) -> bytes:
+        """Fetch byte range [start, end] inclusive with exponential backoff retry."""
+        for attempt in range(max_retries):
             try:
-                return self._blob(gs_uri).download_as_bytes(start=start, end=end)  # inclusive end
-            except Exception as e:
-                tqdm.write(f"[RangeFetcher] Client range failed ({e}); gsutil fallback: {gs_uri} {start}-{end}")
-        # fallback
-        return subprocess.check_output(["gsutil", "-u", self.project, "cat", "-r", f"{start}-{end}", gs_uri])
+                return subprocess.check_output(
+                    ["gsutil", "-u", self.project, "cat", "-r", f"{start}-{end}", gs_uri],
+                    stderr=subprocess.PIPE
+                )
+            except subprocess.CalledProcessError as e:
+                stderr = e.stderr.decode('utf-8', errors='replace') if e.stderr else ''
+                
+                # Check for retryable errors (403, 429, 5xx, connection issues)
+                retryable = any(x in stderr for x in ['403', '429', '500', '502', '503', '504', 'Connection', 'Timeout'])
+                
+                if retryable and attempt < max_retries - 1:
+                    wait = min(2 ** attempt, 32)  # Cap at 32s
+                    tqdm.write(f"\n[RETRY {attempt+1}/{max_retries}] Range fetch failed, waiting {wait}s: {os.path.basename(gs_uri)}")
+                    time.sleep(wait)
+                    continue
+                
+                # Non-retryable or exhausted retries
+                tqdm.write(f"\nFATAL: Range fetch failed after {attempt+1} attempts: {gs_uri} bytes {start}-{end}")
+                tqdm.write(f"STDERR: {stderr}")
+                raise
+        
+        raise RuntimeError(f"Range fetch failed after {max_retries} attempts: {gs_uri}")
 
 # ------------------------ BED DECODING (VECTORIZED) --------------------------
 
