@@ -24,6 +24,27 @@
   color: #4b5563;
 }
 
+.downloadLink,
+.downloadLinkMissing {
+  margin-top: 1rem;
+}
+
+.downloadLink a {
+  font-weight: 600;
+  color: #1d4ed8;
+  text-decoration: none;
+}
+
+.downloadLink a:hover,
+.downloadLink a:focus {
+  text-decoration: underline;
+}
+
+.downloadLinkMissing {
+  color: #6b7280;
+  font-size: 0.95rem;
+}
+
 .nav {
   margin: 1.5rem 0 2rem;
   border-top: 1px solid rgba(15, 23, 42, 0.1);
