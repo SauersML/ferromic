@@ -107,12 +107,44 @@ def gsutil_ls(pattern: str) -> List[str]:
         raise
 
 def gsutil_stat_size(gs_uri: str) -> int:
-    out = run_gsutil(["stat", gs_uri]).stdout
-    m = re.search(r"Content-Length:\s*(\d+)", out)
-    if not m:
-        print(f"FATAL: Unable to parse size for {gs_uri}", file=sys.stderr)
-        sys.exit(1)
-    return int(m.group(1))
+    """Get file size with diagnostics."""
+    print(f"\n[gsutil_stat_size] DIAGNOSTIC START", file=sys.stderr)
+    print(f"[gsutil_stat_size] URI: {gs_uri}", file=sys.stderr)
+    
+    cmd = ["gsutil", "-u", require_project(), "stat", gs_uri]
+    print(f"[gsutil_stat_size] Command: {' '.join(cmd)}", file=sys.stderr)
+    
+    try:
+        result = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=30)
+        print(f"[gsutil_stat_size] Return code: {result.returncode}", file=sys.stderr)
+        
+        if result.returncode != 0:
+            print(f"[gsutil_stat_size] STDERR:", file=sys.stderr)
+            print(result.stderr, file=sys.stderr)
+            print(f"[gsutil_stat_size] STDOUT:", file=sys.stderr)
+            print(result.stdout, file=sys.stderr)
+            raise subprocess.CalledProcessError(result.returncode, cmd, result.stdout, result.stderr)
+        
+        out = result.stdout
+        print(f"[gsutil_stat_size] Output length: {len(out)} chars", file=sys.stderr)
+        m = re.search(r"Content-Length:\s*(\d+)", out)
+        if not m:
+            print(f"[gsutil_stat_size] FAILED to parse Content-Length from output:", file=sys.stderr)
+            print(out, file=sys.stderr)
+            print(f"FATAL: Unable to parse size for {gs_uri}", file=sys.stderr)
+            sys.exit(1)
+        
+        size = int(m.group(1))
+        print(f"[gsutil_stat_size] Parsed size: {size:,} bytes", file=sys.stderr)
+        print(f"[gsutil_stat_size] DIAGNOSTIC END\n", file=sys.stderr)
+        return size
+        
+    except subprocess.TimeoutExpired:
+        print(f"[gsutil_stat_size] TIMEOUT!", file=sys.stderr)
+        raise
+    except Exception as e:
+        print(f"[gsutil_stat_size] EXCEPTION: {type(e).__name__}: {e}", file=sys.stderr)
+        raise
 
 def gsutil_cat_lines(gs_uri: str) -> Iterable[str]:
     """Stream lines from gs:// URI."""
