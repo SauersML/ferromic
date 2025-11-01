@@ -16,6 +16,7 @@ export interface SpecialFigureGroup {
 export interface SpecialGalleryProps {
   groups: SpecialFigureGroup[];
   generatedAt: string | null;
+  supplementaryHref?: string | null;
 }
 
 const BASE_PATH = '/ferromic/figures';
@@ -79,7 +80,7 @@ function formatGeneratedAt(timestamp: string | null): string {
   });
 }
 
-export function SpecialGallery({ groups, generatedAt }: SpecialGalleryProps) {
+export function SpecialGallery({ groups, generatedAt, supplementaryHref }: SpecialGalleryProps) {
   return (
     <div className={styles.container}>
       <header className={styles.header}>
@@ -88,6 +89,17 @@ export function SpecialGallery({ groups, generatedAt }: SpecialGalleryProps) {
           Auto-generated figures for each analysis.
         </p>
         <p className={styles.timestamp}>Last updated: {formatGeneratedAt(generatedAt)}</p>
+        {supplementaryHref ? (
+          <p className={styles.downloadLink}>
+            <a href={supplementaryHref} download>
+              Download supplementary tables (XLSX)
+            </a>
+          </p>
+        ) : (
+          <p className={styles.downloadLinkMissing}>
+            Supplementary tables will appear here after the next data refresh.
+          </p>
+        )}
       </header>
 
       <nav className={styles.nav} aria-label="Figure sections">
