@@ -1,6 +1,6 @@
-import os, sys, re, math, subprocess
+import os, sys, re, math, subprocess, json, pickle, hashlib, uuid, time
 from dataclasses import dataclass
-from typing import Dict, List, Tuple, Set, Iterable, Optional, DefaultDict
+from typing import Dict, List, Tuple, Set, Iterable, Optional, DefaultDict, Any
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
@@ -29,6 +29,114 @@ ASSEMBLY_MAX_BYTE_GAP  = 256 * 1024
 
 # I/O concurrency (network-bound). Increase if your network can handle it.
 IO_THREADS = max(64, (os.cpu_count() or 8) * 8)
+
+# ------------------------------ CACHE HELPERS --------------------------------
+
+CACHE_VERSION = 1
+CACHE_DIR = os.path.join(os.getcwd(), ".snv_cache")
+
+
+def ensure_cache_dir() -> None:
+    os.makedirs(CACHE_DIR, exist_ok=True)
+
+
+def cache_path(name: str) -> str:
+    ensure_cache_dir()
+    return os.path.join(CACHE_DIR, name)
+
+
+def atomic_write_bytes(path: str, data: bytes) -> None:
+    ensure_cache_dir()
+    directory = os.path.dirname(path) or "."
+    os.makedirs(directory, exist_ok=True)
+    tmp_path = f"{path}.tmp-{uuid.uuid4().hex}"
+    with open(tmp_path, "wb") as fh:
+        fh.write(data)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp_path, path)
+
+
+def dump_pickle(path: str, payload: Any) -> None:
+    atomic_write_bytes(path, pickle.dumps(payload, protocol=pickle.HIGHEST_PROTOCOL))
+
+
+def safe_load_pickle(path: str) -> Optional[Any]:
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "rb") as fh:
+            return pickle.load(fh)
+    except Exception as exc:
+        print(f"WARNING: Failed to load cache {path}: {exc}; deleting corrupt cache.")
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        return None
+
+
+def dump_json(path: str, payload: Any) -> None:
+    data = json.dumps(payload, indent=2, sort_keys=True).encode("utf-8")
+    atomic_write_bytes(path, data)
+
+
+def load_json(path: str) -> Optional[Any]:
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r") as fh:
+            return json.load(fh)
+    except Exception as exc:
+        print(f"WARNING: Failed to load JSON cache {path}: {exc}; deleting corrupt file.")
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        return None
+
+
+def fingerprint_shards(shards: List["Shard"]) -> Tuple[Tuple[Any, ...], ...]:
+    return tuple(
+        (sh.chrom, sh.bim_uri, sh.bed_uri, sh.fam_uri, sh.bim_size, sh.bed_size)
+        for sh in shards
+    )
+
+
+def compute_candidates_digest(candidates: List["Candidate"]) -> str:
+    h = hashlib.sha256()
+    for c in candidates:
+        h.update(
+            f"{c.chrom}|{c.bp}|{c.allele}|{c.shard_idx}|{c.snp_index}|{c.snp_id}|{c.a1}|{c.a2}\n".encode(
+                "utf-8"
+            )
+        )
+    return h.hexdigest()
+
+
+def compute_stats_digest(per_snp_stats: Dict[Tuple[int, int], Tuple[int, int, int]]) -> str:
+    h = hashlib.sha256()
+    for key in sorted(per_snp_stats.keys()):
+        miss, d1, d2 = per_snp_stats[key]
+        h.update(f"{key[0]}:{key[1]}={miss},{d1},{d2}\n".encode("utf-8"))
+    return h.hexdigest()
+
+
+def compute_winners_digest(winners: List[int]) -> str:
+    h = hashlib.sha256()
+    for idx in winners:
+        h.update(f"{idx}\n".encode("utf-8"))
+    return h.hexdigest()
+
+
+def fsync_and_close_text(path: str, lines: Iterable[str]) -> None:
+    tmp_path = f"{path}.tmp-{uuid.uuid4().hex}"
+    with open(tmp_path, "w") as fh:
+        for ln in lines:
+            fh.write(ln)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp_path, path)
 
 # ------------------------------ UTILITIES ------------------------------------
 
@@ -296,64 +404,143 @@ class Candidate:
 # ------------------------------- PIPELINE ------------------------------------
 
 def load_allow_list(url: str):
+    cache_file = cache_path("allow_list.pkl")
+    cached = safe_load_pickle(cache_file)
+    if cached and cached.get("version") == CACHE_VERSION and cached.get("url") == url:
+        print("SKIP: Using cached allow-list …")
+        allow_map = defaultdict(set)
+        for key, vals in cached.get("allow_map", {}).items():
+            allow_map[key] = set(vals)
+        allow_raw = defaultdict(list)
+        for key, vals in cached.get("allow_raw", {}).items():
+            allow_raw[key] = list(vals)
+        chr_set = set(cached.get("chr_set", []))
+        digest = cached.get("digest", "")
+        meta = cached.get("meta", {})
+        print(
+            f"DONE: Allow-list (cached) total={meta.get('total', 'unknown')}, "
+            f"non-ACGT dropped={meta.get('non_acgt', 'unknown')}, "
+            f"unique positions={meta.get('unique_positions', 'unknown')}, "
+            f"chromosomes={meta.get('chromosomes', 'unknown')}\n"
+        )
+        return allow_map, allow_raw, chr_set, digest
+
     print("START: Loading allow-list …")
     r = requests.get(url, stream=True)
     r.raise_for_status()
 
-    allow_map: DefaultDict[Tuple[str,int], Set[str]] = defaultdict(set)
-    allow_raw: DefaultDict[Tuple[str,int], List[str]] = defaultdict(list)
+    allow_map: DefaultDict[Tuple[str, int], Set[str]] = defaultdict(set)
+    allow_raw: DefaultDict[Tuple[str, int], List[str]] = defaultdict(list)
     chr_set: Set[str] = set()
     total = non_acgt = 0
+    digest = hashlib.sha256()
 
     with tqdm(total=None, unit="line", desc="Allow-list") as bar:
         for raw in r.iter_lines(decode_unicode=True):
             total += 1
-            s = (raw or "").strip()
+            s_raw = (raw or "")
+            digest.update((s_raw + "\n").encode("utf-8", "ignore"))
+            s = s_raw.strip()
             if not s:
-                bar.update(1); continue
+                bar.update(1)
+                continue
             parts = s.split()
             if len(parts) < 2:
-                bar.update(1); continue
+                bar.update(1)
+                continue
             loc, al = parts[0], parts[1].upper()
-            if al not in {"A","C","G","T"}:
-                non_acgt += 1; bar.update(1); continue
+            if al not in {"A", "C", "G", "T"}:
+                non_acgt += 1
+                bar.update(1)
+                continue
             if ":" not in loc:
-                bar.update(1); continue
+                bar.update(1)
+                continue
             cs, ps = loc.split(":", 1)
-            try: bp = int(float(ps))
-            except: bar.update(1); continue
+            try:
+                bp = int(float(ps))
+            except Exception:
+                bar.update(1)
+                continue
             c = norm_chr(cs)
             allow_map[(c, bp)].add(al)
             allow_raw[(c, bp)].append(s)
             chr_set.add(c)
             bar.update(1)
 
-    print(f"DONE: Allow-list total={total:,}, non-ACGT dropped={non_acgt:,}, unique positions={len(allow_map):,}, chromosomes={len(chr_set)}\n")
-    return allow_map, allow_raw, chr_set
+    allow_digest = digest.hexdigest()
+    payload = {
+        "version": CACHE_VERSION,
+        "url": url,
+        "allow_map": {k: sorted(v) for k, v in allow_map.items()},
+        "allow_raw": {k: list(v) for k, v in allow_raw.items()},
+        "chr_set": sorted(chr_set),
+        "digest": allow_digest,
+        "meta": {
+            "total": total,
+            "non_acgt": non_acgt,
+            "unique_positions": len(allow_map),
+            "chromosomes": len(chr_set),
+        },
+    }
+    dump_pickle(cache_file, payload)
 
-def list_relevant_shards(chr_set: Set[str]) -> List[Shard]:
+    print(
+        f"DONE: Allow-list total={total:,}, non-ACGT dropped={non_acgt:,}, "
+        f"unique positions={len(allow_map):,}, chromosomes={len(chr_set)}\n"
+    )
+    return allow_map, allow_raw, chr_set, allow_digest
+
+def list_relevant_shards(chr_set: Set[str], allow_digest: str) -> List[Shard]:
+    cache_file = cache_path("shards.pkl")
+    cached = safe_load_pickle(cache_file)
+    chr_signature = tuple(sorted(chr_set))
+    if (
+        cached
+        and cached.get("version") == CACHE_VERSION
+        and tuple(cached.get("chr_set", [])) == chr_signature
+        and cached.get("allow_digest") == allow_digest
+    ):
+        print("SKIP: Using cached shard metadata …")
+        shards = cached.get("shards", [])
+        print(f"DONE: Selected {len(shards)} shards (cached).\n")
+        return shards
+
     print("START: Discovering shards on GCS …")
     bim_paths = gsutil_ls(os.path.join(GCS_DIR, "*.bim"))
     if not bim_paths:
         print("FATAL: No .bim files found.", file=sys.stderr); sys.exit(1)
-    selected = []
+    selected: List[Shard] = []
     for p in bim_paths:
         chosen_chr = None
         for c in chr_set:
             if looks_like_chr(p, c):
-                chosen_chr = c; break
+                chosen_chr = c
+                break
         if chosen_chr is None:
             continue
         bed = p[:-4] + ".bed"
         fam = p[:-4] + ".fam"
-        selected.append(Shard(chrom=chosen_chr,
-                              bim_uri=p,
-                              bed_uri=bed,
-                              fam_uri=fam,
-                              bim_size=gsutil_stat_size(p),
-                              bed_size=gsutil_stat_size(bed)))
+        selected.append(
+            Shard(
+                chrom=chosen_chr,
+                bim_uri=p,
+                bed_uri=bed,
+                fam_uri=fam,
+                bim_size=gsutil_stat_size(p),
+                bed_size=gsutil_stat_size(bed),
+            )
+        )
     if not selected:
         print("FATAL: No shards match allow-list chromosomes.", file=sys.stderr); sys.exit(1)
+    payload = {
+        "version": CACHE_VERSION,
+        "allow_digest": allow_digest,
+        "chr_set": list(chr_signature),
+        "shards": selected,
+        "fingerprint": fingerprint_shards(selected),
+    }
+    dump_pickle(cache_file, payload)
     print(f"DONE: Selected {len(selected)} shards.\n")
     return selected
 
@@ -398,9 +585,35 @@ def list_shards_for_bim_chroms() -> List[Shard]:
     print(f"DONE: Selected {len(shards)} shards (from subset.bim chroms).\n")
     return shards
 
-def scan_bims_collect(shards: List[Shard],
-                      allow_map: Dict[Tuple[str,int], Set[str]],
-                      allow_raw: Dict[Tuple[str,int], List[str]]) -> List[Candidate]:
+def scan_bims_collect(
+    shards: List[Shard],
+    allow_map: Dict[Tuple[str, int], Set[str]],
+    allow_raw: Dict[Tuple[str, int], List[str]],
+    allow_digest: str,
+) -> Tuple[List[Candidate], str]:
+    cache_file = cache_path("candidates.pkl")
+    shards_fp = fingerprint_shards(shards)
+    cached = safe_load_pickle(cache_file)
+    if (
+        cached
+        and cached.get("version") == CACHE_VERSION
+        and cached.get("allow_digest") == allow_digest
+        and tuple(cached.get("shards_fp", [])) == shards_fp
+    ):
+        print("SKIP: Using cached BIM scan results …")
+        candidates = cached.get("candidates", [])
+        variant_counts = cached.get("variant_counts", [])
+        for sid, count in enumerate(variant_counts):
+            if sid < len(shards):
+                shards[sid].variant_count = count
+        candidate_digest = cached.get("candidate_digest", compute_candidates_digest(candidates))
+        meta = cached.get("meta", {})
+        print(
+            f"DONE: BIM scan (cached) variants scanned={meta.get('scanned', 'unknown')}, "
+            f"candidates kept={meta.get('kept', 'unknown')}\n"
+        )
+        return candidates, candidate_digest
+
     print("START: Streaming BIMs (SNP-only, allele-present) …")
     candidates: List[Candidate] = []
     total_bytes = sum(s.bim_size for s in shards)
@@ -416,20 +629,28 @@ def scan_bims_collect(shards: List[Shard],
                 pending_bytes += len(line.encode("utf-8", "ignore"))
                 parts = line.strip().split()
                 if len(parts) < 6:
-                    idx += 1; continue
+                    idx += 1
+                    continue
                 chr_raw, snp_id, cm, bp_raw, a1, a2 = parts[:6]
                 c = norm_chr(chr_raw)
                 try:
                     bp = int(float(bp_raw))
-                except:
-                    idx += 1; continue
+                except Exception:
+                    idx += 1
+                    continue
                 a1u, a2u = a1.upper(), a2.upper()
                 # STRICT SNP-only: EXCLUDE INDELS
-                if a1u not in {"A","C","G","T"} or a2u not in {"A","C","G","T"}:
-                    nonacgt += 1; global_nonacgt += 1; idx += 1; continue
+                if a1u not in {"A", "C", "G", "T"} or a2u not in {"A", "C", "G", "T"}:
+                    nonacgt += 1
+                    global_nonacgt += 1
+                    idx += 1
+                    continue
                 allow = allow_map.get((c, bp))
                 if not allow:
-                    notallowed += 1; global_notallowed += 1; idx += 1; continue
+                    notallowed += 1
+                    global_notallowed += 1
+                    idx += 1
+                    continue
                 present = [al for al in allow if (al == a1u or al == a2u)]
                 if not present:
                     # Print full context: raw allow-list lines and raw BIM line
@@ -440,22 +661,51 @@ def scan_bims_collect(shards: List[Shard],
                         print(f"    {raw}")
                     print(f"  Allow-list parsed alleles: {sorted(list(allow))}")
                     print(f"  BIM raw line: {line.strip()}\n")
-                    allele_absent += 1; global_allele_absent += 1
-                    idx += 1; continue
+                    allele_absent += 1
+                    global_allele_absent += 1
+                    idx += 1
+                    continue
                 for al in present:
                     candidates.append(Candidate(c, bp, al, sid, idx, snp_id, a1u, a2u, line))
-                    kept += 1; global_kept += 1
-                scanned += 1; global_scanned += 1
+                    kept += 1
+                    global_kept += 1
+                scanned += 1
+                global_scanned += 1
                 idx += 1
                 if pending_bytes >= (1 << 20):
-                    pbar.update(pending_bytes); pending_bytes = 0
+                    pbar.update(pending_bytes)
+                    pending_bytes = 0
             if pending_bytes:
                 pbar.update(pending_bytes)
             shards[sid].variant_count = idx
-            print(f"[{os.path.basename(sh.bim_uri)}] scanned={idx:,}, kept={kept:,}, non-ACGT={nonacgt:,}, not-allowed={notallowed:,}, allele-absent={allele_absent:,}")
+            print(
+                f"[{os.path.basename(sh.bim_uri)}] scanned={idx:,}, kept={kept:,}, "
+                f"non-ACGT={nonacgt:,}, not-allowed={notallowed:,}, allele-absent={allele_absent:,}"
+            )
 
-    print(f"DONE: BIM scan — variants scanned={global_scanned:,}, candidates kept={global_kept:,}, allele-absent events={global_allele_absent:,}\n")
-    return candidates
+    print(
+        f"DONE: BIM scan — variants scanned={global_scanned:,}, candidates kept={global_kept:,}, "
+        f"allele-absent events={global_allele_absent:,}\n"
+    )
+
+    candidate_digest = compute_candidates_digest(candidates)
+    payload = {
+        "version": CACHE_VERSION,
+        "allow_digest": allow_digest,
+        "shards_fp": shards_fp,
+        "candidates": candidates,
+        "candidate_digest": candidate_digest,
+        "variant_counts": [sh.variant_count for sh in shards],
+        "meta": {
+            "scanned": global_scanned,
+            "kept": global_kept,
+            "allele_absent": global_allele_absent,
+            "nonacgt": global_nonacgt,
+            "not_allowed": global_notallowed,
+        },
+    }
+    dump_pickle(cache_file, payload)
+    return candidates, candidate_digest
 
 def validate_bed_and_choose_fam(shards: List[Shard]) -> int:
     print("START: Validating BED headers + computing bytes-per-SNP (bpf) …")
@@ -519,9 +769,13 @@ def validate_bed_and_choose_fam(shards: List[Shard]) -> int:
             print(f"FATAL: No FAM matches bpf={bpf_ref}.", file=sys.stderr); sys.exit(1)
 
         print("START: Writing subset.fam …")
-        with open(OUT_FAM, "w") as fout:
+        tmp_path = f"{OUT_FAM}.tmp-{uuid.uuid4().hex}"
+        with open(tmp_path, "w") as fout:
             for line in tqdm(gsutil_cat_lines(chosen), desc="subset.fam", unit="lines"):
                 fout.write(line)
+            fout.flush()
+            os.fsync(fout.fileno())
+        os.replace(tmp_path, OUT_FAM)
         print(f"DONE: Wrote {OUT_FAM} (N={N:,})\n")
     else:
         print("SKIP: Found existing subset.fam — keeping it.\n")
@@ -555,20 +809,41 @@ def coalesce_by_bytes(indices: List[int], bpf: int, *, max_gap: int, max_run: in
     runs.append((i0, prev))
     return runs
 
-def evaluate_candidates_fast(shards: List[Shard],
-                             candidates: List[Candidate],
-                             n_samples: int) -> Dict[Tuple[int,int], Tuple[int,int,int]]:
+def evaluate_candidates_fast(
+    shards: List[Shard],
+    candidates: List[Candidate],
+    n_samples: int,
+    candidate_digest: str,
+) -> Tuple[Dict[Tuple[int, int], Tuple[int, int, int]], str]:
     """
     Compute per-SNP (missing, doseA1, doseA2) for all unique SNP indices by coalesced ranged reads.
     Returns dict[(sid, snp_idx)] = (missing, doseA1, doseA2).
     """
+    cache_file = cache_path("metrics.pkl")
+    shards_fp = fingerprint_shards(shards)
+    cached = safe_load_pickle(cache_file)
+    if (
+        cached
+        and cached.get("version") == CACHE_VERSION
+        and cached.get("candidate_digest") == candidate_digest
+        and tuple(cached.get("shards_fp", [])) == shards_fp
+        and cached.get("n_samples") == n_samples
+    ):
+        print("SKIP: Using cached per-SNP metrics …")
+        per_snp_stats = cached.get("per_snp_stats", {})
+        stats_digest = cached.get("stats_digest", compute_stats_digest(per_snp_stats))
+        print(
+            f"DONE: Metrics (cached) for {len(per_snp_stats):,} SNPs (~{cached.get('bytes_done', 'unknown')} bytes)\n"
+        )
+        return per_snp_stats, stats_digest
+
     print("START: Computing call rate & allele frequency (fast mode) …")
     # Unique SNP indices per shard
     snp_by_shard: DefaultDict[int, List[int]] = defaultdict(list)
     for c in candidates:
         snp_by_shard[c.shard_idx].append(c.snp_index)
 
-    runs: List[Tuple[int,int,int,int]] = []  # (sid, i0, i1, total_bytes)
+    runs: List[Tuple[int, int, int, int]] = []  # (sid, i0, i1, total_bytes)
     for sid, idxs in snp_by_shard.items():
         sh = shards[sid]
         bpf = int(sh.bpf)  # type: ignore
@@ -579,52 +854,89 @@ def evaluate_candidates_fast(shards: List[Shard],
     runs.sort(key=lambda x: x[3], reverse=True)
 
     total_blocks = sum((i1 - i0 + 1) for _, i0, i1, _ in runs)
-    total_bytes  = sum(sz for *_, sz in runs)
-    print(f"INFO: {len(runs)} ranged requests | ~{total_blocks:,} SNP blocks | ~{total_bytes/1024/1024:.1f} MiB")
+    total_bytes = sum(sz for *_, sz in runs)
+    print(
+        f"INFO: {len(runs)} ranged requests | ~{total_blocks:,} SNP blocks | ~{total_bytes/1024/1024:.1f} MiB"
+    )
 
     fetcher = RangeFetcher()
-    per_snp_stats: Dict[Tuple[int,int], Tuple[int,int,int]] = {}
+    per_snp_stats: Dict[Tuple[int, int], Tuple[int, int, int]] = {}
 
     def worker(sid: int, i0: int, i1: int):
         sh = shards[sid]
         bpf = int(sh.bpf)  # type: ignore
         start = 3 + i0 * bpf
-        end   = 3 + (i1 + 1) * bpf - 1  # inclusive
+        end = 3 + (i1 + 1) * bpf - 1  # inclusive
         blob = fetcher.fetch(sh.bed_uri, start, end)
         miss, d1, d2 = decode_run(blob, bpf, n_samples)
         return sid, i0, i1, miss, d1, d2, len(blob)
 
     blocks_done = 0
-    bytes_done  = 0
+    bytes_done = 0
     with ThreadPoolExecutor(max_workers=IO_THREADS) as ex, \
-         tqdm(total=total_blocks, desc="Metrics SNPs", unit="snp") as pbar_snp, \
-         tqdm(total=total_bytes,  desc="Metrics bytes", unit="B", unit_scale=True, unit_divisor=1024, leave=False) as pbar_bytes:
+        tqdm(total=total_blocks, desc="Metrics SNPs", unit="snp") as pbar_snp, \
+        tqdm(total=total_bytes, desc="Metrics bytes", unit="B", unit_scale=True, unit_divisor=1024, leave=False) as pbar_bytes:
 
         futs = [ex.submit(worker, sid, i0, i1) for sid, i0, i1, _ in runs]
         for fut in as_completed(futs):
             sid, i0, i1, miss, d1, d2, nbytes = fut.result()
             # store per-SNP results
-            for off, snp_idx in enumerate(range(i0, i1+1)):
+            for off, snp_idx in enumerate(range(i0, i1 + 1)):
                 per_snp_stats[(sid, snp_idx)] = (int(miss[off]), int(d1[off]), int(d2[off]))
             nblocks = i1 - i0 + 1
             blocks_done += nblocks
-            bytes_done  += nbytes
+            bytes_done += nbytes
             pbar_snp.update(nblocks)
             pbar_bytes.update(nbytes)
 
     print(f"DONE: Metrics for {blocks_done:,} SNPs (~{bytes_done/1024/1024:.1f} MiB)\n")
-    return per_snp_stats
+    stats_digest = compute_stats_digest(per_snp_stats)
+    payload = {
+        "version": CACHE_VERSION,
+        "candidate_digest": candidate_digest,
+        "shards_fp": shards_fp,
+        "n_samples": n_samples,
+        "per_snp_stats": per_snp_stats,
+        "stats_digest": stats_digest,
+        "bytes_done": bytes_done,
+    }
+    dump_pickle(cache_file, payload)
+    return per_snp_stats, stats_digest
 
-def select_winners(candidates: List[Candidate],
-                   per_snp_stats: Dict[Tuple[int,int], Tuple[int,int,int]],
-                   n_samples: int) -> List[int]:
+def select_winners(
+    candidates: List[Candidate],
+    per_snp_stats: Dict[Tuple[int, int], Tuple[int, int, int]],
+    n_samples: int,
+    candidate_digest: str,
+    stats_digest: str,
+) -> Tuple[List[int], str]:
     """
     Keep variants with call rate ≥95% and deduplicate by (chr,bp,allele),
     preferring higher target-allele frequency (then higher call rate).
     """
+    cache_file = cache_path("winners.pkl")
+    cached = safe_load_pickle(cache_file)
+    if (
+        cached
+        and cached.get("version") == CACHE_VERSION
+        and cached.get("candidate_digest") == candidate_digest
+        and cached.get("stats_digest") == stats_digest
+        and cached.get("n_samples") == n_samples
+    ):
+        print("SKIP: Using cached winner selection …")
+        winners = cached.get("winners", [])
+        winners_digest = cached.get("winners_digest", compute_winners_digest(winners))
+        meta = cached.get("meta", {})
+        print(
+            f"DONE: Winners (cached) considered={meta.get('considered', 'unknown')}, "
+            f"kept={len(winners)}\n"
+        )
+        return winners, winners_digest
+
     print("START: Filtering (call-rate≥95%) and deduplicating …")
-    kept: Dict[Tuple[str,int,str], Tuple[int,float,float]] = {}
-    dropped_cr = 0; considered = 0
+    kept: Dict[Tuple[str, int, str], Tuple[int, float, float]] = {}
+    dropped_cr = 0
+    considered = 0
 
     for i, c in enumerate(candidates):
         st = per_snp_stats.get((c.shard_idx, c.snp_index))
@@ -634,9 +946,10 @@ def select_winners(candidates: List[Candidate],
         called = n_samples - missing
         call_rate = (called / n_samples) if n_samples else 0.0
         if call_rate < 0.95:
-            dropped_cr += 1; continue
+            dropped_cr += 1
+            continue
         dose = d2 if c.allele == c.a2 else d1
-        freq = (dose / (2*called)) if called > 0 else 0.0
+        freq = (dose / (2 * called)) if called > 0 else 0.0
         considered += 1
         key = (c.chrom, c.bp, c.allele)
         prev = kept.get(key)
@@ -644,11 +957,43 @@ def select_winners(candidates: List[Candidate],
             kept[key] = (i, freq, call_rate)
 
     winners = [i for (i, _, _) in kept.values()]
-    print(f"DONE: Considered={considered:,}, dropped(call-rate<95%)={dropped_cr:,}, unique kept={len(winners):,}\n")
-    return winners
+    print(
+        f"DONE: Considered={considered:,}, dropped(call-rate<95%)={dropped_cr:,}, unique kept={len(winners):,}\n"
+    )
+    winners_digest = compute_winners_digest(winners)
+    payload = {
+        "version": CACHE_VERSION,
+        "candidate_digest": candidate_digest,
+        "stats_digest": stats_digest,
+        "n_samples": n_samples,
+        "winners": winners,
+        "winners_digest": winners_digest,
+        "meta": {"considered": considered, "dropped_cr": dropped_cr},
+    }
+    dump_pickle(cache_file, payload)
+    return winners, winners_digest
 
-def write_winners_outputs(shards: List[Shard], candidates: List[Candidate], winners: List[int]):
+def write_winners_outputs(
+    shards: List[Shard],
+    candidates: List[Candidate],
+    winners: List[int],
+    winners_digest: str,
+    candidate_digest: str,
+):
     """Write subset.bim and passed_snvs.txt in BIM order across shards."""
+    meta_path = cache_path("outputs_meta.json")
+    meta = load_json(meta_path)
+    if (
+        meta
+        and meta.get("version") == CACHE_VERSION
+        and meta.get("candidate_digest") == candidate_digest
+        and meta.get("winners_digest") == winners_digest
+        and os.path.exists(OUT_BIM)
+        and os.path.exists(OUT_PASSED)
+    ):
+        print("SKIP: subset.bim and passed_snvs.txt already up-to-date (cached).\n")
+        return
+
     # Winners grouped by shard in BIM order
     by_shard: DefaultDict[int, List[int]] = defaultdict(list)
     for i in winners:
@@ -656,14 +1001,32 @@ def write_winners_outputs(shards: List[Shard], candidates: List[Candidate], winn
     for sid in list(by_shard.keys()):
         by_shard[sid].sort(key=lambda i: candidates[i].snp_index)
 
+    ordered_candidates: List[Candidate] = []
+    for sid in range(len(shards)):
+        for idx in by_shard.get(sid, []):
+            ordered_candidates.append(candidates[idx])
+
     print(f"START: Writing {OUT_BIM} and {OUT_PASSED} …")
-    total_selected = sum(len(v) for v in by_shard.values())
-    with open(OUT_BIM, "w") as fbim, open(OUT_PASSED, "w") as ftxt:
-        for sid in range(len(shards)):
-            for i in by_shard.get(sid, []):
-                c = candidates[i]
-                fbim.write(c.bim_line)
-                ftxt.write(f"{c.chrom}:{c.bp} {c.allele}\n")
+    total_selected = len(ordered_candidates)
+
+    def bim_lines() -> Iterable[str]:
+        for cand in ordered_candidates:
+            yield cand.bim_line
+
+    def passed_lines() -> Iterable[str]:
+        for cand in ordered_candidates:
+            yield f"{cand.chrom}:{cand.bp} {cand.allele}\n"
+
+    fsync_and_close_text(OUT_BIM, bim_lines())
+    fsync_and_close_text(OUT_PASSED, passed_lines())
+
+    payload = {
+        "version": CACHE_VERSION,
+        "candidate_digest": candidate_digest,
+        "winners_digest": winners_digest,
+        "variants": total_selected,
+    }
+    dump_json(meta_path, payload)
     print(f"DONE: Wrote {OUT_BIM} (variants={total_selected:,}), {OUT_PASSED}\n")
 
 def load_winners_from_subset_bim() -> Tuple[List[str], List[Tuple[str,str]]]:
@@ -859,6 +1222,7 @@ def assemble_bed_resume(shards: List[Shard],
 
 def main():
     print("=== STREAMED PLINK SUBSETTER (FAST, SNP-only; RESUMABLE) ===\n")
+    ensure_cache_dir()
 
     # FAST-PATH: If subset.bim + subset.fam already exist, skip heavy stages and only assemble BED (resumable).
     winners_ready = os.path.exists(OUT_BIM) and os.path.getsize(OUT_BIM) > 0
@@ -896,38 +1260,50 @@ def main():
 
     # FULL PIPELINE PATH
     # 1) Allow-list
-    allow_map, allow_raw, chr_set = load_allow_list(ALLOW_LIST_URL)
+    allow_map, allow_raw, chr_set, allow_digest = load_allow_list(ALLOW_LIST_URL)
 
     # 2) Shards
-    shards = list_relevant_shards(chr_set)
+    shards = list_relevant_shards(chr_set, allow_digest)
 
     # 3) BIM scan -> candidates (strict SNP-only; verbose allele-absent reporting)
-    candidates = scan_bims_collect(shards, allow_map, allow_raw)
+    candidates, candidate_digest = scan_bims_collect(shards, allow_map, allow_raw, allow_digest)
     if not candidates:
         print("No candidates after BIM scan. Writing empty outputs.")
         open(OUT_BIM, "w").close()
         with open(OUT_BED, "wb") as f: f.write(b"\x6c\x1b\x01")
         open(OUT_FAM, "w").close()
         open(OUT_PASSED, "w").close()
+        dump_json(cache_path("outputs_meta.json"), {
+            "version": CACHE_VERSION,
+            "candidate_digest": candidate_digest,
+            "winners_digest": compute_winners_digest([]),
+            "variants": 0,
+        })
         return
 
     # 4) Validate BED geometry, choose & write FAM (no sample filtering)
     n_samples = validate_bed_and_choose_fam(shards)
 
     # 5) Evaluate (persistent ranges + vectorized decode + aggressive coalescing)
-    per_snp_stats = evaluate_candidates_fast(shards, candidates, n_samples)
+    per_snp_stats, stats_digest = evaluate_candidates_fast(shards, candidates, n_samples, candidate_digest)
 
     # 6) Filter call-rate≥95% and deduplicate per (chr,bp,allele)
-    winners = select_winners(candidates, per_snp_stats, n_samples)
+    winners, winners_digest = select_winners(candidates, per_snp_stats, n_samples, candidate_digest, stats_digest)
     if not winners:
         print("All candidates failed call-rate≥95%. Writing empty subset.")
         open(OUT_BIM, "w").close()
         with open(OUT_BED, "wb") as f: f.write(b"\x6c\x1b\x01")
         open(OUT_PASSED, "w").close()
+        dump_json(cache_path("outputs_meta.json"), {
+            "version": CACHE_VERSION,
+            "candidate_digest": candidate_digest,
+            "winners_digest": winners_digest,
+            "variants": 0,
+        })
         return
 
     # 7) Write subset.bim + passed_snvs.txt
-    write_winners_outputs(shards, candidates, winners)
+    write_winners_outputs(shards, candidates, winners, winners_digest, candidate_digest)
 
     # 8) Assemble subset.bed (fresh run; not resume)
     # Recreate ordered winners per shard
