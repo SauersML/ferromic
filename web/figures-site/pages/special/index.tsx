@@ -16,11 +16,26 @@ interface SpecialManifest {
 interface SpecialPageProps {
   manifest: SpecialManifest;
   manifestError: string | null;
+  supplementaryHref: string | null;
 }
 
 const MANIFEST_PATH = path.join(process.cwd(), 'data', 'special-figures.json');
+const SUPPLEMENTARY_RELATIVE_PATH = path.join(
+  process.cwd(),
+  'public',
+  'downloads',
+  'supplementary_tables.xlsx',
+);
 
 export const getStaticProps: GetStaticProps<SpecialPageProps> = async () => {
+  let supplementaryHref: string | null = null;
+  try {
+    await fs.access(SUPPLEMENTARY_RELATIVE_PATH);
+    supplementaryHref = '/downloads/supplementary_tables.xlsx';
+  } catch (error) {
+    supplementaryHref = null;
+  }
+
   try {
     const raw = await fs.readFile(MANIFEST_PATH, 'utf-8');
     const manifest = JSON.parse(raw) as SpecialManifest;
@@ -28,6 +43,7 @@ export const getStaticProps: GetStaticProps<SpecialPageProps> = async () => {
       props: {
         manifest,
         manifestError: null,
+        supplementaryHref,
       },
     };
   } catch (error) {
@@ -36,12 +52,13 @@ export const getStaticProps: GetStaticProps<SpecialPageProps> = async () => {
       props: {
         manifest: { generatedAt: null, groups: [] },
         manifestError: `Unable to read special manifest: ${message}`,
+        supplementaryHref,
       },
     };
   }
 };
 
-export default function SpecialPage({ manifest, manifestError }: SpecialPageProps) {
+export default function SpecialPage({ manifest, manifestError, supplementaryHref }: SpecialPageProps) {
   return (
     <>
       <Head>
@@ -83,7 +100,11 @@ export default function SpecialPage({ manifest, manifestError }: SpecialPageProp
           </pre>
         </div>
       ) : (
-        <SpecialGallery groups={manifest.groups} generatedAt={manifest.generatedAt} />
+        <SpecialGallery
+          groups={manifest.groups}
+          generatedAt={manifest.generatedAt}
+          supplementaryHref={supplementaryHref}
+        />
       )}
     </>
   );
