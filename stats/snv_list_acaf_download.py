@@ -1,7 +1,8 @@
 import os, sys, re, math, subprocess, json, pickle, hashlib, uuid, time
 from dataclasses import dataclass
 from typing import Dict, List, Tuple, Set, Iterable, Optional, DefaultDict, Any
-from collections import defaultdict
+from collections import defaultdict, deque
+from bisect import bisect_left, bisect_right
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 import numpy as np
@@ -23,9 +24,10 @@ OUT_PASSED = "passed_snvs.txt"
 MAX_RUN_BYTES = 64 * 1024 * 1024     # ~64 MiB per ranged request (metrics phase)
 MAX_BYTE_GAP  =  2 * 1024 * 1024     # merge neighbors if byte gap ≤ 2 MiB (metrics phase)
 
-# For final BED assembly we prioritize stability & resumability (sequential, low RAM):
-ASSEMBLY_MAX_RUN_BYTES = 16 * 1024 * 1024  # smaller chunks to keep memory low
-ASSEMBLY_MAX_BYTE_GAP  = 256 * 1024
+# For final BED assembly we prioritize stability & resumability but allow larger, parallel spans:
+ASSEMBLY_MAX_RUN_BYTES = 64 * 1024 * 1024  # ~64 MiB chunks keep request count low
+ASSEMBLY_MAX_BYTE_GAP  = 4 * 1024 * 1024
+ASSEMBLY_IO_THREADS    = min(16, IO_THREADS)
 
 # I/O concurrency (network-bound). Increase if your network can handle it.
 IO_THREADS = max(64, (os.cpu_count() or 8) * 8)
@@ -400,6 +402,14 @@ class Candidate:
     a1: str
     a2: str
     bim_line: str          # write-through if selected
+
+@dataclass(frozen=True)
+class SpanPlan:
+    sid: int
+    i0: int
+    i1: int
+    bpf: int
+    indices: Tuple[int, ...]
 
 # ------------------------------- PIPELINE ------------------------------------
 
@@ -1173,42 +1183,84 @@ def assemble_bed_resume(shards: List[Shard],
     if left != remaining:
         print(f"WARNING: resume accounting mismatch (computed {left}, expected {remaining}); proceeding with {left}.")
 
-    # Plan sequential runs (per shard, increasing index order)
+    # Plan runs (per shard, increasing index order) keeping strict BIM ordering
+    plan: List[SpanPlan] = []
     total_bytes_planned = 0
-    for sid, idxs in to_write_by_shard.items():
+    for sid in range(len(shards)):
+        idxs = to_write_by_shard.get(sid, [])
+        if not idxs:
+            continue
         sh = shards[sid]
-        spans = coalesce_by_bytes(idxs, int(sh.bpf), max_gap=ASSEMBLY_MAX_BYTE_GAP, max_run=ASSEMBLY_MAX_RUN_BYTES)
-        total_bytes_planned += sum((i1 - i0 + 1) * int(sh.bpf) for i0, i1 in spans)
+        bpf = int(sh.bpf)  # type: ignore
+        spans = coalesce_by_bytes(idxs, bpf, max_gap=ASSEMBLY_MAX_BYTE_GAP, max_run=ASSEMBLY_MAX_RUN_BYTES)
+        ptr = 0
+        for i0, i1 in spans:
+            j0 = bisect_left(idxs, i0, ptr)
+            j1 = bisect_right(idxs, i1, j0)
+            if j0 == j1:
+                ptr = j1
+                continue
+            indices = tuple(idxs[j0:j1])
+            total_bytes_planned += (i1 - i0 + 1) * bpf
+            plan.append(SpanPlan(sid=sid, i0=i0, i1=i1, bpf=bpf, indices=indices))
+            ptr = j1
 
-    import bisect
     wrote = 0
+
+    def submit_next(it, pool, inflight):
+        try:
+            work = next(it)
+        except StopIteration:
+            return False
+        future = pool.submit(
+            lambda w: fetcher.fetch(
+                shards[w.sid].bed_uri,
+                3 + w.i0 * w.bpf,
+                3 + (w.i1 + 1) * w.bpf - 1,
+            ),
+            work,
+        )
+        inflight.append((work, future))
+        return True
+
     with open(OUT_BED, "ab") as fbed, \
+         ThreadPoolExecutor(max_workers=ASSEMBLY_IO_THREADS) as pool, \
          tqdm(total=remaining, desc="BED SNPs (resume)", unit="snp") as pbar_snp, \
          tqdm(total=total_bytes_planned, desc="BED bytes (planned)", unit="B", unit_scale=True, unit_divisor=1024, leave=False) as pbar_bytes:
 
-        for sid in range(len(shards)):
-            idxs = to_write_by_shard.get(sid, [])
-            if not idxs:
-                continue
-            sh = shards[sid]
-            bpf = int(sh.bpf)  # type: ignore
-            spans = coalesce_by_bytes(idxs, bpf, max_gap=ASSEMBLY_MAX_BYTE_GAP, max_run=ASSEMBLY_MAX_RUN_BYTES)
-            # Sequentially fetch each span and write only selected indices (in order)
-            for i0, i1 in spans:
-                start = 3 + i0 * bpf
-                end   = 3 + (i1 + 1) * bpf - 1
-                blob = fetcher.fetch(sh.bed_uri, start, end)
-                # carve
-                start_ptr = bisect.bisect_left(idxs, i0)
-                ptr = start_ptr
-                while ptr < len(idxs) and idxs[ptr] <= i1:
-                    snp_idx = idxs[ptr]
-                    off = (snp_idx - i0) * bpf
-                    fbed.write(blob[off:off+bpf])
+        plan_iter = iter(plan)
+        inflight: deque = deque()
+
+        # Prime the worker pool
+        for _ in range(ASSEMBLY_IO_THREADS):
+            if not submit_next(plan_iter, pool, inflight):
+                break
+
+        while inflight:
+            work, fut = inflight.popleft()
+            blob = fut.result()
+            expected = (work.i1 - work.i0 + 1) * work.bpf
+            if len(blob) != expected:
+                raise RuntimeError(
+                    f"Range fetch returned {len(blob)} bytes, expected {expected} for shard {work.sid} span {work.i0}-{work.i1}"
+                )
+            view = memoryview(blob)
+            try:
+                for snp_idx in work.indices:
+                    off = (snp_idx - work.i0) * work.bpf
+                    fbed.write(view[off:off + work.bpf])
                     wrote += 1
-                    pbar_snp.update(1)
-                    ptr += 1
-                pbar_bytes.update(len(blob))
+            finally:
+                view.release()
+            pbar_snp.update(len(work.indices))
+            pbar_bytes.update(len(blob))
+
+            # Keep pipeline full
+            while len(inflight) < ASSEMBLY_IO_THREADS and submit_next(plan_iter, pool, inflight):
+                pass
+
+    if wrote != left:
+        print(f"WARNING: wrote {wrote} SNPs but expected {left}; proceeding with integrity check.")
 
     # Final integrity
     expected_size = 3 + total_selected * bpf_any
