@@ -24,12 +24,12 @@ OUT_PASSED = "passed_snvs.txt"
 MAX_RUN_BYTES = 64 * 1024 * 1024     # ~64 MiB per ranged request (metrics phase)
 MAX_BYTE_GAP  =  2 * 1024 * 1024     # merge neighbors if byte gap ≤ 2 MiB (metrics phase)
 
+# I/O concurrency (network-bound). Increase if your network can handle it.
+IO_THREADS = max(64, (os.cpu_count() or 8) * 8)
+
 # For final BED assembly we prioritize stability & resumability but allow larger, parallel spans:
 ASSEMBLY_MAX_RUN_BYTES = 64 * 1024 * 1024  # ~64 MiB chunks keep request count low
 ASSEMBLY_MAX_BYTE_GAP  = 4 * 1024 * 1024
-
-# I/O concurrency (network-bound). Increase if your network can handle it.
-IO_THREADS = max(64, (os.cpu_count() or 8) * 8)
 ASSEMBLY_IO_THREADS    = min(16, IO_THREADS)
 
 # ------------------------------ CACHE HELPERS --------------------------------
