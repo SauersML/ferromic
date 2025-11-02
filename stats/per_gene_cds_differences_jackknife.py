@@ -7,15 +7,7 @@ from typing import List, Tuple, Set, Dict
 import numpy as np
 import pandas as pd
 
-try:  # pragma: no cover - exercised indirectly via CLI
-    from tqdm import tqdm
-except ModuleNotFoundError:  # pragma: no cover - fallback for minimal environments
-    def tqdm(iterable=None, *args, **kwargs):
-        """Fallback progress iterator when ``tqdm`` is unavailable."""
-
-        if iterable is None:
-            return iter(())
-        return iterable
+from tqdm import tqdm
 
 # -------------------------
 # Config / constants
