@@ -9,6 +9,11 @@ Prepare the data:
 curl -s https://raw.githubusercontent.com/sauersml/ferromic/main/stats/prepare_data_for_infer.py | python3
 ```
 
+Get the PLS regression patch in the same location where infer_dosage.py will live:
+```
+curl -O https://raw.githubusercontent.com/SauersML/ferromic/refs/heads/main/stats/pls_patch.py
+```
+
 Use the trained models to infer dosage:
 ```
 curl -s https://raw.githubusercontent.com/sauersml/ferromic/main/stats/infer_dosage.py | python3
