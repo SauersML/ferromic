@@ -372,7 +372,6 @@ def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, anc_series, phenos_
         bar_len = 40
         queued = 0
         done = 0
-        lock = threading.Lock()
 
         def _print_bar(q, d, label):
             q = int(q)
@@ -394,41 +393,16 @@ def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, anc_series, phenos_
         gc.collect()
 
         BUDGET.reserve(target_inversion, "pool_steady", 0.0, block=True)
-        pool = get_context(MP_CONTEXT).Pool(
-            processes=n_procs,
-            initializer=models.init_lrt_worker,
-            initargs=(base_meta, core_cols, core_index, allowed_mask_by_cat, anc_series, ctx),
-            maxtasksperchild=500,
-        )
-        try:
-            if on_pool_started:
-                try:
-                    worker_pids = [p.pid for p in getattr(pool, "_pool", []) if p and p.pid]
-                except Exception:
-                    worker_pids = []
-                try:
-                    on_pool_started(n_procs, worker_pids)
-                except Exception as e:
-                    print(f"\n[WARN] on_pool_started callback failed: {e}", flush=True)
 
-            inflight = []
-
-            def _cb(_):
-                nonlocal done, queued
-                with lock:
-                    done += 1
-                    _print_bar(queued, done, "LRT-Stage1")
-
-            failed_tasks = []
-            def _err_cb(e):
-                nonlocal failed_tasks
-                print(f"[pool ERR] Worker failed: {e}", flush=True)
-                failed_tasks.append(e)
-
+        def _task_iter():
+            nonlocal queued
             for task in tasks:
                 floor = _resolve_floor(min_available_memory_gb)
                 while BUDGET.remaining_gb() < floor:
-                    print(f"\n[gov WARN] Budget low (remain: {BUDGET.remaining_gb():.2f}GB, floor: {floor:.2f}GB), pausing task submission...", flush=True)
+                    print(
+                        f"\n[gov WARN] Budget low (remain: {BUDGET.remaining_gb():.2f}GB, floor: {floor:.2f}GB), pausing task submission...",
+                        flush=True,
+                    )
                     time.sleep(2)
 
                 # Cache policy: if a previous Stage-1 LRT result exists but has an invalid or NA P_LRT_Overall,
@@ -443,23 +417,46 @@ def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, anc_series, phenos_
                         if not _cached_lrt_result_is_usable(_res_obj):
                             try:
                                 os.remove(_meta_path)
-                                print(f"\n[cache POLICY] Invalid or missing P_LRT_Overall for '{task['name']}'. Forcing re-run by removing meta.", flush=True)
+                                print(
+                                    f"\n[cache POLICY] Invalid or missing P_LRT_Overall for '{task['name']}'. Forcing re-run by removing meta.",
+                                    flush=True,
+                                )
                             except Exception:
                                 pass
                 except Exception:
                     pass
 
                 queued += 1
-                ar = pool.apply_async(models.lrt_overall_worker, (task,), callback=_cb, error_callback=_err_cb)
-                inflight.append(ar)
                 _print_bar(queued, done, "LRT-Stage1")
+                yield task
 
-            pool.close()
-            for ar in inflight:
-                ar.wait()
-            pool.join()
-            _print_bar(queued, done, "LRT-Stage1")
-            print("")
+        try:
+            with get_context(MP_CONTEXT).Pool(
+                processes=n_procs,
+                initializer=models.init_lrt_worker,
+                initargs=(base_meta, core_cols, core_index, allowed_mask_by_cat, anc_series, ctx),
+                maxtasksperchild=500,
+            ) as pool:
+                if on_pool_started:
+                    try:
+                        worker_pids = [p.pid for p in getattr(pool, "_pool", []) if p and p.pid]
+                    except Exception:
+                        worker_pids = []
+                    try:
+                        on_pool_started(n_procs, worker_pids)
+                    except Exception as e:
+                        print(f"\n[WARN] on_pool_started callback failed: {e}", flush=True)
+
+                try:
+                    for _ in pool.imap_unordered(models.lrt_overall_worker, _task_iter(), chunksize=1):
+                        done += 1
+                        _print_bar(queued, done, "LRT-Stage1")
+                except Exception as exc:
+                    print(f"\n[pool ERR] Worker failed: {exc}", flush=True)
+                    raise
+                finally:
+                    _print_bar(queued, done, "LRT-Stage1")
+                    print("")
         finally:
             base_shm.close()
             base_shm.unlink()
@@ -516,7 +513,6 @@ def run_bootstrap_overall(core_df_with_const, allowed_mask_by_cat, anc_series,
         print(f"[Bootstrap-Stage1] Scheduling {len(tasks)} phenotypes (B={B}) with {n_procs} workers.", flush=True)
 
         bar_len, queued, done = 40, 0, 0
-        lock = threading.Lock()
 
         def _print(q, d):
             pct = int((d * 100) / q) if q else 0
@@ -529,35 +525,9 @@ def run_bootstrap_overall(core_df_with_const, allowed_mask_by_cat, anc_series,
             )
 
         BUDGET.reserve(target_inversion, "pool_steady", 0.0, block=True)
-        pool = None
-        try:
-            pool = get_context(MP_CONTEXT).Pool(
-                processes=n_procs,
-                initializer=models.init_boot_worker,
-                initargs=(base_meta, boot_meta, core_cols, core_index, allowed_mask_by_cat, anc_series, ctx),
-                maxtasksperchild=500,
-            )
-            if on_pool_started:
-                try:
-                    worker_pids = [p.pid for p in getattr(pool, "_pool", []) if p and p.pid]
-                except Exception:
-                    worker_pids = []
-                try:
-                    on_pool_started(n_procs, worker_pids)
-                except Exception as e:
-                    print(f"\n[WARN] on_pool_started callback failed: {e}", flush=True)
 
-            inflight = []
-
-            def _cb(_):
-                nonlocal done
-                with lock:
-                    done += 1
-                    _print(queued, done)
-
-            def _err_cb(e):
-                print(f"[pool ERR] Worker failed: {e}", flush=True)
-
+        def _task_iter():
+            nonlocal queued
             for task in tasks:
                 floor = _resolve_floor(min_available_memory_gb)
                 while BUDGET.remaining_gb() < floor:
@@ -572,27 +542,37 @@ def run_bootstrap_overall(core_df_with_const, allowed_mask_by_cat, anc_series,
                     meta_path = os.path.join(boot_dir, f"{task['name']}.meta.json")
                     _evict_if_ctx_mismatch(meta_path, res_path, ctx, target_inversion)
                 queued += 1
-                ar = pool.apply_async(models.bootstrap_overall_worker, (task,), callback=_cb, error_callback=_err_cb)
-                inflight.append(ar)
                 _print(queued, done)
+                yield task
 
-            pool.close()
-            for ar in inflight:
-                ar.wait()
-            pool.join()
-            _print(queued, done)
-            print("")
-        finally:
-            try:
-                if pool is not None:
-                    pool.close()
-                    pool.join()
-            except Exception:
+        try:
+            with get_context(MP_CONTEXT).Pool(
+                processes=n_procs,
+                initializer=models.init_boot_worker,
+                initargs=(base_meta, boot_meta, core_cols, core_index, allowed_mask_by_cat, anc_series, ctx),
+                maxtasksperchild=500,
+            ) as pool:
+                if on_pool_started:
+                    try:
+                        worker_pids = [p.pid for p in getattr(pool, "_pool", []) if p and p.pid]
+                    except Exception:
+                        worker_pids = []
+                    try:
+                        on_pool_started(n_procs, worker_pids)
+                    except Exception as e:
+                        print(f"\n[WARN] on_pool_started callback failed: {e}", flush=True)
+
                 try:
-                    if pool is not None:
-                        pool.terminate()
-                except Exception:
-                    pass
+                    for _ in pool.imap_unordered(models.bootstrap_overall_worker, _task_iter(), chunksize=1):
+                        done += 1
+                        _print(queued, done)
+                except Exception as exc:
+                    print(f"\n[pool ERR] Worker failed: {exc}", flush=True)
+                    raise
+                finally:
+                    _print(queued, done)
+                    print("")
+        finally:
             try:
                 BUDGET.release(target_inversion, "pool_steady")
             except Exception:
@@ -641,7 +621,6 @@ def run_lrt_followup(core_df_with_const, allowed_mask_by_cat, anc_series, hit_na
         bar_len = 40
         queued = 0
         done = 0
-        lock = threading.Lock()
 
         def _print_bar(q, d, label):
             q = int(q); d = int(d)
@@ -661,42 +640,16 @@ def run_lrt_followup(core_df_with_const, allowed_mask_by_cat, anc_series, hit_na
         del X_base, core_df_with_const
         gc.collect()
         BUDGET.reserve(target_inversion, "pool_steady", 0.0, block=True)
-        pool = get_context(MP_CONTEXT).Pool(
-            processes=n_procs,
-            initializer=models.init_lrt_worker,
-            initargs=(base_meta, core_cols, core_index, allowed_mask_by_cat, anc_series, ctx),
-            maxtasksperchild=500,
-        )
-        try:
-            if on_pool_started:
-                try:
-                    worker_pids = [p.pid for p in getattr(pool, "_pool", []) if p and p.pid]
-                except Exception:
-                    worker_pids = []
-                try:
-                    on_pool_started(n_procs, worker_pids)
-                except Exception as e:
-                    print(f"\n[WARN] on_pool_started callback failed: {e}", flush=True)
 
-            inflight = []
-
-            def _cb2(_):
-                nonlocal done, queued
-                with lock:
-                    done += 1
-                    _print_bar(queued, done, "Ancestry")
-
-            failed_tasks = []
-
-            def _err_cb(e):
-                nonlocal failed_tasks
-                print(f"[pool ERR] Worker failed: {e}", flush=True)
-                failed_tasks.append(e)
-
+        def _task_iter():
+            nonlocal queued
             for task in tasks_follow:
                 floor = _resolve_floor(min_available_memory_gb)
                 while BUDGET.remaining_gb() < floor:
-                    print(f"\n[gov WARN] Budget low (remain: {BUDGET.remaining_gb():.2f}GB, floor: {floor:.2f}GB), pausing task submission...", flush=True)
+                    print(
+                        f"\n[gov WARN] Budget low (remain: {BUDGET.remaining_gb():.2f}GB, floor: {floor:.2f}GB), pausing task submission...",
+                        flush=True,
+                    )
                     time.sleep(2)
 
                 follow_dir = ctx.get("LRT_FOLLOWUP_CACHE_DIR")
@@ -706,16 +659,36 @@ def run_lrt_followup(core_df_with_const, allowed_mask_by_cat, anc_series, hit_na
                     _evict_if_ctx_mismatch(meta_path, res_path, ctx, target_inversion)
 
                 queued += 1
-                ar = pool.apply_async(models.lrt_followup_worker, (task,), callback=_cb2, error_callback=_err_cb)
-                inflight.append(ar)
                 _print_bar(queued, done, "Ancestry")
+                yield task
 
-            pool.close()
-            for ar in inflight:
-                ar.wait()
-            pool.join()
-            _print_bar(queued, done, "Ancestry")
-            print("")
+        try:
+            with get_context(MP_CONTEXT).Pool(
+                processes=n_procs,
+                initializer=models.init_lrt_worker,
+                initargs=(base_meta, core_cols, core_index, allowed_mask_by_cat, anc_series, ctx),
+                maxtasksperchild=500,
+            ) as pool:
+                if on_pool_started:
+                    try:
+                        worker_pids = [p.pid for p in getattr(pool, "_pool", []) if p and p.pid]
+                    except Exception:
+                        worker_pids = []
+                    try:
+                        on_pool_started(n_procs, worker_pids)
+                    except Exception as e:
+                        print(f"\n[WARN] on_pool_started callback failed: {e}", flush=True)
+
+                try:
+                    for _ in pool.imap_unordered(models.lrt_followup_worker, _task_iter(), chunksize=1):
+                        done += 1
+                        _print_bar(queued, done, "Ancestry")
+                except Exception as exc:
+                    print(f"\n[pool ERR] Worker failed: {exc}", flush=True)
+                    raise
+                finally:
+                    _print_bar(queued, done, "Ancestry")
+                    print("")
         finally:
             base_shm.close()
             base_shm.unlink()
