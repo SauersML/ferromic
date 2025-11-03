@@ -72,7 +72,8 @@ def configure_from_ctx(ctx: Dict) -> None:
 
 def _prequeue_should_run(pheno_info, core_index, allowed_mask_by_cat, sex_vec,
                          min_cases=MIN_CASES_FILTER, min_ctrls=MIN_CONTROLS_FILTER,
-                         sex_mode="majority", sex_prop=0.99, max_other=0, min_neff=None):
+                         sex_mode="majority", sex_prop=0.99, max_other=0, min_neff=None,
+                         return_case_idx=False):
     """
     Decide, without loading X, whether this phenotype should be queued.
     Uses cached case indices, allowed control mask, and sex restriction rule.
@@ -85,7 +86,7 @@ def _prequeue_should_run(pheno_info, core_index, allowed_mask_by_cat, sex_vec,
                                         pheno_info.get('cdr_codename', ''),
                                         pheno_info.get('cache_dir', ''))  # may return None
     if not case_idx or (case_idx.get("case_idx") is None):
-        return False
+        return (False, None) if return_case_idx else False
     case_ix_raw = case_idx["case_idx"]
     case_ix_arr = np.asarray(case_ix_raw)
     if not np.issubdtype(case_ix_arr.dtype, np.integer):
@@ -94,7 +95,7 @@ def _prequeue_should_run(pheno_info, core_index, allowed_mask_by_cat, sex_vec,
     else:
         case_ix = case_ix_arr
     if case_ix.size == 0:
-        return False
+        return (False, None) if return_case_idx else False
 
     # 2) allowed control indices for this category (fallback: all allowed)
     allowed_mask = allowed_mask_by_cat.get(category, None)
@@ -102,7 +103,7 @@ def _prequeue_should_run(pheno_info, core_index, allowed_mask_by_cat, sex_vec,
         allowed_mask = np.ones(core_index.size, dtype=bool)
     ctrl_base_ix = np.flatnonzero(allowed_mask)
     if ctrl_base_ix.size == 0:
-        return False
+        return (False, None) if return_case_idx else False
 
     # 3) apply sex restriction logically
     sex_cases = sex_vec[case_ix]
@@ -110,7 +111,7 @@ def _prequeue_should_run(pheno_info, core_index, allowed_mask_by_cat, sex_vec,
     n_m_case = int(np.sum(sex_cases == 1.0))
     total_cases = n_f_case + n_m_case
     if total_cases == 0:
-        return False
+        return (False, None) if return_case_idx else False
 
     if sex_mode == "strict":
         if n_f_case > 0 and n_m_case == 0:
@@ -136,12 +137,15 @@ def _prequeue_should_run(pheno_info, core_index, allowed_mask_by_cat, sex_vec,
         eff_ctrls = int(np.sum(sex_vec[ctrl_ix] == dom))
 
     if (eff_cases < min_cases) or (eff_ctrls < min_ctrls):
-        return False
+        return (False, None) if return_case_idx else False
 
     if min_neff is not None:
         neff_ub = 1.0 / (1.0/eff_cases + 1.0/eff_ctrls)
         if neff_ub < float(min_neff):
-            return False
+            return (False, None) if return_case_idx else False
+
+    if return_case_idx:
+        return True, np.asarray(case_ix, dtype=np.int32)
 
     return True
 

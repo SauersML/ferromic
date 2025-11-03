@@ -649,7 +649,13 @@ def test_cli_pheno_filter_limits_stage1_worklist():
             on_pool_started=None,
             mode=None,
         ):
-            captured_worklists.append(list(phenos_list))
+            snapshot = []
+            for entry in phenos_list:
+                if isinstance(entry, dict):
+                    snapshot.append({**entry})
+                else:
+                    snapshot.append(entry)
+            captured_worklists.append(snapshot)
             return None
 
         with contextlib.ExitStack() as stack:
@@ -657,14 +663,25 @@ def test_cli_pheno_filter_limits_stage1_worklist():
             stack.enter_context(patch("phewas.run.io.load_related_to_remove", return_value=set()))
             stack.enter_context(patch("phewas.pheno.populate_caches_prepass", lambda *_, **__: None))
             stack.enter_context(patch("phewas.pheno.deduplicate_phenotypes", lambda *_, **__: None))
-            stack.enter_context(patch("phewas.pheno._prequeue_should_run", lambda *_, **__: True))
+            def _always_run(*_args, return_case_idx=False, **_kwargs):
+                if return_case_idx:
+                    return True, np.array([0, 1], dtype=np.int32)
+                return True
+
+            stack.enter_context(patch("phewas.pheno._prequeue_should_run", _always_run))
             stack.enter_context(patch("phewas.testing.run_overall", fake_run_overall))
             stack.enter_context(patch("phewas.run.supervisor_main", lambda: run._pipeline_once()))
 
             cli.main(["--pheno", target_pheno])
 
         assert captured_worklists, "Stage-1 testing did not run during the pipeline"
-        assert captured_worklists == [[target_pheno]], captured_worklists
+        assert len(captured_worklists) == 1
+        assert len(captured_worklists[0]) == 1
+        payload = captured_worklists[0][0]
+        assert isinstance(payload, dict)
+        assert payload["name"] == target_pheno
+        assert isinstance(payload.get("case_idx"), list) and payload["case_idx"], payload
+        assert isinstance(payload.get("case_fp"), str) and ":" in payload["case_fp"]
 
 
 def test_cli_pheno_filter_uses_isolated_cache_tags():
@@ -713,7 +730,8 @@ def test_cli_pheno_filter_uses_isolated_cache_tags():
                 "cdr_codename": ctx.get("cdr_codename"),
                 "target": ctx.get("TARGET_INVERSION"),
             }
-            for name in phenos_list:
+            for item in phenos_list:
+                name = item["name"] if isinstance(item, dict) else item
                 payload = {
                     "Phenotype": name,
                     "P_Value": 1.0,
@@ -751,12 +769,17 @@ def test_cli_pheno_filter_uses_isolated_cache_tags():
             write_stage1_results(phenos_list, ctx)
             return None
 
+        def _always_run(*_args, return_case_idx=False, **_kwargs):
+            if return_case_idx:
+                return True, np.array([0, 1], dtype=np.int32)
+            return True
+
         patches = [
             patch("phewas.run.bigquery.Client", MagicMock()),
             patch("phewas.run.io.load_related_to_remove", return_value=set()),
             patch("phewas.pheno.populate_caches_prepass", lambda *_, **__: None),
             patch("phewas.pheno.deduplicate_phenotypes", lambda *_, **__: None),
-            patch("phewas.pheno._prequeue_should_run", lambda *_, **__: True),
+            patch("phewas.pheno._prequeue_should_run", _always_run),
             patch("phewas.testing.run_overall", stage1_stub),
             patch("phewas.run.supervisor_main", lambda: run._pipeline_once()),
             patch("phewas.pipes.run_lrt_followup", lambda *_, **__: None),
@@ -1020,6 +1043,14 @@ def _patch_and_invoke(worker_fn, env, monkeypatch):
 
 
 def test_lrt_overall_design_matrix_respects_mask(worker_environment, monkeypatch):
+    _patch_and_invoke(models.lrt_overall_worker, worker_environment, monkeypatch)
+
+
+def test_lrt_overall_worker_uses_precomputed_case_idx(worker_environment, monkeypatch):
+    def _fail(*_args, **_kwargs):
+        raise AssertionError("_read_case_cache should not be invoked when case_idx provided")
+
+    monkeypatch.setattr(models, "_read_case_cache", _fail)
     _patch_and_invoke(models.lrt_overall_worker, worker_environment, monkeypatch)
 
 

@@ -367,7 +367,31 @@ def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, anc_series, phenos_
     """
     Same pool pattern; submits models.lrt_overall_worker.
     """
-    tasks = [{"name": s, "category": name_to_cat.get(s, None), "cdr_codename": cdr_codename, "target": target_inversion} for s in phenos_list]
+    tasks = []
+    for item in phenos_list:
+        if isinstance(item, dict):
+            name = item.get("name") or item.get("sanitized_name")
+            if name is None:
+                raise KeyError("phenotype payload missing 'name'")
+            category = item.get("category", name_to_cat.get(name, None))
+            task = {
+                "name": name,
+                "category": category,
+                "cdr_codename": item.get("cdr_codename", cdr_codename),
+                "target": target_inversion,
+            }
+            for key, value in item.items():
+                if key not in task:
+                    task[key] = value
+        else:
+            name = item
+            task = {
+                "name": name,
+                "category": name_to_cat.get(name, None),
+                "cdr_codename": cdr_codename,
+                "target": target_inversion,
+            }
+        tasks.append(task)
     random.shuffle(tasks)
 
     monitor = MemoryMonitor()
@@ -487,8 +511,31 @@ def run_bootstrap_overall(core_df_with_const, allowed_mask_by_cat, anc_series,
                           ctx, min_available_memory_gb, on_pool_started=None):
     """Stage-1 parametric bootstrap with shared U matrix."""
     import gc, os, numpy as np, random, threading, time, hashlib
-    tasks = [{"name": s, "category": name_to_cat.get(s, None), "cdr_codename": cdr_codename, "target": target_inversion}
-             for s in phenos_list]
+    tasks = []
+    for item in phenos_list:
+        if isinstance(item, dict):
+            name = item.get("name") or item.get("sanitized_name")
+            if name is None:
+                raise KeyError("phenotype payload missing 'name'")
+            category = item.get("category", name_to_cat.get(name, None))
+            task = {
+                "name": name,
+                "category": category,
+                "cdr_codename": item.get("cdr_codename", cdr_codename),
+                "target": target_inversion,
+            }
+            for key, value in item.items():
+                if key not in task:
+                    task[key] = value
+        else:
+            name = item
+            task = {
+                "name": name,
+                "category": name_to_cat.get(name, None),
+                "cdr_codename": cdr_codename,
+                "target": target_inversion,
+            }
+        tasks.append(task)
     random.shuffle(tasks)
 
     monitor = MemoryMonitor()
