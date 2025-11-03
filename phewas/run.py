@@ -1669,12 +1669,25 @@ def _pipeline_once():
 
 
 def supervisor_main(max_restarts=100, backoff_sec=10):
-    import multiprocessing as mp, time, signal
+    import multiprocessing as mp, time, signal, os
+
     ctx = mp.get_context("spawn")
     should_stop = {"flag": False}
+    current_child = {"proc": None}
 
-    def _stop(*_):
+    def _stop(signum, _frame):
         should_stop["flag"] = True
+        proc = current_child.get("proc")
+        if proc is not None and proc.is_alive():
+            try:
+                proc.send_signal(signum)
+            except AttributeError:
+                try:
+                    os.kill(proc.pid, signum)
+                except Exception:
+                    pass
+            except Exception:
+                pass
 
     signal.signal(signal.SIGINT, _stop)
     signal.signal(signal.SIGTERM, _stop)
@@ -1682,6 +1695,7 @@ def supervisor_main(max_restarts=100, backoff_sec=10):
     restarts = 0
     while not should_stop["flag"] and restarts <= max_restarts:
         p = ctx.Process(target=_pipeline_once, name="ferromic-pipeline")
+        current_child["proc"] = p
         p.start()
         while p.is_alive():
             if should_stop["flag"]:
@@ -1690,8 +1704,10 @@ def supervisor_main(max_restarts=100, backoff_sec=10):
                 except Exception:
                     pass
                 p.join(timeout=5)
+                current_child["proc"] = None
                 return
             time.sleep(0.2)
+        current_child["proc"] = None
         code = p.exitcode
         if code == 0:
             break
