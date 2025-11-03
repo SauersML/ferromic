@@ -7,6 +7,7 @@ import traceback
 import sys
 import atexit
 import math
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -1609,19 +1610,72 @@ def _drop_zero_variance(X: pd.DataFrame, keep_cols=('const',), always_keep=(), e
 
 
 def _drop_rank_deficient(X: pd.DataFrame, keep_cols=('const',), always_keep=(), rtol=1e-2):
-    """
-    Detects rank deficiency but NEVER drops covariates.
-    
-    Returns the original DataFrame unchanged. If rank deficiency is detected,
-    downstream fitting will fail appropriately rather than silently dropping covariates.
-    
-    This function is kept for API compatibility but no longer modifies the design matrix.
-    """
-    if X.shape[1] == 0:
+    """Remove nearly collinear columns from ``X`` while respecting preservation hints."""
+
+    if not isinstance(X, pd.DataFrame) or X.empty:
         return X
-    
-    # Return the original DataFrame unchanged - NEVER drop covariates
-    return X
+
+    keep_cols_set = {col for col in (keep_cols or ()) if col in X.columns}
+    always_keep_set = {col for col in (always_keep or ()) if col in X.columns}
+
+    def _effective_rank(cols: list[str]) -> int:
+        if not cols:
+            return 0
+        arr = np.nan_to_num(X[cols].to_numpy(dtype=np.float64), copy=False)
+        if arr.size == 0:
+            return 0
+        try:
+            s = np.linalg.svd(arr, compute_uv=False, hermitian=False)
+        except np.linalg.LinAlgError:
+            # Fall back to numpy's default rank computation if SVD fails to converge
+            return int(np.linalg.matrix_rank(arr))
+        if s.size == 0:
+            return 0
+        s0 = float(np.max(np.abs(s)))
+        if not np.isfinite(s0) or s0 <= 0.0:
+            return int(np.sum(np.abs(s) > 0.0))
+        thresh = float(rtol) * s0
+        return int(np.sum(np.abs(s) > thresh))
+
+    def _pick_column_to_drop(selected: list[str], new_col: str) -> Optional[str]:
+        candidates: list[str] = []
+        if new_col in selected and new_col not in always_keep_set:
+            candidates.append(new_col)
+        for name in reversed(selected):
+            if name == new_col or name in always_keep_set:
+                continue
+            candidates.append(name)
+        if not candidates:
+            return None
+        for cand in candidates:
+            if cand not in keep_cols_set:
+                return cand
+        return candidates[0]
+
+    selected: list[str] = []
+    for col in X.columns:
+        selected.append(col)
+        while True:
+            rank = _effective_rank(selected)
+            if rank >= len(selected):
+                break
+            drop_col = _pick_column_to_drop(selected, col)
+            if drop_col is None:
+                # No droppable column (all are protected); leave matrix as-is.
+                break
+            selected.remove(drop_col)
+            if drop_col == col:
+                # The newly added column was dropped; move to the next column.
+                break
+            # Otherwise we removed an earlier column; ensure the remaining set is full-rank.
+            # Loop again to verify whether additional pruning is required.
+        # If the while-loop exited because the new column was removed, avoid re-checking.
+        if col not in selected:
+            continue
+
+    if not selected:
+        return X.iloc[:, :0]
+    return X.loc[:, selected]
 
 
 def _fit_diagnostics(X, y, params):
