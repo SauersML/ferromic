@@ -13,3 +13,5 @@ Use the trained models to infer dosage:
 ```
 curl -s https://raw.githubusercontent.com/sauersml/ferromic/main/stats/infer_dosage.py | python3
 ```
+
+Head to the phewas/ directory to see how to run the PheWAS itself.
