@@ -2629,3 +2629,50 @@ def test_plan_category_sets_respects_min_k_and_dedup(tmp_path):
     assert "Y" in dropped and dropped["Y"] == ["C"]
     assert "Y" not in kept
     assert all(p in {"A", "B", "C"} for plist in kept.values() for p in plist)
+
+
+def test_deduplicate_keeps_high_prevalence_phenotypes(monkeypatch, tmp_path):
+    core_index = pd.Index([str(i) for i in range(10)], name="person_id")
+    pheno_defs = pd.DataFrame(
+        {
+            "sanitized_name": ["HighPrev", "Subset"],
+            "disease_category": ["cat", "cat"],
+            "all_codes": [["A"], ["B"]],
+        }
+    )
+
+    case_map = {
+        "HighPrev": [str(i) for i in range(10)],
+        "Subset": [str(i) for i in range(7)],
+    }
+
+    monkeypatch.setattr(
+        pheno,
+        "_case_ids_cached",
+        lambda s_name, cdr, cache_dir: tuple(case_map[s_name]),
+    )
+    monkeypatch.setattr(pheno, "EXCLUDE_ABS_CASES", 5)
+
+    result = pheno.deduplicate_phenotypes(
+        pheno_defs_df=pheno_defs,
+        core_index=core_index,
+        cdr_codename="TEST",
+        cache_dir=tmp_path.as_posix(),
+        min_cases=1,
+        phi_threshold=1.5,
+        share_threshold=0.5,
+    )
+
+    assert result["dropped"] == []
+    assert set(result["kept"]) == {"HighPrev", "Subset"}
+
+    flags = result.get("flagged_high_prevalence")
+    assert flags and any(entry["name"] == "HighPrev" for entry in flags)
+
+    fingerprint = models._index_fingerprint(core_index)
+    manifest_path = tmp_path / f"pheno_dedup_manifest_TEST_{fingerprint}.json"
+    assert manifest_path.exists()
+    manifest = json.loads(manifest_path.read_text())
+    assert "HighPrev" in manifest.get("kept", [])
+    flagged_manifest = manifest.get("flagged_high_prevalence", [])
+    assert any(entry.get("name") == "HighPrev" for entry in flagged_manifest)

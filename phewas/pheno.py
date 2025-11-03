@@ -40,6 +40,8 @@ MIN_CONTROLS_FILTER = 1_000
 
 # --- Prevalence cap ---
 # Drop phenotypes with extremely high absolute case counts before pairwise deduplication.
+# Phenotypes with case counts above this threshold are flagged (but retained)
+# during deduplication to avoid silently removing ultra-common covariates.
 EXCLUDE_ABS_CASES = 90_000
 
 _CASE_CACHE_MAX = int(os.environ.get("PHENO_CASE_CACHE_MAX", "512"))
@@ -949,6 +951,8 @@ def deduplicate_phenotypes(pheno_defs_df: pd.DataFrame,
     kept: Set[str] = set()
     dropped_names: Set[str] = set()
     dropped_records: List[dict] = []
+    high_prevalence: Set[str] = set()
+    high_prevalence_records: List[dict] = []
 
     for s_name in pheno_defs_df["sanitized_name"]:
         try:
@@ -962,21 +966,24 @@ def deduplicate_phenotypes(pheno_defs_df: pd.DataFrame,
         n1 = int(idx.size)
         if n1 < int(min_cases):
             continue
-        # Prevalence cap: exclude ultra-common phenotypes up front
+        # Prevalence cap: flag ultra-common phenotypes but retain them
         if n1 >= EXCLUDE_ABS_CASES:
-            print(f"Dropped '{s_name}' due to prevalence cap: n1={n1} >= {EXCLUDE_ABS_CASES} of N={N}")
-            dropped_records.append({
+            print(
+                f"[Dedup]     - [WARN] Prevalence cap triggered for '{s_name}' "
+                f"(n1={n1} >= {EXCLUDE_ABS_CASES} of N={N}); retaining phenotype.",
+                flush=True,
+            )
+            high_prevalence.add(s_name)
+            high_prevalence_records.append({
                 "name": s_name,
-                "reason": "prevalence_cap",
+                "reason": "prevalence_cap_flagged",
                 "with": None,
                 "k": 0,
                 "n1_self": n1,
                 "n1_other": N,
                 "share_self": (n1 / float(N)) if N else 0.0,
-                "share_other": None
+                "share_other": None,
             })
-            dropped_names.add(s_name)
-            continue
         cases_by_pheno[s_name] = np.sort(idx, kind="mergesort")
         n1_map[s_name] = n1
         n_codes_map[s_name] = len(all_codes_map.get(s_name) or [])
@@ -985,10 +992,15 @@ def deduplicate_phenotypes(pheno_defs_df: pd.DataFrame,
         manifest = {
             "config": {"min_cases": min_cases, "phi_threshold": phi_threshold, "share_threshold": share_threshold, "N": N},
             "kept": [],
-            "dropped": dropped_records
+            "dropped": dropped_records,
+            "flagged_high_prevalence": high_prevalence_records,
         }
         _write_dedup_manifest(manifest_path, manifest)
-        return {"kept": set(), "dropped": dropped_records}
+        return {
+            "kept": set(),
+            "dropped": dropped_records,
+            "flagged_high_prevalence": high_prevalence_records,
+        }
 
     # 2) Build sparse overlap counts only for co-occurring pairs
     pair_k = _build_pair_overlap_counts(cases_by_pheno, cap_per_person=PHENO_DEDUP_CAP_PER_PERSON)
@@ -1040,6 +1052,9 @@ def deduplicate_phenotypes(pheno_defs_df: pd.DataFrame,
                 continue
             n1b = n1_map.get(name_b, 0)
             n_codes_b = n_codes_map.get(name_b, 0)
+
+            if name_a in high_prevalence or name_b in high_prevalence:
+                continue
 
             # Intersection size from sparse map (skip if zero or missing)
             k = pair_k.get(_pair_key(name_a, name_b), 0)
@@ -1126,7 +1141,12 @@ def deduplicate_phenotypes(pheno_defs_df: pd.DataFrame,
             "N": N
         },
         "kept": sorted(list(kept)),
-        "dropped": dropped_records
+        "dropped": dropped_records,
+        "flagged_high_prevalence": high_prevalence_records,
     }
     _write_dedup_manifest(manifest_path, manifest)
-    return {"kept": kept, "dropped": dropped_records}
+    return {
+        "kept": kept,
+        "dropped": dropped_records,
+        "flagged_high_prevalence": high_prevalence_records,
+    }
