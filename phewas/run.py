@@ -15,7 +15,7 @@ import json
 import importlib
 import importlib.util
 import hashlib
-from typing import Optional, Sequence, Tuple
+from typing import Callable, Optional, Sequence, Tuple
 try:
     import psutil
     PSUTIL_AVAILABLE = True
@@ -190,6 +190,66 @@ def _infer_bootstrap_ceiling(num_phenotypes: int, num_inversions: int, alpha: fl
 
     hard_cap = 1 << 31  # ~2.1 billion draws; protects against runaway estimates
     return int(min(required, hard_cap))
+
+
+def _create_progress_emitter(
+    total: int,
+    log_prefix: str,
+    stage_label: str,
+    *,
+    max_updates: int = 20,
+) -> Callable[[int], None]:
+    """Return a callable that prints coarse progress updates for long-running stages."""
+
+    try:
+        total_int = int(total)
+    except Exception:
+        total_int = 0
+
+    total_int = max(0, total_int)
+    if total_int == 0:
+        prefix = f"{log_prefix} " if log_prefix else ""
+        printed = threading.Event()
+        lock = threading.Lock()
+
+        def _noop(_: int) -> None:
+            if printed.is_set():
+                return
+            with lock:
+                if printed.is_set():
+                    return
+                print(
+                    f"{prefix}[Stage] {stage_label}: 0/0 (0.0%)",
+                    flush=True,
+                )
+                printed.set()
+
+        return _noop
+
+    step = max(1, total_int // max(1, int(max_updates)))
+    prefix = f"{log_prefix} " if log_prefix else ""
+    lock = threading.Lock()
+
+    def _emit(current: int) -> None:
+        nonlocal step
+        try:
+            cur = int(current)
+        except Exception:
+            cur = total_int
+
+        cur = max(0, min(cur, total_int))
+        should_print = cur == 0 or cur == total_int or (cur % step == 0)
+        if not should_print:
+            return
+
+        pct = (cur / total_int) * 100 if total_int else 100.0
+        with lock:
+            print(
+                f"{prefix}[Stage] {stage_label}: {cur}/{total_int} ({pct:5.1f}%)",
+                flush=True,
+            )
+
+    return _emit
 
 
 class SystemMonitor(threading.Thread):
@@ -999,6 +1059,11 @@ def _pipeline_once():
             log_prefix = f"[INV {inv_safe_name}]"
             try:
                 print(f"{log_prefix} Started.", flush=True)
+                stage_total = 5
+                print(
+                    f"{log_prefix} [Stage 1/{stage_total}] Loading inversion dosages...",
+                    flush=True,
+                )
                 inversion_cache_dir = os.path.join(CACHE_DIR, inv_safe_name)
                 results_cache_dir = os.path.join(inversion_cache_dir, "results_atomic")
                 lrt_overall_cache_dir = os.path.join(inversion_cache_dir, "lrt_overall")
@@ -1071,6 +1136,15 @@ def _pipeline_once():
                         skipped_low_variance_inversions.add(target_inversion)
                     return
                 inversion_df.index = inversion_df.index.astype(str)
+                print(
+                    f"{log_prefix} [Stage 1/{stage_total}] Loaded inversion dosages for "
+                    f"{len(inversion_df):,} participants.",
+                    flush=True,
+                )
+                print(
+                    f"{log_prefix} [Stage 2/{stage_total}] Assembling covariate matrix...",
+                    flush=True,
+                )
                 core_df = shared_data['covariates'].join(inversion_df, how="inner")
                 if not core_df.index.is_unique:
                     dupes = core_df.index[core_df.index.duplicated()].unique()
@@ -1089,12 +1163,21 @@ def _pipeline_once():
                 core_df_subset["const"] = np.float32(1.0)
                 A_slice = shared_data['A_global'].reindex(core_df_subset.index).fillna(0.0).astype(np.float32)
                 core_df_with_const = pd.concat([core_df_subset, A_slice], axis=1, copy=False).astype(np.float32, copy=False)
+                print(
+                    f"{log_prefix} [Stage 2/{stage_total}] Covariate matrix ready with "
+                    f"shape {core_df_with_const.shape}.",
+                    flush=True,
+                )
 
                 delta_core_df_gb = (monitor_thread.snapshot().app_rss_gb - baseline_rss_gb) if monitor_thread else 0.0
                 governor.update_after_core_df(delta_core_df_gb)
 
                 core_index = pd.Index(core_df_with_const.index.astype(str), name="person_id")
                 global_notnull_mask = np.isfinite(core_df_with_const.to_numpy()).all(axis=1)
+                print(
+                    f"{log_prefix} [Stage 3/{stage_total}] Resolving allowed-control masks...",
+                    flush=True,
+                )
                 pan_path = os.path.join(CACHE_DIR, f"pan_category_cases_{shared_data['cdr_codename']}.pkl")
                 category_to_pan_cases = io.get_cached_or_generate_pickle(
                     pan_path,
@@ -1102,13 +1185,30 @@ def _pipeline_once():
                     shared_data['pheno_defs'], shared_data['bq_client'], shared_data['cdr_id'], CACHE_DIR, shared_data['cdr_codename'],
                     lock_dir=LOCK_DIR,
                 )
-                allowed_mask_by_cat = pheno.build_allowed_mask_by_cat(core_index, category_to_pan_cases, global_notnull_mask)
+                allowed_mask_by_cat = pheno.build_allowed_mask_by_cat(
+                    core_index,
+                    category_to_pan_cases,
+                    global_notnull_mask,
+                    log_prefix=log_prefix,
+                    progress_label=f"Stage 3/{stage_total}: Building allowed-control masks",
+                )
 
                 sex_vec = core_df_with_const['sex'].to_numpy(dtype=np.float32, copy=False)
-                
+
                 # --- Build Stage-1 testing worklist without running main PheWAS ---
+                print(
+                    f"{log_prefix} [Stage 4/{stage_total}] Prefiltering phenotypes for Stage-1 queue...",
+                    flush=True,
+                )
                 phenos_list = []
-                for row in shared_data['pheno_defs'][['sanitized_name','disease_category']].to_dict('records'):
+                pheno_records = shared_data['pheno_defs'][['sanitized_name', 'disease_category']].to_dict('records')
+                prefilter_progress = _create_progress_emitter(
+                    len(pheno_records),
+                    log_prefix,
+                    f"Stage 4/{stage_total}: Prefiltering phenotypes",
+                )
+                prefilter_progress(0)
+                for idx, row in enumerate(pheno_records, start=1):
                     info = {
                         'sanitized_name': row['sanitized_name'],
                         'disease_category': row['disease_category'],
@@ -1129,7 +1229,13 @@ def _pipeline_once():
                     )
                     if ok:
                         phenos_list.append(row['sanitized_name'])
-                
+                    prefilter_progress(idx)
+
+                print(
+                    f"{log_prefix} [Stage 4/{stage_total}] Prefilter complete: {len(phenos_list)} phenotypes queued.",
+                    flush=True,
+                )
+
                 print(f"{log_prefix} Queued {len(phenos_list)} phenotypes for Stage-1 testing (pre-filtered).")
 
                 def on_pool_started_callback(num_procs, worker_pids):
@@ -1148,6 +1254,10 @@ def _pipeline_once():
 
                 name_to_cat = shared_data['pheno_defs'].set_index('sanitized_name')['disease_category'].to_dict()
                 if phenos_list:
+                    print(
+                        f"{log_prefix} [Stage 5/{stage_total}] Dispatching Stage-1 models for {len(phenos_list)} phenotypes...",
+                        flush=True,
+                    )
                     testing.run_overall(
                         core_df_with_const,
                         allowed_mask_by_cat,
@@ -1161,8 +1271,15 @@ def _pipeline_once():
                         on_pool_started=on_pool_started_callback,
                         mode=tctx["MODE"],
                     )
+                    print(
+                        f"{log_prefix} [Stage 5/{stage_total}] Stage-1 testing complete.",
+                        flush=True,
+                    )
                 else:
-                    print(f"{log_prefix} No phenotypes qualified for Stage-1 testing after prefiltering.")
+                    print(
+                        f"{log_prefix} [Stage 5/{stage_total}] No phenotypes qualified for Stage-1 testing after prefiltering.",
+                        flush=True,
+                    )
 
                 inv_df = pd.DataFrame()
                 p_col = None
