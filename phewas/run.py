@@ -1215,7 +1215,7 @@ def _pipeline_once():
                         'cdr_codename': shared_data['cdr_codename'],
                         'cache_dir': CACHE_DIR
                     }
-                    ok = pheno._prequeue_should_run(
+                    ok, case_ix = pheno._prequeue_should_run(
                         info,
                         core_index,
                         allowed_mask_by_cat,
@@ -1225,10 +1225,21 @@ def _pipeline_once():
                         sex_mode="majority",
                         sex_prop=models.DEFAULT_SEX_RESTRICT_PROP,
                         max_other=ctx.get("SEX_RESTRICT_MAX_OTHER_CASES", 0),
-                        min_neff=(MIN_NEFF_FILTER if MIN_NEFF_FILTER > 0 else None)
+                        min_neff=(MIN_NEFF_FILTER if MIN_NEFF_FILTER > 0 else None),
+                        return_case_idx=True,
                     )
                     if ok:
-                        phenos_list.append(row['sanitized_name'])
+                        case_ix = np.asarray(case_ix, dtype=np.int32)
+                        if case_ix.size:
+                            case_index = core_index.take(case_ix)
+                        else:
+                            case_index = pd.Index([], dtype=core_index.dtype, name=core_index.name)
+                        case_fp = models._index_fingerprint(case_index)
+                        phenos_list.append({
+                            "name": row['sanitized_name'],
+                            "case_idx": case_ix.tolist(),
+                            "case_fp": case_fp,
+                        })
                     prefilter_progress(idx)
 
                 print(
