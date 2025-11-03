@@ -1217,6 +1217,92 @@ def test_worker_insufficient_counts_skips(test_ctx):
         assert res["Skip_Reason"].startswith("insufficient_counts")
         shm.close(); shm.unlink()
 
+
+def test_lrt_overall_reports_case_cache_error(test_ctx, monkeypatch):
+    with temp_workspace():
+        core_data, phenos = make_synth_cohort()
+        prime_all_caches_for_run(core_data, phenos, TEST_CDR_CODENAME, TEST_TARGET_INVERSION)
+        core_df = pd.concat([
+            core_data['demographics'][['AGE_c', 'AGE_c_sq']],
+            core_data['sex'],
+            core_data['pcs'],
+            core_data['inversion_main'],
+        ], axis=1)
+        core_df_with_const = sm.add_constant(core_df)
+        anc_series = core_data['ancestry']['ANCESTRY'].str.lower()
+        A = pd.get_dummies(pd.Categorical(anc_series), prefix='ANC', drop_first=True, dtype=np.float64)
+        core_df_with_const = core_df_with_const.join(A, how="left").fillna({c: 0.0 for c in A.columns})
+        shm = _init_lrt_worker_from_df(core_df_with_const, {"cardio": np.ones(len(core_df), dtype=bool)}, core_data['ancestry']['ANCESTRY'], test_ctx)
+
+        original_read = models.pd.read_parquet
+
+        def fail_on_case(path, *args, **kwargs):
+            if Path(path).name.startswith("pheno_A_strong_signal"):
+                raise RuntimeError("synthetic parquet failure")
+            return original_read(path, *args, **kwargs)
+
+        monkeypatch.setattr(models.pd, "read_parquet", fail_on_case)
+
+        task = {"name": "A_strong_signal", "category": "cardio", "cdr_codename": TEST_CDR_CODENAME, "target": TEST_TARGET_INVERSION}
+        models.lrt_overall_worker(task)
+
+        result_path = Path(test_ctx["LRT_OVERALL_CACHE_DIR"]) / "A_strong_signal.json"
+        with open(result_path) as f:
+            res = json.load(f)
+        assert res["LRT_Overall_Reason"] == "case_cache_error"
+        assert "synthetic parquet failure" in res["LRT_Overall_Message"]
+
+        phewas_path = Path(test_ctx["RESULTS_CACHE_DIR"]) / "A_strong_signal.json"
+        with open(phewas_path) as f:
+            phewas_res = json.load(f)
+        assert phewas_res["Skip_Reason"] == "case_cache_error"
+        assert "synthetic parquet failure" in phewas_res["Skip_Message"]
+
+        shm.close(); shm.unlink()
+
+
+def test_bootstrap_overall_reports_case_cache_error(test_ctx, monkeypatch):
+    with temp_workspace():
+        core_data, phenos = make_synth_cohort()
+        prime_all_caches_for_run(core_data, phenos, TEST_CDR_CODENAME, TEST_TARGET_INVERSION)
+        core_df = pd.concat([
+            core_data['demographics'][['AGE_c', 'AGE_c_sq']],
+            core_data['sex'],
+            core_data['pcs'],
+            core_data['inversion_main'],
+        ], axis=1)
+        core_df_with_const = sm.add_constant(core_df)
+        anc_series = core_data['ancestry']['ANCESTRY'].str.lower()
+        A = pd.get_dummies(pd.Categorical(anc_series), prefix='ANC', drop_first=True, dtype=np.float64)
+        core_df_with_const = core_df_with_const.join(A, how="left").fillna({c: 0.0 for c in A.columns})
+        shm = _init_lrt_worker_from_df(core_df_with_const, {"cardio": np.ones(len(core_df), dtype=bool)}, core_data['ancestry']['ANCESTRY'], test_ctx)
+
+        original_read = models.pd.read_parquet
+
+        def fail_on_case(path, *args, **kwargs):
+            if Path(path).name.startswith("pheno_A_strong_signal"):
+                raise RuntimeError("synthetic bootstrap parquet failure")
+            return original_read(path, *args, **kwargs)
+
+        monkeypatch.setattr(models.pd, "read_parquet", fail_on_case)
+
+        task = {"name": "A_strong_signal", "category": "cardio", "cdr_codename": TEST_CDR_CODENAME, "target": TEST_TARGET_INVERSION}
+        models.bootstrap_overall_worker(task)
+
+        result_path = Path(test_ctx["BOOT_OVERALL_CACHE_DIR"]) / "A_strong_signal.json"
+        with open(result_path) as f:
+            res = json.load(f)
+        assert res["Reason"] == "case_cache_error"
+        assert "synthetic bootstrap parquet failure" in res["Message"]
+
+        phewas_path = Path(test_ctx["RESULTS_CACHE_DIR"]) / "A_strong_signal.json"
+        with open(phewas_path) as f:
+            phewas_res = json.load(f)
+        assert phewas_res["Skip_Reason"] == "case_cache_error"
+        assert "synthetic bootstrap parquet failure" in phewas_res["Skip_Message"]
+
+        shm.close(); shm.unlink()
+
 def test_lrt_rank_and_df_positive(test_ctx):
     with temp_workspace():
         core_data, phenos = make_synth_cohort()
