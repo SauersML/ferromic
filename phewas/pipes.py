@@ -5,6 +5,7 @@ import os
 import json
 import math
 import gc
+import traceback
 import numpy as np
 
 from . import models
@@ -13,6 +14,21 @@ import time
 import random
 
 # PHEWAS main removed: Stage-1 (LRT/Bootstrap) is the only engine.
+
+
+def _log_worker_exception(stage: str, exc: BaseException) -> None:
+    """Emit a detailed message for a worker exception before re-raising."""
+
+    message = str(exc).strip()
+    if message:
+        header = f"\n[pool ERR] {stage} worker raised {type(exc).__name__}: {message}"
+    else:
+        header = f"\n[pool ERR] {stage} worker raised {type(exc).__name__}"
+    print(header, flush=True)
+
+    formatted = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)).rstrip("\n")
+    if formatted:
+        print(formatted, flush=True)
 
 
 def cgroup_available_gb():
@@ -452,7 +468,7 @@ def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, anc_series, phenos_
                         done += 1
                         _print_bar(queued, done, "LRT-Stage1")
                 except Exception as exc:
-                    print(f"\n[pool ERR] Worker failed: {exc}", flush=True)
+                    _log_worker_exception("LRT-Stage1", exc)
                     raise
                 finally:
                     _print_bar(queued, done, "LRT-Stage1")
@@ -567,7 +583,7 @@ def run_bootstrap_overall(core_df_with_const, allowed_mask_by_cat, anc_series,
                         done += 1
                         _print(queued, done)
                 except Exception as exc:
-                    print(f"\n[pool ERR] Worker failed: {exc}", flush=True)
+                    _log_worker_exception("Bootstrap-Stage1", exc)
                     raise
                 finally:
                     _print(queued, done)
@@ -684,7 +700,7 @@ def run_lrt_followup(core_df_with_const, allowed_mask_by_cat, anc_series, hit_na
                         done += 1
                         _print_bar(queued, done, "Ancestry")
                 except Exception as exc:
-                    print(f"\n[pool ERR] Worker failed: {exc}", flush=True)
+                    _log_worker_exception("Followup", exc)
                     raise
                 finally:
                     _print_bar(queued, done, "Ancestry")
