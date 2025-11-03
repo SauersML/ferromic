@@ -21,6 +21,18 @@ from . import logging_utils
 CTX = {}  # Worker context with constants from run.py
 allowed_fp_by_cat = {}
 
+
+class CaseCacheReadError(RuntimeError):
+    """Raised when a phenotype case cache cannot be read."""
+
+    def __init__(self, phenotype: str, path: str, stage: str, original: Exception):
+        self.phenotype = phenotype
+        self.path = path
+        self.stage = stage
+        self.original = original
+        self.detail = f"{type(original).__name__}: {original}"
+        super().__init__(f"{phenotype} [{stage}] case cache read failed: {self.detail}")
+
 # --- inference behavior toggles ---
 DEFAULT_PREFER_FIRTH_ON_RIDGE = True
 DEFAULT_ALLOW_PENALIZED_WALD = False
@@ -86,6 +98,21 @@ def _write_meta(meta_path, kind, s_name, category, target, core_cols, core_idx_f
     if extra:
         base.update(extra)
     io.atomic_write_json(meta_path, base)
+
+
+def _read_case_cache(path: str, *, phenotype: str, stage: str, columns=None) -> pd.DataFrame:
+    """Read a phenotype case cache, converting I/O errors into diagnostics."""
+    cols = ['is_case'] if columns is None else columns
+    try:
+        return pd.read_parquet(path, columns=cols)
+    except Exception as exc:  # pragma: no cover - exercised via custom tests
+        err = CaseCacheReadError(phenotype, path, stage, exc)
+        print(
+            f"[cache ERROR] name={safe_basename(phenotype)} stage={stage} "
+            f"path={path} error={err.detail}",
+            flush=True,
+        )
+        raise err from exc
 
 # thresholds (configured via CTX; here are defaults/fallbacks)
 DEFAULT_MIN_CASES = 100
@@ -2694,7 +2721,42 @@ def _lrt_overall_worker_impl(task):
             if case_idx is None:
                 case_idx = np.array([], dtype=np.int32)
         else:
-            case_ids = pd.read_parquet(pheno_path, columns=['is_case']).query("is_case == 1").index
+            try:
+                case_df = _read_case_cache(
+                    pheno_path,
+                    phenotype=s_name,
+                    stage="LRT-Stage1",
+                    columns=['is_case'],
+                )
+            except CaseCacheReadError as err:
+                message = err.detail
+                io.atomic_write_json(result_path, {
+                    "Phenotype": s_name,
+                    "P_LRT_Overall": np.nan,
+                    "LRT_Overall_Reason": "case_cache_error",
+                    "LRT_Overall_Message": message,
+                })
+                io.atomic_write_json(res_path, {
+                    "Phenotype": s_name,
+                    "N_Total": np.nan,
+                    "N_Cases": np.nan,
+                    "N_Controls": np.nan,
+                    "Beta": np.nan,
+                    "OR": np.nan,
+                    "P_Value": np.nan,
+                    "OR_CI95": None,
+                    "Used_Ridge": False,
+                    "Final_Is_MLE": False,
+                    "Used_Firth": False,
+                    "N_Total_Used": np.nan,
+                    "N_Cases_Used": np.nan,
+                    "N_Controls_Used": np.nan,
+                    "Model_Notes": "",
+                    "Skip_Reason": "case_cache_error",
+                    "Skip_Message": message,
+                })
+                return
+            case_ids = case_df.query("is_case == 1").index
             idx = worker_core_df_index.get_indexer(case_ids)
             case_idx = idx[idx >= 0].astype(np.int32)
             case_fp = _index_fingerprint(worker_core_df_index[case_idx] if case_idx.size > 0 else pd.Index([]))
@@ -3669,7 +3731,42 @@ def _bootstrap_overall_worker_impl(task):
             if case_idx is None:
                 case_idx = np.array([], dtype=np.int32)
         else:
-            case_ids = pd.read_parquet(pheno_path, columns=['is_case']).query("is_case == 1").index
+            try:
+                case_df = _read_case_cache(
+                    pheno_path,
+                    phenotype=s_name,
+                    stage="Bootstrap-Stage1",
+                    columns=['is_case'],
+                )
+            except CaseCacheReadError as err:
+                message = err.detail
+                io.atomic_write_json(result_path, {
+                    "Phenotype": s_name,
+                    "Reason": "case_cache_error",
+                    "Message": message,
+                })
+                if not os.path.exists(res_path):
+                    io.atomic_write_json(res_path, {
+                        "Phenotype": s_name,
+                        "N_Total": np.nan,
+                        "N_Cases": np.nan,
+                        "N_Controls": np.nan,
+                        "Beta": np.nan,
+                        "OR": np.nan,
+                        "P_Value": np.nan,
+                        "OR_CI95": None,
+                        "Used_Ridge": False,
+                        "Final_Is_MLE": False,
+                        "Used_Firth": False,
+                        "N_Total_Used": np.nan,
+                        "N_Cases_Used": np.nan,
+                        "N_Controls_Used": np.nan,
+                        "Model_Notes": "",
+                        "Skip_Reason": "case_cache_error",
+                        "Skip_Message": message,
+                    })
+                return
+            case_ids = case_df.query("is_case == 1").index
             idx = worker_core_df_index.get_indexer(case_ids)
             case_idx = idx[idx >= 0].astype(np.int32)
             case_fp = _index_fingerprint(worker_core_df_index[case_idx] if case_idx.size > 0 else pd.Index([]))
