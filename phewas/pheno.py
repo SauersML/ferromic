@@ -221,12 +221,35 @@ def build_pan_category_cases(defs, bq_client, cdr_id, cache_dir, cdr_codename) -
     io.atomic_write_pickle(category_cache_path, category_to_pan_cases)
     return category_to_pan_cases
 
-def build_allowed_mask_by_cat(core_index, category_to_pan_cases, global_notnull_mask) -> dict:
-    """Moves the “Building allowed-control masks…” block here unchanged."""
-    print("[Setup]    - Building allowed-control masks per category without constructing per-phenotype controls...")
+def build_allowed_mask_by_cat(
+    core_index,
+    category_to_pan_cases,
+    global_notnull_mask,
+    *,
+    log_prefix: str = "",
+    progress_label: Optional[str] = None,
+    max_updates: int = 20,
+) -> dict:
+    """Build per-category allowed-control masks with coarse progress reporting."""
+
+    prefix = f"{log_prefix} " if log_prefix else ""
+    label = progress_label or "Building allowed-control masks"
+    total_categories = len(category_to_pan_cases)
+    print(
+        f"{prefix}[Stage] {label}: starting ({total_categories} categories).",
+        flush=True,
+    )
+    if total_categories == 0:
+        print(
+            f"{prefix}[Stage] {label}: no categories available; returning empty mask.",
+            flush=True,
+        )
+        return {}
+
+    step = max(1, total_categories // max(1, int(max_updates)))
     allowed_mask_by_cat = {}
     n_core = len(core_index)
-    for category, pan_cases in category_to_pan_cases.items():
+    for idx, (category, pan_cases) in enumerate(category_to_pan_cases.items(), start=1):
         pan_idx = core_index.get_indexer(list(pan_cases))
         pan_idx = pan_idx[pan_idx >= 0]
         mask = np.ones(n_core, dtype=bool)
@@ -234,6 +257,16 @@ def build_allowed_mask_by_cat(core_index, category_to_pan_cases, global_notnull_
             mask[pan_idx] = False
         mask &= global_notnull_mask
         allowed_mask_by_cat[category] = mask
+        if idx == total_categories or (idx % step == 0):
+            pct = (idx / total_categories) * 100 if total_categories else 100.0
+            print(
+                f"{prefix}[Stage] {label}: {idx}/{total_categories} ({pct:5.1f}%)",
+                flush=True,
+            )
+    print(
+        f"{prefix}[Stage] {label}: complete ({total_categories} categories).",
+        flush=True,
+    )
     return allowed_mask_by_cat
 
 def populate_caches_prepass(pheno_defs_df, bq_client, cdr_id, core_index, cache_dir, cdr_codename, max_lock_age_sec=LOCK_MAX_AGE_SEC):
