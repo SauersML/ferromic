@@ -22,8 +22,8 @@ INVERSION_CATEGORY_MAPPING = {
     'Single-event': 'single_event'
 }
 
-RECURRENT_COLOR = '#00FFFF'
-SINGLE_EVENT_COLOR = '#8B0000'
+RECURRENT_COLOR = '#FF6F00'  # Rich orange
+SINGLE_EVENT_COLOR = '#006400'  # Dark green
 VIOLIN_ALPHA = 0.5
 EDGE_COLOR = '#4a4a4a'
 FIGSIZE = (4.6, 9.6)
