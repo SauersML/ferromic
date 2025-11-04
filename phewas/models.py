@@ -4595,9 +4595,24 @@ def _lrt_followup_worker_impl(task):
                             out['Stage2_Model_Notes'] = "rao_score_multi_failed"
                     else:
                         out['LRT_Reason'] = "score_unavailable_multi_df"
+                except (np.linalg.LinAlgError, ValueError, TypeError) as e:
+                    # Expected numerical issues - log and continue
+                    err_msg = str(e)[:100]  # Truncate to avoid massive error strings
+                    out['LRT_Reason'] = f"score_linalg_error"
+                    out['Stage2_Model_Notes'] = f"rao_score_multi_exception:{type(e).__name__}:{err_msg}"
+                    print(
+                        f"[WARN] Rao score numerical error for {s_name_safe}: {type(e).__name__}: {err_msg}",
+                        flush=True,
+                    )
                 except Exception as e:
-                    out['LRT_Reason'] = "score_exception"
-                    out['Stage2_Model_Notes'] = f"rao_score_multi_exception:{type(e).__name__}"
+                    # Unexpected error - log with more detail but don't crash the worker
+                    err_msg = str(e)[:100]
+                    out['LRT_Reason'] = "score_unexpected_error"
+                    out['Stage2_Model_Notes'] = f"rao_score_multi_unexpected:{type(e).__name__}:{err_msg}"
+                    print(
+                        f"[ERROR] Unexpected Rao score error for {s_name_safe}: {type(e).__name__}: {e}",
+                        flush=True,
+                    )
             else:
                 out['LRT_Reason'] = "score_unavailable_multi_df"
 
