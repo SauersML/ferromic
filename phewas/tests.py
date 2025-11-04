@@ -2779,6 +2779,14 @@ def test_stage2_dosage_ancestry_interaction(test_ctx):
         A = pd.get_dummies(pd.Categorical(anc_series), prefix='ANC', drop_first=True, dtype=np.float64)
         core_df_with_const = core_df_with_const.join(A, how="left").fillna({c: 0.0 for c in A.columns})
 
+        # DEBUG: Print design matrix info
+        print("\n=== DEBUG: Design Matrix Info ===")
+        print(f"Columns: {list(core_df_with_const.columns)}")
+        print(f"Shape: {core_df_with_const.shape}")
+        print(f"Ancestry dummy columns: {list(A.columns)}")
+        print(f"Ancestry value counts:\n{anc_series.value_counts()}")
+        print(f"Matrix rank: {np.linalg.matrix_rank(core_df_with_const.to_numpy())}")
+
         # Initialize worker with all phenotypes allowed
         allowed_masks = {
             "cardio": np.ones(len(core_df), dtype=bool),
@@ -2838,14 +2846,15 @@ def test_stage2_dosage_ancestry_interaction(test_ctx):
                         if result.get(f'{anc}_REASON'):
                             print(f"  REASON: {result.get(f'{anc}_REASON')}")
 
-                print("\n=== Test Status: SUCCESS ===")
-                print("Stage-2 dosage*ancestry analysis completed successfully.")
-
-                # Basic assertions to verify structure
+                # Verify the interaction test actually worked
                 assert result.get('Phenotype') == 'A_strong_signal'
-                assert 'P_Stage2_Valid' in result
-                assert 'P_LRT_AncestryxDosage' in result
+                assert result.get('P_Stage2_Valid') == True, f"P_Stage2_Valid should be True but got {result.get('P_Stage2_Valid')}. Reason: {result.get('LRT_Reason')}"
+                assert result.get('LRT_df') is not None and not np.isnan(result.get('LRT_df')), f"LRT_df should be valid but got {result.get('LRT_df')}"
+                assert result.get('P_LRT_AncestryxDosage') is not None and not np.isnan(result.get('P_LRT_AncestryxDosage')), "P_LRT_AncestryxDosage should be a valid p-value"
                 assert 'LRT_Ancestry_Levels' in result
+
+                print("\n=== Test Status: SUCCESS ===")
+                print("Stage-2 dosage*ancestry interaction test completed successfully.")
 
             else:
                 print("\n=== Test Status: FAILED ===")
