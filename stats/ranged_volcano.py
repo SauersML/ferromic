@@ -8,6 +8,8 @@ from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.lines import Line2D
 from matplotlib.patches import FancyArrowPatch
 from matplotlib import colors as mcolors
+
+from _inv_common import map_inversion_series
 from volcano_shared import (
     desaturate_color, assign_colors_and_markers, bh_fdr_cutoff,
     create_legend_handles, NON_SIG_SIZE, NON_SIG_ALPHA, NON_SIG_DESAT,
@@ -51,6 +53,7 @@ def load_and_prepare(path):
             raise SystemExit(f"ERROR: missing required column '{c}' in {path}")
 
     df["Inversion"] = df.get("Inversion", "Unknown").fillna("Unknown").astype(str)
+    df["Inversion"] = map_inversion_series(df["Inversion"])
     df["Phenotype"] = df.get("Phenotype", "").fillna("").astype(str)
 
     df["OR"] = pd.to_numeric(df["OR"], errors="coerce")
