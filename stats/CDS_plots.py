@@ -613,7 +613,7 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
     ax.axvspan(2.5, 4.5, color="#e6f4ea", alpha=0.18, zorder=0)
 
     # Swarm plot parameters
-    swarm_width = 0.6  # Total width for swarm
+    swarm_width = 0.7  # Total width for swarm (increased for better spread)
 
     for i, cat in enumerate(CATEGORY_ORDER, start=1):
         d = dist[cat]
@@ -624,81 +624,79 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
         # Orientation-based face color
         face = CATEGORY_FACE[cat]
 
-        # Swarm plot: arrange points to avoid overlap
+        # Swarm plot: arrange points to avoid overlap with improved bunching handling
         if all_vals.size > 0:
-            mask_at1 = (all_vals == 1.0)
-            vals_non1 = all_vals[~mask_at1]
+            # Sort by y-value for bottom-up placement
+            y_sorted_idx = np.argsort(all_vals)
+            y_sorted = all_vals[y_sorted_idx]
+            x_positions = np.zeros(len(y_sorted))
 
-            # Create swarm for values < 1.0
-            if vals_non1.size > 0:
-                # Simple swarm: use beeswarm-like positioning
-                y_sorted_idx = np.argsort(vals_non1)
-                y_sorted = vals_non1[y_sorted_idx]
-                x_positions = np.zeros(len(y_sorted))
+            # Adaptive parameters based on data density
+            bin_size = 0.012  # Tighter y-binning for better vertical resolution
+            point_radius = 0.022  # Slightly smaller for denser packing
+            
+            # Track occupied positions in a grid-like structure for faster collision detection
+            occupied_positions = []
 
-                # Bin size for collision detection
-                bin_size = 0.015
-                point_radius = 0.025  # Approximate visual radius of points in data units
+            for idx, y_val in enumerate(y_sorted):
+                # Find nearby points in y-direction (within bin_size)
+                nearby_x = []
+                for prev_idx in range(idx):
+                    if abs(y_sorted[prev_idx] - y_val) < bin_size:
+                        nearby_x.append(x_positions[prev_idx])
 
-                for idx, y_val in enumerate(y_sorted):
-                    # Find nearby points already placed
-                    nearby = []
-                    for prev_idx in range(idx):
-                        if abs(y_sorted[prev_idx] - y_val) < bin_size:
-                            nearby.append(x_positions[prev_idx])
-
-                    # Find x position that doesn't collide
-                    x_offset = 0
-                    if nearby:
-                        # Try positions moving outward from center
-                        for attempt in range(50):
-                            offset_candidate = (attempt // 2) * point_radius * (1 if attempt % 2 == 0 else -1)
-                            if abs(offset_candidate) > swarm_width / 2:
-                                break
-                            # Check if this position is free
-                            collision = False
-                            for nx in nearby:
-                                if abs(nx - offset_candidate) < point_radius:
-                                    collision = True
+                # Find x position that doesn't collide
+                x_offset = 0
+                if nearby_x:
+                    # Sort nearby positions to find gaps
+                    nearby_x_sorted = sorted(nearby_x)
+                    
+                    # Try center first
+                    if not any(abs(nx - 0) < point_radius for nx in nearby_x):
+                        x_offset = 0
+                    else:
+                        # Build outward symmetrically, checking both sides
+                        found = False
+                        for layer in range(1, 100):
+                            # Calculate position at this layer
+                            offset_dist = layer * point_radius * 0.95  # Slight overlap for tighter packing
+                            
+                            # Try right side first, then left
+                            for sign in [1, -1]:
+                                candidate = sign * offset_dist
+                                
+                                # Check if within swarm width
+                                if abs(candidate) > swarm_width / 2:
+                                    continue
+                                
+                                # Check collision with all nearby points
+                                collision = any(abs(nx - candidate) < point_radius for nx in nearby_x)
+                                
+                                if not collision:
+                                    x_offset = candidate
+                                    found = True
                                     break
-                            if not collision:
-                                x_offset = offset_candidate
+                            
+                            if found:
                                 break
+                        
+                        # If still no position found, force placement at edge
+                        if not found:
+                            x_offset = swarm_width / 2 if len([x for x in nearby_x if x > 0]) < len([x for x in nearby_x if x < 0]) else -swarm_width / 2
 
-                    x_positions[idx] = x_offset
+                x_positions[idx] = x_offset
+                occupied_positions.append((y_val, x_offset))
 
-                # Plot swarm points
-                ax.scatter(
-                    i + x_positions,
-                    y_sorted,
-                    s=20, alpha=0.7, color=face,
-                    edgecolor="white", linewidths=0.5, zorder=2,
-                )
-
-            # Handle values at 1.0 (100% identical) - plot in strip above
-            n_at1_pts = int(mask_at1.sum())
-            if n_at1_pts > 0:
-                rect_w = 0.44
-                rect_h = 0.045
-                rect_y0 = 1.005
-
-                rect = mpatches.Rectangle(
-                    (i - rect_w / 2, rect_y0),
-                    rect_w, rect_h,
-                    facecolor="none",
-                    edgecolor=face,
-                    linewidth=0.8,
-                    zorder=1.8,
-                )
-                ax.add_patch(rect)
-
-                x_rect = (i - rect_w / 2) + np.random.rand(n_at1_pts) * rect_w
-                y_rect = rect_y0 + np.random.rand(n_at1_pts) * rect_h
-                ax.scatter(
-                    x_rect, y_rect,
-                    s=20, alpha=0.7, color=face,
-                    edgecolor="white", linewidths=0.5, zorder=2.2,
-                )
+            # Plot all swarm points with size adjustment for dense regions
+            # Reduce point size slightly if there are many points
+            point_size = 20 if len(y_sorted) < 50 else 16 if len(y_sorted) < 100 else 14
+            
+            ax.scatter(
+                i + x_positions,
+                y_sorted,
+                s=point_size, alpha=0.7, color=face,
+                edgecolor="white", linewidths=0.4, zorder=2,
+            )
 
         # Draw median line
         if not np.isnan(median):
