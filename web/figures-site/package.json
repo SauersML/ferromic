@@ -5,6 +5,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "prebuild": "python3 ../../scripts/generate_phewas_figures_json.py",
     "build": "next build",
     "start": "next start"
   },
