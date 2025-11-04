@@ -3053,3 +3053,159 @@ def test_stage2_strong_heterogeneity(test_ctx):
         finally:
             shm.close()
             shm.unlink()
+
+
+def test_stage2_strong_heterogeneity(test_ctx):
+    """Test stage-2 with STRONG ancestry heterogeneity - should detect p < 0.05."""
+    with temp_workspace():
+        # Create large synthetic cohort for adequate EPV
+        core_data, phenos = make_synth_cohort(N=3000, NUM_PCS=10, seed=456)
+
+        # Ensure we have multiple ancestry groups (eur, afr, amr)
+        rng = np.random.default_rng(456)
+        ancestry_labels = rng.choice(["eur", "afr", "amr"], size=len(core_data['demographics']), p=[0.5, 0.3, 0.2])
+        core_data['ancestry'] = pd.DataFrame(
+            {"ANCESTRY": ancestry_labels},
+            index=core_data['demographics'].index
+        )
+
+        # Create phenotype with STRONG HETEROGENEITY across ancestries
+        from scipy.special import expit as sigmoid
+        inversion_dosage = core_data['inversion_main'][TEST_TARGET_INVERSION]
+        age_centered = core_data['demographics']['AGE'] - 50
+
+        # Ancestry-specific effects (strong heterogeneity but not complete separation)
+        # EUR: strong positive effect (OR ~ 2.2)
+        # AFR: weak positive effect (OR ~ 1.2)
+        # AMR: moderate negative effect (OR ~ 0.6)
+        p_case = np.zeros(len(core_data['demographics']))
+        for i, anc in enumerate(ancestry_labels):
+            if anc == 'eur':
+                beta_dosage = 0.8  # Strong positive effect
+            elif anc == 'afr':
+                beta_dosage = 0.18  # Weak positive effect
+            else:  # amr
+                beta_dosage = -0.5  # Moderate negative effect
+
+            p_case[i] = sigmoid(-0.7 + beta_dosage * inversion_dosage.iloc[i] + 0.002 * age_centered.iloc[i])
+
+        is_case = rng.random(len(core_data['demographics'])) < p_case
+        cases_het = set(core_data['demographics'].index[is_case])
+        phenos["B_heterogeneous_signal"] = {
+            "disease": "B heterogeneous signal",
+            "category": "cardio",
+            "cases": cases_het
+        }
+
+        print(f"\n=== Generated Heterogeneous Phenotype ===")
+        print(f"Total N: {len(core_data['demographics'])}")
+        print(f"Cases: {len(cases_het)}")
+        print(f"Controls: {len(core_data['demographics']) - len(cases_het)}")
+        print(f"Case rate: {len(cases_het) / len(core_data['demographics']):.1%}")
+        print(f"\nExpected effects:")
+        print(f"  EUR: beta=0.8  (OR~2.2, strong positive)")
+        print(f"  AFR: beta=0.18 (OR~1.2, weak positive)")
+        print(f"  AMR: beta=-0.5 (OR~0.6, negative)")
+
+        # Disable sex restriction to preserve full sample size
+        test_ctx["SEX_RESTRICT_PROP"] = 1.1
+
+        # Prime caches with test data
+        prime_all_caches_for_run(core_data, phenos, TEST_CDR_CODENAME, TEST_TARGET_INVERSION)
+
+        # Build design matrix with ancestry dummies and interactions
+        core_df = pd.concat([
+            core_data['demographics'][['AGE_c', 'AGE_c_sq']],
+            core_data['sex'],
+            core_data['pcs'],
+            core_data['inversion_main']
+        ], axis=1)
+        core_df_with_const = sm.add_constant(core_df)
+
+        # Add ancestry dummy variables (drop 'eur' as reference)
+        anc_series = core_data['ancestry']['ANCESTRY'].str.lower()
+        A = pd.get_dummies(pd.Categorical(anc_series), prefix='ANC', drop_first=True, dtype=np.float64)
+        core_df_with_const = core_df_with_const.join(A, how="left").fillna({c: 0.0 for c in A.columns})
+
+        # Initialize worker with all phenotypes allowed
+        allowed_masks = {
+            "cardio": np.ones(len(core_df), dtype=bool),
+            "neuro": np.ones(len(core_df), dtype=bool),
+        }
+        shm = _init_lrt_worker_from_df(
+            core_df_with_const,
+            allowed_masks,
+            core_data['ancestry']['ANCESTRY'],
+            test_ctx
+        )
+
+        # Run stage-2 followup analysis
+        task = {
+            "name": "B_heterogeneous_signal",
+            "category": "cardio",
+            "cdr_codename": TEST_CDR_CODENAME,
+            "target": TEST_TARGET_INVERSION
+        }
+
+        try:
+            # Execute the stage-2 dosage*ancestry analysis
+            models.lrt_followup_worker(task)
+
+            # Check if results were generated
+            result_path = Path(test_ctx["LRT_FOLLOWUP_CACHE_DIR"]) / "B_heterogeneous_signal.json"
+
+            if result_path.exists():
+                with result_path.open() as fh:
+                    result = json.load(fh)
+
+                print("\n=== Stage-2 Heterogeneity Test Results ===")
+                print(f"Phenotype: {result.get('Phenotype', 'N/A')}")
+                print(f"P_Stage2_Valid: {result.get('P_Stage2_Valid', 'N/A')}")
+                print(f"P_LRT_AncestryxDosage: {result.get('P_LRT_AncestryxDosage', 'N/A')}")
+                print(f"LRT_df: {result.get('LRT_df', 'N/A')}")
+                print(f"P_Method: {result.get('P_Method', 'N/A')}")
+                print(f"Inference_Type: {result.get('Inference_Type', 'N/A')}")
+
+                # Check per-ancestry results
+                print("\n=== Per-Ancestry Results ===")
+                for anc in ['EUR', 'AFR', 'AMR']:
+                    if f"{anc}_N" in result:
+                        print(f"\n{anc}:")
+                        print(f"  N: {result.get(f'{anc}_N', 'N/A')}")
+                        print(f"  N_Cases: {result.get(f'{anc}_N_Cases', 'N/A')}")
+                        print(f"  OR: {result.get(f'{anc}_OR', 'N/A'):.3f}")
+                        print(f"  P: {result.get(f'{anc}_P', 'N/A'):.4f}")
+                        print(f"  P_Valid: {result.get(f'{anc}_P_Valid', 'N/A')}")
+
+                # CRITICAL ASSERTIONS for heterogeneity test
+                print("\n=== Validating Heterogeneity Detection ===")
+
+                assert result.get('P_Stage2_Valid') == True, \
+                    f"Stage-2 test should be valid, got: {result.get('LRT_Reason', 'unknown reason')}"
+
+                p_stage2 = result.get('P_LRT_AncestryxDosage')
+                assert p_stage2 is not None and not np.isnan(p_stage2), \
+                    "Stage-2 p-value should be finite"
+
+                assert p_stage2 < 0.05, \
+                    f"Stage-2 should detect strong heterogeneity (p < 0.05), got p={p_stage2:.4e}"
+
+                print(f"✓ Heterogeneity detected: p={p_stage2:.4e} < 0.05")
+                print(f"✓ Method: {result.get('P_Method', 'N/A')}")
+                print(f"✓ df: {result.get('LRT_df', 'N/A')}")
+
+                print("\n=== Test Status: SUCCESS ===")
+                print("Strong heterogeneity correctly detected by Stage-2 test!")
+
+            else:
+                print("\n=== Test Status: FAILED ===")
+                print("Result file was not created.")
+                raise AssertionError("Stage-2 analysis did not produce results file")
+
+        except Exception as e:
+            print(f"\n=== Test Status: FAILED ===")
+            print(f"Error during stage-2 analysis: {type(e).__name__}: {e}")
+            raise
+        finally:
+            shm.close()
+            shm.unlink()
