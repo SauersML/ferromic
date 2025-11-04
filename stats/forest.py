@@ -489,10 +489,10 @@ def plot_forest(df: pd.DataFrame, out_pdf=OUT_PDF, out_png=OUT_PNG):
 
             # Left labels CENTERED vertically within the row box
             y_label = yc  # center of the row box
-            
+
             phen = wrap_label(row["Phenotype"])
             t1 = axL.text(0.02,  y_label, phen, ha="left",  va="center",
-                          color="#111111", transform=yxf, zorder=3)
+                          fontsize=20.0, color="#111111", transform=yxf, zorder=3)
 
             row_texts_by_section[sec_id].extend([t1])
 
@@ -512,7 +512,7 @@ def plot_forest(df: pd.DataFrame, out_pdf=OUT_PDF, out_png=OUT_PNG):
             # Point estimate dot
             size_pt2, facecolor = point_style_for_q(row["Q_GLOBAL"], c)
             axR.scatter([x_pt], [yc], s=size_pt2, facecolor=facecolor, edgecolor="black",
-                        linewidth=POINT_EDGE_LW, alpha=0.97, zorder=3.0)
+                        linewidth=POINT_EDGE_LW, alpha=0.75, zorder=3.0)
 
     # 3) Fixed OR ticks within [x_or_left, x_or_right]
     tick_ors = [v for v in TICK_OR_VALUES if (x_or_left <= v <= x_or_right)]
@@ -528,7 +528,7 @@ def plot_forest(df: pd.DataFrame, out_pdf=OUT_PDF, out_png=OUT_PNG):
     legend_x = 0.98  # right edge
     legend_y = 0.98  # top edge
     legend_width = 0.30
-    legend_height_per_item = 0.060
+    legend_height_per_item = 0.050
 
     # Hard-coded reasonable q-value examples for the legend
     legend_q_values = [0.001, 0.01, 0.05]
@@ -539,7 +539,7 @@ def plot_forest(df: pd.DataFrame, out_pdf=OUT_PDF, out_png=OUT_PNG):
     ]
 
     n_items = len(legend_q_values)
-    legend_height = 0.14 + n_items * legend_height_per_item
+    legend_height = 0.12 + n_items * legend_height_per_item
 
     # Draw background box - positioned from TOP RIGHT, extending downward
     box_x = legend_x - legend_width
@@ -554,15 +554,15 @@ def plot_forest(df: pd.DataFrame, out_pdf=OUT_PDF, out_png=OUT_PNG):
     axR.add_patch(box)
 
     # Title - positioned at top of legend box
-    axR.text(legend_x - legend_width/2, legend_y - 0.018,
+    axR.text(legend_x - legend_width/2, legend_y - 0.012,
              "",
-             ha='center', va='top', fontsize=22, fontweight='bold',
+             ha='center', va='top', fontsize=20, fontweight='bold',
              transform=axR.transAxes, zorder=51)
 
     # Subtitle explaining the encoding
-    axR.text(legend_x - legend_width/2, legend_y - 0.040,
+    axR.text(legend_x - legend_width/2, legend_y - 0.028,
              "by q-value (FDR)",
-             ha='center', va='top', fontsize=18, style='italic', color='#444444',
+             ha='center', va='top', fontsize=17, style='italic', color='#444444',
              transform=axR.transAxes, zorder=51)
 
     # Use a neutral color for legend examples
@@ -570,20 +570,20 @@ def plot_forest(df: pd.DataFrame, out_pdf=OUT_PDF, out_png=OUT_PNG):
 
     # Draw example dots and labels - positioned from top down
     for i, (q_val, label) in enumerate(zip(legend_q_values, legend_labels)):
-        y_pos = legend_y - 0.065 - i * legend_height_per_item
+        y_pos = legend_y - 0.055 - i * legend_height_per_item
 
         # Get size and color for this q-value
         size_pt2, facecolor = point_style_for_q(q_val, legend_base_color)
 
         # Draw dot (in axes coordinates) - slightly larger for visibility in legend
-        dot_x = box_x + 0.040
-        axR.scatter([dot_x], [y_pos], s=size_pt2 * 1.20,
+        dot_x = box_x + 0.038
+        axR.scatter([dot_x], [y_pos], s=size_pt2 * 1.00,
                    facecolor=facecolor, edgecolor='black',
-                   linewidth=POINT_EDGE_LW, alpha=0.97,
+                   linewidth=POINT_EDGE_LW * 0.85, alpha=0.97,
                    transform=axR.transAxes, zorder=52, clip_on=False)
 
         # Draw label
-        text_x = dot_x + 0.055
+        text_x = dot_x + 0.050
         axR.text(text_x, y_pos, label,
                 ha='left', va='center', fontsize=20,
                 transform=axR.transAxes, zorder=52)
