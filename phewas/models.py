@@ -4339,6 +4339,13 @@ def _lrt_followup_worker_impl(task):
         interaction_cols = [f"{target}:{c}" for c in A_df.columns]
         X_full_df = pd.concat([X_red_df, pd.DataFrame(interaction_mat, index=X_red_df.index, columns=interaction_cols)], axis=1)
 
+        # DEBUG: Before pruning
+        print(f"\n=== DEBUG Before Pruning for {s_name_safe} ===")
+        print(f"X_full_df columns ({len(X_full_df.columns)}): {list(X_full_df.columns)}")
+        print(f"A_df columns: {list(A_df.columns)}")
+        for c in A_df.columns:
+            print(f"  {c}: nunique={X_full_df[c].nunique()}, std={X_full_df[c].std():.6f}, mean={X_full_df[c].mean():.6f}")
+
         # Prune the full model (with interactions) first.
         X_full_zv = _drop_zero_variance(X_full_df, keep_cols=('const',), always_keep=[target] + interaction_cols)
         X_full_zv = _drop_rank_deficient(X_full_zv, keep_cols=('const',), always_keep=[target] + interaction_cols)
@@ -4392,6 +4399,14 @@ def _lrt_followup_worker_impl(task):
         r_full = np.linalg.matrix_rank(X_full_zv.to_numpy(dtype=np.float64, copy=False))
         r_red = np.linalg.matrix_rank(X_red_zv.to_numpy(dtype=np.float64, copy=False))
         df_lrt = max(0, int(r_full - r_red))
+
+        # DEBUG: Print model details
+        print(f"\n=== DEBUG Stage-2 Models for {s_name_safe} ===")
+        print(f"X_red_zv columns ({len(X_red_zv.columns)}): {list(X_red_zv.columns)}")
+        print(f"X_full_zv columns ({len(X_full_zv.columns)}): {list(X_full_zv.columns)}")
+        print(f"Interaction cols kept: {kept_interaction_cols}")
+        print(f"Rank reduced: {r_red}, Rank full: {r_full}, df_lrt: {df_lrt}")
+        print(f"X_red_zv shape: {X_red_zv.shape}, X_full_zv shape: {X_full_zv.shape}")
         inference_family = None
         fit_full_use = None
         fit_red_use = None
