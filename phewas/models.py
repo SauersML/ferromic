@@ -38,7 +38,7 @@ DEFAULT_PREFER_FIRTH_ON_RIDGE = True
 DEFAULT_ALLOW_PENALIZED_WALD = False
 DEFAULT_ALLOW_POST_FIRTH_MLE_REFIT = True
 
-ALLOWED_P_SOURCES = {"lrt_mle", "score_chi2", "score_boot_mle", "score_boot_firth"}
+ALLOWED_P_SOURCES = {"lrt_mle", "score_chi2", "score_boot_mle", "score_boot_firth", "rao_score"}
 ALLOWED_CI_METHODS = {
     "profile",
     "profile_penalized",
@@ -2018,6 +2018,102 @@ def _score_test_from_reduced(X_red, y, x_target, const_ix=None):
         return np.nan, np.nan
     p = float(sp_stats.chi2.sf(T_obs, 1))
     return p, T_obs
+
+
+def _rao_score_block(y, X0, X1, clip_w=1e-12, rcond=1e-12, fit_red=None):
+    """
+    Multi-df Rao score test for adding block X1 to reduced model X0 in logistic regression.
+    Uses statsmodels for the reduced MLE fit and SVD-based pseudoinverses for stability.
+
+    Args:
+        y: outcome vector
+        X0: reduced model design matrix
+        X1: interaction block to test
+        clip_w: minimum weight for numerical stability
+        rcond: condition number tolerance for rank determination
+        fit_red: optional pre-fitted reduced model (if None, will fit fresh)
+
+    Returns (statistic, df, pval, details_dict).
+    """
+    # Ensure arrays
+    y = np.asarray(y, dtype=np.float64).reshape(-1)
+    X0 = np.asarray(X0, dtype=np.float64)
+    X1 = np.asarray(X1, dtype=np.float64)
+
+    # 1) Use pre-fitted reduced model if provided, otherwise fit fresh
+    if fit_red is not None:
+        res0 = fit_red
+        # Firth fits may not set converged=True, so be lenient
+        # Just check that params are available
+        if not hasattr(res0, "params") or getattr(res0, "params", None) is None:
+            return np.nan, 0, np.nan, {"error": "reduced_no_params"}
+    else:
+        # Fit reduced model by mainstream library (statsmodels)
+        #    Newton with generous iterations; this is usually stable for the reduced model.
+        try:
+            res0 = sm.Logit(y, X0).fit(disp=0, method="newton", maxiter=200)
+        except Exception:
+            return np.nan, 0, np.nan, {"error": "reduced_fit_failed"}
+
+        if not bool(getattr(res0, "converged", False)):
+            return np.nan, 0, np.nan, {"error": "reduced_not_converged"}
+
+    # Get fitted probabilities (handle both statsmodels and Firth _Result objects)
+    if hasattr(res0, "predict"):
+        p = res0.predict()
+    else:
+        # Manual prediction for Firth _Result objects
+        params = np.asarray(getattr(res0, "params", None), dtype=np.float64)
+        if params is None or params.shape[0] != X0.shape[1]:
+            return np.nan, 0, np.nan, {"error": "reduced_params_mismatch"}
+        from scipy.special import expit
+        eta = X0 @ params
+        p = expit(eta)
+
+    w = p * (1.0 - p)                                  # logistic weights p(1-p)
+    w = np.clip(w, clip_w, 0.25)                       # guard against vanishing weights
+
+    # 2) Efficient information for X1 given X0:
+    #    I_eff = X1' W X1  -  X1' W X0 (X0' W X0)^(-1) X0' W X1
+    WX0 = X0 * w[:, None]
+    WX1 = X1 * w[:, None]
+    XtWX0 = X0.T @ WX0
+    XtWX1 = X1.T @ WX1
+    X1tWX1 = X1.T @ WX1
+    X1tWX0 = X1.T @ WX0
+
+    # Stable pseudo-inverse for symmetric PSD matrices via SVD
+    def _sym_pinv(A, tol=rcond):
+        U, s, Vt = np.linalg.svd(A, full_matrices=False)
+        if s.size == 0:
+            return A * 0.0
+        s_inv = np.where(s > tol * s.max(), 1.0 / s, 0.0)
+        return (Vt.T * s_inv) @ U.T
+
+    XtWX0_inv = _sym_pinv(XtWX0)
+    I_eff = X1tWX1 - X1tWX0 @ XtWX0_inv @ X1tWX0.T
+
+    # 3) Score vector for X1 at reduced fit: U = X1' (y - p)
+    U = X1.T @ (y - p)
+
+    # 4) Test statistic: U' I_eff^(-1) U  ~  χ²_df
+    I_eff_inv = _sym_pinv(I_eff)
+    stat = float(U.T @ I_eff_inv @ U)
+
+    # Rank for df (robust to dropped/aliased columns)
+    df = int(np.linalg.matrix_rank(I_eff, tol=rcond))
+
+    # p-value
+    pval = float(sp_stats.chi2.sf(stat, df)) if df > 0 else np.nan
+
+    details = {
+        "W_mean": float(w.mean()),
+        "I_eff_cond": float(np.linalg.cond(I_eff)) if df > 0 else np.inf,
+        "rank": df,
+        "reduced_converged": bool(getattr(res0, "converged", True)),
+        "llf_reduced": float(getattr(res0, "llf", np.nan)),
+    }
+    return stat, df, pval, details
 
 
 def _score_bootstrap_bits(Xr, yv, xt, beta0, kind="mle"):
@@ -4475,7 +4571,35 @@ def _lrt_followup_worker_impl(task):
                     else:
                         out['LRT_Reason'] = "score_boot_failed"
         else:
-            out['LRT_Reason'] = "score_unavailable_multi_df"
+            # Multi-df case (df_lrt > 1): Use robust Rao score test computed at reduced model
+            # This avoids fitting the unstable full interaction model
+            if kept_interaction_cols and len(kept_interaction_cols) > 0:
+                try:
+                    # Extract interaction block from full design matrix
+                    X_int_cols = [c for c in kept_interaction_cols if c in X_full_zv.columns]
+                    if X_int_cols:
+                        X_int = X_full_zv[X_int_cols].to_numpy(dtype=np.float64, copy=False)
+                        X_red_arr = X_red_zv.to_numpy(dtype=np.float64, copy=False)
+
+                        stat, df_eff, pval, det = _rao_score_block(y=yb, X0=X_red_arr, X1=X_int, fit_red=fit_red)
+
+                        if df_eff > 0 and np.isfinite(pval):
+                            p_val = pval
+                            p_source = "rao_score"
+                            inference_type = "mle"  # Anchored at reduced MLE
+                            out['LRT_df'] = df_eff
+                            out['LRT_Reason'] = ""
+                            out['Stage2_Model_Notes'] = "rao_score_multi;reduced_mle"
+                        else:
+                            out['LRT_Reason'] = "score_info_singular" if df_eff == 0 else "score_p_nan"
+                            out['Stage2_Model_Notes'] = "rao_score_multi_failed"
+                    else:
+                        out['LRT_Reason'] = "score_unavailable_multi_df"
+                except Exception as e:
+                    out['LRT_Reason'] = "score_exception"
+                    out['Stage2_Model_Notes'] = f"rao_score_multi_exception:{type(e).__name__}"
+            else:
+                out['LRT_Reason'] = "score_unavailable_multi_df"
 
         out['Boot_Engine'] = boot_engine
         out['Boot_Draws'] = int(boot_draws)
