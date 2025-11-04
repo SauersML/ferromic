@@ -1,0 +1,22 @@
+[
+  {
+    "title": "PheWAS Manhattan \u2014 chr10:79,542,901-80,217,413",
+    "filename": "phewas_plots/phewas_chr10_79_542_901-80_217_413.pdf",
+    "description": "Phenome-wide association plot for the 674 kbp inversion at chr10:79,542,901-80,217,413."
+  },
+  {
+    "title": "PheWAS Manhattan \u2014 chr12:46,896,694-46,915,975",
+    "filename": "phewas_plots/phewas_chr12_46_896_694-46_915_975.pdf",
+    "description": "Phenome-wide association plot for the 19 kbp inversion at chr12:46,896,694-46,915,975."
+  },
+  {
+    "title": "PheWAS Manhattan \u2014 chr17:45,585,159-46,292,045",
+    "filename": "phewas_plots/phewas_chr17_45_585_159-46_292_045.pdf",
+    "description": "Phenome-wide association plot for the 706 kbp inversion at chr17:45,585,159-46,292,045."
+  },
+  {
+    "title": "PheWAS Manhattan \u2014 chr6:141,866,310-141,898,728",
+    "filename": "phewas_plots/phewas_chr6_141_866_310-141_898_728.pdf",
+    "description": "Phenome-wide association plot for the 32 kbp inversion at chr6:141,866,310-141,898,728."
+  }
+]
