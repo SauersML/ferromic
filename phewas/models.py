@@ -4340,13 +4340,6 @@ def _lrt_followup_worker_impl(task):
         interaction_cols = [f"{target}:{c}" for c in A_df.columns]
         X_full_df = pd.concat([X_red_df, pd.DataFrame(interaction_mat, index=X_red_df.index, columns=interaction_cols)], axis=1)
 
-        # DEBUG: Before pruning
-        print(f"\n=== DEBUG Before Pruning for {s_name_safe} ===")
-        print(f"X_full_df columns ({len(X_full_df.columns)}): {list(X_full_df.columns)}")
-        print(f"A_df columns: {list(A_df.columns)}")
-        for c in A_df.columns:
-            print(f"  {c}: nunique={X_full_df[c].nunique()}, std={X_full_df[c].std():.6f}, mean={X_full_df[c].mean():.6f}")
-
         # Prune the full model (with interactions) first.
         X_full_zv = _drop_zero_variance(X_full_df, keep_cols=('const',), always_keep=[target] + interaction_cols)
         X_full_zv = _drop_rank_deficient(X_full_zv, keep_cols=('const',), always_keep=[target] + interaction_cols)
@@ -4400,14 +4393,6 @@ def _lrt_followup_worker_impl(task):
         r_full = np.linalg.matrix_rank(X_full_zv.to_numpy(dtype=np.float64, copy=False))
         r_red = np.linalg.matrix_rank(X_red_zv.to_numpy(dtype=np.float64, copy=False))
         df_lrt = max(0, int(r_full - r_red))
-
-        # DEBUG: Print model details
-        print(f"\n=== DEBUG Stage-2 Models for {s_name_safe} ===")
-        print(f"X_red_zv columns ({len(X_red_zv.columns)}): {list(X_red_zv.columns)}")
-        print(f"X_full_zv columns ({len(X_full_zv.columns)}): {list(X_full_zv.columns)}")
-        print(f"Interaction cols kept: {kept_interaction_cols}")
-        print(f"Rank reduced: {r_red}, Rank full: {r_full}, df_lrt: {df_lrt}")
-        print(f"X_red_zv shape: {X_red_zv.shape}, X_full_zv shape: {X_full_zv.shape}")
         inference_family = None
         fit_full_use = None
         fit_red_use = None
@@ -4425,15 +4410,6 @@ def _lrt_followup_worker_impl(task):
             full_ok2, _, _ = _ok_mle_fit(fit_full, X_full_zv, yb) if fit_full is not None else (False, None, {})
             red_ok2, _, _ = _ok_mle_fit(fit_red, X_red_zv, yb) if fit_red is not None else (False, None, {})
 
-            # DEBUG: Print inference_family decision factors
-            print(f"\n=== DEBUG Inference Family Decision ===")
-            print(f"fit_full is not None: {fit_full is not None}")
-            print(f"fit_red is not None: {fit_red is not None}")
-            print(f"full_is_mle: {full_is_mle}")
-            print(f"red_is_mle: {red_is_mle}")
-            print(f"full_ok2: {full_ok2}")
-            print(f"red_ok2: {red_ok2}")
-
             if (
                 fit_full is not None
                 and fit_red is not None
@@ -4445,8 +4421,6 @@ def _lrt_followup_worker_impl(task):
                 inference_family = "mle"
                 fit_full_use = fit_full
                 fit_red_use = fit_red
-
-            print(f"inference_family: {inference_family}")
 
         if inference_family == "mle":
             ll_full = float(getattr(fit_full_use, "llf", np.nan))

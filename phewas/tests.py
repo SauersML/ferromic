@@ -2799,14 +2799,6 @@ def test_stage2_dosage_ancestry_interaction(test_ctx):
         A = pd.get_dummies(pd.Categorical(anc_series), prefix='ANC', drop_first=True, dtype=np.float64)
         core_df_with_const = core_df_with_const.join(A, how="left").fillna({c: 0.0 for c in A.columns})
 
-        # DEBUG: Print design matrix info
-        print("\n=== DEBUG: Design Matrix Info ===")
-        print(f"Columns: {list(core_df_with_const.columns)}")
-        print(f"Shape: {core_df_with_const.shape}")
-        print(f"Ancestry dummy columns: {list(A.columns)}")
-        print(f"Ancestry value counts:\n{anc_series.value_counts()}")
-        print(f"Matrix rank: {np.linalg.matrix_rank(core_df_with_const.to_numpy())}")
-
         # Initialize worker with all phenotypes allowed
         allowed_masks = {
             "cardio": np.ones(len(core_df), dtype=bool),
