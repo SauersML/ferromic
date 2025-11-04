@@ -566,9 +566,9 @@ def plot_forest(df: pd.DataFrame, out_pdf=OUT_PDF, out_png=OUT_PNG):
              transform=axR.transAxes, zorder=51)
 
     # Subtitle explaining the encoding
-    axR.text(legend_x - legend_width/2, legend_y - 0.025,
+    axR.text(legend_x - legend_width/2, legend_y - 0.015,
              "by q-value (FDR)",
-             ha='center', va='top', fontsize=17, style='italic', color='#444444',
+             ha='center', va='top', fontsize=24, style='italic', color='#444444',
              transform=axR.transAxes, zorder=51)
 
     # Use a neutral color for legend examples
