@@ -533,9 +533,9 @@ def plot_forest(df: pd.DataFrame, out_pdf=OUT_PDF, out_png=OUT_PNG):
     # Hard-coded reasonable q-value examples for the legend
     legend_q_values = [0.001, 0.01, 0.05]
     legend_labels = [
-        "Most sig. (q≤0.001)",
-        "Moderate (q≈0.01)",
-        "Least sig. (q≈0.05)"
+        "q=0.001",
+        "q=0.01",
+        "q=0.05"
     ]
 
     n_items = len(legend_q_values)
