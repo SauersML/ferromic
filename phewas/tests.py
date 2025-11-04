@@ -2762,13 +2762,17 @@ def test_stage2_dosage_ancestry_interaction(test_ctx):
             index=core_data['demographics'].index
         )
 
-        # Create phenotype with ~1000 cases, ~2000 controls for adequate EPV
-        # Use dosage-dependent probability to generate realistic signal
+        # Create phenotype with EXACTLY 1000 cases, 2000 controls for adequate EPV
+        # Use weighted sampling based on dosage to generate realistic signal
         from scipy.special import expit as sigmoid
         inversion_dosage = core_data['inversion_main'][TEST_TARGET_INVERSION]
-        # Adjust intercept to get ~33% case rate (1000/3000)
-        p_case = sigmoid(-0.5 + 0.8 * inversion_dosage + 0.01 * (core_data['demographics']['AGE'] - 50))
-        cases_a = set(core_data['demographics'].index[rng.random(len(core_data['demographics'])) < p_case])
+        # Create weights proportional to case probability (higher dosage = higher weight)
+        weights = sigmoid(0.8 * inversion_dosage + 0.01 * (core_data['demographics']['AGE'] - 50))
+        # Normalize weights
+        weights = weights / weights.sum()
+        # Sample exactly 1000 cases based on weights
+        case_indices = rng.choice(len(core_data['demographics']), size=1000, replace=False, p=weights)
+        cases_a = set(core_data['demographics'].index[case_indices])
         phenos["A_strong_signal"]["cases"] = cases_a
 
         # Disable sex restriction to preserve full sample size
