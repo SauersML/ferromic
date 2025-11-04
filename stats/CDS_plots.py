@@ -1198,7 +1198,7 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
             loc="upper left",
             bbox_to_anchor=(0.02, 0.62),
             borderaxespad=0.0,
-            labelspacing=0.7,
+            labelspacing=1.4,
             handletextpad=1.2,
             scatterpoints=1,
             fontsize=8,
