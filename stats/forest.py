@@ -543,12 +543,11 @@ def plot_forest(df: pd.DataFrame, out_pdf=OUT_PDF, out_png=OUT_PNG, legend_posit
 
     n_items = len(legend_q_values)
 
-    # CORRECT FORMULA: height = distance_to_first_item + (n_items - 1) * spacing + bottom_padding
-    # Bug fix: Original used n_items * spacing instead of (n_items - 1) * spacing,
-    # causing 40%+ of the legend box to be wasted empty space.
-    first_item_offset = 0.050  # Distance from legend top to first item
+    # CORRECT FORMULA: height = subtitle_space + distance_to_first_item + (n_items - 1) * spacing + bottom_padding
+    subtitle_space = 0.045     # Space for "by q-value (FDR)" subtitle at top
+    first_item_offset = 0.050  # Distance from subtitle to first item
     bottom_padding = 0.015     # Space below the last item
-    legend_height = first_item_offset + (n_items - 1) * legend_height_per_item + bottom_padding
+    legend_height = subtitle_space + first_item_offset + (n_items - 1) * legend_height_per_item + bottom_padding
 
     # Draw background box - positioned from TOP RIGHT, extending downward
     box_x = legend_x - legend_width
@@ -562,14 +561,8 @@ def plot_forest(df: pd.DataFrame, out_pdf=OUT_PDF, out_png=OUT_PNG, legend_posit
     )
     axR.add_patch(box)
 
-    # Title - positioned at top of legend box
-    axR.text(legend_x - legend_width/2, legend_y - 0.010,
-             "",
-             ha='center', va='top', fontsize=20, fontweight='bold',
-             transform=axR.transAxes, zorder=51)
-
-    # Subtitle explaining the encoding
-    axR.text(legend_x - legend_width/2, legend_y - 0.015,
+    # Subtitle explaining the encoding - positioned near top with proper spacing
+    axR.text(legend_x - legend_width/2, legend_y - 0.020,
              "by q-value (FDR)",
              ha='center', va='top', fontsize=24, style='italic', color='#444444',
              transform=axR.transAxes, zorder=51)
@@ -577,9 +570,9 @@ def plot_forest(df: pd.DataFrame, out_pdf=OUT_PDF, out_png=OUT_PNG, legend_posit
     # Use a neutral color for legend examples
     legend_base_color = "#4C78A8"
 
-    # Draw example dots and labels - positioned from top down
+    # Draw example dots and labels - positioned from top down (after subtitle)
     for i, (q_val, label) in enumerate(zip(legend_q_values, legend_labels)):
-        y_pos = legend_y - first_item_offset - i * legend_height_per_item
+        y_pos = legend_y - subtitle_space - first_item_offset - i * legend_height_per_item
 
         # Get size and color for this q-value
         size_pt2, facecolor = point_style_for_q(q_val, legend_base_color)
