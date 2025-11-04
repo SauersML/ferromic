@@ -4329,7 +4329,8 @@ def _lrt_followup_worker_impl(task):
         else:
             anc_cat = pd.Categorical(anc_vec)
 
-        A_df = pd.get_dummies(anc_cat, prefix='ANC', drop_first=True).reindex(Xb.index, fill_value=0)
+        # Create Series with index before get_dummies to preserve person IDs
+        A_df = pd.get_dummies(pd.Series(anc_cat, index=anc_vec.index), prefix='ANC', drop_first=True)
         X_red_df = Xb.join(A_df)
 
         # Use vectorized broadcasting to create interaction terms
