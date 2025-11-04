@@ -4425,6 +4425,15 @@ def _lrt_followup_worker_impl(task):
             full_ok2, _, _ = _ok_mle_fit(fit_full, X_full_zv, yb) if fit_full is not None else (False, None, {})
             red_ok2, _, _ = _ok_mle_fit(fit_red, X_red_zv, yb) if fit_red is not None else (False, None, {})
 
+            # DEBUG: Print inference_family decision factors
+            print(f"\n=== DEBUG Inference Family Decision ===")
+            print(f"fit_full is not None: {fit_full is not None}")
+            print(f"fit_red is not None: {fit_red is not None}")
+            print(f"full_is_mle: {full_is_mle}")
+            print(f"red_is_mle: {red_is_mle}")
+            print(f"full_ok2: {full_ok2}")
+            print(f"red_ok2: {red_ok2}")
+
             if (
                 fit_full is not None
                 and fit_red is not None
@@ -4436,6 +4445,8 @@ def _lrt_followup_worker_impl(task):
                 inference_family = "mle"
                 fit_full_use = fit_full
                 fit_red_use = fit_red
+
+            print(f"inference_family: {inference_family}")
 
         if inference_family == "mle":
             ll_full = float(getattr(fit_full_use, "llf", np.nan))
