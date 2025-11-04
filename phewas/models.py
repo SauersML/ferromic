@@ -38,7 +38,7 @@ DEFAULT_PREFER_FIRTH_ON_RIDGE = True
 DEFAULT_ALLOW_PENALIZED_WALD = False
 DEFAULT_ALLOW_POST_FIRTH_MLE_REFIT = True
 
-ALLOWED_P_SOURCES = {"lrt_mle", "score_chi2", "score_boot_mle", "score_boot_firth"}
+ALLOWED_P_SOURCES = {"lrt_mle", "score_chi2", "score_chi2_multidf", "score_boot_mle", "score_boot_firth"}
 ALLOWED_CI_METHODS = {
     "profile",
     "profile_penalized",
@@ -2018,6 +2018,116 @@ def _score_test_from_reduced(X_red, y, x_target, const_ix=None):
         return np.nan, np.nan
     p = float(sp_stats.chi2.sf(T_obs, 1))
     return p, T_obs
+
+
+def _multidf_score_test_from_reduced(X_red, y, X_int, const_ix=None, min_weight=1e-8):
+    """
+    Multi-df Rao score test for testing a block of interaction terms.
+
+    Computes the score statistic from the reduced model to test whether
+    adding X_int (a matrix of k interaction columns) significantly improves fit.
+
+    Args:
+        X_red: Reduced model design matrix (DataFrame or ndarray)
+        y: Binary outcome vector
+        X_int: Matrix of interaction columns to test (DataFrame or ndarray)
+        const_ix: Optional index of constant column in X_red
+        min_weight: Minimum weight threshold for stability (clips small weights)
+
+    Returns:
+        (p_value, test_statistic, df):
+            - p_value: χ² p-value (nan if test fails)
+            - test_statistic: Rao score statistic (nan if test fails)
+            - df: Degrees of freedom = rank(X_int after orthogonalization)
+    """
+    # Fit the reduced model using the standard ladder (MLE preferred)
+    fit_red, _ = _fit_logit_ladder(X_red, y, const_ix=const_ix, prefer_mle_first=True)
+    if fit_red is None:
+        return np.nan, np.nan, 0
+
+    # Only accept clean MLE fits (no Firth)
+    if not bool(getattr(fit_red, "_final_is_mle", False)) or bool(getattr(fit_red, "_used_firth", False)):
+        return np.nan, np.nan, 0
+
+    # Convert to numpy arrays
+    Xr = X_red.to_numpy(dtype=np.float64, copy=False) if hasattr(X_red, "to_numpy") else np.asarray(X_red, dtype=np.float64)
+    yv = np.asarray(y, dtype=np.float64)
+    X_int_np = X_int.to_numpy(dtype=np.float64, copy=False) if hasattr(X_int, "to_numpy") else np.asarray(X_int, dtype=np.float64)
+
+    if X_int_np.ndim != 2 or X_int_np.shape[0] != Xr.shape[0]:
+        return np.nan, np.nan, 0
+
+    # Get fitted values from reduced model
+    beta = np.asarray(getattr(fit_red, "params", np.zeros(Xr.shape[1])), dtype=np.float64)
+    eta = np.clip(Xr @ beta, -35.0, 35.0)
+    p_hat = expit(eta)
+
+    # Compute weights, clipping small values for numerical stability
+    W = np.maximum(p_hat * (1.0 - p_hat), min_weight)
+
+    # Compute score vector: U = X_int' (y - p_hat)
+    resid = yv - p_hat
+    U = X_int_np.T @ resid
+
+    # Compute the efficient information matrix for X_int
+    # I_eff = X_int' W X_int - X_int' W X_red (X_red' W X_red)^{-1} X_red' W X_int
+
+    # Step 1: Compute X_int' W X_int
+    XintT_W = X_int_np.T * W
+    I_raw = XintT_W @ X_int_np
+
+    # Step 2: Compute the adjustment term from projecting onto X_red
+    # First compute X_red' W X_red and its inverse (using SVD for stability)
+    XrT_W = Xr.T * W
+    XrTWXr = XrT_W @ Xr
+
+    try:
+        # Use SVD-based pseudoinverse for stability
+        u_svd, s_svd, vt_svd = np.linalg.svd(XrTWXr, full_matrices=False)
+        # Determine effective rank
+        tol = s_svd[0] * max(XrTWXr.shape) * np.finfo(float).eps
+        rank_red = int(np.sum(s_svd > tol))
+        if rank_red == 0:
+            return np.nan, np.nan, 0
+        # Compute pseudoinverse
+        s_inv = np.zeros_like(s_svd)
+        s_inv[:rank_red] = 1.0 / s_svd[:rank_red]
+        XrTWXr_inv = (vt_svd.T * s_inv) @ u_svd.T
+    except np.linalg.LinAlgError:
+        return np.nan, np.nan, 0
+
+    # Step 3: Compute adjustment: X_int' W X_red (X_red' W X_red)^{-1} X_red' W X_int
+    XintT_W_Xr = XintT_W @ Xr
+    adjustment = XintT_W_Xr @ XrTWXr_inv @ XintT_W_Xr.T
+
+    # Step 4: Efficient information matrix
+    I_eff = I_raw - adjustment
+
+    # Compute rank of I_eff using SVD
+    try:
+        u_eff, s_eff, vt_eff = np.linalg.svd(I_eff, full_matrices=False)
+        tol_eff = s_eff[0] * max(I_eff.shape) * np.finfo(float).eps if s_eff[0] > 0 else 1e-10
+        rank_eff = int(np.sum(s_eff > tol_eff))
+        if rank_eff == 0:
+            return np.nan, np.nan, 0
+
+        # Compute pseudoinverse of I_eff
+        s_eff_inv = np.zeros_like(s_eff)
+        s_eff_inv[:rank_eff] = 1.0 / s_eff[:rank_eff]
+        I_eff_inv = (vt_eff.T * s_eff_inv) @ u_eff.T
+    except np.linalg.LinAlgError:
+        return np.nan, np.nan, 0
+
+    # Compute Rao score statistic: T = U' I_eff^{-1} U
+    T_obs = float(U.T @ I_eff_inv @ U)
+
+    if not np.isfinite(T_obs) or T_obs < 0:
+        return np.nan, np.nan, rank_eff
+
+    # Compute p-value from χ² distribution
+    p_val = float(sp_stats.chi2.sf(T_obs, rank_eff))
+
+    return p_val, T_obs, rank_eff
 
 
 def _score_bootstrap_bits(Xr, yv, xt, beta0, kind="mle"):
@@ -4475,7 +4585,26 @@ def _lrt_followup_worker_impl(task):
                     else:
                         out['LRT_Reason'] = "score_boot_failed"
         else:
-            out['LRT_Reason'] = "score_unavailable_multi_df"
+            # Multi-df case: use Rao score test from reduced model
+            if kept_interaction_cols:
+                # Extract interaction columns from the full model design matrix
+                X_int_df = X_full_zv[kept_interaction_cols]
+                p_sc, T_sc, df_sc = _multidf_score_test_from_reduced(
+                    X_red_zv,
+                    yb,
+                    X_int_df,
+                    const_ix=const_ix_red,
+                )
+                if np.isfinite(p_sc) and df_sc > 0:
+                    p_val = p_sc
+                    p_source = "score_chi2_multidf"
+                    inference_type = "score"
+                    out['LRT_df'] = df_sc
+                    out['LRT_Reason'] = ""
+                else:
+                    out['LRT_Reason'] = "score_multidf_failed"
+            else:
+                out['LRT_Reason'] = "no_interaction_cols"
 
         out['Boot_Engine'] = boot_engine
         out['Boot_Draws'] = int(boot_draws)
