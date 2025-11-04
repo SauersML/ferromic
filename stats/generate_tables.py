@@ -62,7 +62,7 @@ GENE_RESULTS_TSV = REPO_ROOT / "gene_inversion_direct_inverted.tsv"
 CDS_SUMMARY_TSV = REPO_ROOT / "cds_identical_proportions.tsv"
 
 PHEWAS_RESULTS = DATA_DIR / "phewas_results.tsv"
-PHEWAS_TAGGING_RESULTS = DATA_DIR / "phewas_tagging_17q21_results.tsv"
+PHEWAS_TAGGING_RESULTS = DATA_DIR / "all_pop_phewas_tag.tsv"
 CATEGORIES_RESULTS_CANDIDATES = (
     DATA_DIR / "categories.tsv",
     DATA_DIR / "phewas v2 - categories.tsv",
@@ -289,7 +289,7 @@ def build_workbook(output_path: Path) -> None:
             name="17q21 tagging PheWAS",
             description=(
                 "PheWAS results for tagging variants linked to the 17q21 inversion "
-                "(data/phewas_tagging_17q21_results.tsv)."
+                "(data/all_pop_phewas_tag.tsv)."
             ),
             loader=_load_phewas_tagging,
         )
