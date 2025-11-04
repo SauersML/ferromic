@@ -2746,3 +2746,116 @@ def test_plan_category_sets_respects_min_k_and_dedup(tmp_path):
     assert "Y" in dropped and dropped["Y"] == ["C"]
     assert "Y" not in kept
     assert all(p in {"A", "B", "C"} for plist in kept.values() for p in plist)
+
+
+def test_stage2_dosage_ancestry_interaction(test_ctx):
+    """Test stage-2 dosage*ancestry interaction analysis using existing pipeline code."""
+    with temp_workspace():
+        # Create synthetic cohort with multiple ancestry groups
+        core_data, phenos = make_synth_cohort(N=300, NUM_PCS=10, seed=123)
+
+        # Ensure we have multiple ancestry groups (eur, afr, amr)
+        rng = np.random.default_rng(123)
+        ancestry_labels = rng.choice(["eur", "afr", "amr"], size=len(core_data['demographics']), p=[0.5, 0.3, 0.2])
+        core_data['ancestry'] = pd.DataFrame(
+            {"ANCESTRY": ancestry_labels},
+            index=core_data['demographics'].index
+        )
+
+        # Prime caches with test data
+        prime_all_caches_for_run(core_data, phenos, TEST_CDR_CODENAME, TEST_TARGET_INVERSION)
+
+        # Build design matrix with ancestry dummies and interactions
+        core_df = pd.concat([
+            core_data['demographics'][['AGE_c', 'AGE_c_sq']],
+            core_data['sex'],
+            core_data['pcs'],
+            core_data['inversion_main']
+        ], axis=1)
+        core_df_with_const = sm.add_constant(core_df)
+
+        # Add ancestry dummy variables (drop 'eur' as reference)
+        anc_series = core_data['ancestry']['ANCESTRY'].str.lower()
+        A = pd.get_dummies(pd.Categorical(anc_series), prefix='ANC', drop_first=True, dtype=np.float64)
+        core_df_with_const = core_df_with_const.join(A, how="left").fillna({c: 0.0 for c in A.columns})
+
+        # Initialize worker with all phenotypes allowed
+        allowed_masks = {
+            "cardio": np.ones(len(core_df), dtype=bool),
+            "neuro": np.ones(len(core_df), dtype=bool),
+        }
+        shm = _init_lrt_worker_from_df(
+            core_df_with_const,
+            allowed_masks,
+            core_data['ancestry']['ANCESTRY'],
+            test_ctx
+        )
+
+        # Run stage-2 followup analysis on a phenotype
+        task = {
+            "name": "A_strong_signal",
+            "category": "cardio",
+            "cdr_codename": TEST_CDR_CODENAME,
+            "target": TEST_TARGET_INVERSION
+        }
+
+        try:
+            # Execute the stage-2 dosage*ancestry analysis
+            models.lrt_followup_worker(task)
+
+            # Check if results were generated
+            result_path = Path(test_ctx["LRT_FOLLOWUP_CACHE_DIR"]) / "A_strong_signal.json"
+            meta_path = Path(test_ctx["LRT_FOLLOWUP_CACHE_DIR"]) / "A_strong_signal.meta.json"
+
+            if result_path.exists():
+                with result_path.open() as fh:
+                    result = json.load(fh)
+
+                print("\n=== Stage-2 Dosage*Ancestry Analysis Results ===")
+                print(f"Phenotype: {result.get('Phenotype', 'N/A')}")
+                print(f"P_Stage2_Valid: {result.get('P_Stage2_Valid', 'N/A')}")
+                print(f"P_LRT_AncestryxDosage: {result.get('P_LRT_AncestryxDosage', 'N/A')}")
+                print(f"LRT_df: {result.get('LRT_df', 'N/A')}")
+                print(f"LRT_Ancestry_Levels: {result.get('LRT_Ancestry_Levels', 'N/A')}")
+                print(f"P_Method: {result.get('P_Method', 'N/A')}")
+                print(f"Inference_Type: {result.get('Inference_Type', 'N/A')}")
+                print(f"LRT_Reason: {result.get('LRT_Reason', 'N/A')}")
+                print(f"Model_Notes: {result.get('Model_Notes', 'N/A')}")
+
+                # Check per-ancestry results
+                print("\n=== Per-Ancestry Results ===")
+                for anc in ['EUR', 'AFR', 'AMR']:
+                    if f"{anc}_N" in result:
+                        print(f"\n{anc}:")
+                        print(f"  N: {result.get(f'{anc}_N', 'N/A')}")
+                        print(f"  N_Cases: {result.get(f'{anc}_N_Cases', 'N/A')}")
+                        print(f"  N_Controls: {result.get(f'{anc}_N_Controls', 'N/A')}")
+                        print(f"  OR: {result.get(f'{anc}_OR', 'N/A')}")
+                        print(f"  P: {result.get(f'{anc}_P', 'N/A')}")
+                        print(f"  P_Valid: {result.get(f'{anc}_P_Valid', 'N/A')}")
+                        print(f"  CI95: {result.get(f'{anc}_CI95', 'N/A')}")
+                        print(f"  Inference_Type: {result.get(f'{anc}_Inference_Type', 'N/A')}")
+                        if result.get(f'{anc}_REASON'):
+                            print(f"  REASON: {result.get(f'{anc}_REASON')}")
+
+                print("\n=== Test Status: SUCCESS ===")
+                print("Stage-2 dosage*ancestry analysis completed successfully.")
+
+                # Basic assertions to verify structure
+                assert result.get('Phenotype') == 'A_strong_signal'
+                assert 'P_Stage2_Valid' in result
+                assert 'P_LRT_AncestryxDosage' in result
+                assert 'LRT_Ancestry_Levels' in result
+
+            else:
+                print("\n=== Test Status: FAILED ===")
+                print("Result file was not created.")
+                raise AssertionError("Stage-2 analysis did not produce results file")
+
+        except Exception as e:
+            print(f"\n=== Test Status: FAILED ===")
+            print(f"Error during stage-2 analysis: {type(e).__name__}: {e}")
+            raise
+        finally:
+            shm.close()
+            shm.unlink()
