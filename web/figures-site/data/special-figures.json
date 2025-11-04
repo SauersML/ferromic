@@ -88,6 +88,16 @@
           "description": "Forest plot summarising significant inversion–phenotype associations with odds ratios and confidence intervals."
         },
         {
+          "title": "PheWAS Forest — chr17:45,585,159-46,292,045 Only",
+          "filename": "phewas_forest_chr17_only.pdf",
+          "description": "Forest plot showing only associations for the chr17:45,585,159-46,292,045 inversion."
+        },
+        {
+          "title": "PheWAS Forest — Excluding chr17:45,585,159-46,292,045",
+          "filename": "phewas_forest_excluding_chr17.pdf",
+          "description": "Forest plot of all significant associations except chr17:45,585,159-46,292,045."
+        },
+        {
           "title": "PheWAS Volcano (Full Scale)",
           "filename": "phewas_volcano.pdf",
           "description": "Volcano plot showing all odds ratios across 1,096 phecodes with full x-axis scale."
