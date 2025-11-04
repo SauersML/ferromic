@@ -170,7 +170,6 @@ def _load_gene_conservation() -> pd.DataFrame:
         "se_delta": "SE(Δ)",
         "p_value": "p-value",
         "q_value": "q-value",
-        "note": "Notes",
     }
 
     ordered_cols = [
@@ -184,7 +183,6 @@ def _load_gene_conservation() -> pd.DataFrame:
         "SE(Δ)",
         "p-value",
         "q-value",
-        "Notes",
     ]
 
     df = df.rename(columns=rename_map)
@@ -199,6 +197,44 @@ def _load_simple_tsv(path: Path) -> pd.DataFrame:
     return pd.read_csv(path, sep="\t", dtype=str, low_memory=False)
 
 
+def _load_phewas_results() -> pd.DataFrame:
+    df = _load_simple_tsv(PHEWAS_RESULTS)
+    
+    # Check for P_Value_x and P_Value_y columns
+    if "P_Value_x" in df.columns and "P_Value_y" in df.columns:
+        # Convert to numeric for comparison
+        p_x = pd.to_numeric(df["P_Value_x"], errors="coerce")
+        p_y = pd.to_numeric(df["P_Value_y"], errors="coerce")
+        
+        # Check if values are the same (accounting for NaN)
+        # Two NaNs are considered equal, but any difference in non-NaN values is an error
+        both_nan = p_x.isna() & p_y.isna()
+        both_equal = (p_x == p_y)
+        all_match = (both_nan | both_equal).all()
+        
+        if not all_match:
+            # Find first differing row for error message
+            diff_mask = ~(both_nan | both_equal)
+            first_diff_idx = diff_mask.idxmax() if diff_mask.any() else None
+            raise SupplementaryTablesError(
+                f"P_Value_x and P_Value_y columns have different values. "
+                f"First difference at row {first_diff_idx}: "
+                f"P_Value_x={df.loc[first_diff_idx, 'P_Value_x']}, "
+                f"P_Value_y={df.loc[first_diff_idx, 'P_Value_y']}"
+            )
+        
+        # Values match - drop P_Value_y and rename P_Value_x
+        df = df.drop(columns=["P_Value_y"])
+        df = df.rename(columns={"P_Value_x": "P_Value_unadjusted"})
+    
+    # Remove columns that have no data (all values are empty/null)
+    empty_cols = [col for col in df.columns if df[col].isna().all() or (df[col].astype(str).str.strip() == "").all()]
+    if empty_cols:
+        df = df.drop(columns=empty_cols)
+    
+    return df
+
+
 def _load_categories() -> pd.DataFrame:
     for candidate in CATEGORIES_RESULTS_CANDIDATES:
         if candidate.exists():
@@ -206,6 +242,16 @@ def _load_categories() -> pd.DataFrame:
             # Remove Z_Cap and Dropped columns if present
             columns_to_drop = ["Z_Cap", "Dropped"]
             df = df.drop(columns=[col for col in columns_to_drop if col in df.columns])
+            
+            # Rename columns for clarity
+            rename_map = {
+                "K_Total": "Phenotypes in category",
+                "K_GBJ": "Phenotypes included in GBJ",
+                "K_GLS": "Phenotypes included in GLS",
+                "T_GLS": "GLS test statistic",
+            }
+            df = df.rename(columns=rename_map)
+            
             return df
     raise SupplementaryTablesError("Unable to locate categories TSV in the data directory.")
 
@@ -292,7 +338,7 @@ def build_workbook(output_path: Path) -> None:
         SheetInfo(
             name="PheWAS results",
             description="Full genome-wide PheWAS association statistics (data/phewas_results.tsv).",
-            loader=lambda: _load_simple_tsv(PHEWAS_RESULTS),
+            loader=_load_phewas_results,
         )
     )
 
