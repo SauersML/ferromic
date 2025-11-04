@@ -20,6 +20,7 @@ interface SpecialPageProps {
 }
 
 const MANIFEST_PATH = path.join(process.cwd(), 'data', 'special-figures.json');
+const PHEWAS_FIGURES_PATH = path.join(process.cwd(), 'data', 'phewas-figures.json');
 const SUPPLEMENTARY_FILENAME = 'supplementary_tables.xlsx';
 const SUPPLEMENTARY_PUBLIC_PATH = path.join(
   process.cwd(),
@@ -41,6 +42,36 @@ export const getStaticProps: GetStaticProps<SpecialPageProps> = async () => {
   try {
     const raw = await fs.readFile(MANIFEST_PATH, 'utf-8');
     const manifest = JSON.parse(raw) as SpecialManifest;
+
+    // Try to load dynamically generated PheWAS figures list
+    try {
+      const phewasRaw = await fs.readFile(PHEWAS_FIGURES_PATH, 'utf-8');
+      const phewasPlots = JSON.parse(phewasRaw) as Array<{
+        title: string;
+        filename: string;
+        description: string;
+      }>;
+
+      // Find the PheWAS section and update its Manhattan plots
+      const phewasGroupIndex = manifest.groups.findIndex(g => g.slug === 'phewas');
+      if (phewasGroupIndex !== -1) {
+        const phewasGroup = manifest.groups[phewasGroupIndex];
+
+        // Keep non-Manhattan figures (forest plots, volcano plots, heatmap)
+        const nonManhattanFigures = phewasGroup.figures.filter(
+          f => !f.filename.startsWith('phewas_plots/phewas_chr')
+        );
+
+        // Combine: auto-generated Manhattan plots first, then other PheWAS figures
+        phewasGroup.figures = [...phewasPlots, ...nonManhattanFigures];
+
+        console.log(`✓ Loaded ${phewasPlots.length} auto-generated PheWAS Manhattan plots`);
+      }
+    } catch (error) {
+      // If phewas-figures.json doesn't exist or can't be read, use the hardcoded list
+      console.log('ℹ Using hardcoded PheWAS figure list (phewas-figures.json not found)');
+    }
+
     return {
       props: {
         manifest,
