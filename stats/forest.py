@@ -559,7 +559,7 @@ def plot_forest(df: pd.DataFrame, out_pdf=OUT_PDF, out_png=OUT_PNG):
     
     # Title - positioned at top of legend box
     axR.text(legend_x - legend_width/2, legend_y - 0.015,
-             "Point Size & Color",
+             "",
              ha='center', va='top', fontsize=11.5, fontweight='bold',
              transform=axR.transAxes, zorder=51)
 
