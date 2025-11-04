@@ -110,36 +110,12 @@ def ensure_cds_summary() -> Path:
 
 
 def ensure_gene_results() -> Path:
-    ensure_cds_summary()
+    if GENE_RESULTS_TSV.exists():
+        return GENE_RESULTS_TSV
 
-    if not GENE_RESULTS_SCRIPT.exists():
-        raise SupplementaryTablesError(
-            f"Gene-level CDS script not found: {GENE_RESULTS_SCRIPT}"
-        )
-
-    print("Running per-gene CDS conservation jackknife analysis ...")
-    completed = subprocess.run(
-        [sys.executable, str(GENE_RESULTS_SCRIPT)],
-        cwd=str(REPO_ROOT),
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-
-    if completed.returncode != 0:
-        stderr = completed.stderr.strip()
-        stdout = completed.stdout.strip()
-        message = "per_gene_cds_differences_jackknife.py failed"
-        details = "\n".join(filter(None, [stdout, stderr]))
-        raise SupplementaryTablesError(
-            f"{message}.\n{details if details else 'No additional diagnostics were emitted.'}"
-        )
-
-    if not GENE_RESULTS_TSV.exists():
-        raise SupplementaryTablesError(
-            "Expected gene_inversion_direct_inverted.tsv was not produced by the CDS pipeline."
-        )
-
+    url = PUBLIC_BASE_URL + GENE_RESULTS_TSV.name
+    print(f"Downloading gene-level CDS results from {url} ...")
+    _download_file(url, GENE_RESULTS_TSV)
     return GENE_RESULTS_TSV
 
 
