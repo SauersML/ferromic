@@ -945,11 +945,11 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
     else:
         sizes = np.full(len(df), 60.0)
 
-    # Colors by recurrence (Single-event: deep red, Recurrent: cyan)
+    # Colors by recurrence (Single-event: dark green, Recurrent: rich orange)
     rec = df["recurrence"].astype(str)
     color_map = {
-        "SE": "#8B0000",   # Single-event: deep red
-        "REC": "#00FFFF",  # Recurrent: cyan
+        "SE": "#006400",   # Single-event: dark green
+        "REC": "#FF6F00",  # Recurrent: rich orange
     }
     colors = rec.map(color_map).fillna("#7f7f7f")
 
