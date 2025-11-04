@@ -612,86 +612,70 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
     ax.axvspan(0.5, 2.5, color="#ede7f6", alpha=0.18, zorder=0)
     ax.axvspan(2.5, 4.5, color="#e6f4ea", alpha=0.18, zorder=0)
 
-    # --- Compute a global max of counts (so widths are comparable across violins) ---
-    y_grid = np.linspace(0.0, 1.0, 400)
-    global_density_max = 0.0
-    for cat_tmp in CATEGORY_ORDER:
-        vals_tmp = dist[cat_tmp]["values_core"]
-        vals_tmp = vals_tmp[(vals_tmp >= 0.0) & (vals_tmp <= 1.0)]
-        if vals_tmp.size >= 2:
-            try:
-                kde_tmp = gaussian_kde(vals_tmp, bw_method="scott")
-                dens_tmp = kde_tmp(y_grid) * vals_tmp.size  # convert PDF to expected counts
-                global_density_max = max(global_density_max, float(np.max(dens_tmp)))
-            except Exception:
-                hist_tmp, _ = np.histogram(vals_tmp, bins=40, range=(0.0, 1.0), density=False)  # counts
-                if hist_tmp.size:
-                    global_density_max = max(global_density_max, float(hist_tmp.max()))
+    # Swarm plot parameters
+    swarm_width = 0.6  # Total width for swarm
 
     for i, cat in enumerate(CATEGORY_ORDER, start=1):
         d = dist[cat]
-        core = d["values_core"]
         all_vals = d["values_all"]
-
-        # Orientation-based face color, recurrence-based hatch
-        face = CATEGORY_FACE[cat]
-        if cat.startswith("Single-event"):
-            hatch_pat  = "."
-            hatch_edge = OVERLAY_SINGLE
-        else:
-            hatch_pat  = "//"
-            hatch_edge = OVERLAY_RECUR
-
-        # Symmetric half-violins with GLOBAL scaling + hatch overlay
-        # Half-violin + half-box; jitter on the BOX side (raincloud-style)
-        side_violin = "left" if "direct" in cat else "right"
-        side_box = "right" if side_violin == "left" else "left"
-        offset = 0.08 if side_box == "right" else -0.08
-        sign = 1.0 if side_box == "right" else -1.0
-        x_center = (i + offset) + sign * 0.03
-
-        # Half-box shifted to the opposite side of the violin
         box_stats = d["box_stats"]
         median = box_stats["median"]
-        if not np.isnan(median):
-            cx = i + offset
-            q1 = box_stats["q1"]
-            q3 = box_stats["q3"]
-            whisker_low = box_stats["whisker_low"]
-            whisker_high = box_stats["whisker_high"]
-            box_width = 0.18
-            rect = mpatches.Rectangle(
-                (cx - box_width / 2, q1),
-                box_width,
-                max(q3 - q1, 0.0),
-                facecolor="white",
-                edgecolor="#333333",
-                linewidth=0.6,
-                zorder=3,
-            )
-            ax.add_patch(rect)
-            ax.plot([cx - box_width / 2, cx + box_width / 2], [median, median], color="#333333", lw=0.7, zorder=3.2)
-            # Whiskers (1.5 IQR)
-            ax.plot([cx, cx], [whisker_low, q1], color="#333333", lw=0.6, zorder=3)
-            ax.plot([cx, cx], [q3, whisker_high], color="#333333", lw=0.6, zorder=3)
-            cap_half = box_width * 0.35
-            ax.plot([cx - cap_half, cx + cap_half], [whisker_low, whisker_low], color="#333333", lw=0.6, zorder=3)
-            ax.plot([cx - cap_half, cx + cap_half], [whisker_high, whisker_high], color="#333333", lw=0.6, zorder=3)
 
-        # Jitter points: NOT over the violin. Nudge just past the box on the box side.
+        # Orientation-based face color
+        face = CATEGORY_FACE[cat]
+
+        # Swarm plot: arrange points to avoid overlap
         if all_vals.size > 0:
             mask_at1 = (all_vals == 1.0)
             vals_non1 = all_vals[~mask_at1]
 
+            # Create swarm for values < 1.0
             if vals_non1.size > 0:
-                x_jit = x_center + (np.random.rand(vals_non1.size) - 0.5) * 0.04
+                # Simple swarm: use beeswarm-like positioning
+                y_sorted_idx = np.argsort(vals_non1)
+                y_sorted = vals_non1[y_sorted_idx]
+                x_positions = np.zeros(len(y_sorted))
 
+                # Bin size for collision detection
+                bin_size = 0.015
+                point_radius = 0.025  # Approximate visual radius of points in data units
+
+                for idx, y_val in enumerate(y_sorted):
+                    # Find nearby points already placed
+                    nearby = []
+                    for prev_idx in range(idx):
+                        if abs(y_sorted[prev_idx] - y_val) < bin_size:
+                            nearby.append(x_positions[prev_idx])
+
+                    # Find x position that doesn't collide
+                    x_offset = 0
+                    if nearby:
+                        # Try positions moving outward from center
+                        for attempt in range(50):
+                            offset_candidate = (attempt // 2) * point_radius * (1 if attempt % 2 == 0 else -1)
+                            if abs(offset_candidate) > swarm_width / 2:
+                                break
+                            # Check if this position is free
+                            collision = False
+                            for nx in nearby:
+                                if abs(nx - offset_candidate) < point_radius:
+                                    collision = True
+                                    break
+                            if not collision:
+                                x_offset = offset_candidate
+                                break
+
+                    x_positions[idx] = x_offset
+
+                # Plot swarm points
                 ax.scatter(
-                    x_jit, vals_non1,
-                    s=12, alpha=0.9, color=face,
-                    edgecolor="white", linewidths=0.4, zorder=2.4,
+                    i + x_positions,
+                    y_sorted,
+                    s=20, alpha=0.7, color=face,
+                    edgecolor="white", linewidths=0.5, zorder=2,
                 )
 
+            # Handle values at 1.0 (100% identical) - plot in strip above
             n_at1_pts = int(mask_at1.sum())
             if n_at1_pts > 0:
                 rect_w = 0.44
@@ -699,7 +683,7 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
                 rect_y0 = 1.005
 
                 rect = mpatches.Rectangle(
-                    (x_center - rect_w / 2, rect_y0),
+                    (i - rect_w / 2, rect_y0),
                     rect_w, rect_h,
                     facecolor="none",
                     edgecolor=face,
@@ -708,15 +692,22 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
                 )
                 ax.add_patch(rect)
 
-                x_rect = (x_center - rect_w / 2) + np.random.rand(n_at1_pts) * rect_w
+                x_rect = (i - rect_w / 2) + np.random.rand(n_at1_pts) * rect_w
                 y_rect = rect_y0 + np.random.rand(n_at1_pts) * rect_h
                 ax.scatter(
                     x_rect, y_rect,
-                    s=12, alpha=0.9, color=face,
-                    edgecolor="white", linewidths=0.4, zorder=2.2,
+                    s=20, alpha=0.7, color=face,
+                    edgecolor="white", linewidths=0.5, zorder=2.2,
                 )
 
-        # Cap at 1.0: stacked dots + explicit counts
+        # Draw median line
+        if not np.isnan(median):
+            median_line_width = 0.35
+            ax.plot([i - median_line_width/2, i + median_line_width/2],
+                   [median, median],
+                   color="#000000", lw=2.5, zorder=10, solid_capstyle='butt')
+
+        # Annotations
         n_at1 = d["n_at1"]
         label = f"N (CDSs) = {d['n_cds']}\n100% identical: {d['share_at_1']*100:.0f}%"
         ax.text(i, 1.065, label, ha="center", va="bottom", fontsize=8, color="#333333")
