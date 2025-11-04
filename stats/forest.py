@@ -391,7 +391,7 @@ def build_layout(df: pd.DataFrame):
 
 # --------------------------- Plot ---------------------------
 
-def plot_forest(df: pd.DataFrame, out_pdf=OUT_PDF, out_png=OUT_PNG):
+def plot_forest(df: pd.DataFrame, out_pdf=OUT_PDF, out_png=OUT_PNG, legend_position="top_right"):
     sections, y_max = build_layout(df)
     point_style_for_q = make_qvalue_point_scaler(sections)
 
@@ -521,11 +521,14 @@ def plot_forest(df: pd.DataFrame, out_pdf=OUT_PDF, out_png=OUT_PNG):
     axR.set_xticks(tick_pos)
     axR.set_xticklabels(tick_lbl)
 
-    # 4) Add custom legend box in top right corner of the plot
+    # 4) Add custom legend box in top corner of the plot
     from matplotlib.patches import FancyBboxPatch
 
-    # Legend positioning (in axes fraction coordinates) - TOP RIGHT
-    legend_x = 0.98  # right edge
+    # Legend positioning (in axes fraction coordinates)
+    if legend_position == "top_left":
+        legend_x = 0.02 + 0.30  # left edge + width (so box starts at 0.02)
+    else:  # top_right (default)
+        legend_x = 0.98  # right edge
     legend_y = 0.98  # top edge
     legend_width = 0.30
     legend_height_per_item = 0.040  # Spacing between legend items
@@ -684,7 +687,8 @@ def main():
     else:
         plot_forest(df_excluding_chr17,
                    out_pdf="phewas_forest_excluding_chr17.pdf",
-                   out_png="phewas_forest_excluding_chr17.png")
+                   out_png="phewas_forest_excluding_chr17.png",
+                   legend_position="top_left")
 
     print("\n=== All forest plots generated successfully ===")
 
