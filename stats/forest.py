@@ -471,7 +471,7 @@ def plot_forest(df: pd.DataFrame, out_pdf=OUT_PDF, out_png=OUT_PNG):
         # initial y for header label: a bit below the top edge; anchor with va='top'
         y_header = head_y0 + HEADER_BOX_H * HEADER_TOP_PAD_FRAC
         t = axL.text(HEADER_X_SHIFT, y_header, inv, ha="left", va="top",
-                     fontsize=28.0, fontweight="semibold", color=c,
+                     fontsize=20.0, fontweight="semibold", color=c,
                      transform=yxf, zorder=3)
         header_texts.append({"text": t, "sec": sec, "color": c})
 
