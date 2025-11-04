@@ -2043,10 +2043,17 @@ def _rao_score_block(y, X0, X1, clip_w=1e-12, rcond=1e-12, fit_red=None):
     # 1) Use pre-fitted reduced model if provided, otherwise fit fresh
     if fit_red is not None:
         res0 = fit_red
-        # Firth fits may not set converged=True, so be lenient
-        # Just check that params are available
+        # Check that params are available
         if not hasattr(res0, "params") or getattr(res0, "params", None) is None:
             return np.nan, 0, np.nan, {"error": "reduced_no_params"}
+        
+        # CRITICAL: Rao score test's χ² calibration requires true MLE, not penalized fit
+        # Check if this is a genuine MLE (not pure Firth)
+        is_mle = bool(getattr(res0, "_final_is_mle", False))
+        if not is_mle:
+            # This is a penalized fit (Firth without MLE refit)
+            # χ² calibration is invalid - caller should use bootstrap instead
+            return np.nan, 0, np.nan, {"error": "reduced_not_mle"}
     else:
         # Fit reduced model by mainstream library (statsmodels)
         #    Newton with generous iterations; this is usually stable for the reduced model.
@@ -2057,6 +2064,9 @@ def _rao_score_block(y, X0, X1, clip_w=1e-12, rcond=1e-12, fit_red=None):
 
         if not bool(getattr(res0, "converged", False)):
             return np.nan, 0, np.nan, {"error": "reduced_not_converged"}
+        
+        # Fresh fit from statsmodels is always MLE
+        setattr(res0, "_final_is_mle", True)
 
     # Get fitted probabilities (handle both statsmodels and Firth _Result objects)
     if hasattr(res0, "predict"):
@@ -2078,7 +2088,6 @@ def _rao_score_block(y, X0, X1, clip_w=1e-12, rcond=1e-12, fit_red=None):
     WX0 = X0 * w[:, None]
     WX1 = X1 * w[:, None]
     XtWX0 = X0.T @ WX0
-    XtWX1 = X1.T @ WX1
     X1tWX1 = X1.T @ WX1
     X1tWX0 = X1.T @ WX0
 
@@ -4583,13 +4592,27 @@ def _lrt_followup_worker_impl(task):
 
                         stat, df_eff, pval, det = _rao_score_block(y=yb, X0=X_red_arr, X1=X_int, fit_red=fit_red)
 
-                        if df_eff > 0 and np.isfinite(pval):
+                        # Check if Rao score test succeeded
+                        if "error" in det:
+                            # Handle specific error cases
+                            if det["error"] == "reduced_not_mle":
+                                # Reduced model required penalization - χ² calibration invalid
+                                # TODO: Could fall back to score-bootstrap here in future
+                                out['LRT_Reason'] = "rao_score_reduced_not_mle"
+                                out['Stage2_Model_Notes'] = "rao_score_multi_failed;reduced_penalized"
+                            else:
+                                out['LRT_Reason'] = f"rao_score_{det['error']}"
+                                out['Stage2_Model_Notes'] = f"rao_score_multi_failed;{det['error']}"
+                        elif df_eff > 0 and np.isfinite(pval):
                             p_val = pval
                             p_source = "rao_score"
-                            inference_type = "mle"  # Anchored at reduced MLE
+                            inference_type = "rao_score"  # Distinct from full MLE LRT
                             out['LRT_df'] = df_eff
                             out['LRT_Reason'] = ""
-                            out['Stage2_Model_Notes'] = "rao_score_multi;reduced_mle"
+                            # Include diagnostics for debugging
+                            rank = det.get('rank', df_eff)
+                            cond = det.get('I_eff_cond', np.nan)
+                            out['Stage2_Model_Notes'] = f"rao_score_multi;rank={rank};cond={cond:.2e}"
                         else:
                             out['LRT_Reason'] = "score_info_singular" if df_eff == 0 else "score_p_nan"
                             out['Stage2_Model_Notes'] = "rao_score_multi_failed"
