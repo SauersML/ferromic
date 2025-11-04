@@ -202,7 +202,11 @@ def _load_simple_tsv(path: Path) -> pd.DataFrame:
 def _load_categories() -> pd.DataFrame:
     for candidate in CATEGORIES_RESULTS_CANDIDATES:
         if candidate.exists():
-            return _load_simple_tsv(candidate)
+            df = _load_simple_tsv(candidate)
+            # Remove Z_Cap and Dropped columns if present
+            columns_to_drop = ["Z_Cap", "Dropped"]
+            df = df.drop(columns=[col for col in columns_to_drop if col in df.columns])
+            return df
     raise SupplementaryTablesError("Unable to locate categories TSV in the data directory.")
 
 
@@ -220,6 +224,14 @@ def _load_phewas_tagging() -> pd.DataFrame:
         ) from exc
 
     return _load_simple_tsv(PHEWAS_TAGGING_RESULTS)
+
+
+def _load_imputation_results() -> pd.DataFrame:
+    df = _load_simple_tsv(IMPUTATION_RESULTS)
+    # Remove unnamed columns (Column 6 and Column 9)
+    columns_to_drop = ["Column 6", "Column 9"]
+    df = df.drop(columns=[col for col in columns_to_drop if col in df.columns])
+    return df
 
 
 def build_workbook(output_path: Path) -> None:
@@ -307,7 +319,7 @@ def build_workbook(output_path: Path) -> None:
         SheetInfo(
             name="Imputation results",
             description="Dosage imputation performance metrics (data/imputation_results.tsv).",
-            loader=lambda: _load_simple_tsv(IMPUTATION_RESULTS),
+            loader=_load_imputation_results,
         )
     )
 
