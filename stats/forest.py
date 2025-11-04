@@ -524,26 +524,22 @@ def plot_forest(df: pd.DataFrame, out_pdf=OUT_PDF, out_png=OUT_PNG):
     # 4) Add custom legend box in top right corner of the plot
     from matplotlib.patches import FancyBboxPatch
 
-    # Get q-value range for legend examples
-    all_q = [row["Q_GLOBAL"] for sec in sections for row in sec["rows"]]
-    q_min, q_max = float(np.min(all_q)), float(np.max(all_q))
-
     # Legend positioning (in axes fraction coordinates) - TOP RIGHT, no collision detection
     legend_x = 0.98  # right edge
     legend_y = 0.98  # top edge (in axes coords, 1.0 = top)
     legend_width = 0.24  # controlled width
-    legend_height_per_item = 0.07  # controlled item spacing
-    
-    # Create 3 example significance levels
-    legend_q_values = [q_min, (q_min + q_max) / 2, q_max]
+    legend_height_per_item = 0.045  # controlled item spacing (reduced for compactness)
+
+    # Hard-coded reasonable q-value examples for the legend
+    legend_q_values = [0.001, 0.01, 0.05]
     legend_labels = [
-        f"Most sig. (q={format_plain_decimal(q_min)})",
-        f"Moderate (q={format_plain_decimal((q_min + q_max) / 2)})",
-        f"Least sig. (q={format_plain_decimal(q_max)})"
+        "q=0.001",
+        "q=0.01",
+        "q=0.05"
     ]
-    
+
     n_items = len(legend_q_values)
-    legend_height = 0.14 + n_items * legend_height_per_item  # controlled total height
+    legend_height = 0.10 + n_items * legend_height_per_item  # controlled total height (reduced)
 
     # Draw background box - positioned from TOP RIGHT, extending downward
     box_x = legend_x - legend_width
@@ -558,23 +554,23 @@ def plot_forest(df: pd.DataFrame, out_pdf=OUT_PDF, out_png=OUT_PNG):
     axR.add_patch(box)
     
     # Title - positioned at top of legend box
-    axR.text(legend_x - legend_width/2, legend_y - 0.015,
+    axR.text(legend_x - legend_width/2, legend_y - 0.012,
              "",
              ha='center', va='top', fontsize=11.5, fontweight='bold',
              transform=axR.transAxes, zorder=51)
 
     # Subtitle explaining the encoding
-    axR.text(legend_x - legend_width/2, legend_y - 0.042,
+    axR.text(legend_x - legend_width/2, legend_y - 0.030,
              "by q-value (FDR)",
              ha='center', va='top', fontsize=9, style='italic', color='#444444',
              transform=axR.transAxes, zorder=51)
-    
+
     # Use a neutral color for legend examples
     legend_base_color = "#4C78A8"
-    
+
     # Draw example dots and labels - positioned from top down
     for i, (q_val, label) in enumerate(zip(legend_q_values, legend_labels)):
-        y_pos = legend_y - 0.068 - i * legend_height_per_item  # top-down positioning
+        y_pos = legend_y - 0.050 - i * legend_height_per_item  # top-down positioning (reduced offset)
 
         # Get size and color for this q-value
         size_pt2, facecolor = point_style_for_q(q_val, legend_base_color)
