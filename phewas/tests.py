@@ -2751,8 +2751,8 @@ def test_plan_category_sets_respects_min_k_and_dedup(tmp_path):
 def test_stage2_dosage_ancestry_interaction(test_ctx):
     """Test stage-2 dosage*ancestry interaction analysis using existing pipeline code."""
     with temp_workspace():
-        # Create synthetic cohort with multiple ancestry groups
-        core_data, phenos = make_synth_cohort(N=300, NUM_PCS=10, seed=123)
+        # Create large synthetic cohort for adequate EPV (2000 controls, 1000 cases)
+        core_data, phenos = make_synth_cohort(N=3000, NUM_PCS=10, seed=123)
 
         # Ensure we have multiple ancestry groups (eur, afr, amr)
         rng = np.random.default_rng(123)
@@ -2761,6 +2761,18 @@ def test_stage2_dosage_ancestry_interaction(test_ctx):
             {"ANCESTRY": ancestry_labels},
             index=core_data['demographics'].index
         )
+
+        # Create phenotype with ~1000 cases, ~2000 controls for adequate EPV
+        # Use dosage-dependent probability to generate realistic signal
+        from scipy.special import expit as sigmoid
+        inversion_dosage = core_data['inversion_main'][TEST_TARGET_INVERSION]
+        # Adjust intercept to get ~33% case rate (1000/3000)
+        p_case = sigmoid(-0.5 + 0.8 * inversion_dosage + 0.01 * (core_data['demographics']['AGE'] - 50))
+        cases_a = set(core_data['demographics'].index[rng.random(len(core_data['demographics'])) < p_case])
+        phenos["A_strong_signal"]["cases"] = cases_a
+
+        # Disable sex restriction to preserve full sample size
+        test_ctx["SEX_RESTRICT_PROP"] = 1.1  # Set threshold > 1.0 to disable restriction
 
         # Prime caches with test data
         prime_all_caches_for_run(core_data, phenos, TEST_CDR_CODENAME, TEST_TARGET_INVERSION)
