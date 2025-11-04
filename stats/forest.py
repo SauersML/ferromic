@@ -527,8 +527,8 @@ def plot_forest(df: pd.DataFrame, out_pdf=OUT_PDF, out_png=OUT_PNG):
     # Legend positioning (in axes fraction coordinates) - TOP RIGHT
     legend_x = 0.98  # right edge
     legend_y = 0.98  # top edge
-    legend_width = 0.26
-    legend_height_per_item = 0.038
+    legend_width = 0.30
+    legend_height_per_item = 0.050
 
     # Hard-coded reasonable q-value examples for the legend
     legend_q_values = [0.001, 0.01, 0.05]
@@ -539,7 +539,7 @@ def plot_forest(df: pd.DataFrame, out_pdf=OUT_PDF, out_png=OUT_PNG):
     ]
 
     n_items = len(legend_q_values)
-    legend_height = 0.08 + n_items * legend_height_per_item
+    legend_height = 0.12 + n_items * legend_height_per_item
 
     # Draw background box - positioned from TOP RIGHT, extending downward
     box_x = legend_x - legend_width
@@ -556,13 +556,13 @@ def plot_forest(df: pd.DataFrame, out_pdf=OUT_PDF, out_png=OUT_PNG):
     # Title - positioned at top of legend box
     axR.text(legend_x - legend_width/2, legend_y - 0.012,
              "",
-             ha='center', va='top', fontsize=17, fontweight='bold',
+             ha='center', va='top', fontsize=20, fontweight='bold',
              transform=axR.transAxes, zorder=51)
 
     # Subtitle explaining the encoding
     axR.text(legend_x - legend_width/2, legend_y - 0.028,
              "by q-value (FDR)",
-             ha='center', va='top', fontsize=14, style='italic', color='#444444',
+             ha='center', va='top', fontsize=17, style='italic', color='#444444',
              transform=axR.transAxes, zorder=51)
 
     # Use a neutral color for legend examples
@@ -570,22 +570,22 @@ def plot_forest(df: pd.DataFrame, out_pdf=OUT_PDF, out_png=OUT_PNG):
 
     # Draw example dots and labels - positioned from top down
     for i, (q_val, label) in enumerate(zip(legend_q_values, legend_labels)):
-        y_pos = legend_y - 0.045 - i * legend_height_per_item
+        y_pos = legend_y - 0.055 - i * legend_height_per_item
 
         # Get size and color for this q-value
         size_pt2, facecolor = point_style_for_q(q_val, legend_base_color)
 
         # Draw dot (in axes coordinates) - slightly larger for visibility in legend
-        dot_x = box_x + 0.032
+        dot_x = box_x + 0.038
         axR.scatter([dot_x], [y_pos], s=size_pt2 * 1.00,
                    facecolor=facecolor, edgecolor='black',
                    linewidth=POINT_EDGE_LW * 0.85, alpha=0.97,
                    transform=axR.transAxes, zorder=52, clip_on=False)
 
         # Draw label
-        text_x = dot_x + 0.045
+        text_x = dot_x + 0.050
         axR.text(text_x, y_pos, label,
-                ha='left', va='center', fontsize=16,
+                ha='left', va='center', fontsize=20,
                 transform=axR.transAxes, zorder=52)
 
     # --- Overlap detection & iterative lift for header labels ---
