@@ -44,15 +44,15 @@ def desaturate_color(color, desat_factor=0.70):
 
 
 def non_orange_colors(n, seed=21):
-    """Generate n distinct colors excluding orange and yellow-green to avoid similar colors.
-    
+    """Generate n distinct colors using the full color spectrum.
+
     Parameters
     ----------
     n : int
         Number of colors to generate
     seed : int, default=21
         Random seed (currently unused, kept for API compatibility)
-        
+
     Returns
     -------
     list of tuple
@@ -60,20 +60,12 @@ def non_orange_colors(n, seed=21):
     """
     if n <= 0:
         return []
-    # Skip orange (~20-45°) and yellow-green (~60-150°) to avoid two similar greens
-    # Use: Red (0-20°), Cyan-Blue (150-240°), Magenta (240-360°)
-    gaps = [(0.0, 0.055), (0.42, 0.67), (0.67, 1.0)]
-    total = sum(b - a for a, b in gaps)
+    # Use the FULL hue spectrum (0° to 360°) - any and all colors allowed
     sv = [(0.80, 0.85), (0.65, 0.90), (0.75, 0.70), (0.55, 0.80)]
     cols = []
     for i in range(n):
-        t = (i + 0.5) / n * total
-        for a, b in gaps:
-            w = b - a
-            if t <= w:
-                h = a + t
-                break
-            t -= w
+        # Distribute hues evenly across the full spectrum
+        h = (i + 0.5) / n  # This gives values from 0.0 to 1.0 (full hue range)
         s, v = sv[i % len(sv)]
         cols.append(mcolors.hsv_to_rgb((h, s, v)))
     return [tuple(c) for c in cols]
