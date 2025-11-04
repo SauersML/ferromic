@@ -539,7 +539,13 @@ def plot_forest(df: pd.DataFrame, out_pdf=OUT_PDF, out_png=OUT_PNG):
     ]
 
     n_items = len(legend_q_values)
-    legend_height = 0.12 + n_items * legend_height_per_item
+
+    # CORRECT FORMULA: height = distance_to_first_item + (n_items - 1) * spacing + bottom_padding
+    # The bug was using n_items * spacing instead of (n_items - 1) * spacing, which caused
+    # 40%+ of the legend box to be wasted empty space below the items.
+    first_item_offset = 0.055  # How far down from legend_y the first item appears
+    bottom_padding = 0.020     # Space below the last item
+    legend_height = first_item_offset + (n_items - 1) * legend_height_per_item + bottom_padding
 
     # Draw background box - positioned from TOP RIGHT, extending downward
     box_x = legend_x - legend_width
