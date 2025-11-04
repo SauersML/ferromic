@@ -12,7 +12,7 @@ from _inv_common import map_inversion_series
 
 # --------------------------- Configuration ---------------------------
 
-INPUT_FILE       = "phewas_results.tsv"
+INPUT_FILE       = "data/phewas_results.tsv"
 OUT_PDF          = "phewas_forest.pdf"
 OUT_PNG          = "phewas_forest.png"
 
@@ -641,16 +641,46 @@ def plot_forest(df: pd.DataFrame, out_pdf=OUT_PDF, out_png=OUT_PNG):
 
     # Final layout & save (no legend)
     fig.tight_layout(rect=[0.03, 0.03, 0.99, 0.99])
-    fig.savefig(OUT_PDF, bbox_inches="tight")
-    fig.savefig(OUT_PNG, bbox_inches="tight")
+    fig.savefig(out_pdf, bbox_inches="tight")
+    fig.savefig(out_png, bbox_inches="tight")
     plt.close(fig)
-    print(f"Saved:\n  - {OUT_PDF}\n  - {OUT_PNG}")
+    print(f"Saved:\n  - {out_pdf}\n  - {out_png}")
 
 # --------------------------- Entrypoint ---------------------------
 
 def main():
+    # Load all significant associations
     df = load_and_prepare(INPUT_FILE)
+
+    # 1) Generate the original forest plot with ALL significant associations
+    print("\n=== Generating original forest plot (all significant associations) ===")
     plot_forest(df, out_pdf=OUT_PDF, out_png=OUT_PNG)
+
+    # 2) Generate forest plot with ONLY chr17:45,585,159-46,292,045
+    print("\n=== Generating forest plot for ONLY chr17:45,585,159-46,292,045 ===")
+    # After mapping, the chr17 inversion is "chr17:45,585,159-46,292,045" (with commas)
+    CHR17_INVERSION = "chr17:45,585,159-46,292,045"
+    df_chr17_only = df[df["Inversion"] == CHR17_INVERSION].copy()
+
+    if df_chr17_only.empty:
+        print(f"WARNING: No significant associations found for {CHR17_INVERSION}")
+    else:
+        plot_forest(df_chr17_only,
+                   out_pdf="phewas_forest_chr17_only.pdf",
+                   out_png="phewas_forest_chr17_only.png")
+
+    # 3) Generate forest plot EXCLUDING chr17:45,585,159-46,292,045
+    print("\n=== Generating forest plot EXCLUDING chr17:45,585,159-46,292,045 ===")
+    df_excluding_chr17 = df[df["Inversion"] != CHR17_INVERSION].copy()
+
+    if df_excluding_chr17.empty:
+        print(f"WARNING: No significant associations remaining after excluding {CHR17_INVERSION}")
+    else:
+        plot_forest(df_excluding_chr17,
+                   out_pdf="phewas_forest_excluding_chr17.pdf",
+                   out_png="phewas_forest_excluding_chr17.png")
+
+    print("\n=== All forest plots generated successfully ===")
 
 if __name__ == "__main__":
     main()
