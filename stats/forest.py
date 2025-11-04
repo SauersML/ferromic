@@ -493,11 +493,8 @@ def plot_forest(df: pd.DataFrame, out_pdf=OUT_PDF, out_png=OUT_PNG):
             phen = wrap_label(row["Phenotype"])
             t1 = axL.text(0.02,  y_label, phen, ha="left",  va="center",
                           color="#111111", transform=yxf, zorder=3)
-            t2 = axL.text(0.985, y_label, f"q = {format_plain_decimal(row['Q_GLOBAL'])}",
-                          ha="right", va="center", color="#444444",
-                          transform=yxf, zorder=3)
 
-            row_texts_by_section[sec_id].extend([t1, t2])
+            row_texts_by_section[sec_id].extend([t1])
 
             # Right panel: CI line & point at center
             or_lo, or_hi, or_pt = row["OR_lo"], row["OR_hi"], row["OR"]
@@ -526,16 +523,16 @@ def plot_forest(df: pd.DataFrame, out_pdf=OUT_PDF, out_png=OUT_PNG):
 
     # 4) Add custom legend box in top right corner of the plot
     from matplotlib.patches import FancyBboxPatch
-    
+
     # Get q-value range for legend examples
     all_q = [row["Q_GLOBAL"] for sec in sections for row in sec["rows"]]
     q_min, q_max = float(np.min(all_q)), float(np.max(all_q))
-    
-    # Legend positioning (in axes fraction coordinates)
-    legend_x = 0.97  # right edge
-    legend_y = 0.02  # top edge (remember y-axis is inverted, so small y = top)
-    legend_width = 0.32
-    legend_height_per_item = 0.09
+
+    # Legend positioning (in axes fraction coordinates) - TOP RIGHT, no collision detection
+    legend_x = 0.98  # right edge
+    legend_y = 0.98  # top edge (in axes coords, 1.0 = top)
+    legend_width = 0.24  # controlled width
+    legend_height_per_item = 0.07  # controlled item spacing
     
     # Create 3 example significance levels
     legend_q_values = [q_min, (q_min + q_max) / 2, q_max]
@@ -546,53 +543,53 @@ def plot_forest(df: pd.DataFrame, out_pdf=OUT_PDF, out_png=OUT_PNG):
     ]
     
     n_items = len(legend_q_values)
-    legend_height = 0.16 + n_items * legend_height_per_item
-    
-    # Draw background box
+    legend_height = 0.14 + n_items * legend_height_per_item  # controlled total height
+
+    # Draw background box - positioned from TOP RIGHT, extending downward
     box_x = legend_x - legend_width
-    box_y = legend_y
+    box_y = legend_y - legend_height  # start from top and go down
     box = FancyBboxPatch(
         (box_x, box_y), legend_width, legend_height,
-        boxstyle="round,pad=0.015", 
+        boxstyle="round,pad=0.012",
         transform=axR.transAxes,
         facecolor='white', edgecolor='#555555',
-        linewidth=1.5, alpha=0.96, zorder=50
+        linewidth=1.3, alpha=0.85, zorder=50  # translucent background
     )
     axR.add_patch(box)
     
-    # Title
-    axR.text(legend_x - legend_width/2, legend_y + 0.025, 
-             "Point Size & Color", 
-             ha='center', va='bottom', fontsize=12, fontweight='bold',
+    # Title - positioned at top of legend box
+    axR.text(legend_x - legend_width/2, legend_y - 0.015,
+             "Point Size & Color",
+             ha='center', va='top', fontsize=11.5, fontweight='bold',
              transform=axR.transAxes, zorder=51)
-    
+
     # Subtitle explaining the encoding
-    axR.text(legend_x - legend_width/2, legend_y + 0.055, 
-             "by q-value (FDR)", 
-             ha='center', va='bottom', fontsize=9.5, style='italic', color='#444444',
+    axR.text(legend_x - legend_width/2, legend_y - 0.042,
+             "by q-value (FDR)",
+             ha='center', va='top', fontsize=9, style='italic', color='#444444',
              transform=axR.transAxes, zorder=51)
     
     # Use a neutral color for legend examples
     legend_base_color = "#4C78A8"
     
-    # Draw example dots and labels
+    # Draw example dots and labels - positioned from top down
     for i, (q_val, label) in enumerate(zip(legend_q_values, legend_labels)):
-        y_pos = legend_y + 0.09 + (i + 0.5) * legend_height_per_item
-        
+        y_pos = legend_y - 0.068 - i * legend_height_per_item  # top-down positioning
+
         # Get size and color for this q-value
         size_pt2, facecolor = point_style_for_q(q_val, legend_base_color)
-        
+
         # Draw dot (in axes coordinates) - slightly larger for visibility in legend
-        dot_x = box_x + 0.045
-        axR.scatter([dot_x], [y_pos], s=size_pt2 * 1.2, 
+        dot_x = box_x + 0.035
+        axR.scatter([dot_x], [y_pos], s=size_pt2 * 1.15,
                    facecolor=facecolor, edgecolor='black',
-                   linewidth=POINT_EDGE_LW, alpha=0.97, 
+                   linewidth=POINT_EDGE_LW, alpha=0.97,
                    transform=axR.transAxes, zorder=52, clip_on=False)
-        
+
         # Draw label
-        text_x = dot_x + 0.055
+        text_x = dot_x + 0.045
         axR.text(text_x, y_pos, label,
-                ha='left', va='center', fontsize=10,
+                ha='left', va='center', fontsize=9.5,
                 transform=axR.transAxes, zorder=52)
 
     # --- Overlap detection & iterative lift for header labels ---
