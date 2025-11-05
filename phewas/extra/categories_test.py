@@ -572,7 +572,7 @@ def main():
     anc_series = ancestry.reindex(shared_covariates_df.index)["ANCESTRY"]
     anc_cat = pd.Categorical(anc_series)
     ancestry_dummies = pd.get_dummies(anc_cat, prefix='ANC', drop_first=True, dtype=np.float32)
-    ancestry_dummies.index = ancestry_dummies.index.astype(str)
+    ancestry_dummies.index = anc_series.index  # Use the person IDs from anc_series, not RangeIndex
 
     _log(f"Ancestry categories: {sorted(anc_cat.categories.tolist())}")
 
