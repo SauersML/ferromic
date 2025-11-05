@@ -5014,9 +5014,12 @@ def _lrt_followup_worker_impl(task):
                         f"action=score_chi2_succeeded p_val={p_val}",
                         flush=True
                     )
-                    # Only set inference_type if not already set (e.g., preserve "firth")
+                    # Create composite label when score test provides p-value after Firth/MLE fit
                     if inference_type == "none":
                         inference_type = "score"
+                    elif inference_type in {"firth", "mle"}:
+                        # Composite: coefficients from firth/mle, p-value from score test
+                        inference_type = f"{inference_type}+score"
                 else:
                     if ENABLE_SCORE_BOOT_PER_ANCESTRY:
                         print(
@@ -5039,9 +5042,12 @@ def _lrt_followup_worker_impl(task):
                                 f"p_emp={p_emp:.4e} source={p_source} action=bootstrap_succeeded",
                                 flush=True
                             )
-                            # Only set inference_type if not already set (e.g., preserve "firth")
+                            # Create composite label when bootstrap provides p-value after Firth/MLE fit
                             if inference_type == "none":
                                 inference_type = "score_boot"
+                            elif inference_type in {"firth", "mle"}:
+                                # Composite: coefficients from firth/mle, p-value from bootstrap
+                                inference_type = f"{inference_type}+score_boot"
                         else:
                             print(
                                 f"[BOOT-PER-ANCESTRY] name={s_name} anc={anc_upper} "
@@ -5182,7 +5188,7 @@ def _lrt_followup_worker_impl(task):
                 )
             elif inference_type == "firth":
                 penalized_inference = True
-            elif inference_type in {"score", "score_boot"}:
+            elif inference_type in {"score", "score_boot", "firth+score", "firth+score_boot", "mle+score", "mle+score_boot"}:
                 penalized_inference = False
             else:
                 penalized_inference = _final_stage_penalized(
