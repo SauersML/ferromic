@@ -4300,9 +4300,17 @@ def _lrt_followup_worker_impl(task):
     s_name_safe = safe_basename(s_name)
     result_path = os.path.join(CTX["LRT_FOLLOWUP_CACHE_DIR"], f"{s_name_safe}.json")
     meta_path = os.path.join(CTX["LRT_FOLLOWUP_CACHE_DIR"], f"{s_name_safe}.meta.json")
+    
+    print(f"\n{'='*80}", flush=True)
+    print(f"[Stage2] Starting: {s_name_safe}", flush=True)
+    print(f"[Stage2]   Target: {target}", flush=True)
+    print(f"[Stage2]   Category: {category}", flush=True)
+    print(f"{'='*80}", flush=True)
+    
     try:
         pheno_path = os.path.join(CTX["CACHE_DIR"], f"pheno_{s_name}_{task['cdr_codename']}.parquet")
         if not os.path.exists(pheno_path):
+            print(f"[Stage2] SKIP: Missing case cache at {pheno_path}", flush=True)
             io.atomic_write_json(result_path, {'Phenotype': s_name, 'P_LRT_AncestryxDosage': np.nan, 'LRT_df': np.nan, 'LRT_Reason': "missing_case_cache"})
             return
 
@@ -4404,14 +4412,15 @@ def _lrt_followup_worker_impl(task):
             if skip:
                 extra_meta["skip_reason"] = skip
             _write_meta(meta_path, "lrt_followup", s_name, category, target, worker_core_df_cols, core_fp, case_fp, extra=extra_meta)
-            print(f"[meta repaired] {s_name_safe} (LRT-Stage2)", flush=True)
+            print(f"[Stage2] Meta repaired for {s_name_safe}", flush=True)
         if os.path.exists(result_path) and _lrt_meta_should_skip(
             meta_path, worker_core_df_cols, core_fp, case_fp, category, target, allowed_fp,
             used_index_fp=used_index_fp, sex_cfg=sex_cfg, thresholds=thresholds
         ):
-            print(f"[skip cache-ok] {s_name_safe} (LRT-Stage2)", flush=True)
+            print(f"[Stage2] Cache valid, skipping {s_name_safe}", flush=True)
             return
         if skip:
+            print(f"[Stage2] SKIP: {skip} (N_total={len(yb)}, N_cases={int(yb.sum())}, N_ctrls={len(yb)-int(yb.sum())})", flush=True)
             out['LRT_Reason'] = skip; io.atomic_write_json(result_path, out)
             meta_extra = dict(meta_extra_common)
             meta_extra["skip_reason"] = skip
@@ -4421,8 +4430,20 @@ def _lrt_followup_worker_impl(task):
         levels = pd.Index(anc_vec.dropna().unique(), dtype=str).tolist()
         levels_sorted = (['eur'] if 'eur' in levels else []) + [x for x in sorted(levels) if x != 'eur']
         out['LRT_Ancestry_Levels'] = ",".join(levels_sorted)
+        
+        print(f"[Stage2] Sample composition: N_total={len(yb)}, N_cases={int(yb.sum())}, N_ctrls={len(yb)-int(yb.sum())}", flush=True)
+        print(f"[Stage2] Ancestry levels detected: {', '.join(levels_sorted)} (n={len(levels_sorted)})", flush=True)
+        
+        # Print per-ancestry counts
+        for anc in levels_sorted:
+            anc_mask = (anc_vec == anc).to_numpy()
+            n_anc = anc_mask.sum()
+            n_cases_anc = int(yb[anc_mask].sum())
+            n_ctrls_anc = n_anc - n_cases_anc
+            print(f"[Stage2]   - {anc.upper()}: N={n_anc} (cases={n_cases_anc}, ctrls={n_ctrls_anc})", flush=True)
 
         if len(levels_sorted) < 2:
+            print(f"[Stage2] SKIP: Only one ancestry level, cannot test heterogeneity", flush=True)
             out['LRT_Reason'] = "only_one_ancestry_level"; io.atomic_write_json(result_path, out)
             meta_extra = dict(meta_extra_common)
             meta_extra["skip_reason"] = "only_one_ancestry_level"
@@ -4446,19 +4467,28 @@ def _lrt_followup_worker_impl(task):
         X_full_df = pd.concat([X_red_df, pd.DataFrame(interaction_mat, index=X_red_df.index, columns=interaction_cols)], axis=1)
 
         # Prune the full model (with interactions) first.
+        print(f"[Stage2] Building models...", flush=True)
+        print(f"[Stage2]   Full model: {len(X_full_df.columns)} covariates (before pruning)", flush=True)
         X_full_zv = _drop_zero_variance(X_full_df, keep_cols=('const',), always_keep=[target] + interaction_cols)
         X_full_zv = _drop_rank_deficient(X_full_zv, keep_cols=('const',), always_keep=[target] + interaction_cols)
+        print(f"[Stage2]   Full model: {len(X_full_zv.columns)} covariates (after pruning)", flush=True)
 
         # Construct the reduced model by dropping interaction terms from the pruned full model.
         # This ensures the reduced model is properly nested within the full model.
         kept_interaction_cols = [c for c in interaction_cols if c in X_full_zv.columns]
         red_cols = [c for c in X_full_zv.columns if c not in kept_interaction_cols]
         X_red_zv = X_full_zv[red_cols]
+        print(f"[Stage2]   Reduced model: {len(X_red_zv.columns)} covariates", flush=True)
+        print(f"[Stage2]   Interaction terms: {len(kept_interaction_cols)} ({', '.join(kept_interaction_cols[:3])}{'...' if len(kept_interaction_cols) > 3 else ''})", flush=True)
 
         const_ix_red = X_red_zv.columns.get_loc('const') if 'const' in X_red_zv.columns else None
         const_ix_full = X_full_zv.columns.get_loc('const') if 'const' in X_full_zv.columns else None
 
+        print(f"[Stage2] Fitting reduced model...", flush=True)
         fit_red, reason_red = _fit_logit_ladder(X_red_zv, yb, const_ix=const_ix_red)
+        print(f"[Stage2]   Reduced: {reason_red if fit_red else 'FAILED'}", flush=True)
+        
+        print(f"[Stage2] Fitting full model (with interactions)...", flush=True)
         target_ix_full = X_full_zv.columns.get_loc(target) if target in X_full_zv.columns else None
         fit_full, reason_full = _fit_logit_ladder(
             X_full_zv,
@@ -4466,6 +4496,7 @@ def _lrt_followup_worker_impl(task):
             const_ix=const_ix_full,
             target_ix=target_ix_full,
         )
+        print(f"[Stage2]   Full: {reason_full if fit_full else 'FAILED'}", flush=True)
 
         if fit_red is not None:
             _print_fit_diag(
@@ -4498,6 +4529,9 @@ def _lrt_followup_worker_impl(task):
         r_full = np.linalg.matrix_rank(X_full_zv.to_numpy(dtype=np.float64, copy=False))
         r_red = np.linalg.matrix_rank(X_red_zv.to_numpy(dtype=np.float64, copy=False))
         df_lrt = max(0, int(r_full - r_red))
+        
+        print(f"[Stage2] Model ranks: full={r_full}, reduced={r_red}, df_LRT={df_lrt}", flush=True)
+        
         inference_family = None
         fit_full_use = None
         fit_red_use = None
@@ -4515,6 +4549,10 @@ def _lrt_followup_worker_impl(task):
             full_ok2, _, _ = _ok_mle_fit(fit_full, X_full_zv, yb) if fit_full is not None else (False, None, {})
             red_ok2, _, _ = _ok_mle_fit(fit_red, X_red_zv, yb) if fit_red is not None else (False, None, {})
 
+            print(f"[Stage2] Inference eligibility:", flush=True)
+            print(f"[Stage2]   Full: is_MLE={full_is_mle}, ok={full_ok2}", flush=True)
+            print(f"[Stage2]   Reduced: is_MLE={red_is_mle}, ok={red_ok2}", flush=True)
+
             if (
                 fit_full is not None
                 and fit_red is not None
@@ -4526,6 +4564,7 @@ def _lrt_followup_worker_impl(task):
                 inference_family = "mle"
                 fit_full_use = fit_full
                 fit_red_use = fit_red
+                print(f"[Stage2] Using MLE-based LRT", flush=True)
 
         if inference_family == "mle":
             ll_full = float(getattr(fit_full_use, "llf", np.nan))
@@ -4536,11 +4575,15 @@ def _lrt_followup_worker_impl(task):
                 p_source = "lrt_mle"
                 inference_type = "mle"
                 out['LRT_df'] = df_lrt
+                print(f"[Stage2] LRT statistic: chi2={stat:.4f}, df={df_lrt}, p={p_val:.4e}", flush=True)
             else:
                 out['LRT_Reason'] = "fit_failed"
+                print(f"[Stage2] LRT failed: non-finite log-likelihoods (ll_full={ll_full}, ll_red={ll_red})", flush=True)
         elif df_lrt == 0:
             out['LRT_Reason'] = "zero_df_lrt"
+            print(f"[Stage2] Zero degrees of freedom for LRT", flush=True)
         elif df_lrt == 1:
+            print(f"[Stage2] Falling back to score test (df=1)...", flush=True)
             x_target_vec = None
             if kept_interaction_cols:
                 int_col = kept_interaction_cols[0]
@@ -4548,6 +4591,7 @@ def _lrt_followup_worker_impl(task):
                     x_target_vec = X_full_zv[int_col].to_numpy(dtype=np.float64, copy=False)
             if x_target_vec is None:
                 out['LRT_Reason'] = "score_target_missing"
+                print(f"[Stage2] Score test failed: target vector missing", flush=True)
             else:
                 p_sc, _ = _score_test_from_reduced(
                     X_red_zv,
@@ -4560,7 +4604,9 @@ def _lrt_followup_worker_impl(task):
                     p_source = "score_chi2"
                     inference_type = "score"
                     out['LRT_Reason'] = ""
+                    print(f"[Stage2] Score test: p={p_val:.4e}", flush=True)
                 else:
+                    print(f"[Stage2] Score test returned non-finite p-value, trying bootstrap...", flush=True)
                     boot_res = _score_bootstrap_from_reduced(
                         X_red_zv,
                         yb,
@@ -4577,11 +4623,14 @@ def _lrt_followup_worker_impl(task):
                         inference_type = "score_boot"
                         out['LRT_Reason'] = ""
                         boot_engine = "score_bootstrap"
+                        print(f"[Stage2] Bootstrap score test: p={p_val:.4e} (draws={boot_draws}, exceed={boot_exceed}, fit={boot_fit_kind})", flush=True)
                     else:
                         out['LRT_Reason'] = "score_boot_failed"
+                        print(f"[Stage2] Bootstrap score test failed", flush=True)
         else:
             # Multi-df case (df_lrt > 1): Use robust Rao score test computed at reduced model
             # This avoids fitting the unstable full interaction model
+            print(f"[Stage2] Using Rao score test (df={df_lrt} > 1)...", flush=True)
             if kept_interaction_cols and len(kept_interaction_cols) > 0:
                 try:
                     # Extract interaction block from full design matrix
@@ -4596,13 +4645,15 @@ def _lrt_followup_worker_impl(task):
                         if "error" in det:
                             # Handle specific error cases
                             if det["error"] == "reduced_not_mle":
-                                # Reduced model required penalization - χ² calibration invalid
+                                # Reduced model required penalization - chi2 calibration invalid
                                 # TODO: Could fall back to score-bootstrap here in future
                                 out['LRT_Reason'] = "rao_score_reduced_not_mle"
                                 out['Stage2_Model_Notes'] = "rao_score_multi_failed;reduced_penalized"
+                                print(f"[Stage2] Rao score failed: reduced model not MLE (penalized)", flush=True)
                             else:
                                 out['LRT_Reason'] = f"rao_score_{det['error']}"
                                 out['Stage2_Model_Notes'] = f"rao_score_multi_failed;{det['error']}"
+                                print(f"[Stage2] Rao score failed: {det['error']}", flush=True)
                         elif df_eff > 0 and np.isfinite(pval):
                             p_val = pval
                             p_source = "rao_score"
@@ -4613,9 +4664,11 @@ def _lrt_followup_worker_impl(task):
                             rank = det.get('rank', df_eff)
                             cond = det.get('I_eff_cond', np.nan)
                             out['Stage2_Model_Notes'] = f"rao_score_multi;rank={rank};cond={cond:.2e}"
+                            print(f"[Stage2] Rao score test: chi2={stat:.4f}, df_eff={df_eff}, p={pval:.4e}, rank={rank}, cond={cond:.2e}", flush=True)
                         else:
                             out['LRT_Reason'] = "score_info_singular" if df_eff == 0 else "score_p_nan"
                             out['Stage2_Model_Notes'] = "rao_score_multi_failed"
+                            print(f"[Stage2] Rao score failed: df_eff={df_eff}, pval={pval}", flush=True)
                     else:
                         out['LRT_Reason'] = "score_unavailable_multi_df"
                 except (np.linalg.LinAlgError, ValueError, TypeError) as e:
@@ -4656,6 +4709,10 @@ def _lrt_followup_worker_impl(task):
         out['Inference_Type'] = inference_type if p_valid else "none"
         if not out['P_Stage2_Valid'] and not out['LRT_Reason']:
             out['LRT_Reason'] = "fit_failed"
+        
+        print(f"[Stage2] Interaction test summary:", flush=True)
+        print(f"[Stage2]   P_valid: {p_valid}, P_value: {p_val if p_finite else 'NaN'}, Method: {p_source or 'none'}", flush=True)
+        print(f"[Stage2]   Inference: {inference_type}, Reason: {out['LRT_Reason'] or 'success'}", flush=True)
 
         lrt_df_val = out.get('LRT_df')
         if isinstance(lrt_df_val, (np.integer, int)):
@@ -4672,12 +4729,14 @@ def _lrt_followup_worker_impl(task):
             "stage2_boot_engine": out.get('Boot_Engine'),
         })
 
+        print(f"\n[Stage2] Per-ancestry stratified analysis:", flush=True)
         for anc in levels_sorted:
             anc_mask = (anc_vec == anc).to_numpy()
             X_anc, y_anc = Xb[anc_mask], yb[anc_mask]
 
             anc_upper = anc.upper()
             n_total_anc = len(y_anc)
+            print(f"[Stage2]   Analyzing {anc_upper}: N={n_total_anc}...", flush=True)
             n_cases_anc = int(y_anc.sum())
             n_ctrls_anc = n_total_anc - n_cases_anc
 
@@ -5105,12 +5164,26 @@ def _lrt_followup_worker_impl(task):
 
             if not out.get(f"{anc_upper}_REASON"):
                 out.pop(f"{anc_upper}_REASON", None)
+            
+            # Print per-ancestry result
+            p_str = f"{p_val:.4e}" if p_valid else "NaN"
+            or_str = f"{or_val:.3f}" if np.isfinite(or_val) else "NaN"
+            ci_str_display = ci_str if ci_valid else "N/A"
+            print(f"[Stage2]     {anc_upper}: OR={or_str}, P={p_str}, CI95={ci_str_display}, method={p_source or 'none'}", flush=True)
 
 
 
         io.atomic_write_json(result_path, out)
         _write_meta(meta_path, "lrt_followup", s_name, category, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra=dict(meta_extra_common))
+        
+        print(f"\n[Stage2] COMPLETE: {s_name_safe}", flush=True)
+        print(f"[Stage2]   Interaction P: {out['P_LRT_AncestryxDosage']:.4e if out['P_Stage2_Valid'] else 'NaN'}", flush=True)
+        print(f"[Stage2]   Results saved to: {os.path.basename(result_path)}", flush=True)
+        print(f"{'='*80}\n", flush=True)
+        
     except Exception as e:
+        print(f"\n[Stage2] EXCEPTION in {s_name_safe}: {type(e).__name__}: {e}", flush=True)
+        print(f"{'='*80}\n", flush=True)
         io.atomic_write_json(result_path, {"Phenotype": s_name, "Skip_Reason": f"exception:{type(e).__name__}"})
         traceback.print_exc()
     finally:
