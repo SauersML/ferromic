@@ -1751,9 +1751,6 @@ def _pipeline_once():
             else:
                 print("\n--- Stage-2 ancestry follow-up consolidation skipped due to population filter. ---")
 
-            if "EUR_P_Source" in df.columns:
-                df = df.drop(columns=["EUR_P_Source"], errors="ignore")
-
             df = testing.apply_followup_fdr(df, FDR_ALPHA, LRT_SELECT_ALPHA)
 
             print(f"\n--- Saving final results to '{MASTER_RESULTS_CSV}' ---")
