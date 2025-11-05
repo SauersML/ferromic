@@ -740,19 +740,92 @@ def _firth_refit_offset(X, y, offset=None, maxiter=200, tol=1e-8):
     return res
 
 
+def _firth_refit_with_fixed_coef(X, y, target_ix, fixed_value, maxiter=200, tol=1e-8):
+    """
+    Fit Firth logistic regression with one coefficient fixed.
+    Keeps full design matrix and constrains beta[target_ix] = fixed_value.
+    This maintains the same penalty dimension as the unconstrained fit.
+    """
+    X_np = np.asarray(X, dtype=np.float64)
+    y_np = np.asarray(y, dtype=np.float64)
+    if X_np.ndim != 2 or y_np.ndim != 1 or X_np.shape[0] != y_np.shape[0]:
+        raise ValueError("design/response mismatch for Firth fixed coef refit")
+    n, p = X_np.shape
+    target_ix = int(target_ix)
+    if target_ix < 0 or target_ix >= p:
+        raise ValueError(f"target_ix {target_ix} out of range [0, {p})")
+    
+    # Initialize all coefficients to zero
+    beta = np.zeros(p, dtype=np.float64)
+    beta[target_ix] = float(fixed_value)
+    
+    # Create mask for free parameters
+    free_mask = np.ones(p, dtype=bool)
+    free_mask[target_ix] = False
+    free_indices = np.where(free_mask)[0]
+    
+    converged = False
+    for _ in range(int(maxiter)):
+        eta = np.clip(X_np @ beta, -35.0, 35.0)
+        p_hat = np.clip(expit(eta), 1e-12, 1.0 - 1e-12)
+        W = p_hat * (1.0 - p_hat)
+        XTW = X_np.T * W
+        XtWX = XTW @ X_np
+        
+        try:
+            XtWX_inv = np.linalg.inv(XtWX)
+        except np.linalg.LinAlgError:
+            XtWX_inv = np.linalg.pinv(XtWX)
+        
+        h = _leverages_batched(X_np, XtWX_inv, W)
+        score = X_np.T @ (y_np - p_hat + (0.5 - p_hat) * h)
+        
+        # Only update free parameters
+        delta_full = XtWX_inv @ score
+        delta_free = delta_full[free_indices]
+        
+        beta_new = beta.copy()
+        beta_new[free_indices] += delta_free
+        
+        if not np.all(np.isfinite(beta_new)):
+            break
+        if np.max(np.abs(delta_free)) < tol:
+            beta = beta_new
+            converged = True
+            break
+        beta = beta_new
+    
+    if not converged:
+        raise RuntimeError("Firth fixed coef refit failed to converge")
+    
+    eta = X_np @ beta
+    eta_work = np.clip(eta, -35.0, 35.0)
+    p_hat = np.clip(expit(eta_work), 1e-12, 1.0 - 1e-12)
+    W = p_hat * (1.0 - p_hat)
+    XTW = X_np.T * W
+    XtWX = XTW @ X_np
+    loglik = float(np.sum(y_np * eta - np.logaddexp(0.0, eta)))
+    sign_det, logdet = np.linalg.slogdet(XtWX)
+    pll = loglik + 0.5 * logdet if sign_det > 0 else -np.inf
+    
+    class _Res:
+        pass
+    
+    res = _Res()
+    res.params = beta
+    res.bse = np.full(p, np.nan)
+    res.llf = float(pll)
+    setattr(res, "_final_is_mle", False)
+    setattr(res, "_used_firth", True)
+    return res
+
+
 def _profile_ci_beta(X_full, y, target_ix, fit_full, kind="mle", alpha=0.05, max_abs_beta=None):
     """
     Compute profile likelihood CI for a single coefficient.
     
-    KNOWN ISSUE for kind="firth":
-    This implementation drops the target column and uses an offset, which changes
-    the dimension of the Firth penalty term (0.5 * log|X'WX|) between the full
-    and constrained models. This causes dev_at(beta_hat) to be non-zero, leading
-    to invalid or misclassified CIs for rare/imbalanced traits.
-    
-    CORRECT FIX: Keep the target column and constrain β_target = b0 (don't drop
-    the column) so the penalization is computed on the same parameterization.
-    This requires implementing _firth_refit_with_fixed_coef().
+    For Firth regression, uses _firth_refit_with_fixed_coef to maintain
+    the same penalty dimension between full and constrained models.
     """
     max_abs_beta = float(CTX.get("PROFILE_MAX_ABS_BETA", PROFILE_MAX_ABS_BETA) if max_abs_beta is None else max_abs_beta)
     X_np = X_full.to_numpy(dtype=np.float64, copy=False) if hasattr(X_full, "to_numpy") else np.asarray(X_full, dtype=np.float64)
@@ -768,22 +841,36 @@ def _profile_ci_beta(X_full, y, target_ix, fit_full, kind="mle", alpha=0.05, max
     ll_full = float(getattr(fit_full, "llf", np.nan))
     if not np.isfinite(ll_full):
         return {"lo": np.nan, "hi": np.nan, "sided": "two", "valid": False, "method": None}
-    # WARNING: Dropping column changes Firth penalty dimension - see docstring
-    X_red = np.delete(X_np, int(target_ix), axis=1)
-    x_target = X_np[:, int(target_ix)]
+    
     crit = float(sp_stats.chi2.ppf(1.0 - alpha, df=1))
-    refit = _logit_mle_refit_offset if kind == "mle" else _firth_refit_offset
-
-    def dev_at(b0):
-        try:
-            fit_c = refit(X_red, y_np, offset=b0 * x_target)
-        except Exception:
-            return np.inf
-        ll_con = float(getattr(fit_c, "llf", np.nan))
-        if not np.isfinite(ll_con):
-            return np.inf
-        val = 2.0 * (ll_full - ll_con)
-        return float(val)
+    
+    if kind == "firth":
+        # Use fixed coefficient approach to maintain penalty dimension
+        def dev_at(b0):
+            try:
+                fit_c = _firth_refit_with_fixed_coef(X_np, y_np, target_ix, b0)
+            except Exception:
+                return np.inf
+            ll_con = float(getattr(fit_c, "llf", np.nan))
+            if not np.isfinite(ll_con):
+                return np.inf
+            val = 2.0 * (ll_full - ll_con)
+            return float(val)
+    else:
+        # MLE: use offset approach (dropping column is fine for MLE)
+        X_red = np.delete(X_np, int(target_ix), axis=1)
+        x_target = X_np[:, int(target_ix)]
+        
+        def dev_at(b0):
+            try:
+                fit_c = _logit_mle_refit_offset(X_red, y_np, offset=b0 * x_target)
+            except Exception:
+                return np.inf
+            ll_con = float(getattr(fit_c, "llf", np.nan))
+            if not np.isfinite(ll_con):
+                return np.inf
+            val = 2.0 * (ll_full - ll_con)
+            return float(val)
 
     base = dev_at(beta_hat)
     if not np.isfinite(base):
