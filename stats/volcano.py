@@ -247,7 +247,7 @@ def plot_volcano(df, out_pdf):
     # FDR threshold (BH 0.05)
     p_cut = bh_fdr_cutoff(df["P_LRT_Overall"].to_numpy(), alpha=0.05)
     y_fdr = -np.log10(p_cut) if (isinstance(p_cut, (int, float)) and np.isfinite(p_cut) and p_cut > 0) else np.nan
-    fdr_label = f"BH FDR 0.05 (p ≤ {p_cut:.2e})" if np.isfinite(y_fdr) else "BH FDR 0.05"
+    fdr_label = "BH FDR 0.05"
 
     df["is_significant"] = np.isfinite(y_fdr) & (df["neglog10p"] >= y_fdr)
 
