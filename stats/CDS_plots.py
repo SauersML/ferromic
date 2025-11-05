@@ -476,8 +476,27 @@ def load_gene_tests() -> pd.DataFrame:
 def build_pairs_and_phy_index(cds_summary: pd.DataFrame) -> pd.DataFrame:
     files = sorted(set(cds_summary["filename"].astype(str).tolist()))
     rows = []
+    
+    # Search paths for .phy files (in priority order)
+    search_paths = [
+        ".",                           # Current directory
+        "analysis_downloads",          # replicate_figures.py download location
+        "../analysis_downloads",       # If running from stats/
+    ]
+    
     for fn in files:
-        phy_path = os.path.join(".", fn)
+        # Try each search path
+        phy_path = None
+        for search_dir in search_paths:
+            candidate = os.path.join(search_dir, fn)
+            if os.path.exists(candidate):
+                phy_path = candidate
+                break
+        
+        # If not found, use current directory (will fail later with clear error)
+        if phy_path is None:
+            phy_path = os.path.join(".", fn)
+        
         rows.append({"filename": fn, "phy_path": phy_path})
     return pd.DataFrame(rows).set_index("filename")
 
