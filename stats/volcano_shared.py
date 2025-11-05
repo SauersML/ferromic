@@ -44,7 +44,7 @@ def desaturate_color(color, desat_factor=0.70):
 
 
 def non_orange_colors(n, seed=21):
-    """Generate n distinct colors using the full color spectrum.
+    """Generate n highly distinct colors using the full color spectrum.
 
     Parameters
     ----------
@@ -60,13 +60,26 @@ def non_orange_colors(n, seed=21):
     """
     if n <= 0:
         return []
-    # Use the FULL hue spectrum (0° to 360°) - any and all colors allowed
-    sv = [(0.80, 0.85), (0.65, 0.90), (0.75, 0.70), (0.55, 0.80)]
+    
+    # Use MUCH MORE DIVERSE saturation and value combinations for maximum distinction
+    # Mix high/low saturation with high/low value to create very different colors
+    sv_combos = [
+        (0.95, 0.90),  # Vivid, bright
+        (0.75, 0.65),  # Muted, darker
+        (0.90, 0.75),  # Saturated, medium
+        (0.60, 0.85),  # Pastel, bright
+        (0.85, 0.55),  # Deep, rich
+        (0.50, 0.95),  # Light, washed
+        (0.95, 0.70),  # Bold, medium
+        (0.70, 0.50),  # Subdued, dark
+    ]
+    
     cols = []
     for i in range(n):
-        # Distribute hues evenly across the full spectrum
-        h = (i + 0.5) / n  # This gives values from 0.0 to 1.0 (full hue range)
-        s, v = sv[i % len(sv)]
+        # Distribute hues evenly across the FULL spectrum (0° to 360°)
+        h = (i + 0.5) / n
+        # Cycle through diverse saturation/value combinations
+        s, v = sv_combos[i % len(sv_combos)]
         cols.append(mcolors.hsv_to_rgb((h, s, v)))
     return [tuple(c) for c in cols]
 
