@@ -215,6 +215,8 @@ def run_logistic_regression(
         result_dict["Separation_Detected"] = True
         result_dict["Separation_Reason"] = sep_reason
         result_dict["Method"] = "skipped_separation"
+        result_dict["Skip_Reason"] = "separation_detected"
+        result_dict["Skip_Notes"] = f"Separation detected: {sep_reason}. MLE is unstable and p-values are invalid. Penalized likelihood p-values are not valid for hypothesis testing."
         # Return NaN for all inference results
         result_dict.update({
             "Beta": np.nan,
@@ -233,6 +235,8 @@ def run_logistic_regression(
         _log(f"      SKIP: Low EPV ({epv:.1f} < {MIN_EPV}) - insufficient data for stable inference")
         result_dict["Low_EPV"] = True
         result_dict["Method"] = "skipped_low_epv"
+        result_dict["Skip_Reason"] = "low_epv"
+        result_dict["Skip_Notes"] = f"Events per variable (EPV) = {epv:.2f} is below minimum threshold of {MIN_EPV}. Insufficient data for stable MLE inference."
         # Return NaN for all inference results
         result_dict.update({
             "Beta": np.nan,
@@ -293,6 +297,7 @@ def run_logistic_regression(
 
     except Exception as e:
         _log(f"      ERROR in logistic regression: {type(e).__name__}: {e}")
+        error_msg = str(e)[:200]  # Truncate long error messages
         result_dict.update({
             "Beta": np.nan,
             "SE": np.nan,
@@ -304,7 +309,9 @@ def run_logistic_regression(
             "Converged": False,
             "LLF": np.nan,
             "Method": "failed",
-            "Error": str(e)[:200],  # Truncate long error messages
+            "Skip_Reason": "regression_failed",
+            "Skip_Notes": f"Regression failed with {type(e).__name__}: {error_msg}",
+            "Error": error_msg,
         })
     
     return result_dict
@@ -358,6 +365,24 @@ def test_categories_for_inversion(
         shared_idx = X_full.index.intersection(core_df.index)
         if len(shared_idx) == 0:
             _log(f"    SKIP: No overlap between X_full and core_df")
+            # Record skip with reason
+            results.append({
+                "Category": category,
+                "Inversion": inversion_name,
+                "N_Total": 0,
+                "N_Cases": 0,
+                "N_Controls": 0,
+                "Beta": np.nan,
+                "SE": np.nan,
+                "Z": np.nan,
+                "P_Value": np.nan,
+                "OR": np.nan,
+                "OR_CI95_Low": np.nan,
+                "OR_CI95_High": np.nan,
+                "Method": "skipped",
+                "Skip_Reason": "no_overlap_after_ancestry_filter",
+                "Skip_Notes": "No individuals remained after ancestry filtering",
+            })
             continue
             
         core_positions = core_df.index.get_indexer(shared_idx)
@@ -367,12 +392,49 @@ def test_categories_for_inversion(
         # Check minimum cases and controls after ancestry filtering
         n_cases = int(y_full.sum())
         n_controls = int((1 - y_full).sum())
+        n_total = len(y_full)
         
         if n_cases < MIN_CASES_FILTER:
             _log(f"    SKIP: Only {n_cases:,} cases (< {MIN_CASES_FILTER:,})")
+            # Record skip with reason
+            results.append({
+                "Category": category,
+                "Inversion": inversion_name,
+                "N_Total": n_total,
+                "N_Cases": n_cases,
+                "N_Controls": n_controls,
+                "Beta": np.nan,
+                "SE": np.nan,
+                "Z": np.nan,
+                "P_Value": np.nan,
+                "OR": np.nan,
+                "OR_CI95_Low": np.nan,
+                "OR_CI95_High": np.nan,
+                "Method": "skipped",
+                "Skip_Reason": "insufficient_cases",
+                "Skip_Notes": f"Only {n_cases:,} cases, minimum required is {MIN_CASES_FILTER:,}",
+            })
             continue
         if n_controls < MIN_CONTROLS_FILTER:
             _log(f"    SKIP: Only {n_controls:,} controls (< {MIN_CONTROLS_FILTER:,})")
+            # Record skip with reason
+            results.append({
+                "Category": category,
+                "Inversion": inversion_name,
+                "N_Total": n_total,
+                "N_Cases": n_cases,
+                "N_Controls": n_controls,
+                "Beta": np.nan,
+                "SE": np.nan,
+                "Z": np.nan,
+                "P_Value": np.nan,
+                "OR": np.nan,
+                "OR_CI95_Low": np.nan,
+                "OR_CI95_High": np.nan,
+                "Method": "skipped",
+                "Skip_Reason": "insufficient_controls",
+                "Skip_Notes": f"Only {n_controls:,} controls, minimum required is {MIN_CONTROLS_FILTER:,}",
+            })
             continue
 
         # Run regression
