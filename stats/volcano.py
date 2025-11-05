@@ -323,7 +323,7 @@ def plot_volcano(df, out_pdf):
 
     # Axis labels & ticks
     ax.set_ylabel(r"$-\log_{10}(p)$", fontsize=18)  # italic p
-    ax.set_xlabel("", fontsize=18)                  # remove x-axis title
+    ax.set_xlabel("Odds Ratio", fontsize=18)
     xticks, xlabels = make_or_ticks_sparse(ax.get_xlim())
     if len(xticks) >= 3:
         ax.set_xticks(xticks)
@@ -334,10 +334,10 @@ def plot_volcano(df, out_pdf):
         inv_levels, color_map, marker_map, fdr_label, y_fdr
     )
     ax.legend(
-        handles=handles, title="Key",
+        handles=handles,
         loc="upper right", frameon=False, ncol=ncol,
         borderaxespad=0.8, handlelength=1.6, columnspacing=1.0, labelspacing=0.6,
-        fontsize=13, title_fontsize=15
+        fontsize=13
     )
 
     # -------------------- BINNED LABELING --------------------
