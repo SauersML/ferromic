@@ -13,6 +13,7 @@ import pandas as pd
 import statsmodels.api as sm
 from scipy import stats as sp_stats
 from scipy.special import expit
+from scipy.optimize import brentq
 from statsmodels.tools.sm_exceptions import ConvergenceWarning, PerfectSeparationWarning
 
 from . import iox as io
@@ -619,7 +620,7 @@ def _mle_prefit_ok(X, y, target_ix=None, const_ix=None):
     return ok
 
 
-def _logit_mle_refit_offset(X, y, offset=None, maxiter=200, tol=1e-8):
+def _logit_mle_refit_offset(X, y, offset=None, maxiter=200, tol=1e-8, start_beta=None):
     X_np = np.asarray(X, dtype=np.float64)
     y_np = np.asarray(y, dtype=np.float64)
     if X_np.ndim != 2 or y_np.ndim != 1 or X_np.shape[0] != y_np.shape[0]:
@@ -631,7 +632,12 @@ def _logit_mle_refit_offset(X, y, offset=None, maxiter=200, tol=1e-8):
         offset = np.asarray(offset, dtype=np.float64)
         if offset.shape != (n,):
             raise ValueError("offset shape mismatch")
-    beta = np.zeros(p, dtype=np.float64)
+    if start_beta is not None:
+        beta = np.asarray(start_beta, dtype=np.float64).copy()
+        if beta.shape != (p,):
+            raise ValueError("start_beta shape mismatch")
+    else:
+        beta = np.zeros(p, dtype=np.float64)
     converged = False
     for _ in range(int(maxiter)):
         eta = np.clip(offset + X_np @ beta, -35.0, 35.0)
@@ -680,7 +686,7 @@ def _logit_mle_refit_offset(X, y, offset=None, maxiter=200, tol=1e-8):
     return res
 
 
-def _firth_refit_offset(X, y, offset=None, maxiter=200, tol=1e-8):
+def _firth_refit_offset(X, y, offset=None, maxiter=200, tol=1e-8, start_beta=None):
     X_np = np.asarray(X, dtype=np.float64)
     y_np = np.asarray(y, dtype=np.float64)
     if X_np.ndim != 2 or y_np.ndim != 1 or X_np.shape[0] != y_np.shape[0]:
@@ -692,7 +698,12 @@ def _firth_refit_offset(X, y, offset=None, maxiter=200, tol=1e-8):
         offset = np.asarray(offset, dtype=np.float64)
         if offset.shape != (n,):
             raise ValueError("offset shape mismatch")
-    beta = np.zeros(p, dtype=np.float64)
+    if start_beta is not None:
+        beta = np.asarray(start_beta, dtype=np.float64).copy()
+        if beta.shape != (p,):
+            raise ValueError("start_beta shape mismatch")
+    else:
+        beta = np.zeros(p, dtype=np.float64)
     converged = False
     for _ in range(int(maxiter)):
         eta = np.clip(offset + X_np @ beta, -35.0, 35.0)
@@ -740,7 +751,7 @@ def _firth_refit_offset(X, y, offset=None, maxiter=200, tol=1e-8):
     return res
 
 
-def _firth_refit_with_fixed_coef(X, y, target_ix, fixed_value, maxiter=200, tol=1e-8):
+def _firth_refit_with_fixed_coef(X, y, target_ix, fixed_value, maxiter=200, tol=1e-8, start_beta=None):
     """
     Fit Firth logistic regression with one coefficient fixed.
     Keeps full design matrix and constrains beta[target_ix] = fixed_value.
@@ -755,8 +766,13 @@ def _firth_refit_with_fixed_coef(X, y, target_ix, fixed_value, maxiter=200, tol=
     if target_ix < 0 or target_ix >= p:
         raise ValueError(f"target_ix {target_ix} out of range [0, {p})")
     
-    # Initialize all coefficients to zero
-    beta = np.zeros(p, dtype=np.float64)
+    # Initialize all coefficients
+    if start_beta is not None:
+        beta = np.asarray(start_beta, dtype=np.float64).copy()
+        if beta.shape != (p,):
+            raise ValueError("start_beta shape mismatch")
+    else:
+        beta = np.zeros(p, dtype=np.float64)
     beta[target_ix] = float(fixed_value)
     
     # Create mask for free parameters
@@ -844,93 +860,122 @@ def _profile_ci_beta(X_full, y, target_ix, fit_full, kind="mle", alpha=0.05, max
     
     crit = float(sp_stats.chi2.ppf(1.0 - alpha, df=1))
     
+    # Continuation state: track last successful coefficient vector per side
+    # This enables warm-start homotopy for path-following
+    warm_state = {"last_beta": None}
+    
+    # Memoization cache to avoid redundant fits during Brent interpolation
+    memo_cache = {}
+    
     if kind == "firth":
         # Use fixed coefficient approach to maintain penalty dimension
-        def dev_at(b0):
+        def dev_at(b0, use_warm=True):
+            key = float(b0)
+            if key in memo_cache:
+                return memo_cache[key]
             try:
-                fit_c = _firth_refit_with_fixed_coef(X_np, y_np, target_ix, b0)
+                start = warm_state["last_beta"] if (use_warm and warm_state["last_beta"] is not None) else None
+                fit_c = _firth_refit_with_fixed_coef(X_np, y_np, target_ix, b0, start_beta=start)
+                warm_state["last_beta"] = fit_c.params.copy()
             except Exception:
+                memo_cache[key] = np.inf
                 return np.inf
             ll_con = float(getattr(fit_c, "llf", np.nan))
             if not np.isfinite(ll_con):
+                memo_cache[key] = np.inf
                 return np.inf
             val = 2.0 * (ll_full - ll_con)
+            memo_cache[key] = float(val)
             return float(val)
     else:
         # MLE: use offset approach (dropping column is fine for MLE)
         X_red = np.delete(X_np, int(target_ix), axis=1)
         x_target = X_np[:, int(target_ix)]
         
-        def dev_at(b0):
+        def dev_at(b0, use_warm=True):
+            key = float(b0)
+            if key in memo_cache:
+                return memo_cache[key]
             try:
-                fit_c = _logit_mle_refit_offset(X_red, y_np, offset=b0 * x_target)
+                start = warm_state["last_beta"] if (use_warm and warm_state["last_beta"] is not None) else None
+                fit_c = _logit_mle_refit_offset(X_red, y_np, offset=b0 * x_target, start_beta=start)
+                warm_state["last_beta"] = fit_c.params.copy()
             except Exception:
+                memo_cache[key] = np.inf
                 return np.inf
             ll_con = float(getattr(fit_c, "llf", np.nan))
             if not np.isfinite(ll_con):
+                memo_cache[key] = np.inf
                 return np.inf
             val = 2.0 * (ll_full - ll_con)
+            memo_cache[key] = float(val)
             return float(val)
 
-    base = dev_at(beta_hat)
+    base = dev_at(beta_hat, use_warm=False)
     if not np.isfinite(base):
         return {"lo": np.nan, "hi": np.nan, "sided": "two", "valid": False, "method": None}
     diff0 = base - crit
 
-    def bracket_toward_zero(beta_hat_val, direction):
-        a, b = (beta_hat_val, 0.0) if direction < 0 else (0.0, beta_hat_val)
-        if a > b:
-            a, b = b, a
-        fa = dev_at(a) - crit
-        fb = dev_at(b) - crit
+    def solve_root_brent(a, b, reset_warm=True):
+        """Use Brent-Dekker method for fast root finding with safeguarding."""
+        if reset_warm:
+            warm_state["last_beta"] = None
+        
+        def objective(x):
+            return dev_at(x) - crit
+        
+        # Check bracket validity
+        fa = objective(a)
+        fb = objective(b)
         if not (np.isfinite(fa) and np.isfinite(fb)):
             return None, False
         if fa * fb > 0:
             return None, False
-        for _ in range(100):
-            m = 0.5 * (a + b)
-            fm = dev_at(m) - crit
-            if not np.isfinite(fm):
-                break
-            if abs(fm) < 1e-6 or abs(b - a) < 1e-6:
-                return float(m), True
-            if fa * fm <= 0:
-                b, fb = m, fm
-            else:
-                a, fa = m, fm
-        return 0.5 * (a + b), True
+        
+        try:
+            root = brentq(objective, a, b, xtol=1e-6, rtol=1e-6, maxiter=50)
+            return float(root), True
+        except (ValueError, RuntimeError):
+            # Fallback to bisection if Brent fails
+            for _ in range(50):
+                m = 0.5 * (a + b)
+                fm = objective(m)
+                if not np.isfinite(fm):
+                    break
+                if abs(fm) < 1e-6 or abs(b - a) < 1e-6:
+                    return float(m), True
+                if fa * fm <= 0:
+                    b, fb = m, fm
+                else:
+                    a, fa = m, fm
+            return 0.5 * (a + b), True
+
+    def bracket_toward_zero(beta_hat_val, direction):
+        # Reset warm state for this side
+        a, b = (beta_hat_val, 0.0) if direction < 0 else (0.0, beta_hat_val)
+        if a > b:
+            a, b = b, a
+        return solve_root_brent(a, b, reset_warm=True)
 
     def bracket_far_side(beta_hat_val, direction, max_abs=max_abs_beta, tries=5):
+        # Reset warm state for this side
+        warm_state["last_beta"] = None
         step = 0.5
         for _ in range(int(tries)):
             cand = beta_hat_val + direction * step
             if abs(cand) > max_abs:
                 break
-            df = dev_at(cand) - crit
+            df = dev_at(cand, use_warm=False) - crit
             if np.isfinite(df) and np.isfinite(diff0) and diff0 * df <= 0:
                 if direction < 0:
                     a, b = cand, beta_hat_val
                 else:
                     a, b = beta_hat_val, cand
-                fa = dev_at(a) - crit
-                fb = dev_at(b) - crit
-                if not (np.isfinite(fa) and np.isfinite(fb)):
-                    break
-                for _ in range(100):
-                    m = 0.5 * (a + b)
-                    fm = dev_at(m) - crit
-                    if not np.isfinite(fm):
-                        break
-                    if abs(fm) < 1e-6 or abs(b - a) < 1e-6:
-                        return float(m), True
-                    if fa * fm <= 0:
-                        b, fb = m, fm
-                    else:
-                        a, fa = m, fm
+                return solve_root_brent(a, b, reset_warm=False)
             step *= 2.0
         return None, False
 
-    dev_zero = dev_at(0.0)
+    dev_zero = dev_at(0.0, use_warm=False)
     if not np.isfinite(dev_zero):
         return {"lo": np.nan, "hi": np.nan, "sided": "two", "valid": False,
                 "method": "profile" if kind == "mle" else "profile_penalized"}
@@ -939,16 +984,22 @@ def _profile_ci_beta(X_full, y, target_ix, fit_full, kind="mle", alpha=0.05, max
     ok_lo = ok_hi = False
     if dev_zero > crit:
         if beta_hat > 0:
+            # Lower bound: toward zero (warm-start from beta_hat)
             blo, ok_lo = bracket_toward_zero(beta_hat, direction=-1)
+            # Upper bound: far side (reset and warm-start from beta_hat)
             bhi, ok_hi = bracket_far_side(beta_hat, direction=+1)
         elif beta_hat < 0:
+            # Upper bound: toward zero (warm-start from beta_hat)
             bhi, ok_hi = bracket_toward_zero(beta_hat, direction=+1)
+            # Lower bound: far side (reset and warm-start from beta_hat)
             blo, ok_lo = bracket_far_side(beta_hat, direction=-1)
         else:
             return {"lo": np.nan, "hi": np.nan, "sided": "two", "valid": False,
                     "method": "profile" if kind == "mle" else "profile_penalized"}
     else:
+        # Both bounds on far side
         blo, ok_lo = bracket_far_side(beta_hat, direction=-1)
+        # Reset for opposite side
         bhi, ok_hi = bracket_far_side(beta_hat, direction=+1)
 
     if not ok_lo and not ok_hi:
