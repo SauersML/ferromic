@@ -1434,9 +1434,10 @@ def _fit_logit_ladder(
                                 **solver_kwargs,
                             )
                         except (Exception, PerfectSeparationWarning) as e:
+                            error_msg = str(e)[:400]
                             print(
                                 f"[MLE-REFIT-FAIL] name={pheno_name} site=_fit_logit_ladder "
-                                f"method={method} reason={type(e).__name__}",
+                                f"method={method} reason={type(e).__name__} message={error_msg}",
                                 flush=True
                             )
                             continue
@@ -1495,8 +1496,13 @@ def _fit_logit_ladder(
                         setattr(mle_newton, "_final_is_mle", True)
                         setattr(mle_newton, "_path_reasons", ["mle_first_newton"] + prefit_gate_tags)
                         return mle_newton, "mle_first_newton"
-                except (Exception, PerfectSeparationWarning):
-                    pass
+                except (Exception, PerfectSeparationWarning) as e:
+                    error_msg = str(e)[:200]
+                    print(
+                        f"[MLE-FIRST-FAIL] name={pheno_name or 'unknown'} site=_fit_logit_ladder "
+                        f"method=newton reason={type(e).__name__} message={error_msg}",
+                        flush=True
+                    )
                 try:
                     mle_bfgs = _logit_fit(
                         sm.Logit(y, X),
@@ -1510,10 +1516,15 @@ def _fit_logit_ladder(
                         setattr(mle_bfgs, "_final_is_mle", True)
                         setattr(mle_bfgs, "_path_reasons", ["mle_first_bfgs"] + prefit_gate_tags)
                         return mle_bfgs, "mle_first_bfgs"
-                except (Exception, PerfectSeparationWarning):
-                    pass
+                except (Exception, PerfectSeparationWarning) as e:
+                    error_msg = str(e)[:200]
+                    print(
+                        f"[MLE-FIRST-FAIL] name={pheno_name or 'unknown'} site=_fit_logit_ladder "
+                        f"method=bfgs reason={type(e).__name__} message={error_msg}",
+                        flush=True
+                    )
 
-        # Ridge-first pathway with strict MLE gating based on numerical diagnostics.
+        # Ridge-first pathway with strict MLE gating
         n_params = int(X.shape[1])
         valid_zero_ixs = sorted(ix for ix in zero_penalty_ixs if isinstance(ix, int) and 0 <= ix < n_params)
         penalized_param_count = n_params - len(valid_zero_ixs)
@@ -1667,8 +1678,13 @@ def _fit_logit_ladder(
                     tags = ["ridge_seeded_refit"] + gate_tags + prefit_gate_tags
                     setattr(refit_newton, "_path_reasons", tags)
                     return refit_newton, "ridge_seeded_refit"
-            except (Exception, PerfectSeparationWarning):
-                pass
+            except (Exception, PerfectSeparationWarning) as e:
+                error_msg = str(e)[:400]
+                print(
+                    f"[MLE-REFIT-FAIL] name={pheno_name} site=_fit_logit_ladder "
+                    f"method=newton reason={type(e).__name__} message={error_msg}",
+                    flush=True
+                )
 
             try:
                 extra_flag = {} if ('_already_failed' in kwargs) else {'_already_failed': True}
@@ -1688,8 +1704,13 @@ def _fit_logit_ladder(
                     tags = ["ridge_seeded_refit"] + gate_tags + prefit_gate_tags
                     setattr(refit_bfgs, "_path_reasons", tags)
                     return refit_bfgs, "ridge_seeded_refit"
-            except (Exception, PerfectSeparationWarning):
-                pass
+            except (Exception, PerfectSeparationWarning) as e:
+                error_msg = str(e)[:400]
+                print(
+                    f"[MLE-REFIT-FAIL] name={pheno_name} site=_fit_logit_ladder "
+                    f"method=bfgs reason={type(e).__name__} message={error_msg}",
+                    flush=True
+                )
 
         firth_path = list(path_prefix) + ["seeded_refit_failed"]
         firth_attempt = _maybe_firth(firth_path)
