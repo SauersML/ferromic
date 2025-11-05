@@ -345,15 +345,26 @@ def populate_caches_prepass(pheno_defs_df, bq_client, cdr_id, core_index, cache_
 def _case_ids_cached(s_name: str, cdr_codename: str, cache_dir: str) -> tuple:
     """
     Read the per-phenotype parquet ONCE per process and return the case person_ids as a tuple of str.
-    Pure read-only; never writes or deletes any on-disk cache.
+    If cache is corrupted, deletes it and raises exception to trigger rebuild.
     """
     pheno_cache_path = os.path.join(cache_dir, f"pheno_{s_name}_{cdr_codename}.parquet")
-    ph = pd.read_parquet(pheno_cache_path, columns=['is_case'])
-    case_ids = ph.index[ph['is_case'] == 1].astype(str)
-    return tuple(case_ids)
+    try:
+        ph = pd.read_parquet(pheno_cache_path, columns=['is_case'])
+        case_ids = ph.index[ph['is_case'] == 1].astype(str)
+        return tuple(case_ids)
+    except Exception as e:
+        print(f"[CacheLoader] - [CORRUPT] Cache corrupted for '{s_name}': {e}. Deleting and will rebuild.", flush=True)
+        try:
+            os.remove(pheno_cache_path)
+        except FileNotFoundError:
+            pass
+        except Exception as rm_err:
+            print(f"[CacheLoader] - [WARN] Could not delete corrupted cache '{pheno_cache_path}': {rm_err}", flush=True)
+        raise
 
 def _load_single_pheno_cache(pheno_info, core_index, cdr_codename, cache_dir):
-    """THREAD WORKER: Loads one cached phenotype (via memoized IDs) and returns integer case indices."""
+    """THREAD WORKER: Loads one cached phenotype (via memoized IDs) and returns integer case indices.
+    If cache is corrupted, it will be deleted and marked for rebuild (returns None to signal missing cache)."""
     s_name = pheno_info['sanitized_name']
     category = pheno_info['disease_category']
     try:
@@ -370,7 +381,10 @@ def _load_single_pheno_cache(pheno_info, core_index, cdr_codename, cache_dir):
             return None
         return {"name": s_name, "category": category, "case_idx": case_idx}
     except Exception as e:
-        print(f"[CacheLoader] - [FAIL] Failed to load '{s_name}': {e}", flush=True)
+        # Cache was corrupted and deleted by _case_ids_cached, or other error occurred
+        # Clear the LRU cache entry so next attempt will retry from disk
+        _case_ids_cached.cache_clear()
+        print(f"[CacheLoader] - [FAIL] Failed to load '{s_name}': {e}. Cache cleared for rebuild.", flush=True)
         return None
 
 def _query_single_pheno_bq(pheno_info, cdr_id, core_index, cache_dir, cdr_codename, bq_client=None, non_blocking=False):
