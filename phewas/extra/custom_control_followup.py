@@ -80,7 +80,7 @@ from ..run import (
 # ---------------------------------------------------------------------------
 
 TARGET_INVERSIONS: Sequence[str] = (
-    "chr17-45974480-INV-29218",
+    "chr17-45585160-INV-706887",
 )
 
 @dataclass(frozen=True)
