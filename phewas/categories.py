@@ -322,6 +322,27 @@ def _two_sided_p_to_z(p_value: float, *, z_cap: Optional[float]) -> float:
     return z_abs
 
 
+def _clopper_pearson_bounds(s: int, n: int, gamma: float) -> Tuple[float, float]:
+    """Compute Clopper-Pearson confidence bounds for binomial proportion.
+    
+    Returns (lower, upper) bounds for the true probability given s successes
+    in n trials at confidence level (1 - gamma).
+    """
+    if n <= 0:
+        return 0.0, 1.0
+    if s == 0:
+        lower = 0.0
+        upper = 1.0 - (gamma / 2.0) ** (1.0 / n)
+    elif s == n:
+        lower = (gamma / 2.0) ** (1.0 / n)
+        upper = 1.0
+    else:
+        from scipy.stats import beta as beta_dist
+        lower = beta_dist.ppf(gamma / 2.0, s, n - s + 1)
+        upper = beta_dist.ppf(1.0 - gamma / 2.0, s + 1, n - s)
+    return float(lower), float(upper)
+
+
 def _simulate_gbj_pvalue(
     observed_stat: float,
     correlation: np.ndarray,
@@ -366,6 +387,88 @@ def _simulate_gbj_pvalue(
     return float((stats_obs + 1) / (total_draws + 1)), int(total_draws)
 
 
+def _adaptive_gbj_pvalue(
+    observed_stat: float,
+    correlation: np.ndarray,
+    rng: np.random.Generator,
+    *,
+    z_cap: Optional[float] = None,
+    bh_threshold: Optional[float] = None,
+    n0: int = 50000,
+    refinement_factor: float = 5.0,
+    gamma: float = 0.001,
+    max_total_draws: int = 10000000,
+) -> Tuple[float, int]:
+    """Adaptive BH-aware GBJ p-value simulation with Clopper-Pearson certification.
+    
+    Stage A: Run n0 draws for coarse estimate.
+    Stage B: If near BH threshold, refine until CP bounds certify decision.
+    
+    Args:
+        observed_stat: Observed GBJ statistic
+        correlation: Correlation matrix for null simulation
+        rng: Random number generator
+        z_cap: Optional z-score ceiling
+        bh_threshold: BH cutoff t* = alpha/m; if None, skip adaptive refinement
+        n0: Initial coarse-pass draw count
+        refinement_factor: Multiplier c for borderline region (test if p̂ ≤ c·t*)
+        gamma: CP confidence level (1-gamma)
+        max_total_draws: Hard limit on total draws per test
+        
+    Returns:
+        (p_value, total_draws)
+    """
+    p_coarse, n_coarse = _simulate_gbj_pvalue(
+        observed_stat, correlation, n0, rng, z_cap=z_cap
+    )
+    
+    if not np.isfinite(p_coarse) or bh_threshold is None:
+        return p_coarse, n_coarse
+    
+    if p_coarse > refinement_factor * bh_threshold:
+        return p_coarse, n_coarse
+    
+    s_total = int(round((p_coarse * (n_coarse + 1)) - 1))
+    s_total = max(0, s_total)
+    n_total = n_coarse
+    
+    max_iterations = 20
+    for iteration in range(max_iterations):
+        if n_total >= max_total_draws:
+            break
+            
+        lower, upper = _clopper_pearson_bounds(s_total, n_total, gamma)
+        
+        if upper <= bh_threshold:
+            break
+        if lower >= bh_threshold:
+            break
+            
+        n_target = min(
+            max(n_total * 2, int(n_total * 1.5)),
+            max_total_draws
+        )
+        n_additional = n_target - n_total
+        if n_additional <= 0:
+            break
+            
+        p_additional, n_additional_actual = _simulate_gbj_pvalue(
+            observed_stat, correlation, n_additional, rng, z_cap=z_cap
+        )
+        
+        if not np.isfinite(p_additional):
+            break
+            
+        s_additional = int(round((p_additional * (n_additional_actual + 1)) - 1))
+        s_additional = max(0, s_additional)
+        
+        s_total += s_additional
+        n_total += n_additional_actual
+    
+    p_final = float((s_total + 1) / (n_total + 1))
+    return p_final, int(n_total)
+
+
 def _directional_meta_z(z_scores: np.ndarray, correlation: np.ndarray) -> Tuple[float, float]:
     if z_scores.size == 0:
         return float("nan"), float("nan")
@@ -396,8 +499,35 @@ def compute_category_metrics(
     fdr_method: str = "fdr_bh",
     fdr_alpha: float = 0.05,
     apply_fdr: bool = True,
+    adaptive_bh: bool = True,
+    adaptive_n0: int = 50000,
+    adaptive_refinement_factor: float = 5.0,
+    adaptive_gamma: Optional[float] = None,
+    adaptive_max_draws: int = 10000000,
 ) -> pd.DataFrame:
-    """Compute GBJ and directional GLS metrics per category."""
+    """Compute GBJ and directional GLS metrics per category.
+    
+    Args:
+        per_pheno_results: Per-phenotype results DataFrame
+        p_col: Column name for p-values
+        beta_col: Column name for effect sizes
+        null_structures: Category null structures with correlation matrices
+        gbj_draws: Fixed draw count (used when adaptive_bh=False)
+        z_cap: Optional z-score ceiling
+        rng_seed: Random seed
+        min_k: Minimum phenotypes per category
+        fdr_method: FDR correction method
+        fdr_alpha: FDR significance level
+        apply_fdr: Whether to apply FDR correction
+        adaptive_bh: Enable BH-aware adaptive simulation
+        adaptive_n0: Initial coarse-pass draw count
+        adaptive_refinement_factor: Borderline region multiplier (c)
+        adaptive_gamma: CP confidence level; if None, set to alpha/(10*m)
+        adaptive_max_draws: Hard limit on draws per test
+        
+    Returns:
+        DataFrame with category-level metrics
+    """
 
     if per_pheno_results.empty or not null_structures:
         return pd.DataFrame(columns=[
@@ -428,6 +558,13 @@ def compute_category_metrics(
     if "Phenotype" in df.columns:
         df = df.set_index("Phenotype")
     rng = np.random.default_rng(rng_seed)
+    
+    m = len(null_structures)
+    bh_threshold = None
+    if adaptive_bh and apply_fdr and m > 0:
+        bh_threshold = fdr_alpha / m
+        if adaptive_gamma is None:
+            adaptive_gamma = fdr_alpha / (10.0 * m)
 
     records: List[MutableMapping[str, object]] = []
     for cat, struct in null_structures.items():
@@ -479,13 +616,27 @@ def compute_category_metrics(
         gbj_corr = corr_full[np.ix_(gbj_indices, gbj_indices)]
         gbj_pvals = 2.0 * stats.norm.sf(np.asarray(gbj_z, dtype=np.float64))
         gbj_stat = _gbj_statistic(gbj_pvals)
-        gbj_p, gbj_draw_total = _simulate_gbj_pvalue(
-            gbj_stat,
-            gbj_corr,
-            int(gbj_draws),
-            rng,
-            z_cap=ceiling,
-        )
+        
+        if adaptive_bh and bh_threshold is not None:
+            gbj_p, gbj_draw_total = _adaptive_gbj_pvalue(
+                gbj_stat,
+                gbj_corr,
+                rng,
+                z_cap=ceiling,
+                bh_threshold=bh_threshold,
+                n0=adaptive_n0,
+                refinement_factor=adaptive_refinement_factor,
+                gamma=adaptive_gamma if adaptive_gamma is not None else 0.001,
+                max_total_draws=adaptive_max_draws,
+            )
+        else:
+            gbj_p, gbj_draw_total = _simulate_gbj_pvalue(
+                gbj_stat,
+                gbj_corr,
+                int(gbj_draws),
+                rng,
+                z_cap=ceiling,
+            )
 
         gls_stat = float("nan")
         gls_p = float("nan")
