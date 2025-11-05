@@ -645,7 +645,7 @@ def compute_category_metrics(
             dir_corr = corr_full[np.ix_(dir_indices, dir_indices)]
             dir_z_arr = np.asarray(dir_z, dtype=np.float64)
             gls_stat, gls_p = _directional_meta_z(dir_z_arr, dir_corr)
-            if np.isfinite(gls_stat):
+            if np.isfinite(gls_stat) and abs(gls_stat) > 1e-12:
                 direction_label = "increase" if gls_stat > 0 else "decrease"
 
         records.append({
