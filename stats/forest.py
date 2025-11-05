@@ -348,8 +348,12 @@ def build_layout(df: pd.DataFrame):
     sections = []
     y_cursor = 0.0  # grows downward (we will invert axis later)
 
-    for inv, sub in df.groupby("Inversion", sort=False):
+    for inv, sub in df.groupby("Inversion", sort=False, observed=True):
         sub = sub.copy()
+        
+        # Skip empty groups (can happen with categorical columns after filtering)
+        if sub.empty:
+            continue
 
         # Header box (top of section)
         head_y0 = y_cursor
