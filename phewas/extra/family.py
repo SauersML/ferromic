@@ -13,7 +13,7 @@ from statsmodels.genmod.cov_struct import Exchangeable
 PROJECT_ID      = os.getenv("GOOGLE_PROJECT")
 CDR_DATASET_ID  = os.getenv("WORKSPACE_CDR")
 
-INVERSION_FILE  = "../imputed_inversion_dosages.tsv"
+INVERSION_FILE  = "./imputed_inversion_dosages.tsv"
 OUTPUT_DIR      = "./assoc_outputs"
 CACHE_DIR       = ".bq_cache"
 
