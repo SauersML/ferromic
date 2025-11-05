@@ -197,11 +197,8 @@ def _phi_covariance_for_category(
             vec_j = used_vectors[j].astype(np.float64)
             mean_j = vec_j.mean()
             std_j = vec_j.std(ddof=0)
-            if std_i > 0 and std_j > 0:
-                corr_val = float(np.mean((vec_i - mean_i) * (vec_j - mean_j)) / (std_i * std_j))
-                corr_val = np.clip(corr_val, -1.0, 1.0)
-            else:
-                corr_val = 0.0
+            corr_val = float(np.mean((vec_i - mean_i) * (vec_j - mean_j)) / (std_i * std_j))
+            corr_val = np.clip(corr_val, -1.0, 1.0)
             Sigma[i, j] = Sigma[j, i] = corr_val
 
     Sigma = _apply_shrinkage(Sigma, method=shrinkage, lambda_value=lambda_value)
@@ -332,7 +329,6 @@ def _simulate_gbj_pvalue(
     rng: np.random.Generator,
     *,
     z_cap: Optional[float] = None,
-    max_draws: Optional[int] = None,
 ) -> Tuple[float, int]:
     if draws <= 0:
         return float("nan"), 0
@@ -394,7 +390,6 @@ def compute_category_metrics(
     beta_col: str,
     null_structures: Mapping[str, CategoryNull],
     gbj_draws: int = 5000,
-    gbj_max_draws: Optional[int] = None,
     z_cap: Optional[float] = None,
     rng_seed: Optional[int] = None,
     min_k: int = 3,
@@ -490,7 +485,6 @@ def compute_category_metrics(
             int(gbj_draws),
             rng,
             z_cap=ceiling,
-            max_draws=gbj_max_draws,
         )
 
         gls_stat = float("nan")
