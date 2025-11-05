@@ -269,7 +269,11 @@ def apply_followup_fdr(df, alpha_global, lrt_select_alpha):
         df["FINAL_INTERPRETATION"] = ""
         for idx in df.index[df["Sig_Global"] == True].tolist():
             p_lrt = df.at[idx, "P_LRT_AncestryxDosage"] if "P_LRT_AncestryxDosage" in df.columns else np.nan
-            if pd.isna(p_lrt) or p_lrt >= lrt_select_alpha:
+            # Missing p_lrt means we cannot determine heterogeneity, not that there is none
+            if pd.isna(p_lrt):
+                df.at[idx, "FINAL_INTERPRETATION"] = "unable to determine"
+                continue
+            if p_lrt >= lrt_select_alpha:
                 df.at[idx, "FINAL_INTERPRETATION"] = "overall"
                 continue
             levels_str = str(df.at[idx, "LRT_Ancestry_Levels"]) if "LRT_Ancestry_Levels" in df.columns else ""
