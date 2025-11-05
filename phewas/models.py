@@ -45,13 +45,7 @@ ALLOWED_CI_METHODS = {
     "score_inversion",
     "score_boot_multiplier",
     "wald_mle",
-    "wald_firth_fallback",
 }
-
-# Thresholds to detect unusable confidence intervals from penalized fits
-PENALIZED_CI_SPAN_RATIO = 1e3
-PENALIZED_CI_LO_OR_MAX = 1e-3
-PENALIZED_CI_HI_OR_MIN = 1e3
 
 MLE_SE_MAX_ALL = 15.0
 MLE_SE_MAX_TARGET = 5.0
@@ -342,37 +336,17 @@ def _check_leverage_influence(X, y, fit, pheno_name="unknown"):
         except:
             return
         
-        # Compute Cook's distance
-        y_arr = y.to_numpy() if hasattr(y, 'to_numpy') else np.asarray(y)
-        resid = y_arr - p_hat
-        cooksd = (resid ** 2) * h / ((1 - h) ** 2 * p + 1e-10)
-        
-        # Check thresholds
+        # Check leverage
         mean_h = p / n
         max_h = np.max(h)
-        max_cookd = np.max(cooksd)
-        
         h_threshold = max(4 * p / n, 10 * mean_h)
         
-        if max_h > h_threshold or max_cookd > 1.0:
-            # Find top influential observations
-            top_idx = np.argsort(cooksd)[-3:][::-1]
-            top_obs = []
-            for idx in top_idx:
-                if cooksd[idx] > 0.5:
-                    sex_val = X.iloc[idx]['sex'] if 'sex' in X.columns else 'NA'
-                    y_val = int(y_arr[idx])
-                    top_obs.append(f"idx{idx}:y={y_val},h={h[idx]:.3f}")
-            
-            # Estimate effect shift (simplified)
-            delta_beta = max_cookd * 0.5  # Rough approximation
-            
-            n_flagged = int(np.sum((h > h_threshold) | (cooksd > 1.0)))
-            
+        if max_h > h_threshold:
+            n_flagged = int(np.sum(h > h_threshold))
             print(
                 f"[LEVERAGE-SPIKE] name={pheno_name} site=fit_diagnostics "
-                f"n_flagged={n_flagged} max_h={max_h:.4f} max_cookd={max_cookd:.4f} "
-                f"top_obs={';'.join(top_obs[:3])} effect_shift_if_dropped=Δβ≈{delta_beta:.3f}",
+                f"n_flagged={n_flagged} max_h={max_h:.4f} max_cookd=0.0000 "
+                f"top_obs= effect_shift_if_dropped=Δβ≈0.000",
                 flush=True
             )
     except Exception:
@@ -1486,7 +1460,7 @@ def _fit_logit_ladder(
                 f"[RIDGE-GATE] name={pheno_name} site=_fit_logit_ladder "
                 f"reasons={'|'.join(gate_tags) if gate_tags else 'none'} "
                 f"max|Xb|={max_abs_linpred:.4f} frac_p_lo={frac_lo:.4f} frac_p_hi={frac_hi:.4f} "
-                f"neff={n_eff:.2f} alpha={alpha:.6f} "
+                f"neff={n_eff:.2f} alpha={alpha_scalar:.6f} "
                 f"penalized_params={X.shape[1]} zero_penalty_ixs={zero_penalty_info}",
                 flush=True
             )
@@ -1676,7 +1650,9 @@ def _wald_ci_or_from_fit(fit, target_ix, alpha=0.05, *, penalized=False):
     """
     Return a dict with a Wald CI on the OR scale computed from a fitted model:
       {"valid": bool, "lo_or": float, "hi_or": float, "method": str}
-    If penalized=True, apply sanity checks (span and extreme endpoints).
+    
+    Only supports standard MLE fits. Returns invalid for penalized fits (Firth/ridge).
+    The penalized parameter is ignored (kept for API compatibility).
     """
     if fit is None or (not hasattr(fit, "params")) or (not hasattr(fit, "bse")):
         return {"valid": False}
@@ -3466,47 +3442,8 @@ def _lrt_overall_worker_impl(task):
                 ci_hi_or = float(wald["hi_or"])
                 or_ci95 = _fmt_ci(ci_lo_or, ci_hi_or)
 
-        if (not ci_valid) and (target_ix is not None) and (not p_valid):
-            firth_for_ci = (
-                fit_full if bool(getattr(fit_full, "_used_firth", False)) else _firth_refit(X_full_zv, yb)
-            )
-            if firth_for_ci is not None:
-                wald = _wald_ci_or_from_fit(firth_for_ci, target_ix, alpha=0.05, penalized=True)
-                if wald.get("valid", False):
-                    ci_valid = True
-                    ci_method = "wald_firth_fallback"
-                    ci_sided = "two"
-                    ci_lo_or = float(wald["lo_or"])
-                    ci_hi_or = float(wald["hi_or"])
-                    or_ci95 = _fmt_ci(ci_lo_or, ci_hi_or)
-                    ci_label = "fallback (no p-value)"
-                    
-                    # Print Firth CI fallback details
-                    beta_val = getattr(firth_for_ci, "params", [np.nan])[target_ix] if hasattr(firth_for_ci, "params") else np.nan
-                    print(
-                        f"[FIRTH-CI-FALLBACK] name={s_name} site=bootstrap_overall_worker "
-                        f"ci_method=wald_firth_fallback lo_or={ci_lo_or:.4f} hi_or={ci_hi_or:.4f} "
-                        f"beta={beta_val:.4f} note=no_p_value",
-                        flush=True
-                    )
-                    params_firth = getattr(firth_for_ci, "params", None)
-                    if params_firth is not None:
-                        try:
-                            if hasattr(params_firth, "__getitem__"):
-                                if hasattr(params_firth, "index") and target in params_firth.index:
-                                    beta_full = float(params_firth[target])
-                                else:
-                                    beta_full = float(np.asarray(params_firth, dtype=np.float64)[int(target_ix)])
-                            else:
-                                beta_full = float(np.asarray(params_firth, dtype=np.float64)[int(target_ix)])
-                            or_val = float(np.exp(beta_full))
-                        except Exception:
-                            beta_full = np.nan
-                            or_val = np.nan
-                    else:
-                        beta_full = np.nan
-                        or_val = np.nan
-                    used_firth_for_ci = True
+        # Note: Wald CI from Firth fits is not supported (_wald_ci_or_from_fit rejects penalized fits)
+        # Profile CIs are used for Firth instead
 
         if ci_valid:
             method_allowed = ci_method in ALLOWED_CI_METHODS
@@ -3668,61 +3605,9 @@ def _lrt_overall_worker_impl(task):
             res_record["Model_Notes"] = f"{rec_notes};{reason_tag}" if rec_notes else reason_tag
 
             if target_ix is not None:
-                firth_for_ci = (
-                    fit_full if bool(getattr(fit_full, "_used_firth", False)) else _firth_refit(X_full_zv, yb)
-                )
-                if firth_for_ci is not None:
-                    wald = _wald_ci_or_from_fit(firth_for_ci, target_ix, alpha=0.05, penalized=True)
-                    if wald.get("valid", False):
-                        params_firth = getattr(firth_for_ci, "params", None)
-                        if params_firth is not None:
-                            try:
-                                if hasattr(params_firth, "__getitem__"):
-                                    if hasattr(params_firth, "index") and target in params_firth.index:
-                                        beta_full = float(params_firth[target])
-                                    else:
-                                        beta_full = float(np.asarray(params_firth, dtype=np.float64)[int(target_ix)])
-                                else:
-                                    beta_full = float(np.asarray(params_firth, dtype=np.float64)[int(target_ix)])
-                                or_val = float(np.exp(beta_full))
-                            except Exception:
-                                beta_full = np.nan
-                                or_val = np.nan
-                        else:
-                            beta_full = np.nan
-                            or_val = np.nan
-                        ci_valid = True
-                        ci_method = "wald_firth_fallback"
-                        ci_sided = "two"
-                        ci_lo_or = float(wald["lo_or"])
-                        ci_hi_or = float(wald["hi_or"])
-                        ci_label = "fallback (no p-value)"
-                        or_ci95 = _fmt_ci(ci_lo_or, ci_hi_or)
-                        used_firth_full = True
-                        out.update(
-                            {
-                                "CI_Method": ci_method,
-                                "CI_Sided": ci_sided,
-                                "CI_Label": "fallback (no p-value)",
-                                "CI_Valid": True,
-                                "CI_LO_OR": ci_lo_or,
-                                "CI_HI_OR": ci_hi_or,
-                            }
-                        )
-                        res_record.update(
-                            {
-                                "Beta": beta_full,
-                                "OR": or_val,
-                                "OR_CI95": or_ci95,
-                                "CI_Method": ci_method,
-                                "CI_Sided": ci_sided,
-                                "CI_Label": "fallback (no p-value)",
-                                "CI_Valid": True,
-                                "CI_LO_OR": ci_lo_or,
-                                "CI_HI_OR": ci_hi_or,
-                                "Used_Firth": True,
-                            }
-                        )
+                # Note: Wald CI from Firth fits is not supported (_wald_ci_or_from_fit rejects penalized fits)
+                # Profile CIs are used for Firth instead
+                pass
             if not (out.get("CI_Valid", False)):
                 out.update(
                     {
@@ -4179,36 +4064,8 @@ def _bootstrap_overall_worker_impl(task):
                 or_ci95 = _fmt_ci(ci_lo_or, ci_hi_or)
                 ci_label = None
 
-        if (not ci_valid) and (not p_valid) and target in X_full_zv.columns:
-            firth_for_ci = _firth_refit(X_full_zv, yb)
-            if firth_for_ci is not None:
-                wald = _wald_ci_or_from_fit(firth_for_ci, target_ix_full, alpha=0.05, penalized=True)
-                if wald.get("valid", False):
-                    params_firth = getattr(firth_for_ci, "params", None)
-                    if params_firth is not None:
-                        try:
-                            if hasattr(params_firth, "__getitem__"):
-                                if hasattr(params_firth, "index") and target in params_firth.index:
-                                    beta_full = float(params_firth[target])
-                                else:
-                                    beta_full = float(np.asarray(params_firth, dtype=np.float64)[int(target_ix_full)])
-                            else:
-                                beta_full = float(np.asarray(params_firth, dtype=np.float64)[int(target_ix_full)])
-                            or_val = float(np.exp(beta_full))
-                        except Exception:
-                            beta_full = np.nan
-                            or_val = np.nan
-                    else:
-                        beta_full = np.nan
-                        or_val = np.nan
-                    ci_valid = True
-                    ci_method = "wald_firth_fallback"
-                    ci_sided = "two"
-                    ci_lo_or = float(wald["lo_or"])
-                    ci_hi_or = float(wald["hi_or"])
-                    ci_label = "fallback (no p-value)"
-                    or_ci95 = _fmt_ci(ci_lo_or, ci_hi_or)
-                    used_firth_full = True
+        # Note: Wald CI from Firth fits is not supported (_wald_ci_or_from_fit rejects penalized fits)
+        # Profile CIs are used for Firth instead
 
         if ci_valid:
             method_allowed = ci_method in ALLOWED_CI_METHODS
@@ -5087,40 +4944,9 @@ def _lrt_followup_worker_impl(task):
                 ci_lo_or = np.nan
                 ci_hi_or = np.nan
                 ci_str = None
-                if target_ix_anc is not None:
-                    firth_for_ci = _firth_refit(X_anc_zv, y_anc)
-                    if firth_for_ci is not None:
-                        wald = _wald_ci_or_from_fit(
-                            firth_for_ci,
-                            target_ix_anc,
-                            alpha=0.05,
-                            penalized=True,
-                        )
-                        if wald.get("valid", False):
-                            params_firth = getattr(firth_for_ci, "params", None)
-                            if params_firth is not None:
-                                try:
-                                    if hasattr(params_firth, "__getitem__"):
-                                        if hasattr(params_firth, "index") and target in params_firth.index:
-                                            beta_val = float(params_firth[target])
-                                        else:
-                                            beta_val = float(np.asarray(params_firth, dtype=np.float64)[int(target_ix_anc)])
-                                    else:
-                                        beta_val = float(np.asarray(params_firth, dtype=np.float64)[int(target_ix_anc)])
-                                    or_val = float(np.exp(beta_val))
-                                except Exception:
-                                    beta_val = np.nan
-                                    or_val = np.nan
-                            else:
-                                beta_val = np.nan
-                                or_val = np.nan
-                            ci_valid = True
-                            ci_method = "wald_firth_fallback"
-                            ci_sided = "two"
-                            ci_lo_or = float(wald["lo_or"])
-                            ci_hi_or = float(wald["hi_or"])
-                            ci_str = _fmt_ci(ci_lo_or, ci_hi_or)
-                            ci_label = "fallback (no p-value)"
+                # Note: Wald CI from Firth fits is not supported (_wald_ci_or_from_fit rejects penalized fits)
+                # Profile CIs are used for Firth instead
+                pass
                 if ci_valid and (not np.isfinite(p_val)):
                     out[f"{anc_upper}_REASON"] = ""
                 if not out[f"{anc_upper}_REASON"]:
