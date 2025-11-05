@@ -8,7 +8,8 @@ This is distinct from the category omnibus tests in phewas.categories which aggr
 individual phenotype p-values. Here we define NEW phenotypes at the category level
 and run standard logistic regression on them.
 
-Conservative FDR control is applied across all category tests.
+Benjamini-Hochberg FDR control is applied across all category tests. BH controls
+FDR under independence or positive dependence (PRDS) assumptions.
 """
 
 import os
@@ -60,8 +61,9 @@ RELATEDNESS_URI = phewas_run.RELATEDNESS_URI
 MIN_CASES_FILTER = 1_000
 MIN_CONTROLS_FILTER = 1_000
 
-# Output suppression for convergence warnings
-warnings.filterwarnings('ignore', category=sm.tools.sm_exceptions.ConvergenceWarning)
+# Separation detection thresholds
+MAX_SE_THRESHOLD = 10.0  # Flag potential separation if SE > 10
+MIN_EPV = 10  # Events per variable - minimum for stable MLE
 
 
 def _log(msg: str):
@@ -125,12 +127,45 @@ def build_category_phenotypes(
     return category_phenotypes
 
 
+def _detect_separation(y: np.ndarray, X_design: pd.DataFrame, inv_idx: int) -> tuple:
+    """Detect potential separation or quasi-separation.
+    
+    Returns:
+        (is_separated, reason) tuple
+    """
+    # Check for perfect prediction patterns
+    inv_col = X_design.iloc[:, inv_idx]
+    
+    # Check if all cases have high dosage and all controls have low dosage (or vice versa)
+    cases = y == 1
+    controls = y == 0
+    
+    if cases.sum() == 0 or controls.sum() == 0:
+        return True, "no_variation_in_outcome"
+    
+    # Check for monotone relationship (all cases > all controls or vice versa)
+    case_vals = inv_col[cases]
+    ctrl_vals = inv_col[controls]
+    
+    if case_vals.min() > ctrl_vals.max():
+        return True, "complete_separation_cases_high"
+    if ctrl_vals.min() > case_vals.max():
+        return True, "complete_separation_controls_high"
+    
+    # Check overlap - if very little overlap, likely quasi-separation
+    overlap = (case_vals.min() < ctrl_vals.max()) and (ctrl_vals.min() < case_vals.max())
+    if not overlap:
+        return True, "quasi_separation"
+    
+    return False, None
+
+
 def run_logistic_regression(
     y: np.ndarray,
     X: pd.DataFrame,
     inversion_col: str,
 ) -> Dict:
-    """Run logistic regression for a single category phenotype.
+    """Run logistic regression for a single category phenotype with separation detection.
 
     Args:
         y: Binary outcome (1=case, 0=control)
@@ -142,16 +177,87 @@ def run_logistic_regression(
     """
     # Prepare design matrix with constant
     X_design = sm.add_constant(X, has_constant='add')
-
-    # Fit logistic regression
+    
+    # Sample sizes
+    n_cases = int(y.sum())
+    n_controls = int((1 - y).sum())
+    n_total = len(y)
+    n_params = X_design.shape[1]
+    
+    # Check events per variable
+    min_events = min(n_cases, n_controls)
+    epv = min_events / n_params
+    
+    inv_idx = list(X_design.columns).index(inversion_col)
+    
+    # Check for separation
+    is_separated, sep_reason = _detect_separation(y, X_design, inv_idx)
+    
+    # Initialize result dict
+    result_dict = {
+        "N_Total": n_total,
+        "N_Cases": n_cases,
+        "N_Controls": n_controls,
+        "EPV": epv,
+        "N_Params": n_params,
+    }
+    
+    # Decide on fitting strategy
+    use_penalized = is_separated or epv < MIN_EPV
+    
+    if is_separated:
+        _log(f"      WARN: Separation detected ({sep_reason}), using penalized likelihood")
+        result_dict["Separation_Detected"] = True
+        result_dict["Separation_Reason"] = sep_reason
+    elif epv < MIN_EPV:
+        _log(f"      WARN: Low EPV ({epv:.1f} < {MIN_EPV}), using penalized likelihood")
+        result_dict["Separation_Detected"] = False
+        result_dict["Low_EPV"] = True
+    
+    # Fit model
     try:
-        model = sm.GLM(y, X_design, family=sm.families.Binomial())
-        result = model.fit()
+        if use_penalized:
+            # Use L2 penalized logistic regression
+            # Statsmodels doesn't have built-in Firth, so use ridge penalty
+            model = sm.GLM(y, X_design, family=sm.families.Binomial())
+            
+            # Capture convergence warnings
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always", sm.tools.sm_exceptions.ConvergenceWarning)
+                result = model.fit_regularized(method='l1_cvxopt_cp', alpha=0.1, L1_wt=0.0)
+                
+                convergence_warnings = [str(warning.message) for warning in w 
+                                       if issubclass(warning.category, sm.tools.sm_exceptions.ConvergenceWarning)]
+            
+            result_dict["Method"] = "penalized_l2"
+            result_dict["Converged"] = len(convergence_warnings) == 0
+            result_dict["Convergence_Warnings"] = "; ".join(convergence_warnings) if convergence_warnings else None
+            
+        else:
+            # Standard MLE
+            model = sm.GLM(y, X_design, family=sm.families.Binomial())
+            
+            # Capture convergence warnings
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always", sm.tools.sm_exceptions.ConvergenceWarning)
+                result = model.fit()
+                
+                convergence_warnings = [str(warning.message) for warning in w 
+                                       if issubclass(warning.category, sm.tools.sm_exceptions.ConvergenceWarning)]
+            
+            result_dict["Method"] = "mle"
+            result_dict["Converged"] = bool(result.converged)
+            result_dict["Convergence_Warnings"] = "; ".join(convergence_warnings) if convergence_warnings else None
 
         # Extract inversion coefficient
-        inv_idx = list(X_design.columns).index(inversion_col)
         beta = float(result.params.iloc[inv_idx])
         se = float(result.bse.iloc[inv_idx])
+        
+        # Check for inflated SE (sign of quasi-separation even if not detected)
+        if se > MAX_SE_THRESHOLD:
+            _log(f"      WARN: Large SE ({se:.2f}) suggests quasi-separation or weak identification")
+            result_dict["Large_SE_Warning"] = True
+        
         z_stat = beta / se if se > 0 else np.nan
         p_value = float(result.pvalues.iloc[inv_idx])
 
@@ -160,12 +266,7 @@ def run_logistic_regression(
         ci_low = np.exp(beta - 1.96 * se)
         ci_high = np.exp(beta + 1.96 * se)
 
-        # Sample sizes
-        n_cases = int(y.sum())
-        n_controls = int((1 - y).sum())
-        n_total = len(y)
-
-        return {
+        result_dict.update({
             "Beta": beta,
             "SE": se,
             "Z": z_stat,
@@ -173,16 +274,12 @@ def run_logistic_regression(
             "OR": or_val,
             "OR_CI95_Low": ci_low,
             "OR_CI95_High": ci_high,
-            "N_Total": n_total,
-            "N_Cases": n_cases,
-            "N_Controls": n_controls,
-            "Converged": bool(result.converged),
             "LLF": float(result.llf) if hasattr(result, 'llf') else np.nan,
-        }
+        })
 
     except Exception as e:
-        _log(f"    ERROR in logistic regression: {e}")
-        return {
+        _log(f"      ERROR in logistic regression: {type(e).__name__}: {e}")
+        result_dict.update({
             "Beta": np.nan,
             "SE": np.nan,
             "Z": np.nan,
@@ -190,12 +287,13 @@ def run_logistic_regression(
             "OR": np.nan,
             "OR_CI95_Low": np.nan,
             "OR_CI95_High": np.nan,
-            "N_Total": int((~np.isnan(y)).sum()),
-            "N_Cases": int(np.nansum(y)),
-            "N_Controls": int(np.nansum(1 - y)),
             "Converged": False,
             "LLF": np.nan,
-        }
+            "Method": "failed",
+            "Error": str(e)[:200],  # Truncate long error messages
+        })
+    
+    return result_dict
 
 
 def test_categories_for_inversion(
@@ -252,8 +350,20 @@ def test_categories_for_inversion(
 
         results.append(reg_result)
 
-        _log(f"    Result: OR={reg_result['OR']:.4f}, P={reg_result['P_Value']:.3e}, "
-             f"N={reg_result['N_Cases']}/{reg_result['N_Controls']}")
+        # Enhanced logging with diagnostics
+        method_str = reg_result.get('Method', 'unknown')
+        converged_str = "converged" if reg_result.get('Converged', False) else "NOT_CONVERGED"
+        sep_str = ""
+        if reg_result.get('Separation_Detected'):
+            sep_str = f" [SEP: {reg_result.get('Separation_Reason', 'unknown')}]"
+        elif reg_result.get('Low_EPV'):
+            sep_str = f" [LOW_EPV: {reg_result.get('EPV', 0):.1f}]"
+        if reg_result.get('Large_SE_Warning'):
+            sep_str += f" [LARGE_SE: {reg_result.get('SE', 0):.2f}]"
+        
+        _log(f"    Result: OR={reg_result.get('OR', np.nan):.4f}, P={reg_result.get('P_Value', np.nan):.3e}, "
+             f"N={reg_result['N_Cases']}/{reg_result['N_Controls']}, "
+             f"method={method_str}, {converged_str}{sep_str}")
 
     return pd.DataFrame(results)
 
