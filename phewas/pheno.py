@@ -346,14 +346,19 @@ def _case_ids_cached(s_name: str, cdr_codename: str, cache_dir: str) -> tuple:
     """
     Read the per-phenotype parquet ONCE per process and return the case person_ids as a tuple of str.
     If cache is corrupted, deletes it and raises exception to trigger rebuild.
+    If cache doesn't exist, raises FileNotFoundError (no log spam).
     """
     pheno_cache_path = os.path.join(cache_dir, f"pheno_{s_name}_{cdr_codename}.parquet")
     try:
         ph = pd.read_parquet(pheno_cache_path, columns=['is_case'])
         case_ids = ph.index[ph['is_case'] == 1].astype(str)
         return tuple(case_ids)
+    except FileNotFoundError:
+        # Cache doesn't exist - this is expected for missing phenotypes, don't spam logs
+        raise
     except Exception as e:
-        print(f"[CacheLoader] - [CORRUPT] Cache corrupted for '{s_name}': {e}. Deleting and will rebuild.", flush=True)
+        # Cache exists but is corrupted - delete it and log
+        print(f"[CacheLoader] - [CORRUPT] Cache corrupted for '{s_name}': {e}. Deleting for rebuild.", flush=True)
         try:
             os.remove(pheno_cache_path)
         except FileNotFoundError:
@@ -380,6 +385,9 @@ def _load_single_pheno_cache(pheno_info, core_index, cdr_codename, cache_dir):
         if case_idx.size == 0:
             return None
         return {"name": s_name, "category": category, "case_idx": case_idx}
+    except FileNotFoundError:
+        # Cache doesn't exist - normal for missing phenotypes, no logging needed
+        return None
     except Exception as e:
         # Cache was corrupted and deleted by _case_ids_cached, or other error occurred
         # Clear the LRU cache entry so next attempt will retry from disk
