@@ -190,6 +190,8 @@ def run_logistic_regression(
     n_params = X_design.shape[1]
     
     # Check events per variable
+    # Note: EPV is typically defined as events / number of predictors (excluding intercept),
+    # but we divide by n_params (including intercept) for a more conservative threshold
     min_events = min(n_cases, n_controls)
     epv = min_events / n_params
     
@@ -569,12 +571,22 @@ def main():
         lock_dir=LOCK_DIR,
     )
 
-    anc_series = ancestry.reindex(shared_covariates_df.index)["ANCESTRY"]
-    anc_cat = pd.Categorical(anc_series)
-    ancestry_dummies = pd.get_dummies(anc_cat, prefix='ANC', drop_first=True, dtype=np.float32)
-    ancestry_dummies.index = anc_series.index  # Use the person IDs from anc_series, not RangeIndex
+    # Normalize index dtype to match shared_covariates_df before reindex
+    ancestry.index = ancestry.index.astype(str)
 
-    _log(f"Ancestry categories: {sorted(anc_cat.categories.tolist())}")
+    # Keep as Series (with person_id index), then set categorical dtype
+    anc_series = ancestry.reindex(shared_covariates_df.index)["ANCESTRY"].astype("category")
+
+    # Build dummies from Series so the index is preserved (not from bare Categorical)
+    ancestry_dummies = pd.get_dummies(
+        anc_series, prefix="ANC", drop_first=True, dtype=np.float32
+    )
+
+    # Edge case: if only one ancestry category, ancestry_dummies will have zero columns
+    if ancestry_dummies.shape[1] == 0:
+        _log("Note: only one ancestry present after filtering; no dummy columns added.")
+
+    _log(f"Ancestry categories: {sorted(anc_series.cat.categories.tolist())}")
 
     # Populate phenotype caches
     _log("Populating phenotype caches...")
