@@ -65,6 +65,10 @@ MIN_CONTROLS_FILTER = 1_000
 MAX_SE_THRESHOLD = 10.0  # Flag potential separation if SE > 10
 MIN_EPV = 10  # Events per variable - minimum for stable MLE
 
+# Note: We detect separation but DO NOT use penalized likelihood fallback.
+# Ridge/Firth p-values are not valid for hypothesis testing in this context.
+# Separated fits are flagged and excluded from inference.
+
 
 def _log(msg: str):
     """Simple timestamped logging."""
@@ -174,6 +178,7 @@ def run_logistic_regression(
 
     Returns:
         Dictionary with regression results (Beta, SE, P, OR, CI, N_cases, N_controls, etc.)
+        If separation or low EPV detected, returns NaN for inference results.
     """
     # Prepare design matrix with constant
     X_design = sm.add_constant(X, has_constant='add')
@@ -202,52 +207,61 @@ def run_logistic_regression(
         "N_Params": n_params,
     }
     
-    # Decide on fitting strategy
-    use_penalized = is_separated or epv < MIN_EPV
+    # Check if we should skip inference due to separation or low EPV
+    skip_inference = is_separated or epv < MIN_EPV
     
     if is_separated:
-        _log(f"      WARN: Separation detected ({sep_reason}), using penalized likelihood")
+        _log(f"      SKIP: Separation detected ({sep_reason}) - no valid inference")
         result_dict["Separation_Detected"] = True
         result_dict["Separation_Reason"] = sep_reason
-    elif epv < MIN_EPV:
-        _log(f"      WARN: Low EPV ({epv:.1f} < {MIN_EPV}), using penalized likelihood")
-        result_dict["Separation_Detected"] = False
+        result_dict["Method"] = "skipped_separation"
+        # Return NaN for all inference results
+        result_dict.update({
+            "Beta": np.nan,
+            "SE": np.nan,
+            "Z": np.nan,
+            "P_Value": np.nan,
+            "OR": np.nan,
+            "OR_CI95_Low": np.nan,
+            "OR_CI95_High": np.nan,
+            "Converged": False,
+            "LLF": np.nan,
+        })
+        return result_dict
+        
+    if epv < MIN_EPV:
+        _log(f"      SKIP: Low EPV ({epv:.1f} < {MIN_EPV}) - insufficient data for stable inference")
         result_dict["Low_EPV"] = True
+        result_dict["Method"] = "skipped_low_epv"
+        # Return NaN for all inference results
+        result_dict.update({
+            "Beta": np.nan,
+            "SE": np.nan,
+            "Z": np.nan,
+            "P_Value": np.nan,
+            "OR": np.nan,
+            "OR_CI95_Low": np.nan,
+            "OR_CI95_High": np.nan,
+            "Converged": False,
+            "LLF": np.nan,
+        })
+        return result_dict
     
-    # Fit model
+    # Fit standard MLE
     try:
-        if use_penalized:
-            # Use L2 penalized logistic regression
-            # Statsmodels doesn't have built-in Firth, so use ridge penalty
-            model = sm.GLM(y, X_design, family=sm.families.Binomial())
+        model = sm.GLM(y, X_design, family=sm.families.Binomial())
+        
+        # Capture convergence warnings
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always", sm.tools.sm_exceptions.ConvergenceWarning)
+            result = model.fit()
             
-            # Capture convergence warnings
-            with warnings.catch_warnings(record=True) as w:
-                warnings.simplefilter("always", sm.tools.sm_exceptions.ConvergenceWarning)
-                result = model.fit_regularized(method='l1_cvxopt_cp', alpha=0.1, L1_wt=0.0)
-                
-                convergence_warnings = [str(warning.message) for warning in w 
-                                       if issubclass(warning.category, sm.tools.sm_exceptions.ConvergenceWarning)]
-            
-            result_dict["Method"] = "penalized_l2"
-            result_dict["Converged"] = len(convergence_warnings) == 0
-            result_dict["Convergence_Warnings"] = "; ".join(convergence_warnings) if convergence_warnings else None
-            
-        else:
-            # Standard MLE
-            model = sm.GLM(y, X_design, family=sm.families.Binomial())
-            
-            # Capture convergence warnings
-            with warnings.catch_warnings(record=True) as w:
-                warnings.simplefilter("always", sm.tools.sm_exceptions.ConvergenceWarning)
-                result = model.fit()
-                
-                convergence_warnings = [str(warning.message) for warning in w 
-                                       if issubclass(warning.category, sm.tools.sm_exceptions.ConvergenceWarning)]
-            
-            result_dict["Method"] = "mle"
-            result_dict["Converged"] = bool(result.converged)
-            result_dict["Convergence_Warnings"] = "; ".join(convergence_warnings) if convergence_warnings else None
+            convergence_warnings = [str(warning.message) for warning in w 
+                                   if issubclass(warning.category, sm.tools.sm_exceptions.ConvergenceWarning)]
+        
+        result_dict["Method"] = "mle"
+        result_dict["Converged"] = bool(result.converged)
+        result_dict["Convergence_Warnings"] = "; ".join(convergence_warnings) if convergence_warnings else None
 
         # Extract inversion coefficient
         beta = float(result.params.iloc[inv_idx])
@@ -321,28 +335,48 @@ def test_categories_for_inversion(
     covariate_cols = [inversion_name, "sex"] + pc_cols + ["AGE_c", "AGE_c_sq"]
 
     X_base = core_df[covariate_cols].copy()
-    X_full = pd.concat([X_base, ancestry_dummies.reindex(X_base.index).fillna(0.0)], axis=1)
+    
+    # Join ancestry dummies - MUST have ancestry labels for all individuals
+    # Do NOT fillna(0) as that misclassifies unlabeled individuals as baseline group
+    X_full = X_base.join(ancestry_dummies, how='inner')
+    
+    # Check for individuals dropped due to missing ancestry
+    n_dropped = len(X_base) - len(X_full)
+    if n_dropped > 0:
+        _log(f"  Dropped {n_dropped} individuals without ancestry labels")
 
     # Test each category
     results = []
     for category, case_mask in category_phenotypes.items():
         _log(f"  Testing category: {category}")
 
-        # Build outcome vector aligned to X_full
-        y = case_mask.astype(float)
+        # Build outcome vector aligned to X_full (after ancestry filtering)
+        # case_mask is indexed to core_df, need to subset to X_full.index
+        y_full = np.zeros(len(X_full), dtype=float)
+        
+        # Map case_mask from core_df to X_full
+        shared_idx = X_full.index.intersection(core_df.index)
+        if len(shared_idx) == 0:
+            _log(f"    SKIP: No overlap between X_full and core_df")
+            continue
+            
+        core_positions = core_df.index.get_indexer(shared_idx)
+        xfull_positions = X_full.index.get_indexer(shared_idx)
+        y_full[xfull_positions] = case_mask[core_positions]
 
-        # Apply allowed controls logic: controls cannot be cases of ANY phenotype in category
-        # For now, use all non-cases as controls (following the user's spec)
-        # Note: could refine this with pan-category exclusions like main phewas
-
-        # Check minimum controls
-        n_controls = int((~case_mask).sum())
+        # Check minimum cases and controls after ancestry filtering
+        n_cases = int(y_full.sum())
+        n_controls = int((1 - y_full).sum())
+        
+        if n_cases < MIN_CASES_FILTER:
+            _log(f"    SKIP: Only {n_cases:,} cases (< {MIN_CASES_FILTER:,})")
+            continue
         if n_controls < MIN_CONTROLS_FILTER:
             _log(f"    SKIP: Only {n_controls:,} controls (< {MIN_CONTROLS_FILTER:,})")
             continue
 
         # Run regression
-        reg_result = run_logistic_regression(y, X_full, inversion_name)
+        reg_result = run_logistic_regression(y_full, X_full, inversion_name)
 
         # Add metadata
         reg_result["Category"] = category
