@@ -976,7 +976,17 @@ def _load_scores_table() -> tuple[pd.DataFrame, Path]:
     if not resolved.exists():
         raise FileNotFoundError(f"Scores file not found: {SCORES_FILE}")
     info(f"Loading shared PGS controls from {resolved}")
-    df = pd.read_csv(resolved, sep="\t")
+    
+    # Read file, skipping #REGION lines but keeping #IID header
+    with open(resolved) as f:
+        lines = [line for line in f if not line.startswith("#REGION")]
+    
+    # Remove leading # from header if present
+    if lines and lines[0].startswith("#"):
+        lines[0] = lines[0][1:]
+    
+    from io import StringIO
+    df = pd.read_csv(StringIO("".join(lines)), sep="\t")
     if df.empty:
         raise RuntimeError(f"Scores file '{resolved}' is empty.")
 
