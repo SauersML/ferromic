@@ -3325,7 +3325,7 @@ def _lrt_overall_worker_impl(task):
                 full_path = getattr(fit_full, "_path_reasons", ["unknown"])
                 red_path = getattr(fit_red, "_path_reasons", ["unknown"])
                 print(
-                    f"[INFERENCE-CHOICE] name={s_name} site=bootstrap_overall_worker "
+                    f"[INFERENCE-CHOICE] name={s_name} site=lrt_overall_worker "
                     f"choice=firth full_fit={'|'.join(full_path)} red_fit={'|'.join(red_path)}",
                     flush=True
                 )
@@ -3356,7 +3356,7 @@ def _lrt_overall_worker_impl(task):
                     lo_or_val = np.exp(ci_info.get("lo", np.nan)) if np.isfinite(ci_info.get("lo", np.nan)) else np.nan
                     hi_or_val = np.exp(ci_info.get("hi", np.nan)) if np.isfinite(ci_info.get("hi", np.nan)) else np.nan
                     print(
-                        f"[CI-PROFILE-PENALIZED] name={s_name} site=bootstrap_overall_worker "
+                        f"[CI-PROFILE-PENALIZED] name={s_name} site=lrt_overall_worker "
                         f"sided={ci_sided} lo_or={lo_or_val:.4f} hi_or={hi_or_val:.4f} "
                         f"valid={str(ci_valid).lower()} beta_hat={beta_hat:.4f} note={ci_info.get('note', '')}",
                         flush=True
@@ -3729,7 +3729,7 @@ def _lrt_overall_worker_impl(task):
             if p_source:
                 attempted_sources.append(f"{p_source}:{p_value if np.isfinite(p_value) else 'nan'}")
             print(
-                f"[P-BLOCKED-PENALIZED] name={s_name} site=bootstrap_overall_worker "
+                f"[P-BLOCKED-PENALIZED] name={s_name} site=lrt_overall_worker "
                 f"reason=penalized_fit_in_path full_path={'|'.join(full_path)} red_path={'|'.join(red_path)} "
                 f"attempted_p_sources={';'.join(attempted_sources) if attempted_sources else 'none'}",
                 flush=True
