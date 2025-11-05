@@ -5150,13 +5150,12 @@ def _lrt_followup_worker_impl(task):
             ci_str_display = ci_str if ci_valid else "N/A"
             print(f"[Stage2]     {anc_upper}: OR={or_str}, P={p_str}, CI95={ci_str_display}, method={p_source or 'none'}", flush=True)
 
-
-
         io.atomic_write_json(result_path, out)
         _write_meta(meta_path, "lrt_followup", s_name, category, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra=dict(meta_extra_common))
         
         print(f"\n[Stage2] COMPLETE: {s_name_safe}", flush=True)
-        print(f"[Stage2]   Interaction P: {out['P_LRT_AncestryxDosage']:.4e if out['P_Stage2_Valid'] else 'NaN'}", flush=True)
+        p_display = f"{out['P_LRT_AncestryxDosage']:.4e}" if out['P_Stage2_Valid'] else 'NaN'
+        print(f"[Stage2]   Interaction P: {p_display}", flush=True)
         print(f"[Stage2]   Results saved to: {os.path.basename(result_path)}", flush=True)
         print(f"{'='*80}\n", flush=True)
         
