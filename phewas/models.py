@@ -38,6 +38,7 @@ class CaseCacheReadError(RuntimeError):
 DEFAULT_PREFER_FIRTH_ON_RIDGE = True
 DEFAULT_ALLOW_POST_FIRTH_MLE_REFIT = True
 ENABLE_SCORE_BOOT_MLE = False  # Disable score bootstrap (too slow); set invalid p-value instead
+ENABLE_SCORE_BOOT_PER_ANCESTRY = True  # Enable score bootstrap ONLY for per-ancestry tests
 
 ALLOWED_P_SOURCES = {"lrt_mle", "score_chi2", "score_boot_mle", "score_boot_firth", "rao_score"}
 ALLOWED_CI_METHODS = {
@@ -4963,7 +4964,12 @@ def _lrt_followup_worker_impl(task):
                     if inference_type == "none":
                         inference_type = "score"
                 else:
-                    if ENABLE_SCORE_BOOT_MLE:
+                    if ENABLE_SCORE_BOOT_PER_ANCESTRY:
+                        print(
+                            f"[BOOT-PER-ANCESTRY] name={s_name} anc={anc_upper} "
+                            f"reason=score_chi2_failed action=attempting_score_bootstrap",
+                            flush=True
+                        )
                         boot_res = _score_bootstrap_from_reduced(
                             X_anc_red,
                             y_anc,
@@ -4974,9 +4980,20 @@ def _lrt_followup_worker_impl(task):
                         if np.isfinite(p_emp):
                             p_val = p_emp
                             p_source = "score_boot_firth" if boot_res.get("fit_kind") == "firth" else "score_boot_mle"
+                            print(
+                                f"[BOOT-PER-ANCESTRY] name={s_name} anc={anc_upper} "
+                                f"p_emp={p_emp:.4e} source={p_source} action=bootstrap_succeeded",
+                                flush=True
+                            )
                             # Only set inference_type if not already set (e.g., preserve "firth")
                             if inference_type == "none":
                                 inference_type = "score_boot"
+                        else:
+                            print(
+                                f"[BOOT-PER-ANCESTRY] name={s_name} anc={anc_upper} "
+                                f"action=bootstrap_failed",
+                                flush=True
+                            )
                     # If bootstrap disabled, p_val remains non-finite and will be handled downstream
 
             if (
