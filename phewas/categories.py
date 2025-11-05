@@ -190,19 +190,19 @@ def _phi_covariance_for_category(
     Sigma = np.eye(K, dtype=np.float64)
 
     for i in range(K):
-        vec_i = used_vectors[i]
-        n1_i = int(vec_i.sum())
+        vec_i = used_vectors[i].astype(np.float64)
+        mean_i = vec_i.mean()
+        std_i = vec_i.std(ddof=0)
         for j in range(i + 1, K):
-            vec_j = used_vectors[j]
-            n1_j = int(vec_j.sum())
-            n11 = int(np.sum(vec_i & vec_j))
-            n10 = n1_i - n11
-            n01 = n1_j - n11
-            n00 = n_people - (n11 + n10 + n01)
-            phi_val = pheno.phi_from_2x2(n11, n10, n01, n00)
-            if not np.isfinite(phi_val):
-                phi_val = 0.0
-            Sigma[i, j] = Sigma[j, i] = float(phi_val)
+            vec_j = used_vectors[j].astype(np.float64)
+            mean_j = vec_j.mean()
+            std_j = vec_j.std(ddof=0)
+            if std_i > 0 and std_j > 0:
+                corr_val = float(np.mean((vec_i - mean_i) * (vec_j - mean_j)) / (std_i * std_j))
+                corr_val = np.clip(corr_val, -1.0, 1.0)
+            else:
+                corr_val = 0.0
+            Sigma[i, j] = Sigma[j, i] = corr_val
 
     Sigma = _apply_shrinkage(Sigma, method=shrinkage, lambda_value=lambda_value)
     return CategoryNull(
@@ -345,20 +345,18 @@ def _simulate_gbj_pvalue(
         eigvals, eigvecs = np.linalg.eigh(correlation)
         eigvals = np.clip(eigvals, 1e-6, None)
         cov_pd = (eigvecs @ np.diag(eigvals)) @ eigvecs.T
-        chol = np.linalg.cholesky(cov_pd)
+        d_inv = 1.0 / np.sqrt(np.diag(cov_pd))
+        corr_pd = (d_inv[:, None] * cov_pd) * d_inv[None, :]
+        np.fill_diagonal(corr_pd, 1.0)
+        chol = np.linalg.cholesky(corr_pd)
+    
     stats_obs = 0
-    total_draws = 0
     ceiling = _sanitize_z_cap(z_cap)
-    batch_size = max(int(draws), 1)
-    if max_draws is None:
-        ceiling_draws = batch_size * 10
-    else:
-        ceiling_draws = max(int(max_draws), 1)
-    max_draws = max(batch_size, ceiling_draws)
+    batch_size = 10000
+    total_draws = int(draws)
 
-    while total_draws < max_draws:
-        remaining = max_draws - total_draws
-        current = min(batch_size, remaining)
+    for start in range(0, total_draws, batch_size):
+        current = min(batch_size, total_draws - start)
         samples = chol @ rng.standard_normal((p, current))
         if ceiling is not None:
             np.clip(samples, -ceiling, ceiling, out=samples)
@@ -368,12 +366,6 @@ def _simulate_gbj_pvalue(
             stat = _gbj_statistic(pvals)
             if stat >= observed_stat:
                 stats_obs += 1
-        total_draws += current
-        if stats_obs > 0:
-            break
-        batch_size = min(batch_size * 2, max_draws - total_draws)
-        if batch_size <= 0:
-            break
 
     return float((stats_obs + 1) / (total_draws + 1)), int(total_draws)
 
