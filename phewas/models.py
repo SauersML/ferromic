@@ -741,6 +741,19 @@ def _firth_refit_offset(X, y, offset=None, maxiter=200, tol=1e-8):
 
 
 def _profile_ci_beta(X_full, y, target_ix, fit_full, kind="mle", alpha=0.05, max_abs_beta=None):
+    """
+    Compute profile likelihood CI for a single coefficient.
+    
+    KNOWN ISSUE for kind="firth":
+    This implementation drops the target column and uses an offset, which changes
+    the dimension of the Firth penalty term (0.5 * log|X'WX|) between the full
+    and constrained models. This causes dev_at(beta_hat) to be non-zero, leading
+    to invalid or misclassified CIs for rare/imbalanced traits.
+    
+    CORRECT FIX: Keep the target column and constrain β_target = b0 (don't drop
+    the column) so the penalization is computed on the same parameterization.
+    This requires implementing _firth_refit_with_fixed_coef().
+    """
     max_abs_beta = float(CTX.get("PROFILE_MAX_ABS_BETA", PROFILE_MAX_ABS_BETA) if max_abs_beta is None else max_abs_beta)
     X_np = X_full.to_numpy(dtype=np.float64, copy=False) if hasattr(X_full, "to_numpy") else np.asarray(X_full, dtype=np.float64)
     y_np = np.asarray(y, dtype=np.float64)
@@ -755,6 +768,7 @@ def _profile_ci_beta(X_full, y, target_ix, fit_full, kind="mle", alpha=0.05, max
     ll_full = float(getattr(fit_full, "llf", np.nan))
     if not np.isfinite(ll_full):
         return {"lo": np.nan, "hi": np.nan, "sided": "two", "valid": False, "method": None}
+    # WARNING: Dropping column changes Firth penalty dimension - see docstring
     X_red = np.delete(X_np, int(target_ix), axis=1)
     x_target = X_np[:, int(target_ix)]
     crit = float(sp_stats.chi2.ppf(1.0 - alpha, df=1))
@@ -3469,6 +3483,16 @@ def _lrt_overall_worker_impl(task):
         # Report inference_type even if p-value is invalid, as long as CI is valid
         inference_type_out = inference_type if (p_valid or ci_valid) else "none"
         inference_type = inference_type_out
+        
+        # Track coefficient source separately from p-value source
+        # Coefficients come from fit_full_use if available, otherwise fit_full
+        coef_source_fit = fit_full_use if fit_full_use is not None else fit_full
+        coef_is_mle = (
+            inference_family == "mle" or 
+            (inference_family is None and coef_source_fit is not None and 
+             bool(getattr(coef_source_fit, "_final_is_mle", False)) and 
+             not bool(getattr(coef_source_fit, "_used_firth", False)))
+        )
 
         out = {
             "Phenotype": s_name,
@@ -3525,9 +3549,11 @@ def _lrt_overall_worker_impl(task):
             "CI_LO_OR": ci_lo_or,
             "CI_HI_OR": ci_hi_or,
             "Used_Ridge": ridge_in_path_full,
-            "Final_Is_MLE": inference_type_out == "mle",
+            "Final_Is_MLE": coef_is_mle,
             "Used_Firth": used_firth_full,
             "Inference_Type": inference_type_out,
+            "Coef_Source": "mle" if coef_is_mle else ("firth" if inference_family == "firth" else "unknown"),
+            "P_Value_Method": p_source,
             "N_Total_Used": n_total_used,
             "N_Cases_Used": n_cases_used,
             "N_Controls_Used": n_ctrls_used,
