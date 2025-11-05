@@ -1548,18 +1548,7 @@ def write_volcano_tsv(df: pd.DataFrame, outfile: str):
 # =============================================================================
 
 def main():
-    import argparse
-    parser = argparse.ArgumentParser(description="Generate CDS conservation plots")
-    parser.add_argument("--mapt-only", action="store_true", help="Only generate MAPT heatmap")
-    args = parser.parse_args()
-    
     cds_summary = load_cds_summary()
-    
-    if args.mapt_only:
-        pairs_index = build_pairs_and_phy_index(cds_summary)
-        plot_mapt_polymorphism_heatmap(cds_summary, pairs_index, MAPT_HEATMAP_FILE)
-        return
-    
     gene_tests  = load_gene_tests()
     pairs_index = build_pairs_and_phy_index(cds_summary)
 
