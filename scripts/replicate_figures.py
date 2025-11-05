@@ -434,6 +434,14 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         required=False,
         note="Requires phewas_results.tsv exported from the production pipeline.",
     ),
+    FigureTask(
+        name="PGS control volcano plot",
+        script=Path("stats/PGS_control_plot.py"),
+        outputs=(Path("PGS_control_volcano.pdf"), Path("PGS_control_volcano.png")),
+        dependencies=("PGS_controls.tsv",),
+        required=False,
+        note="Requires PGS_controls.tsv showing effect of polygenic score adjustment.",
+    ),
 )
 
 # ---------------------------------------------------------------------------
