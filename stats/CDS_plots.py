@@ -646,7 +646,7 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
     ax.axvspan(2.5, 4.5, color="#e6f4ea", alpha=0.18, zorder=0)
 
     # Swarm plot parameters
-    swarm_width = 0.7  # Total width for swarm (increased for better spread)
+    swarm_width = 0.85  # Total width for swarm (increased for better spread)
 
     for i, cat in enumerate(CATEGORY_ORDER, start=1):
         d = dist[cat]
@@ -657,77 +657,123 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
         # Orientation-based face color
         face = CATEGORY_FACE[cat]
 
-        # Swarm plot: arrange points to avoid overlap with improved bunching handling
+        # Beeswarm plot: hexagonal packing with both x and y adjustment
         if all_vals.size > 0:
             # Sort by y-value for bottom-up placement
             y_sorted_idx = np.argsort(all_vals)
-            y_sorted = all_vals[y_sorted_idx]
+            y_sorted = all_vals[y_sorted_idx].copy()
             x_positions = np.zeros(len(y_sorted))
+            y_adjusted = y_sorted.copy()
 
-            # Adaptive parameters based on data density
-            bin_size = 0.012  # Tighter y-binning for better vertical resolution
-            point_radius = 0.022  # Slightly smaller for denser packing
+            # Parameters for hexagonal packing
+            point_radius = 0.022
             
-            # Track occupied positions in a grid-like structure for faster collision detection
-            occupied_positions = []
+            # Tighter spacing for points at y=1.0
+            base_y_spacing = point_radius * 0.866  # sqrt(3)/2 for proper hexagonal packing
+            
+            # Track all placed points (x, y)
+            placed_points = []
 
-            for idx, y_val in enumerate(y_sorted):
-                # Find nearby points in y-direction (within bin_size)
-                nearby_x = []
-                for prev_idx in range(idx):
-                    if abs(y_sorted[prev_idx] - y_val) < bin_size:
-                        nearby_x.append(x_positions[prev_idx])
-
-                # Find x position that doesn't collide
-                x_offset = 0
-                if nearby_x:
-                    # Sort nearby positions to find gaps
-                    nearby_x_sorted = sorted(nearby_x)
-                    
-                    # Try center first
-                    if not any(abs(nx - 0) < point_radius for nx in nearby_x):
-                        x_offset = 0
-                    else:
-                        # Build outward symmetrically, checking both sides
-                        found = False
-                        for layer in range(1, 100):
-                            # Calculate position at this layer
-                            offset_dist = layer * point_radius * 0.95  # Slight overlap for tighter packing
+            for idx in range(len(y_sorted)):
+                y_val = y_sorted[idx]
+                
+                # Use tighter spacing near y=1.0
+                if y_val >= 0.99:
+                    y_spacing = base_y_spacing * 0.5
+                else:
+                    y_spacing = base_y_spacing
+                
+                # Find all points that would collide
+                def collides(x_test, y_test):
+                    for px, py in placed_points:
+                        dist = np.sqrt((px - x_test)**2 + (py - y_test)**2)
+                        # Looser collision for y=1.0 points to allow tighter packing
+                        threshold = point_radius * 0.4 if y_val >= 0.999 else point_radius * 0.95
+                        if dist < threshold:
+                            return True
+                    return False
+                
+                # Try to place point
+                found = False
+                
+                # Special handling for y=1.0: 2 rows manually placed
+                if y_val >= 0.999:
+                    for y_row in range(2):  # Only 2 rows
+                        # Alternate row offset for hexagonal packing
+                        x_offset = (point_radius * 0.5) if (y_row % 2 == 1) else 0
+                        # Row 0 at exactly y=1.0, row 1 at y=1.0 + 0.5*radius
+                        if y_row == 0:
+                            y_test = y_val
+                        else:
+                            y_test = y_val + (point_radius * 0.5)
+                        
+                        for x_layer in range(100):
+                            if x_layer == 0:
+                                x_candidates = [x_offset]
+                            else:
+                                x_base = x_layer * point_radius
+                                x_candidates = [x_base + x_offset, -x_base + x_offset]
                             
-                            # Try right side first, then left
-                            for sign in [1, -1]:
-                                candidate = sign * offset_dist
-                                
-                                # Check if within swarm width
-                                if abs(candidate) > swarm_width / 2:
+                            for x_test in x_candidates:
+                                if abs(x_test) > swarm_width / 2:
                                     continue
                                 
-                                # Check collision with all nearby points
-                                collision = any(abs(nx - candidate) < point_radius for nx in nearby_x)
-                                
-                                if not collision:
-                                    x_offset = candidate
+                                if not collides(x_test, y_test):
+                                    x_positions[idx] = x_test
+                                    y_adjusted[idx] = y_test
+                                    placed_points.append((x_test, y_test))
                                     found = True
                                     break
                             
                             if found:
                                 break
                         
-                        # If still no position found, force placement at edge
-                        if not found:
-                            x_offset = swarm_width / 2 if len([x for x in nearby_x if x > 0]) < len([x for x in nearby_x if x < 0]) else -swarm_width / 2
+                        if found:
+                            break
+                else:
+                    # Normal multi-row stacking for other values
+                    for y_layer in range(20):
+                        y_test = y_val + (y_layer * y_spacing)
+                        
+                        # Hexagonal offset for odd rows
+                        x_offset = (point_radius * 0.5) if (y_layer % 2 == 1) else 0
+                        
+                        for x_layer in range(100):
+                            if x_layer == 0:
+                                x_candidates = [x_offset]
+                            else:
+                                x_base = x_layer * point_radius
+                                x_candidates = [x_base + x_offset, -x_base + x_offset]
+                            
+                            for x_test in x_candidates:
+                                if abs(x_test) > swarm_width / 2:
+                                    continue
+                                
+                                if not collides(x_test, y_test):
+                                    x_positions[idx] = x_test
+                                    y_adjusted[idx] = y_test
+                                    placed_points.append((x_test, y_test))
+                                    found = True
+                                    break
+                            
+                            if found:
+                                break
+                        
+                        if found:
+                            break
+                
+                if not found:
+                    x_positions[idx] = 0
+                    y_adjusted[idx] = y_val
+                    placed_points.append((0, y_val))
 
-                x_positions[idx] = x_offset
-                occupied_positions.append((y_val, x_offset))
-
-            # Plot all swarm points with size adjustment for dense regions
-            # Reduce point size slightly if there are many points
-            point_size = 20 if len(y_sorted) < 50 else 16 if len(y_sorted) < 100 else 14
+            # Plot all swarm points - bigger and more transparent
+            point_size = 28 if len(y_sorted) < 50 else 24 if len(y_sorted) < 100 else 20
             
             ax.scatter(
                 i + x_positions,
-                y_sorted,
-                s=point_size, alpha=0.7, color=face,
+                y_adjusted,
+                s=point_size, alpha=0.5, color=face,
                 edgecolor="white", linewidths=0.4, zorder=2,
             )
 
@@ -736,7 +782,7 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
             median_line_width = 0.35
             ax.plot([i - median_line_width/2, i + median_line_width/2],
                    [median, median],
-                   color="#000000", lw=2.5, zorder=10, solid_capstyle='butt')
+                   color="#000000", lw=2.5, alpha=0.6, zorder=10, solid_capstyle='butt')
 
         # Annotations
         n_at1 = d["n_at1"]
