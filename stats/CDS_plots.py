@@ -82,9 +82,23 @@ FIXED_DIFF_UNANIMITY_THRESHOLD = 1.0
 # =============================================================================
 
 def safe_read_tsv(path: str) -> pd.DataFrame:
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"Required file not found: {path}")
-    df = pd.read_csv(path, sep="\t", dtype=str)
+    # Search for file in multiple locations
+    search_paths = [
+        path,                                    # Exact path as given
+        os.path.join("analysis_downloads", os.path.basename(path)),  # Download dir
+        os.path.join("..", "analysis_downloads", os.path.basename(path)),  # Parent download dir
+    ]
+    
+    found_path = None
+    for candidate in search_paths:
+        if os.path.exists(candidate):
+            found_path = candidate
+            break
+    
+    if found_path is None:
+        raise FileNotFoundError(f"Required file not found: {path} (searched: {search_paths})")
+    
+    df = pd.read_csv(found_path, sep="\t", dtype=str)
     # Coerce numeric-looking columns at the DataFrame level (not via .apply)
     df = _coerce_numeric_cols(df)
     return df
@@ -1534,7 +1548,18 @@ def write_volcano_tsv(df: pd.DataFrame, outfile: str):
 # =============================================================================
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Generate CDS conservation plots")
+    parser.add_argument("--mapt-only", action="store_true", help="Only generate MAPT heatmap")
+    args = parser.parse_args()
+    
     cds_summary = load_cds_summary()
+    
+    if args.mapt_only:
+        pairs_index = build_pairs_and_phy_index(cds_summary)
+        plot_mapt_polymorphism_heatmap(cds_summary, pairs_index, MAPT_HEATMAP_FILE)
+        return
+    
     gene_tests  = load_gene_tests()
     pairs_index = build_pairs_and_phy_index(cds_summary)
 
