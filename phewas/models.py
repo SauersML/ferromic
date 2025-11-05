@@ -37,6 +37,7 @@ class CaseCacheReadError(RuntimeError):
 DEFAULT_PREFER_FIRTH_ON_RIDGE = True
 DEFAULT_ALLOW_PENALIZED_WALD = False
 DEFAULT_ALLOW_POST_FIRTH_MLE_REFIT = True
+ENABLE_SCORE_BOOT_MLE = False  # Disable score bootstrap (too slow); set invalid p-value instead
 
 ALLOWED_P_SOURCES = {"lrt_mle", "score_chi2", "score_boot_mle", "score_boot_firth", "rao_score"}
 ALLOWED_CI_METHODS = {
@@ -3297,19 +3298,24 @@ def _lrt_overall_worker_impl(task):
                 if inference_type is None:
                     inference_type = "score"
             else:
-                boot_res = _score_bootstrap_from_reduced(
-                    X_red_zv,
-                    yb,
-                    x_target_vec,
-                    seed_key=("lrt_overall", s_name_safe, target, "pval"),
-                )
-                p_emp = float(boot_res.get("p", np.nan))
-                if np.isfinite(p_emp):
-                    p_value = p_emp
-                    p_source = "score_boot_firth" if boot_res.get("fit_kind") == "firth" else "score_boot_mle"
-                    # Preserve inference_type if already set (e.g., "firth")
-                    if inference_type is None:
-                        inference_type = "score_boot"
+                if ENABLE_SCORE_BOOT_MLE:
+                    boot_res = _score_bootstrap_from_reduced(
+                        X_red_zv,
+                        yb,
+                        x_target_vec,
+                        seed_key=("lrt_overall", s_name_safe, target, "pval"),
+                    )
+                    p_emp = float(boot_res.get("p", np.nan))
+                    if np.isfinite(p_emp):
+                        p_value = p_emp
+                        p_source = "score_boot_firth" if boot_res.get("fit_kind") == "firth" else "score_boot_mle"
+                        # Preserve inference_type if already set (e.g., "firth")
+                        if inference_type is None:
+                            inference_type = "score_boot"
+                else:
+                    # Bootstrap disabled - mark p-value as invalid
+                    p_value = np.nan
+                    notes.append("score_boot_disabled:score_chi2_failed")
 
 
         if (
@@ -4019,7 +4025,9 @@ def _bootstrap_overall_worker_impl(task):
                 flush=True
             )
         elif reduced_fit_type == "mle" and red_final_is_mle and not red_used_firth:
-            if p_hat is None or W is None:
+            if not ENABLE_SCORE_BOOT_MLE:
+                p_reason = "score_boot_disabled:bernoulli_bootstrap"
+            elif p_hat is None or W is None:
                 p_reason = "missing_mle_probabilities"
             else:
                 h, denom = _efficient_score_vector(t_vec, Xr, W)
@@ -4059,24 +4067,27 @@ def _bootstrap_overall_worker_impl(task):
                         else:
                             p_reason = "bootstrap_failed"
         elif reduced_fit_type == "firth" or red_used_firth:
-            boot_engine = "wild_refit"
-            boot_res = _score_bootstrap_from_reduced(
-                X_red_zv,
-                yb,
-                t_vec,
-                seed_key=("boot_overall", s_name_safe, target, "score"),
-                kind="mle",
-            )
-            boot_fit_kind = boot_res.get("fit_kind")
-            p_emp = float(boot_res.get("p", np.nan))
-            T_obs = float(boot_res.get("T_obs", np.nan))
-            boot_draws = int(boot_res.get("draws", 0))
-            boot_exceed = int(boot_res.get("exceed", 0))
-            if np.isfinite(p_emp):
-                p_valid = True
-                p_source = "score_boot_firth" if boot_fit_kind == "firth" else "score_boot_mle"
+            if not ENABLE_SCORE_BOOT_MLE:
+                p_reason = "score_boot_disabled:wild_refit_bootstrap"
             else:
-                p_reason = "bootstrap_failed"
+                boot_engine = "wild_refit"
+                boot_res = _score_bootstrap_from_reduced(
+                    X_red_zv,
+                    yb,
+                    t_vec,
+                    seed_key=("boot_overall", s_name_safe, target, "score"),
+                    kind="mle",
+                )
+                boot_fit_kind = boot_res.get("fit_kind")
+                p_emp = float(boot_res.get("p", np.nan))
+                T_obs = float(boot_res.get("T_obs", np.nan))
+                boot_draws = int(boot_res.get("draws", 0))
+                boot_exceed = int(boot_res.get("exceed", 0))
+                if np.isfinite(p_emp):
+                    p_valid = True
+                    p_source = "score_boot_firth" if boot_fit_kind == "firth" else "score_boot_mle"
+                else:
+                    p_reason = "bootstrap_failed"
         else:
             p_reason = "reduced_fit_unknown"
 
@@ -4606,27 +4617,31 @@ def _lrt_followup_worker_impl(task):
                     out['LRT_Reason'] = ""
                     print(f"[Stage2] Score test: p={p_val:.4e}", flush=True)
                 else:
-                    print(f"[Stage2] Score test returned non-finite p-value, trying bootstrap...", flush=True)
-                    boot_res = _score_bootstrap_from_reduced(
-                        X_red_zv,
-                        yb,
-                        x_target_vec,
-                        seed_key=("lrt_followup", s_name_safe, "stage2", target, "pval"),
-                    )
-                    p_emp = float(boot_res.get("p", np.nan))
-                    boot_draws = int(boot_res.get("draws", 0))
-                    boot_exceed = int(boot_res.get("exceed", 0))
-                    boot_fit_kind = boot_res.get("fit_kind")
-                    if np.isfinite(p_emp):
-                        p_val = p_emp
-                        p_source = "score_boot_firth" if boot_fit_kind == "firth" else "score_boot_mle"
-                        inference_type = "score_boot"
-                        out['LRT_Reason'] = ""
-                        boot_engine = "score_bootstrap"
-                        print(f"[Stage2] Bootstrap score test: p={p_val:.4e} (draws={boot_draws}, exceed={boot_exceed}, fit={boot_fit_kind})", flush=True)
+                    if ENABLE_SCORE_BOOT_MLE:
+                        print(f"[Stage2] Score test returned non-finite p-value, trying bootstrap...", flush=True)
+                        boot_res = _score_bootstrap_from_reduced(
+                            X_red_zv,
+                            yb,
+                            x_target_vec,
+                            seed_key=("lrt_followup", s_name_safe, "stage2", target, "pval"),
+                        )
+                        p_emp = float(boot_res.get("p", np.nan))
+                        boot_draws = int(boot_res.get("draws", 0))
+                        boot_exceed = int(boot_res.get("exceed", 0))
+                        boot_fit_kind = boot_res.get("fit_kind")
+                        if np.isfinite(p_emp):
+                            p_val = p_emp
+                            p_source = "score_boot_firth" if boot_fit_kind == "firth" else "score_boot_mle"
+                            inference_type = "score_boot"
+                            out['LRT_Reason'] = ""
+                            boot_engine = "score_bootstrap"
+                            print(f"[Stage2] Bootstrap score test: p={p_val:.4e} (draws={boot_draws}, exceed={boot_exceed}, fit={boot_fit_kind})", flush=True)
+                        else:
+                            out['LRT_Reason'] = "score_boot_failed"
+                            print(f"[Stage2] Bootstrap score test failed", flush=True)
                     else:
-                        out['LRT_Reason'] = "score_boot_failed"
-                        print(f"[Stage2] Bootstrap score test failed", flush=True)
+                        out['LRT_Reason'] = "score_boot_disabled"
+                        print(f"[Stage2] Score test failed, bootstrap disabled", flush=True)
         else:
             # Multi-df case (df_lrt > 1): Use robust Rao score test computed at reduced model
             # This avoids fitting the unstable full interaction model
@@ -4928,19 +4943,21 @@ def _lrt_followup_worker_impl(task):
                     if inference_type == "none":
                         inference_type = "score"
                 else:
-                    boot_res = _score_bootstrap_from_reduced(
-                        X_anc_red,
-                        y_anc,
-                        x_target_vec,
-                        seed_key=("lrt_followup", s_name_safe, anc, target, "pval"),
-                    )
-                    p_emp = float(boot_res.get("p", np.nan))
-                    if np.isfinite(p_emp):
-                        p_val = p_emp
-                        p_source = "score_boot_firth" if boot_res.get("fit_kind") == "firth" else "score_boot_mle"
-                        # Only set inference_type if not already set (e.g., preserve "firth")
-                        if inference_type == "none":
-                            inference_type = "score_boot"
+                    if ENABLE_SCORE_BOOT_MLE:
+                        boot_res = _score_bootstrap_from_reduced(
+                            X_anc_red,
+                            y_anc,
+                            x_target_vec,
+                            seed_key=("lrt_followup", s_name_safe, anc, target, "pval"),
+                        )
+                        p_emp = float(boot_res.get("p", np.nan))
+                        if np.isfinite(p_emp):
+                            p_val = p_emp
+                            p_source = "score_boot_firth" if boot_res.get("fit_kind") == "firth" else "score_boot_mle"
+                            # Only set inference_type if not already set (e.g., preserve "firth")
+                            if inference_type == "none":
+                                inference_type = "score_boot"
+                    # If bootstrap disabled, p_val remains non-finite and will be handled downstream
 
             if (
                 (not np.isfinite(beta_val))
