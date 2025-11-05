@@ -664,8 +664,6 @@ def phenotype_fetcher_worker(pheno_queue,
                              cdr_codename: str,
                              core_index: pd.Index,
                              cache_dir: str,
-                             loader_chunk_size: int,
-                             loader_threads: int,
                              allow_bq: bool = True,
                              allowed_mask_by_cat: Optional[dict] = None,
                              sex_vec: Optional[np.ndarray] = None,
@@ -1000,7 +998,6 @@ def deduplicate_phenotypes(pheno_defs_df: pd.DataFrame,
 
     # 1) Materialize case indices per phenotype from cache; filter by min_cases
     all_codes_map = pheno_defs_df.set_index("sanitized_name")["all_codes"].to_dict()
-    cat_map = pheno_defs_df.set_index("sanitized_name")["disease_category"].to_dict()
 
     cases_by_pheno: Dict[str, np.ndarray] = {}
     n1_map: Dict[str, int] = {}
