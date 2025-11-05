@@ -4773,6 +4773,11 @@ def _lrt_followup_worker_impl(task):
             anc_upper = anc.upper()
             n_total_anc = len(y_anc)
             print(f"[Stage2]   Analyzing {anc_upper}: N={n_total_anc}...", flush=True)
+            print(
+                f"[DEBUG-START] name={s_name} anc={anc_upper} "
+                f"N_total={n_total_anc} N_cases={int(y_anc.sum())} N_controls={n_total_anc - int(y_anc.sum())}",
+                flush=True
+            )
             n_cases_anc = int(y_anc.sum())
             n_ctrls_anc = n_total_anc - n_cases_anc
 
@@ -4869,6 +4874,12 @@ def _lrt_followup_worker_impl(task):
             fit_full_use = None
             fit_red_use = None
 
+            print(
+                f"[DEBUG-FIT] name={s_name} anc={anc_upper} "
+                f"fit_full={'present' if fit_full is not None else 'None'} "
+                f"fit_red={'present' if fit_red is not None else 'None'}",
+                flush=True
+            )
             full_ok_anc, _, _ = _ok_mle_fit(fit_full, X_anc_zv, y_anc, target_ix=target_ix_anc) if fit_full is not None else (False, None, {})
             red_ok_anc, _, _ = _ok_mle_fit(fit_red, X_anc_red, y_anc) if fit_red is not None else (False, None, {})
 
@@ -4886,12 +4897,28 @@ def _lrt_followup_worker_impl(task):
                 fit_full_use = fit_full
                 fit_red_use = fit_red
             else:
+                print(
+                    f"[DEBUG-FIT] name={s_name} anc={anc_upper} "
+                    f"action=mle_not_suitable attempting_firth",
+                    flush=True
+                )
                 fit_full_firth = fit_full if bool(getattr(fit_full, "_used_firth", False)) else _firth_refit(X_anc_zv, y_anc)
                 fit_red_firth = fit_red if bool(getattr(fit_red, "_used_firth", False)) else _firth_refit(X_anc_red, y_anc)
+                print(
+                    f"[DEBUG-FIT] name={s_name} anc={anc_upper} "
+                    f"fit_full_firth={'present' if fit_full_firth is not None else 'None'} "
+                    f"fit_red_firth={'present' if fit_red_firth is not None else 'None'}",
+                    flush=True
+                )
                 if (fit_full_firth is not None) and (fit_red_firth is not None):
                     inference_family = "firth"
                     fit_full_use = fit_full_firth
                     fit_red_use = fit_red_firth
+                    print(
+                        f"[DEBUG-FIT] name={s_name} anc={anc_upper} "
+                        f"inference_family=firth",
+                        flush=True
+                    )
 
             p_val = np.nan
             p_source = None
@@ -4909,6 +4936,12 @@ def _lrt_followup_worker_impl(task):
             if inference_family is not None:
                 ll_full = float(getattr(fit_full_use, "llf", np.nan))
                 ll_red = float(getattr(fit_red_use, "llf", np.nan))
+                print(
+                    f"[DEBUG-LL] name={s_name} anc={anc_upper} "
+                    f"inference_family={inference_family} ll_full={ll_full} ll_red={ll_red} "
+                    f"ll_full_finite={np.isfinite(ll_full)} ll_red_finite={np.isfinite(ll_red)}",
+                    flush=True
+                )
                 if np.isfinite(ll_full) and np.isfinite(ll_red):
                     if inference_family == "mle":
                         stat = max(0.0, 2.0 * (ll_full - ll_red))
@@ -4949,7 +4982,18 @@ def _lrt_followup_worker_impl(task):
                     inference_family = None
 
             # Attempt score tests if no p-value yet (including for Firth)
+            print(
+                f"[DEBUG-SCORE] name={s_name} anc={anc_upper} "
+                f"p_val={p_val} finite={np.isfinite(p_val)} "
+                f"inference_family={inference_family} inference_type={inference_type}",
+                flush=True
+            )
             if not np.isfinite(p_val):
+                print(
+                    f"[DEBUG-SCORE] name={s_name} anc={anc_upper} "
+                    f"action=entering_score_test_section",
+                    flush=True
+                )
                 x_target_vec = X_anc_zv.iloc[:, int(target_ix_anc)].to_numpy(dtype=np.float64, copy=False)
                 p_sc, _ = _score_test_from_reduced(
                     X_anc_red,
@@ -4957,9 +5001,19 @@ def _lrt_followup_worker_impl(task):
                     x_target_vec,
                     const_ix=const_ix_red,
                 )
+                print(
+                    f"[DEBUG-SCORE] name={s_name} anc={anc_upper} "
+                    f"p_sc={p_sc} finite={np.isfinite(p_sc)}",
+                    flush=True
+                )
                 if np.isfinite(p_sc):
                     p_val = p_sc
                     p_source = "score_chi2"
+                    print(
+                        f"[DEBUG-SCORE] name={s_name} anc={anc_upper} "
+                        f"action=score_chi2_succeeded p_val={p_val}",
+                        flush=True
+                    )
                     # Only set inference_type if not already set (e.g., preserve "firth")
                     if inference_type == "none":
                         inference_type = "score"
@@ -5136,6 +5190,12 @@ def _lrt_followup_worker_impl(task):
                     reason_full,
                 )
             candidate_p_valid = bool(np.isfinite(p_val) and (p_source in ALLOWED_P_SOURCES))
+            print(
+                f"[DEBUG-PENALIZED] name={s_name} anc={anc_upper} "
+                f"inference_type={inference_type} penalized_inference={penalized_inference} "
+                f"candidate_p_valid={candidate_p_valid} p_val={p_val} p_source={p_source}",
+                flush=True
+            )
             if penalized_inference and not candidate_p_valid:
                 p_val = np.nan
                 p_source = None
