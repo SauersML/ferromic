@@ -35,7 +35,6 @@ class CaseCacheReadError(RuntimeError):
 
 # --- inference behavior toggles ---
 DEFAULT_PREFER_FIRTH_ON_RIDGE = True
-DEFAULT_ALLOW_PENALIZED_WALD = False
 DEFAULT_ALLOW_POST_FIRTH_MLE_REFIT = True
 ENABLE_SCORE_BOOT_MLE = False  # Disable score bootstrap (too slow); set invalid p-value instead
 
@@ -1849,7 +1848,6 @@ def _validate_ctx(ctx):
     ctx.setdefault("BOOTSTRAP_SEQ_ALPHA", BOOTSTRAP_SEQ_ALPHA)
     ctx.setdefault("FDR_ALPHA", 0.05)
     ctx.setdefault("BOOT_SEED_BASE", None)
-    ctx.setdefault("ALLOW_PENALIZED_WALD", DEFAULT_ALLOW_PENALIZED_WALD)
 
 
 
@@ -3457,15 +3455,6 @@ def _lrt_overall_worker_impl(task):
                     wald_fit = fit_full_use
             if wald_fit is not None:
                 wald = _wald_ci_or_from_fit(wald_fit, target_ix, alpha=0.05, penalized=False)
-            elif bool(CTX.get("ALLOW_PENALIZED_WALD", DEFAULT_ALLOW_PENALIZED_WALD)):
-                for candidate in (fit_full, fit_full_use):
-                    if candidate is None or not bool(getattr(candidate, "_used_ridge", False)):
-                        continue
-                    wald = _wald_ci_or_from_fit(candidate, target_ix, alpha=0.05, penalized=True)
-                    if wald.get("valid", False):
-                        break
-                else:
-                    wald = {"valid": False}
             if wald.get("valid", False):
                 ci_valid = True
                 ci_method = wald["method"]
@@ -3517,13 +3506,7 @@ def _lrt_overall_worker_impl(task):
                     used_firth_for_ci = True
 
         if ci_valid:
-            method_allowed = (
-                (ci_method in ALLOWED_CI_METHODS)
-                or (
-                    ci_method == "wald_penalized"
-                    and bool(CTX.get("ALLOW_PENALIZED_WALD", DEFAULT_ALLOW_PENALIZED_WALD))
-                )
-            )
+            method_allowed = ci_method in ALLOWED_CI_METHODS
             if not method_allowed:
                 ci_valid = False
                 ci_method = None
@@ -4182,10 +4165,6 @@ def _bootstrap_overall_worker_impl(task):
                 and fit_full_wald_ok2
             ):
                 wald = _wald_ci_or_from_fit(fit_full, target_ix_full, alpha=0.05, penalized=False)
-            elif bool(CTX.get("ALLOW_PENALIZED_WALD", DEFAULT_ALLOW_PENALIZED_WALD)) and bool(
-                getattr(fit_full, "_used_ridge", False)
-            ):
-                wald = _wald_ci_or_from_fit(fit_full, target_ix_full, alpha=0.05, penalized=True)
             if wald.get("valid", False):
                 ci_valid = True
                 ci_method = wald["method"]
@@ -4227,13 +4206,7 @@ def _bootstrap_overall_worker_impl(task):
                     used_firth_full = True
 
         if ci_valid:
-            method_allowed = (
-                (ci_method in ALLOWED_CI_METHODS)
-                or (
-                    ci_method == "wald_penalized"
-                    and bool(CTX.get("ALLOW_PENALIZED_WALD", DEFAULT_ALLOW_PENALIZED_WALD))
-                )
-            )
+            method_allowed = ci_method in ALLOWED_CI_METHODS
             if not method_allowed:
                 ci_valid = False
                 ci_method = None
@@ -5065,13 +5038,7 @@ def _lrt_followup_worker_impl(task):
                     ci_method = None
 
             if ci_valid:
-                method_allowed = (
-                    (ci_method in ALLOWED_CI_METHODS)
-                    or (
-                        ci_method == "wald_penalized"
-                        and bool(CTX.get("ALLOW_PENALIZED_WALD", DEFAULT_ALLOW_PENALIZED_WALD))
-                    )
-                )
+                method_allowed = ci_method in ALLOWED_CI_METHODS
                 if not method_allowed:
                     ci_valid = False
                     ci_method = None
