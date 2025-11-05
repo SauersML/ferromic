@@ -61,27 +61,47 @@ def non_orange_colors(n, seed=21):
     if n <= 0:
         return []
     
-    # Use MUCH MORE DIVERSE saturation and value combinations for maximum distinction
-    # Mix high/low saturation with high/low value to create very different colors
-    sv_combos = [
-        (0.95, 0.90),  # Vivid, bright
-        (0.75, 0.65),  # Muted, darker
-        (0.90, 0.75),  # Saturated, medium
-        (0.60, 0.85),  # Pastel, bright
-        (0.85, 0.55),  # Deep, rich
-        (0.50, 0.95),  # Light, washed
-        (0.95, 0.70),  # Bold, medium
-        (0.70, 0.50),  # Subdued, dark
+    # Custom color mapping for specific inversions (sorted order):
+    # 0: chr10 -> Purple
+    # 1: chr12 -> Orange
+    # 2: chr17 -> Green
+    # 3: chr4 -> Red
+    # 4: chr6:141,866,310-141,898,728 -> Blue
+    # 5: chr6:167,209,001-167,357,782 -> Brown
+    distinct_colors = [
+        (0.58, 0.24, 0.75),  # Purple (chr10)
+        (1.00, 0.55, 0.00),  # Orange (chr12)
+        (0.20, 0.70, 0.20),  # Green (chr17)
+        (0.89, 0.10, 0.11),  # Red (chr4)
+        (0.12, 0.47, 0.80),  # Blue (chr6 first)
+        (0.60, 0.40, 0.20),  # Brown (chr6 second)
+        (0.99, 0.75, 0.05),  # Gold
+        (0.00, 0.62, 0.45),  # Teal
+        (0.90, 0.10, 0.29),  # Crimson
+        (0.55, 0.34, 0.29),  # Tan
+        (0.13, 0.55, 0.13),  # Forest Green
+        (0.00, 0.45, 0.70),  # Steel Blue
+        (0.83, 0.15, 0.16),  # Fire Brick
+        (0.42, 0.24, 0.60),  # Dark Violet
+        (0.72, 0.53, 0.04),  # Dark Goldenrod
     ]
     
-    cols = []
-    for i in range(n):
-        # Distribute hues evenly across the FULL spectrum (0° to 360°)
-        h = (i + 0.5) / n
-        # Cycle through diverse saturation/value combinations
-        s, v = sv_combos[i % len(sv_combos)]
-        cols.append(mcolors.hsv_to_rgb((h, s, v)))
-    return [tuple(c) for c in cols]
+    if n <= len(distinct_colors):
+        return [distinct_colors[i] for i in range(n)]
+    
+    # For more than predefined colors, generate additional ones
+    cols = list(distinct_colors)
+    for i in range(len(distinct_colors), n):
+        # Use golden ratio for hue distribution to maximize perceptual difference
+        h = (i * 0.618033988749895) % 1.0
+        # Alternate between high and low saturation/value
+        if i % 2 == 0:
+            s, v = 0.85, 0.75
+        else:
+            s, v = 0.65, 0.90
+        cols.append(tuple(mcolors.hsv_to_rgb((h, s, v))))
+    
+    return cols
 
 
 def assign_colors_and_markers(levels):
@@ -101,8 +121,7 @@ def assign_colors_and_markers(levels):
     """
     n = len(levels)
     colors = non_orange_colors(n)
-    if n > 1:
-        colors = colors[1:] + colors[:1]
+    # Don't rotate colors - keep direct mapping
     marker_cycle = ['o', 's', 'D', '^', 'v', '<', '>', 'P', 'X', '*', 'h', 'H', 'd', 'p', '8']
     marker_map = {lvl: marker_cycle[i % len(marker_cycle)] for i, lvl in enumerate(levels)}
     color_map  = {lvl: colors[i] for i, lvl in enumerate(levels)}
