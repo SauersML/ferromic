@@ -8,3 +8,13 @@ Download the microarray data:
 ```
 gsutil -u "$GOOGLE_PROJECT" -m cp -r gs://fc-aou-datasets-controlled/v8/microarray/plink/* .
 ```
+
+If you are in a notebook, you can do this:
+```
+!../../gnomon/target/release/gnomon score "PGS004378 | chr17:45535159-46342045, PGS005198 | chr17:45535159-46342045, PGS004146 | chr17:45535159-46342045, PGS004229 | chr17:45535159-46342045, PGS004869 | chr17:45535159-46342045, PGS000507 | chr17:45535159-46342045" ../../arrays
+```
+
+Rename the output file:
+```
+cp arrays.sscore scores.tsv
+```
