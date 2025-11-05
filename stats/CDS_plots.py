@@ -925,14 +925,14 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
     with np.errstate(divide="ignore"):
         y = -np.log10(q.to_numpy())
 
-    # Point sizes by total pairs (scaled smoothly)
+    # Point sizes by total pairs (scaled smoothly, doubled)
     sizes_raw = pd.to_numeric(df.get("n_pairs_total", pd.Series(dtype=float)), errors="coerce").fillna(0)
     size_scale_max = float(sizes_raw.max()) if not sizes_raw.empty else 0.0
     size_legend_info = None
     if size_scale_max > 0:
-        sizes = 60 + 400 * (sizes_raw / size_scale_max)
+        sizes = 2 * (60 + 400 * (sizes_raw / size_scale_max))
     else:
-        sizes = np.full(len(df), 120.0)
+        sizes = np.full(len(df), 240.0)
 
     # Colors by recurrence (Single-event: dark green, Recurrent: rich orange)
     rec = df["recurrence"].astype(str)
@@ -977,7 +977,7 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
         size_labels = []
         for lvl in legend_levels:
             lvl = float(np.clip(lvl, 1e-9, size_scale_max))
-            handle_size = 60 + 400 * (lvl / size_scale_max)
+            handle_size = 2 * (60 + 400 * (lvl / size_scale_max))
             size_handles.append(
                 ax.scatter(
                     [], [],
