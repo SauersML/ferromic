@@ -1168,6 +1168,24 @@ def test_pheno_cache_loader_deletes_corrupted_cache():
         assert res is None, "Corrupted cache should return None"
         assert not cache_path.exists(), "Corrupted cache should be deleted"
 
+def test_pheno_cache_loader_handles_missing_cache_silently():
+    with temp_workspace():
+        core_index = pd.Index([f"p{i}" for i in range(10)])
+        pheno_info = {"sanitized_name": "test_missing", "disease_category": "test_cat"}
+        cache_dir = "./phewas_cache"
+        cache_path = Path(f"{cache_dir}/pheno_{pheno_info['sanitized_name']}_{TEST_CDR_CODENAME}.parquet")
+        
+        # Ensure cache doesn't exist
+        assert not cache_path.exists(), "Cache should not exist"
+        
+        # Clear LRU cache to ensure fresh read
+        pheno._case_ids_cached.cache_clear()
+        
+        # Attempt to load missing cache should return None without logging errors
+        res = pheno._load_single_pheno_cache(pheno_info, core_index, TEST_CDR_CODENAME, cache_dir)
+        
+        assert res is None, "Missing cache should return None"
+
 def test_worker_constant_dosage_emits_nan(test_ctx):
     with temp_workspace():
         core_data, phenos = make_synth_cohort()
