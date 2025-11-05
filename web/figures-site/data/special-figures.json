@@ -91,6 +91,11 @@
           "title": "PheWAS Category Summary Heatmap",
           "filename": "phewas_category_heatmap.pdf",
           "description": "Category grid showing disease systems, inversion loci, GBJ enrichment, and GLS directionality."
+        },
+        {
+          "title": "PGS Control Volcano Plot",
+          "filename": "PGS_control_volcano.pdf",
+          "description": "Volcano plot showing effect of polygenic score adjustment on chr17:45,585,159-46,292,045 associations. Arrows connect unadjusted (red) to adjusted (blue) estimates across phenotypes."
         }
       ]
     }
