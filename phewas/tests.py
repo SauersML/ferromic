@@ -1145,6 +1145,29 @@ def test_pheno_cache_loader_returns_correct_indices():
         res = pheno._load_single_pheno_cache(pheno_info, core_index, TEST_CDR_CODENAME, "./phewas_cache")
         np.testing.assert_array_equal(res["case_idx"], np.array([2, 5, 8], dtype=np.int32))
 
+def test_pheno_cache_loader_deletes_corrupted_cache():
+    with temp_workspace():
+        core_index = pd.Index([f"p{i}" for i in range(10)])
+        pheno_info = {"sanitized_name": "test_corrupt", "disease_category": "test_cat"}
+        cache_dir = "./phewas_cache"
+        cache_path = Path(f"{cache_dir}/pheno_{pheno_info['sanitized_name']}_{TEST_CDR_CODENAME}.parquet")
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Write corrupted data (not a valid parquet file)
+        with open(cache_path, "w") as f:
+            f.write("this is not a valid parquet file")
+        
+        assert cache_path.exists(), "Corrupted cache should exist before load"
+        
+        # Clear LRU cache to ensure fresh read
+        pheno._case_ids_cached.cache_clear()
+        
+        # Attempt to load should return None and delete the corrupted file
+        res = pheno._load_single_pheno_cache(pheno_info, core_index, TEST_CDR_CODENAME, cache_dir)
+        
+        assert res is None, "Corrupted cache should return None"
+        assert not cache_path.exists(), "Corrupted cache should be deleted"
+
 def test_worker_constant_dosage_emits_nan(test_ctx):
     with temp_workspace():
         core_data, phenos = make_synth_cohort()
