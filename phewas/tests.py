@@ -2106,7 +2106,7 @@ def test_fetcher_producer_drains_cache_only():
         q = queue.Queue(maxsize=100)
         fetcher_thread = threading.Thread(
             target=pheno.phenotype_fetcher_worker,
-            args=(q, pheno_defs_df, None, None, TEST_CDR_CODENAME, core_index, "./phewas_cache", 128, 4)
+            args=(q, pheno_defs_df, None, None, TEST_CDR_CODENAME, core_index, "./phewas_cache")
         )
         fetcher_thread.start()
         results = []
