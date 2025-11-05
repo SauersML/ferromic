@@ -2911,6 +2911,9 @@ def _lrt_overall_worker_impl(task):
 
         Xb, yb, note, skip = _apply_sex_restriction(X_base, y_series, pheno_name=s_name)
         n_total_used, n_cases_used, n_ctrls_used = len(yb), int(yb.sum()), len(yb) - int(yb.sum())
+        
+        # Initialize notes list for collecting additional diagnostic messages
+        notes = []
 
         used_index_fp = _index_fingerprint(Xb.index)
         sex_cfg = {
@@ -3558,6 +3561,8 @@ def _lrt_overall_worker_impl(task):
             model_notes.append(reason_full)
         if isinstance(reason_red, str) and reason_red:
             model_notes.append(reason_red)
+        # Merge any additional notes collected during processing
+        model_notes.extend(notes)
         model_notes.append(f"inference={inference_type_out}")
         if ci_method:
             model_notes.append(f"ci={ci_method}")
