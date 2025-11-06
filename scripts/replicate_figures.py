@@ -240,6 +240,28 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         note="Requires exported phewas_results.tsv from the BigQuery-backed pipeline.",
     ),
     FigureTask(
+        name="PheWAS QQ plot",
+        script=Path("stats/qq_plot.py"),
+        outputs=(
+            Path("phewas_plots/qq_plot_overall.png"),
+            Path("phewas_plots/qq_plot_overall.pdf"),
+        ),
+        dependencies=("data/phewas_results.tsv",),
+        required=False,
+        note="Generates QQ plots for PheWAS results with genomic inflation factor.",
+    ),
+    FigureTask(
+        name="Chr17 inversion vs tag SNP correlation",
+        script=Path("stats/chr17_inversion_tag_correlation.py"),
+        outputs=(
+            Path("phewas_plots/chr17_inversion_tag_correlation.png"),
+            Path("phewas_plots/chr17_inversion_tag_correlation.pdf"),
+        ),
+        dependencies=("data/phewas_results.tsv", "data/all_pop_phewas_tag.tsv"),
+        required=False,
+        note="Correlates effect sizes between chr17 inversion and tag SNP for significant phenotypes.",
+    ),
+    FigureTask(
         name="dN/dS violin by inversion event type",
         script=Path("stats/cross_violins.py"),
         outputs=(Path("inversion_omega_analysis_plot_median_only.png"),),
