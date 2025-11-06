@@ -10,12 +10,62 @@ mod tests {
 
     use crate::transcripts::CdsRegion;
     use crate::parse::{parse_region, validate_vcf_header, read_reference_sequence, parse_config_file, find_vcf_file, open_vcf_reader};
-    use crate::process::{MissingDataInfo, FilteringStats, process_config_entries, process_variants, process_variant, ZeroBasedHalfOpen, Variant, VcfError, HaplotypeSide, Args};
-    use crate::stats::{count_segregating_sites, calculate_pairwise_differences, calculate_watterson_theta, calculate_pi, harmonic, calculate_inversion_allele_frequency};
+    use crate::process::{MissingDataInfo, FilteringStats, process_config_entries, process_variants, process_variant, QueryRegion, ZeroBasedHalfOpen, Variant, VcfError, HaplotypeSide, Args};
+    use crate::stats::{count_segregating_sites, calculate_pairwise_differences, calculate_per_site_diversity, calculate_watterson_theta, calculate_pi, harmonic, calculate_inversion_allele_frequency};
 
     // Helper function to create a Variant for testing
     fn create_variant(position: i64, genotypes: Vec<Option<Vec<u8>>>) -> Variant {
         Variant { position, genotypes }
+    }
+
+    #[test]
+    fn test_missing_sites_default_to_zero_diversity() {
+        let variants = vec![
+            create_variant(
+                2,
+                vec![
+                    Some(vec![0, 0]),
+                    Some(vec![0, 0]),
+                ],
+            ),
+        ];
+
+        let haplotypes = vec![
+            (0, HaplotypeSide::Left),
+            (0, HaplotypeSide::Right),
+            (1, HaplotypeSide::Left),
+            (1, HaplotypeSide::Right),
+        ];
+
+        let region = QueryRegion { start: 0, end: 4 };
+        let per_site = calculate_per_site_diversity(&variants, &haplotypes, region);
+
+        assert_eq!(per_site.len(), 5);
+        for (offset, site) in per_site.iter().enumerate() {
+            assert_eq!(site.position, (offset as i64) + 1);
+            assert!(
+                site.pi.is_finite(),
+                "pi at position {} should be numeric",
+                site.position
+            );
+            assert!(
+                site.watterson_theta.is_finite(),
+                "theta at position {} should be numeric",
+                site.position
+            );
+            assert!(
+                (site.pi - 0.0).abs() < f64::EPSILON,
+                "pi at position {} expected 0, found {}",
+                site.position,
+                site.pi
+            );
+            assert!(
+                (site.watterson_theta - 0.0).abs() < f64::EPSILON,
+                "theta at position {} expected 0, found {}",
+                site.position,
+                site.watterson_theta
+            );
+        }
     }
 
     #[test]
