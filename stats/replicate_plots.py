@@ -14,6 +14,7 @@ SCRIPT_IMAGE_MAP: Dict[str, str] = {
     'recur_diversity.py': 'inversion_pi_violins.png',
     'overall_fst_by_type.py': 'fst_recurrent_vs_single_event.png',
     'dist_diversity_by_type.py': 'pi_flanking_regions_mean_bar_plot.png',
+    'qq_plot.py': 'phewas_plots/qq_plot_overall.png',
 }
 
 # Name of the directory to store the final plots
@@ -115,6 +116,11 @@ def main():
 
         # Check for and copy the expected image AFTER running the script
         print(f"Checking for output: {image_name}")
+        # Handle subdirectory paths in image_name
+        if '/' in image_name:
+            source_image_path = start_time / image_name
+            dest_image_path = output_dir / Path(image_name).name
+        
         if source_image_path.is_file():
             try:
                 shutil.copy2(source_image_path, dest_image_path)
