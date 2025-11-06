@@ -122,6 +122,10 @@ REMOTE_PATHS: Sequence[RemoteResource] = [
     "public_internet/group1_MAPT_ENSG00000186868.18_ENST00000262410.10_chr17_cds_start45962338_cds_end46024168_inv_start45585159_inv_end46292045.phy",
 ]
 
+# URL for bulk CDS PHYLIP files
+PHY_FILES_BASE_URL = "https://sharedspace.s3.msi.umn.edu/public_internet/all_phy/"
+PHY_FILES_LIST_URL = "https://sharedspace.s3.msi.umn.edu/public_internet/cds_identical_proportions.tsv"
+
 
 @dataclass
 class DownloadResult:
@@ -149,6 +153,42 @@ class FigureTask:
 
 
 FIGURE_TASKS: Sequence[FigureTask] = (
+    FigureTask(
+        name="Download CDS PHYLIP files",
+        script=Path("scripts/download_phy_files.py"),
+        outputs=("*.phy",),
+        dependencies=("inv_info.tsv",),
+        note="Downloads all CDS PHYLIP files from S3 bucket for CDS conservation analysis.",
+        long_running=True,
+    ),
+    FigureTask(
+        name="CDS pairwise identity computation",
+        script=Path("stats/cds_differences.py"),
+        outputs=("cds_identical_proportions.tsv", "pairs_CDS__*.tsv"),
+        dependencies=("inv_info.tsv", "*.phy"),
+        note="Computes pairwise identity for all CDS alignments. Requires .phy files.",
+        long_running=True,
+    ),
+    FigureTask(
+        name="CDS conservation GLM analysis",
+        script=Path("stats/CDS_identical_model.py"),
+        outputs=(
+            "cds_emm_adjusted.tsv",
+            "cds_pairwise_adjusted.tsv",
+            "cds_emm_nocov.tsv",
+            "cds_pairwise_nocov.tsv",
+        ),
+        dependencies=("cds_identical_proportions.tsv", "pairs_CDS__*.tsv"),
+        note="Runs binomial GLM with cluster-robust standard errors for CDS conservation test.",
+    ),
+    FigureTask(
+        name="Per-gene CDS conservation tests",
+        script=Path("stats/per_gene_cds_differences_jackknife.py"),
+        outputs=("gene_inversion_direct_inverted.tsv",),
+        dependencies=("cds_identical_proportions.tsv", "pairs_CDS__*.tsv"),
+        note="Performs jackknife-based per-gene conservation tests.",
+        long_running=True,
+    ),
     FigureTask(
         name="Inversion nucleotide diversity violins",
         script=Path("stats/recur_diversity.py"),
