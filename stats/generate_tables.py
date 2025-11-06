@@ -100,9 +100,49 @@ def _download_file(url: str, destination: Path) -> None:
 
 
 def ensure_cds_summary() -> Path:
+    """Ensure cds_identical_proportions.tsv exists, generating it if .phy files are available."""
     if CDS_SUMMARY_TSV.exists():
         return CDS_SUMMARY_TSV
 
+    # Check if we have .phy files to run the pipeline
+    phy_files = list(REPO_ROOT.glob("*.phy"))
+    if len(phy_files) >= 100:  # Arbitrary threshold indicating we have the dataset
+        print(f"Found {len(phy_files)} .phy files. Running cds_differences.py to generate summary...")
+        try:
+            cds_diff_script = REPO_ROOT / "stats" / "cds_differences.py"
+            if not cds_diff_script.exists():
+                raise SupplementaryTablesError(f"CDS differences script not found: {cds_diff_script}")
+            
+            # Run cds_differences.py from repo root
+            result = subprocess.run(
+                [sys.executable, str(cds_diff_script)],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+                timeout=3600,  # 1 hour timeout
+            )
+            
+            if result.returncode != 0:
+                print(f"cds_differences.py stderr:\n{result.stderr}", file=sys.stderr)
+                raise SupplementaryTablesError(
+                    f"cds_differences.py failed with exit code {result.returncode}"
+                )
+            
+            if not CDS_SUMMARY_TSV.exists():
+                raise SupplementaryTablesError(
+                    "cds_differences.py completed but did not produce cds_identical_proportions.tsv"
+                )
+            
+            print(f"✅ Generated {CDS_SUMMARY_TSV.name}")
+            return CDS_SUMMARY_TSV
+            
+        except subprocess.TimeoutExpired:
+            raise SupplementaryTablesError("cds_differences.py timed out after 1 hour")
+        except Exception as e:
+            print(f"Failed to run cds_differences.py: {e}", file=sys.stderr)
+            print("Falling back to downloading pre-computed results...")
+    
+    # Fallback: download pre-computed results
     url = PUBLIC_BASE_URL + CDS_SUMMARY_TSV.name
     print(f"Downloading CDS summary table from {url} ...")
     _download_file(url, CDS_SUMMARY_TSV)
@@ -110,9 +150,52 @@ def ensure_cds_summary() -> Path:
 
 
 def ensure_gene_results() -> Path:
+    """Ensure gene_inversion_direct_inverted.tsv exists, generating it if CDS summary is available."""
     if GENE_RESULTS_TSV.exists():
         return GENE_RESULTS_TSV
 
+    # First ensure we have the CDS summary
+    cds_summary = ensure_cds_summary()
+    
+    # Check if we have pairs files to run the per-gene analysis
+    pairs_files = list(REPO_ROOT.glob("pairs_CDS__*.tsv"))
+    if len(pairs_files) >= 100:  # Threshold indicating we have the dataset
+        print(f"Found {len(pairs_files)} pairs files. Running per_gene_cds_differences_jackknife.py...")
+        try:
+            gene_script = REPO_ROOT / "stats" / "per_gene_cds_differences_jackknife.py"
+            if not gene_script.exists():
+                raise SupplementaryTablesError(f"Per-gene script not found: {gene_script}")
+            
+            # Run per_gene_cds_differences_jackknife.py from repo root
+            result = subprocess.run(
+                [sys.executable, str(gene_script)],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+                timeout=3600,  # 1 hour timeout
+            )
+            
+            if result.returncode != 0:
+                print(f"per_gene_cds_differences_jackknife.py stderr:\n{result.stderr}", file=sys.stderr)
+                raise SupplementaryTablesError(
+                    f"per_gene_cds_differences_jackknife.py failed with exit code {result.returncode}"
+                )
+            
+            if not GENE_RESULTS_TSV.exists():
+                raise SupplementaryTablesError(
+                    "per_gene_cds_differences_jackknife.py completed but did not produce gene_inversion_direct_inverted.tsv"
+                )
+            
+            print(f"✅ Generated {GENE_RESULTS_TSV.name}")
+            return GENE_RESULTS_TSV
+            
+        except subprocess.TimeoutExpired:
+            raise SupplementaryTablesError("per_gene_cds_differences_jackknife.py timed out after 1 hour")
+        except Exception as e:
+            print(f"Failed to run per_gene_cds_differences_jackknife.py: {e}", file=sys.stderr)
+            print("Falling back to downloading pre-computed results...")
+    
+    # Fallback: download pre-computed results
     url = PUBLIC_BASE_URL + GENE_RESULTS_TSV.name
     print(f"Downloading gene-level CDS results from {url} ...")
     _download_file(url, GENE_RESULTS_TSV)
