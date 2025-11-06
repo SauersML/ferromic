@@ -2900,8 +2900,8 @@ fn append_diversity_falsta<P: AsRef<std::path::Path>>(
             (true, "pi", "filtered_pi_"),
             (true, "theta", "filtered_theta_"),
         ] {
-            // allocate a line of NAs
-            let mut line = vec![String::from("NA"); region_len];
+            // allocate a line of zeros (monomorphic sites) by default
+            let mut line = vec![String::from("0"); region_len];
             let mut any = false;
 
             for &(pos1, pi, th, gg, filt) in per_site {
@@ -2911,7 +2911,9 @@ fn append_diversity_falsta<P: AsRef<std::path::Path>>(
                 if let Some(rel1) = region.relative_position_1based_inclusive(pos1) {
                     let idx = (rel1 - 1) as usize;
                     let v = if which == "pi" { pi } else { th };
-                    line[idx] = if v == 0.0 {
+                    line[idx] = if v.is_nan() {
+                        "NA".into()
+                    } else if v == 0.0 {
                         "0".into()
                     } else {
                         format!("{:.6}", v)
