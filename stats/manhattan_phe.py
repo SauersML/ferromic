@@ -58,12 +58,12 @@ FIG_HEIGHT      = 7.8
 AXES_BBOX       = (0.12, 0.12, 0.76, 0.76)  # left, bottom, width, height
 
 # Markers & style
-TRI_BASE_SIZE   = 130.0    # non-significant triangle area (pt^2)
-TRI_SIG_BASE    = 150.0    # baseline significant triangle area (pt^2) - increased from 100
+TRI_BASE_SIZE   = 195.0    # non-significant triangle area (pt^2) - 130 × 1.5
+TRI_SIG_BASE    = 225.0    # baseline significant triangle area (pt^2) - 150 × 1.5
 TRI_SIG_MAG_MIN = 0.67     # minimum OR for scaling (protective effects) - changed from 0.5
 TRI_SIG_MAG_MAX = 1.5      # maximum OR for scaling (risk effects) - changed from 2.0
 TRI_SIZE_MULTIPLIER = 2.5  # Multiplier to make size differences more dramatic - reduced from 3.0
-CIRCLE_SIZE     = 300.0    # FDR circle area (pt^2)
+CIRCLE_SIZE     = 450.0    # FDR circle area (pt^2) - 300 × 1.5
 POINT_EDGE_LW   = 0.45
 POINT_ALPHA_SIG = 0.98     # significant points
 POINT_ALPHA_NONSIG = 0.25  # non-significant points (75% transparent)
@@ -698,7 +698,7 @@ def plot_one_inversion(
         ]
         legend2 = ax.legend(
             size_handles, or_labels,
-            title="Odds ratio (sig.)",
+            title="Odds ratio",
             fontsize=LEGEND_FONTSZ, title_fontsize=LEGEND_TITLE_SZ,
             loc="upper left", frameon=False,
             borderaxespad=0.8
