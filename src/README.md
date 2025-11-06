@@ -1,3 +1,17 @@
+Replicate results:
+```
+cargo run --release --bin run_vcf -- \
+    --vcf_folder ../vcfs \
+    --config_file ../variants_freeze4inv_sv_inv_hg38_processed_arbigent_filtered_manualDotplot_filtered_PAVgenAdded_withInvCategs_syncWithWH.fixedPH.simpleINV.mod.tsv \
+    --mask_file ../hardmask.hg38.v4_acroANDsdOnly.over99.bed \
+    --reference ../hg38.no_alt.fa \
+    --gtf ../gencode.v47.basic.annotation.gtf \
+    --fst
+```
+
+
+
+
 ```
 set -euo pipefail
 
