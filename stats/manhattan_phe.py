@@ -59,9 +59,10 @@ AXES_BBOX       = (0.12, 0.12, 0.76, 0.76)  # left, bottom, width, height
 
 # Markers & style
 TRI_BASE_SIZE   = 130.0    # non-significant triangle area (pt^2)
-TRI_SIG_BASE    = 170.0    # baseline significant triangle area (pt^2)
-TRI_SIG_MAG_MIN = 0.5      # minimum OR for scaling (protective effects)
-TRI_SIG_MAG_MAX = 2.0      # maximum OR for scaling (risk effects)
+TRI_SIG_BASE    = 150.0    # baseline significant triangle area (pt^2) - increased from 100
+TRI_SIG_MAG_MIN = 0.67     # minimum OR for scaling (protective effects) - changed from 0.5
+TRI_SIG_MAG_MAX = 1.5      # maximum OR for scaling (risk effects) - changed from 2.0
+TRI_SIZE_MULTIPLIER = 2.5  # Multiplier to make size differences more dramatic - reduced from 3.0
 CIRCLE_SIZE     = 300.0    # FDR circle area (pt^2)
 POINT_EDGE_LW   = 0.45
 POINT_ALPHA_SIG = 0.98     # significant points
@@ -178,26 +179,27 @@ def darken_color(hex_color: str, amount: float) -> str:
 
 def scale_all_sizes(or_values: pd.Series) -> np.ndarray:
     """
-    Scale marker sizes based on odds ratio magnitude, clamped to [0.5, 2.0] range.
+    Scale marker sizes based on odds ratio magnitude, clamped to [0.67, 1.5] range.
+    Uses REDUCED exponential scaling to make differences less dramatic.
     Larger markers for stronger effects (further from OR=1.0):
-    - OR = 0.5 or 2.0 -> magnitude = 2.0 -> size = 170 × 2.0 = 340 pt² (LARGEST)
-    - OR = 0.67 or 1.5 -> magnitude = 1.5 -> size = 170 × 1.5 = 255 pt²
-    - OR = 1.0 -> magnitude = 1.0 -> size = 170 × 1.0 = 170 pt² (SMALLEST - baseline)
+    - OR = 0.67 or 1.5 -> magnitude = 1.5 -> size = 150 × 1.5^1.0 = 225 pt² (LARGER)
+    - OR = 1.0 -> magnitude = 1.0 -> size = 150 × 1.0^1.0 = 150 pt² (SMALLER - baseline)
     """
     arr = pd.to_numeric(or_values, errors="coerce").to_numpy()
-    arr = np.nan_to_num(arr, nan=1.0, posinf=2.0, neginf=0.5)
+    arr = np.nan_to_num(arr, nan=1.0, posinf=1.5, neginf=0.67)
     arr[arr <= 0] = 1.0
     
-    # Clamp to [0.5, 2.0] range first
+    # Clamp to [0.67, 1.5] range first
     arr = np.clip(arr, TRI_SIG_MAG_MIN, TRI_SIG_MAG_MAX)
     
     # Convert to magnitude: both protective and risk scale the same
     # Larger magnitude = further from 1.0 = stronger effect = LARGER marker
-    # OR >= 1.0: magnitude = OR (e.g., 2.0 -> 2.0)
-    # OR < 1.0: magnitude = 1/OR (e.g., 0.5 -> 2.0)
+    # OR >= 1.0: magnitude = OR (e.g., 1.5 -> 1.5)
+    # OR < 1.0: magnitude = 1/OR (e.g., 0.67 -> 1.49)
     mags = np.where(arr >= 1.0, arr, 1.0 / arr)
     
-    return TRI_SIG_BASE * mags
+    # Apply LINEAR scaling (power of 1.0) to make differences less dramatic
+    return TRI_SIG_BASE * (mags ** 1.0)
 
 def pts_to_px(fig, pts):  # points -> pixels
     return pts * (fig.dpi / 72.0)
@@ -681,7 +683,7 @@ def plot_one_inversion(
         legend1 = ax.legend(handles, labels, fontsize=LEGEND_FONTSZ, loc="upper right", frameon=False)
 
     if sig_mask_full.any():
-        or_levels = [0.5, 0.67, 1.0, 1.5, 2.0]
+        or_levels = [0.67, 1.0, 1.5]
         or_labels = [f"{val:.2f}" if val < 1.0 else f"{val:.1f}" for val in or_levels]
         sig_color_sample = darken_color(INCOLOR_HEX, SIG_DARKEN)
         size_handles = [
@@ -714,11 +716,12 @@ def plot_one_inversion(
     draw_connectors(ax, ann_rows, texts, color_by_rowid, size_by_rowid)
 
     os.makedirs(OUTDIR, exist_ok=True)
-    out = os.path.join(OUTDIR, f"phewas_{sanitize_filename(str(inversion_label))}.pdf")
-    # Use bbox_inches='tight' to prevent text cutoff and add padding
-    fig.savefig(out, format="pdf", bbox_inches='tight', pad_inches=0.5)
+    base = os.path.join(OUTDIR, f"phewas_{sanitize_filename(str(inversion_label))}")
+    # Save both PDF and PNG
+    fig.savefig(f"{base}.pdf", format="pdf", bbox_inches='tight', pad_inches=0.5)
+    fig.savefig(f"{base}.png", format="png", dpi=300, bbox_inches='tight', pad_inches=0.5)
     plt.close(fig)
-    return out
+    return base
 
 # ---------- Main ----------
 def main():
