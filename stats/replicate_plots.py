@@ -15,6 +15,7 @@ SCRIPT_IMAGE_MAP: Dict[str, str] = {
     'overall_fst_by_type.py': 'fst_recurrent_vs_single_event.png',
     'dist_diversity_by_type.py': 'pi_flanking_regions_mean_bar_plot.png',
     'qq_plot.py': 'phewas_plots/qq_plot_overall.png',
+    'chr17_inversion_tag_correlation.py': 'phewas_plots/chr17_inversion_tag_correlation.png',
 }
 
 # Name of the directory to store the final plots

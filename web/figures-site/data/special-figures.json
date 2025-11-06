@@ -96,6 +96,16 @@
           "title": "PGS Control Volcano Plot",
           "filename": "PGS_control_volcano.pdf",
           "description": "Volcano plot showing effect of polygenic score adjustment on chr17:45,585,159-46,292,045 associations. Arrows connect unadjusted (red) to adjusted (blue) estimates across phenotypes."
+        },
+        {
+          "title": "QQ Plot — All PheWAS Results",
+          "filename": "phewas_plots/qq_plot_overall.pdf",
+          "description": "Quantile-quantile plot of observed versus expected p-values for all PheWAS associations with genomic inflation factor (λ_GC = 1.324)."
+        },
+        {
+          "title": "Chr17 Inversion vs Tag SNP Correlation",
+          "filename": "phewas_plots/chr17_inversion_tag_correlation.pdf",
+          "description": "Correlation of effect sizes (odds ratios) between chr17 inversion and tag SNP for 26 significant phenotypes (r = 0.978, p = 7.76e-18)."
         }
       ]
     }
