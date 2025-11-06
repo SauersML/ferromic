@@ -10,7 +10,7 @@ import zipfile
 from pathlib import Path
 
 
-PHY_ZIP_URL = "https://sharedspace.s3.msi.umn.edu/public_internet/all_phy/phy_files.zip"
+PHY_ZIP_URL = "https://sharedspace.s3.msi.umn.edu/public_internet/phy_files.zip"
 PHY_ZIP_LOCAL = Path("phy_files.zip")
 
 
