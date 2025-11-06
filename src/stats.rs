@@ -4193,12 +4193,27 @@ pub fn calculate_per_site_diversity(
         .unwrap_or(0);
     let membership = HapMembership::build(sample_count, haplotypes_in_group);
 
+    let region_len = region.len();
+    if region_len <= 0 {
+        log(
+            LogLevel::Warning,
+            &format!(
+                "Region {}:{} had non-positive length ({}); skipping per-site diversity",
+                region.start, region.end, region_len
+            ),
+        );
+        return Vec::new();
+    }
+
+    let region_len_usize = region_len as usize;
+
     let total_variants = variants
         .iter()
         .filter(|variant| region.contains(variant.position))
         .count();
 
-    let mut site_diversities = Vec::with_capacity(total_variants);
+    let mut site_diversities = Vec::with_capacity(region_len_usize);
+    let mut variant_metrics: HashMap<i64, (f64, f64)> = HashMap::with_capacity(total_variants);
 
     if haplotypes_in_group.len() < 2 {
         log(
@@ -4260,11 +4275,7 @@ pub fn calculate_per_site_diversity(
             polymorphic_sites += 1;
         }
 
-        site_diversities.push(SiteDiversity {
-            position: ZeroBasedPosition(variant.position).to_one_based(),
-            pi: pi_value,
-            watterson_theta: watterson_value,
-        });
+        variant_metrics.insert(variant.position, (pi_value, watterson_value));
     }
 
     finish_step_progress(&format!(
@@ -4279,6 +4290,20 @@ pub fn calculate_per_site_diversity(
             total_variants, polymorphic_sites
         ),
     );
+
+    for offset in 0..region_len_usize {
+        let zero_based_pos = region.start + offset as i64;
+        let (pi_value, watterson_value) = variant_metrics
+            .get(&zero_based_pos)
+            .copied()
+            .unwrap_or((0.0, 0.0));
+
+        site_diversities.push(SiteDiversity {
+            position: ZeroBasedPosition(zero_based_pos).to_one_based(),
+            pi: pi_value,
+            watterson_theta: watterson_value,
+        });
+    }
 
     let total_time = start_time.elapsed();
     display_status_box(StatusBox {
