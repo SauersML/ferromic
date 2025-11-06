@@ -229,8 +229,6 @@ def _load_gene_conservation() -> pd.DataFrame:
     for col in numeric_cols:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    df = df[df["q_value"].notna() & (df["q_value"] < 0.05)].copy()
-
     def orientation(row: pd.Series) -> str:
         delta = row.get("delta")
         if pd.isna(delta):
