@@ -36,6 +36,7 @@ INFILE = "phewas_results.tsv"
 PHECODE_FILE = "phecodeX_R_labels.csv"
 PHECODE_URL = "https://raw.githubusercontent.com/PheWAS/PhecodeX/refs/heads/main/phecodeX_R_labels.csv"
 OUTDIR = "phewas_plots"
+INV_MAPPING_FILE = "data/balanced_recurrence_results.tsv"
 
 PHENO_COL = "Phenotype"
 P_Q_COL   = "Q_GLOBAL"
@@ -53,15 +54,18 @@ WIDTH_PER_100   = 0.40
 FIG_HEIGHT      = 7.8
 
 # Axes placement (figure fractions) to enforce constant drawable width
-AXES_BBOX       = (0.18, 0.14, 0.64, 0.78)  # left, bottom, width, height
+# Increased margins: left, bottom, width, height - giving 25% more room on all sides
+AXES_BBOX       = (0.12, 0.12, 0.76, 0.76)  # left, bottom, width, height
 
 # Markers & style
 TRI_BASE_SIZE   = 130.0    # non-significant triangle area (pt^2)
 TRI_SIG_BASE    = 170.0    # baseline significant triangle area (pt^2)
-TRI_SIG_MAG_MAX = 4.0      # clamp for odds-ratio based scaling multiplier
+TRI_SIG_MAG_MIN = 0.5      # minimum OR for scaling (protective effects)
+TRI_SIG_MAG_MAX = 2.0      # maximum OR for scaling (risk effects)
 CIRCLE_SIZE     = 300.0    # FDR circle area (pt^2)
 POINT_EDGE_LW   = 0.45
-POINT_ALPHA     = 0.98
+POINT_ALPHA_SIG = 0.98     # significant points
+POINT_ALPHA_NONSIG = 0.25  # non-significant points (75% transparent)
 CIRCLE_EDGE_LW  = 1.3
 
 # Risk direction palette
@@ -71,10 +75,12 @@ NON_SIG_LIGHTEN = 0.55
 SIG_DARKEN      = 0.35
 
 # Label/legend
-LABEL_FONTSZ    = 14.2
-AX_LABEL_FONTSZ = 12
-TICK_FONTSZ     = 10.5
-TITLE_FONTSZ    = 15
+LABEL_FONTSZ    = 22.0     # phenotype labels
+AX_LABEL_FONTSZ = 22.0     # axis labels (q, x-axis)
+TICK_FONTSZ     = 20.0     # tick labels
+TITLE_FONTSZ    = 26.0     # plot title
+LEGEND_FONTSZ   = 20.0     # legend text
+LEGEND_TITLE_SZ = 22.0     # legend title
 ANNOTATE_Q_THRESH = 0.05
 
 # Single linebreak rule
@@ -170,17 +176,27 @@ def darken_color(hex_color: str, amount: float) -> str:
     b = max(0.0, b * (1.0 - amount))
     return mcolors.to_hex((r, g, b))
 
-def odds_ratio_magnitude(or_value: float) -> float:
-    if not np.isfinite(or_value) or or_value <= 0:
-        return 1.0
-    return float(or_value) if or_value >= 1.0 else float(1.0 / or_value)
-
-def scale_significant_sizes(or_values: pd.Series) -> np.ndarray:
+def scale_all_sizes(or_values: pd.Series) -> np.ndarray:
+    """
+    Scale marker sizes based on odds ratio magnitude, clamped to [0.5, 2.0] range.
+    Larger markers for stronger effects (further from OR=1.0):
+    - OR = 0.5 or 2.0 -> magnitude = 2.0 -> size = 170 × 2.0 = 340 pt² (LARGEST)
+    - OR = 0.67 or 1.5 -> magnitude = 1.5 -> size = 170 × 1.5 = 255 pt²
+    - OR = 1.0 -> magnitude = 1.0 -> size = 170 × 1.0 = 170 pt² (SMALLEST - baseline)
+    """
     arr = pd.to_numeric(or_values, errors="coerce").to_numpy()
-    arr = np.nan_to_num(arr, nan=1.0, posinf=1.0, neginf=1.0)
+    arr = np.nan_to_num(arr, nan=1.0, posinf=2.0, neginf=0.5)
     arr[arr <= 0] = 1.0
-    mags = np.array([odds_ratio_magnitude(v) for v in arr], dtype=float)
-    mags = np.clip(mags, 1.0, TRI_SIG_MAG_MAX)
+    
+    # Clamp to [0.5, 2.0] range first
+    arr = np.clip(arr, TRI_SIG_MAG_MIN, TRI_SIG_MAG_MAX)
+    
+    # Convert to magnitude: both protective and risk scale the same
+    # Larger magnitude = further from 1.0 = stronger effect = LARGER marker
+    # OR >= 1.0: magnitude = OR (e.g., 2.0 -> 2.0)
+    # OR < 1.0: magnitude = 1/OR (e.g., 0.5 -> 2.0)
+    mags = np.where(arr >= 1.0, arr, 1.0 / arr)
+    
     return TRI_SIG_BASE * mags
 
 def pts_to_px(fig, pts):  # points -> pixels
@@ -209,8 +225,8 @@ def texts_bboxes_px(ax, texts):
     renderer = fig.canvas.get_renderer()
     out=[]
     for t in texts:
-        patch = t.get_bbox_patch()
-        bb = patch.get_window_extent(renderer=renderer).expanded(1.01, 1.06)
+        # Get bounding box directly from text, not from patch (which may be None)
+        bb = t.get_window_extent(renderer=renderer).expanded(1.01, 1.06)
         out.append((t, bb))
     return out, renderer
 
@@ -222,6 +238,26 @@ def px_step_to_data(ax, dx_px, dy_px):
     return float(xd), float(yd)
 
 # ---------- Category mapping ----------
+def load_inversion_mapping(mapping_file: str) -> dict:
+    """Load inversion ID to chr:start-end mapping from balanced_recurrence_results.tsv"""
+    if not os.path.exists(mapping_file):
+        print(f"[WARN] Inversion mapping file not found: {mapping_file}", file=sys.stderr)
+        return {}
+    
+    df = pd.read_csv(mapping_file, sep="\t", dtype=str)
+    mapping = {}
+    for _, row in df.iterrows():
+        inv_id = row.get("Inversion_ID", "")
+        chrom = row.get("Chromosome", "")
+        start = row.get("Start", "")
+        end = row.get("End", "")
+        if inv_id and chrom and start and end:
+            # Create chr:start-end format
+            mapped_label = f"{chrom}:{start}-{end}"
+            mapping[inv_id] = mapped_label
+    
+    return mapping
+
 def load_category_map(phecode_csv: str) -> pd.DataFrame:
     if not os.path.exists(phecode_csv): sys.exit(f"ERROR: Cannot find {phecode_csv}")
     pc = pd.read_csv(phecode_csv, dtype=str)
@@ -351,8 +387,8 @@ def draw_connectors(ax, ann_rows, texts, color_by_rowid, size_by_rowid):
         rowid = getattr(t, "_rowid", None)
         if rowid is None or rowid not in pt_px: continue
 
-        patch = t.get_bbox_patch()
-        bb = patch.get_window_extent(renderer=renderer)
+        # Get bounding box directly from text (no patch since we removed bbox)
+        bb = t.get_window_extent(renderer=renderer)
 
         p = pt_px[rowid]
         q = closest_point_on_rect(bb, p)
@@ -455,9 +491,8 @@ def plot_one_inversion(
             plot_colors.append(lighten_color(base, NON_SIG_LIGHTEN))
     g["plot_color"] = plot_colors
 
-    size_array = np.full(m, TRI_BASE_SIZE, dtype=float)
-    if sig_mask_full.any():
-        size_array[sig_mask_full.to_numpy()] = scale_significant_sizes(g.loc[sig_mask_full, OR_COL])
+    # Scale ALL points by odds ratio (not just significant ones)
+    size_array = scale_all_sizes(g[OR_COL])
     g["plot_size"] = size_array
 
     # figure
@@ -485,23 +520,49 @@ def plot_one_inversion(
         )
         obstacles.append(circ)
 
-    # triangles
+    # triangles - split by significance for different alpha values
     inc = g["risk_dir"]=="inc"
     dec = ~inc
-    tri_inc = ax.scatter(
-        g.loc[inc,"x"], g.loc[inc,"y"],
-        s=g.loc[inc,"plot_size"], marker="^",
-        c=g.loc[inc,"plot_color"], edgecolors="black",
-        linewidths=POINT_EDGE_LW, alpha=POINT_ALPHA, zorder=2.0,
+    inc_sig = inc & sig_mask_full
+    inc_nonsig = inc & ~sig_mask_full
+    dec_sig = dec & sig_mask_full
+    dec_nonsig = dec & ~sig_mask_full
+    
+    # Plot significant points with full opacity
+    tri_inc_sig = ax.scatter(
+        g.loc[inc_sig,"x"], g.loc[inc_sig,"y"],
+        s=g.loc[inc_sig,"plot_size"], marker="^",
+        c=g.loc[inc_sig,"plot_color"], edgecolors="black",
+        linewidths=POINT_EDGE_LW, alpha=POINT_ALPHA_SIG, zorder=2.0,
         label="Risk increasing (darker = FDR sig.)"
-    ) if inc.any() else None
-    tri_dec = ax.scatter(
-        g.loc[dec,"x"], g.loc[dec,"y"],
-        s=g.loc[dec,"plot_size"], marker="v",
-        c=g.loc[dec,"plot_color"], edgecolors="black",
-        linewidths=POINT_EDGE_LW, alpha=POINT_ALPHA, zorder=2.0,
+    ) if inc_sig.any() else None
+    
+    # Plot non-significant points with 50% transparency
+    tri_inc_nonsig = ax.scatter(
+        g.loc[inc_nonsig,"x"], g.loc[inc_nonsig,"y"],
+        s=g.loc[inc_nonsig,"plot_size"], marker="^",
+        c=g.loc[inc_nonsig,"plot_color"], edgecolors="black",
+        linewidths=POINT_EDGE_LW, alpha=POINT_ALPHA_NONSIG, zorder=2.0
+    ) if inc_nonsig.any() else None
+    
+    tri_dec_sig = ax.scatter(
+        g.loc[dec_sig,"x"], g.loc[dec_sig,"y"],
+        s=g.loc[dec_sig,"plot_size"], marker="v",
+        c=g.loc[dec_sig,"plot_color"], edgecolors="black",
+        linewidths=POINT_EDGE_LW, alpha=POINT_ALPHA_SIG, zorder=2.0,
         label="Risk decreasing (darker = FDR sig.)"
-    ) if dec.any() else None
+    ) if dec_sig.any() else None
+    
+    tri_dec_nonsig = ax.scatter(
+        g.loc[dec_nonsig,"x"], g.loc[dec_nonsig,"y"],
+        s=g.loc[dec_nonsig,"plot_size"], marker="v",
+        c=g.loc[dec_nonsig,"plot_color"], edgecolors="black",
+        linewidths=POINT_EDGE_LW, alpha=POINT_ALPHA_NONSIG, zorder=2.0
+    ) if dec_nonsig.any() else None
+    
+    # Collect for obstacles (use significant ones for collision detection)
+    tri_inc = tri_inc_sig if tri_inc_sig is not None else tri_inc_nonsig
+    tri_dec = tri_dec_sig if tri_dec_sig is not None else tri_dec_nonsig
     if tri_inc is not None: obstacles.append(tri_inc)
     if tri_dec is not None: obstacles.append(tri_dec)
 
@@ -545,8 +606,7 @@ def plot_one_inversion(
         t = ax.text(
             x0, r["y"], balanced_linebreak(r["Phen_wrapped"]),
             fontsize=LABEL_FONTSZ, ha=ha, va="bottom", zorder=3.6,
-            bbox=dict(boxstyle="round,pad=0.22", facecolor="white",
-                      edgecolor="#333333", linewidth=0.35, alpha=0.4)
+            bbox=None  # Remove box around labels
         )
         t._rowid = idx  # persistent binding for connectors
         texts.append(t)
@@ -618,26 +678,26 @@ def plot_one_inversion(
     handles, labels = ax.get_legend_handles_labels()
     legend1 = None
     if handles:
-        legend1 = ax.legend(handles, labels, fontsize=9, loc="upper right", frameon=False)
+        legend1 = ax.legend(handles, labels, fontsize=LEGEND_FONTSZ, loc="upper right", frameon=False)
 
     if sig_mask_full.any():
-        or_levels = [1.0, 1.5, 2.5]
-        or_labels = ["1.0×" if np.isclose(val, 1.0) else f"{val:.1f}×" for val in or_levels]
+        or_levels = [0.5, 0.67, 1.0, 1.5, 2.0]
+        or_labels = [f"{val:.2f}" if val < 1.0 else f"{val:.1f}" for val in or_levels]
         sig_color_sample = darken_color(INCOLOR_HEX, SIG_DARKEN)
         size_handles = [
             ax.scatter(
                 [], [],
-                s=scale_significant_sizes(pd.Series([val]))[0],
+                s=scale_all_sizes(pd.Series([val]))[0],
                 marker="^", facecolors=sig_color_sample,
                 edgecolors="black", linewidths=POINT_EDGE_LW,
-                alpha=POINT_ALPHA
+                alpha=POINT_ALPHA_SIG
             )
             for val in or_levels
         ]
         legend2 = ax.legend(
             size_handles, or_labels,
             title="Odds ratio (sig.)",
-            fontsize=9, title_fontsize=9,
+            fontsize=LEGEND_FONTSZ, title_fontsize=LEGEND_TITLE_SZ,
             loc="upper left", frameon=False,
             borderaxespad=0.8
         )
@@ -655,7 +715,8 @@ def plot_one_inversion(
 
     os.makedirs(OUTDIR, exist_ok=True)
     out = os.path.join(OUTDIR, f"phewas_{sanitize_filename(str(inversion_label))}.pdf")
-    fig.savefig(out, format="pdf")
+    # Use bbox_inches='tight' to prevent text cutoff and add padding
+    fig.savefig(out, format="pdf", bbox_inches='tight', pad_inches=0.5)
     plt.close(fig)
     return out
 
@@ -688,6 +749,9 @@ def main():
     if df.empty: sys.exit("No rows with a non-empty Inversion value.")
 
     df[INV_COL] = map_inversion_series(df[INV_COL])
+    
+    # Load inversion ID mapping for proper titles
+    inv_mapping = load_inversion_mapping(INV_MAPPING_FILE)
 
     q_numeric_all = pd.to_numeric(df[P_Q_COL], errors="coerce")
     valid_mask = df[PHENO_COL].notna() & q_numeric_all.notna()
@@ -725,9 +789,11 @@ def main():
 
     made, to_open = [], []
     for inv, grp in df.groupby(INV_COL, dropna=False):
+        # Use mapped label if available, otherwise use original
+        display_label = inv_mapping.get(inv, inv)
         out = plot_one_inversion(
             grp,
-            inversion_label=inv,
+            inversion_label=display_label,
             global_ymin=global_ymin,
             global_ymax=global_ymax,
             global_xlim=global_xlim,
