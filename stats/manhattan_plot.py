@@ -320,7 +320,7 @@ def create_manhattan_plot(data_file, inv_file='inv_info.tsv'):
     for spine in ['top','left','right','bottom']:
         ax_bottom.spines[spine].set_visible(False)
     ax_bottom.set_yticks([])
-    ax_bottom.set_xlabel("Chromosome", fontsize=28, labelpad=20)
+    ax_bottom.set_xlabel("Chromosome", fontsize=32, labelpad=20)
 
     ax_bottom.set_xticks(boundary_tick_positions)
     ax_bottom.set_xticklabels([])
@@ -329,7 +329,7 @@ def create_manhattan_plot(data_file, inv_file='inv_info.tsv'):
 
     label_y_pos = 0.20 # Lowered position slightly more
     for pos, txt in zip(midpoint_label_positions, midpoint_label_texts):
-         ax_bottom.text(pos, label_y_pos, txt, ha='center', va='center', fontsize=26, fontweight='bold')
+         ax_bottom.text(pos, label_y_pos, txt, ha='center', va='center', fontsize=30, fontweight='bold')
     print(f"Added {len(midpoint_label_positions)} midpoint labels on bottom axis at y={label_y_pos}.")
 
 
@@ -353,8 +353,8 @@ def create_manhattan_plot(data_file, inv_file='inv_info.tsv'):
         ax_top.set_ylim(0, YLIM_TOP)
 
         if i == 0:
-            ax_top.set_ylabel("-log10(p)", fontsize=26, labelpad=10)
-            ax_top.tick_params(axis='y', labelsize=26)
+            ax_top.set_ylabel("-log10(p)", fontsize=30, labelpad=10)
+            ax_top.tick_params(axis='y', labelsize=28)
         else:
             ax_top.set_yticks([])
             ax_top.set_ylabel("")
@@ -381,13 +381,29 @@ def create_manhattan_plot(data_file, inv_file='inv_info.tsv'):
         else:
              point_colors = 'grey'
 
-        # Increase zorder so points are above significance line
-        ax_top.scatter(
-            cdata['chr_plot_x'],
-            cdata['neg_log_p'],
-            c=point_colors,
-            s=150, alpha=0.7, linewidth=0, zorder=10
-        )
+        # Determine significance for each point
+        if np.isfinite(significance_level_neglogp):
+            is_significant = cdata['neg_log_p'] >= significance_level_neglogp
+        else:
+            is_significant = pd.Series(False, index=cdata.index)
+        
+        # Plot significant points with full opacity
+        if is_significant.any():
+            ax_top.scatter(
+                cdata.loc[is_significant, 'chr_plot_x'],
+                cdata.loc[is_significant, 'neg_log_p'],
+                c=point_colors if isinstance(point_colors, str) else point_colors[is_significant.values],
+                s=150, alpha=0.98, linewidth=0, zorder=10
+            )
+        
+        # Plot non-significant points with 75% transparency
+        if (~is_significant).any():
+            ax_top.scatter(
+                cdata.loc[~is_significant, 'chr_plot_x'],
+                cdata.loc[~is_significant, 'neg_log_p'],
+                c=point_colors if isinstance(point_colors, str) else point_colors[(~is_significant).values],
+                s=150, alpha=0.25, linewidth=0, zorder=10
+            )
 
         used_min = cdata['start'].min()
         used_max = cdata['end'].max()
@@ -454,10 +470,10 @@ def create_manhattan_plot(data_file, inv_file='inv_info.tsv'):
     sm = ScalarMappable(cmap=cmap, norm=norm)
     sm.set_array([])
     cb = fig.colorbar(sm, cax=ax_cb, orientation='vertical', aspect=15)
-    cb.set_label('Effect Size Z-score', fontsize=20, labelpad=15)
-    cb.ax.tick_params(labelsize=20)
-    cb.ax.text(0.5, 1.05, 'Higher dN/dS\nin Inverted', transform=cb.ax.transAxes, ha='center', va='bottom', fontsize=16)
-    cb.ax.text(0.5, -0.05, 'Higher dN/dS\nin Direct', transform=cb.ax.transAxes, ha='center', va='top', fontsize=16)
+    cb.set_label('Effect Size Z-score', fontsize=24, labelpad=15)
+    cb.ax.tick_params(labelsize=22)
+    cb.ax.text(0.5, 1.05, 'Higher dN/dS\nin Inverted', transform=cb.ax.transAxes, ha='center', va='bottom', fontsize=20)
+    cb.ax.text(0.5, -0.05, 'Higher dN/dS\nin Direct', transform=cb.ax.transAxes, ha='center', va='top', fontsize=20)
     pos = ax_cb.get_position()
     # Adjust x0 slightly more to move further right
     ax_cb.set_position([pos.x0 + pos.width*0.8, pos.y0 + pos.height*0.1, pos.width*0.8, pos.height*0.8])
@@ -468,7 +484,7 @@ def create_manhattan_plot(data_file, inv_file='inv_info.tsv'):
     if ax_subplots:
          # Place legend relative to the figure, right and slightly down from top-left corner
          fig.legend(handles=[recurrent_patch, single_patch],
-                    fontsize=20,
+                    fontsize=24,
                     frameon=True,
                     loc='upper left', # Anchor point of the legend box
                     bbox_to_anchor=(0.13, 0.90)) # Position of the anchor point (x, y) in figure coordinates
