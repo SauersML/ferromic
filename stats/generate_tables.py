@@ -69,6 +69,7 @@ CATEGORIES_RESULTS_CANDIDATES = (
 )
 IMPUTATION_RESULTS = DATA_DIR / "imputation_results.tsv"
 INV_PROPERTIES = DATA_DIR / "inv_properties.tsv"
+TRAJECTORY_DATA = DATA_DIR / "Trajectory-12_47296118_A_G.tsv"
 
 
 @dataclass
@@ -361,6 +362,12 @@ def _load_imputation_results() -> pd.DataFrame:
     return df
 
 
+def _load_trajectory_data() -> pd.DataFrame:
+    if not TRAJECTORY_DATA.exists():
+        raise SupplementaryTablesError(f"Trajectory data not found: {TRAJECTORY_DATA}")
+    return pd.read_csv(TRAJECTORY_DATA, sep="\t", dtype=str, low_memory=False)
+
+
 def build_workbook(output_path: Path) -> None:
     sheets = OrderedDict()
     readme_rows: List[Dict[str, str]] = []
@@ -447,6 +454,17 @@ def build_workbook(output_path: Path) -> None:
             name="Imputation results",
             description="Dosage imputation performance metrics (data/imputation_results.tsv).",
             loader=_load_imputation_results,
+        )
+    )
+
+    register(
+        SheetInfo(
+            name="AGES trajectory 12_47296118",
+            description=(
+                "Data downloaded from the AGES database for SNP 12_47296118_A_G. "
+                "Source: https://reich-ages.rc.hms.harvard.edu/#/"
+            ),
+            loader=_load_trajectory_data,
         )
     )
 
