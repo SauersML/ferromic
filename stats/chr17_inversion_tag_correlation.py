@@ -175,6 +175,10 @@ def create_correlation_plot(data, x_col, y_col, output_path):
     ax.set_xlim(axis_min, axis_max)
     ax.set_ylim(axis_min, axis_max)
 
+    # Add diagonal reference line (y=x)
+    ax.plot([axis_min, axis_max], [axis_min, axis_max], 
+            color='gray', linestyle='--', linewidth=1.5, alpha=0.5, zorder=1)
+
     # Force square aspect ratio
     ax.set_aspect('equal', adjustable='box')
 
@@ -283,6 +287,10 @@ def create_pvalue_correlation_plot(data, x_pval_col, y_pval_col, output_path):
 
     ax.set_xlim(axis_min, axis_max)
     ax.set_ylim(axis_min, axis_max)
+
+    # Add diagonal reference line (y=x)
+    ax.plot([axis_min, axis_max], [axis_min, axis_max], 
+            color='gray', linestyle='--', linewidth=1.5, alpha=0.5, zorder=1)
 
     # Force square aspect ratio
     ax.set_aspect('equal', adjustable='box')
