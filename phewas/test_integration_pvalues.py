@@ -83,8 +83,9 @@ def test_pipeline_final_results_lambda_is_reasonable(inversion_mode):
         run.MLE_REFIT_MIN_NEFF = 0
         run.FDR_ALPHA = 0.05
         run.LRT_SELECT_ALPHA = 0.1
-        run.MIN_CASES_FILTER = 20
-        run.MIN_CONTROLS_FILTER = 20
+        realistic_min_threshold = 30
+        run.MIN_CASES_FILTER = realistic_min_threshold
+        run.MIN_CONTROLS_FILTER = realistic_min_threshold
         pheno.MIN_CASES_FILTER = run.MIN_CASES_FILTER
         pheno.MIN_CONTROLS_FILTER = run.MIN_CONTROLS_FILTER
         run.MASTER_RESULTS_CSV = str(Path(tmpdir) / "final_results.tsv")
@@ -236,7 +237,12 @@ def test_pipeline_final_results_lambda_is_reasonable(inversion_mode):
 
             from phewas import cli
 
-            cli.main([])
+            cli.main([
+                "--min-cases-controls",
+                str(realistic_min_threshold),
+                "--pop-label",
+                "EUR",
+            ])
 
         final_results = pd.read_csv(run.MASTER_RESULTS_CSV, sep="\t")
         assert not final_results.empty
