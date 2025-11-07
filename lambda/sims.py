@@ -5,6 +5,7 @@ N_INDIVIDUALS = 10_000
 N_PHENOTYPES = 5_000
 MAF_LIST = [0.01, 0.10, 0.30]
 PHENOTYPE_LIST = [10, 100, 1_000]
+CORRELATION_LIST = [0.0, 0.2, 0.8]
 N_REPLICATES = 5
 
 # Median of chi-square with 1 degree of freedom
@@ -60,6 +61,55 @@ def simulate_lambda_for_n_phenotypes(n_phenotypes, maf=0.10):
     genotypes = np.random.choice([0.0, 1.0, 2.0], size=n, p=probs)
 
     phenotypes = np.random.normal(loc=0.0, scale=1.0, size=(n, m))
+
+    x = genotypes
+    x_mean = x.mean()
+    x_centered = x - x_mean
+    sxx = np.sum(x_centered ** 2)
+
+    y = phenotypes
+    y_mean = y.mean(axis=0, keepdims=True)
+    y_centered = y - y_mean
+
+    sxy = x_centered @ y_centered
+
+    beta1 = sxy / sxx
+
+    residuals = y_centered - np.outer(x_centered, beta1)
+
+    sse = np.sum(residuals ** 2, axis=0)
+
+    sigma2_hat = sse / (n - 2)
+    var_beta1 = sigma2_hat / sxx
+
+    t_stats = beta1 / np.sqrt(var_beta1)
+
+    chi2_stats = t_stats ** 2
+
+    lambda_gc = np.median(chi2_stats) / CHI2_MEDIAN_1DF
+    return lambda_gc
+
+
+def simulate_lambda_with_correlated_phenotypes(correlation, maf=0.10):
+    n = N_INDIVIDUALS
+    m = N_PHENOTYPES
+
+    p = maf
+    probs = [(1.0 - p) ** 2, 2.0 * p * (1.0 - p), p ** 2]
+
+    genotypes = np.random.choice([0.0, 1.0, 2.0], size=n, p=probs)
+
+    # Generate correlated phenotypes using a common factor model
+    # For correlation rho, Y_i = sqrt(rho) * Z + sqrt(1-rho) * epsilon_i
+    # where Z is a common factor and epsilon_i are independent noise terms
+    rho = correlation
+    common_factor = np.random.normal(loc=0.0, scale=1.0, size=(n, 1))
+    independent_noise = np.random.normal(loc=0.0, scale=1.0, size=(n, m))
+
+    if rho == 0.0:
+        phenotypes = independent_noise
+    else:
+        phenotypes = np.sqrt(rho) * common_factor + np.sqrt(1.0 - rho) * independent_noise
 
     x = genotypes
     x_mean = x.mean()
@@ -160,6 +210,44 @@ def main():
     plt.ylabel("Genomic control lambda")
     plt.title("Null PheWAS lambdas across phenotype count and replicates")
     plt.xscale("log")
+    plt.ylim(0.9, 1.1)
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.show()
+
+    # Test 3: Varying phenotype correlation
+    print("\n" + "="*60)
+    print("Varying phenotype correlation (fixed MAF=0.10)")
+    print("="*60)
+
+    lambdas_correlation = {}
+
+    for corr in CORRELATION_LIST:
+        corr_values = []
+        for _ in range(N_REPLICATES):
+            lam = simulate_lambda_with_correlated_phenotypes(corr)
+            corr_values.append(lam)
+        lambdas_correlation[corr] = corr_values
+
+    print("\nGenomic control lambda values")
+    print("Each row: one correlation coefficient; entries: five replicate null PheWAS runs.")
+    for corr in CORRELATION_LIST:
+        vals = lambdas_correlation[corr]
+        formatted = "  ".join(f"{v:.6f}" for v in vals)
+        print(f"Correlation {corr:.1f}:  {formatted}")
+
+    x_vals_corr = []
+    y_vals_corr = []
+    for corr in CORRELATION_LIST:
+        for lam in lambdas_correlation[corr]:
+            x_vals_corr.append(corr)
+            y_vals_corr.append(lam)
+
+    plt.figure(figsize=(8, 5))
+    plt.scatter(x_vals_corr, y_vals_corr)
+    plt.xlabel("Phenotype correlation coefficient")
+    plt.ylabel("Genomic control lambda")
+    plt.title("Null PheWAS lambdas across phenotype correlation and replicates")
     plt.ylim(0.9, 1.1)
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
