@@ -90,9 +90,9 @@ def simulate_lambda_for_n_phenotypes(n_phenotypes, maf=0.10):
     return lambda_gc
 
 
-def simulate_lambda_with_correlated_phenotypes(correlation, maf=0.10):
-    n = N_INDIVIDUALS
-    m = N_PHENOTYPES
+def simulate_lambda_with_correlated_phenotypes(correlation, maf=0.10, n_individuals=None, n_phenotypes=None):
+    n = n_individuals if n_individuals is not None else N_INDIVIDUALS
+    m = n_phenotypes if n_phenotypes is not None else N_PHENOTYPES
 
     p = maf
     probs = [(1.0 - p) ** 2, 2.0 * p * (1.0 - p), p ** 2]
@@ -222,6 +222,7 @@ def main():
     # Test 3: Varying phenotype correlation
     print("\n" + "="*60)
     print("Varying phenotype correlation (fixed MAF=0.10)")
+    print("100,000 individuals, 1,000 phenotypes")
     print("="*60)
 
     lambdas_correlation = {}
@@ -229,7 +230,7 @@ def main():
     for corr in CORRELATION_LIST:
         corr_values = []
         for _ in range(N_REPLICATES):
-            lam = simulate_lambda_with_correlated_phenotypes(corr)
+            lam = simulate_lambda_with_correlated_phenotypes(corr, n_individuals=100_000, n_phenotypes=1_000)
             corr_values.append(lam)
         lambdas_correlation[corr] = corr_values
 
