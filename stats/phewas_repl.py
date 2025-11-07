@@ -129,88 +129,40 @@ def get_target_phecodes_from_ferromic():
     return targets
 
 
-# ======================= rs1052553 cohort: local or microarray MT ====================
+# ======================= rs1052553 cohort from microarray Hail MT ====================
 
-def build_cohort_from_local_genotype():
+def build_rs1052553_additive_cohort():
     """
-    If RS1052553_GENOTYPE_CSV is set, use that file.
-
-    Expected columns:
-      - person_id
-      - rs1052553_dosage  (or rs1052553 / dosage)
-
-    Returns path to normalized CSV or None if env var not set.
-    """
-    path = os.getenv("RS1052553_GENOTYPE_CSV")
-    if not path:
-        return None
-    if not os.path.exists(path):
-        raise RuntimeError(
-            f"RS1052553_GENOTYPE_CSV is set to '{path}' but file does not exist."
-        )
-
-    print(f"Using precomputed genotype cohort from: {path}")
-    df = pl.read_csv(path, infer_schema_length=1000)
-    cols = set(df.columns)
-
-    if "person_id" not in cols:
-        raise RuntimeError(
-            f"Genotype file {path} must contain 'person_id' column. "
-            f"Columns: {df.columns}"
-        )
-
-    dosage_col = None
-    for cand in ("rs1052553_dosage", "rs1052553", "dosage"):
-        if cand in cols:
-            dosage_col = cand
-            break
-
-    if dosage_col is None:
-        raise RuntimeError(
-            f"Genotype file {path} must contain rs1052553 dosage column "
-            f"(one of rs1052553_dosage, rs1052553, dosage). "
-            f"Columns: {df.columns}"
-        )
-
-    df = df.select(["person_id", dosage_col])
-    df = df.rename({dosage_col: "rs1052553_dosage"})
-    df = df.drop_nulls(["rs1052553_dosage"])
-    df = df.with_columns(
-        pl.col("person_id").cast(pl.Int64),
-        pl.col("rs1052553_dosage").cast(pl.Int64),
-    )
-    df = df.unique(subset=["person_id"])
-
-    out = "cohort_rs1052553_additive_raw.csv"
-    df.write_csv(out)
-    print(f"Normalized local genotype cohort written to {out} (n={df.height}).")
-    return out
-
-
-def build_cohort_from_microarray_hail():
-    """
-    Fallback: derive rs1052553 dosage from AoU microarray Hail MT.
+    Build additive genotype-defined cohort for rs1052553 from AoU v8 microarray MT.
 
     Uses:
       MICROARRAY_HAIL_STORAGE_PATH
 
     Steps:
+      - Initialize Hail.
+      - Read microarray MT.
       - Filter rows by rsid/ID == 'rs1052553'.
-      - Compute GT.n_alt_alleles() as rs1052553_dosage.
-      - Export via hl.export_table (no to_pandas on full cohort).
-      - Normalize to CSV: person_id, rs1052553_dosage.
+      - Compute GT.n_alt_alleles() as rs1052553_dosage (0/1/2).
+      - Export entries table to local TSV via ht.export (no to_pandas on full cohort).
+      - Normalize to CSV with columns:
+            person_id, rs1052553_dosage
 
     Returns:
-      path to CSV, or None if MICROARRAY_HAIL_STORAGE_PATH not set.
+      Path to CSV.
     """
     micro_mt_path = os.getenv("MICROARRAY_HAIL_STORAGE_PATH")
     if not micro_mt_path:
-        return None
+        raise RuntimeError(
+            "MICROARRAY_HAIL_STORAGE_PATH is not set. "
+            "This script requires the AoU v8 microarray Hail MT."
+        )
 
     print("Initializing Hail to derive rs1052553 cohort from microarray MT...")
-    hl.init(app_name="rs1052553_additive_from_microarray",
-            quiet=True,
-            log="/tmp/hail_rs1052553_microarray.log")
+    hl.init(
+        app_name="rs1052553_additive_from_microarray",
+        quiet=True,
+        log="/tmp/hail_rs1052553_microarray.log"
+    )
 
     print(f"Reading microarray MT: {micro_mt_path}")
     mt = hl.read_matrix_table(micro_mt_path)
@@ -247,18 +199,22 @@ def build_cohort_from_microarray_hail():
     mt_snp = mt_snp.select_entries(
         rs1052553_dosage=mt_snp.GT.n_alt_alleles()
     )
+
+    # Entries table: row + col + rs1052553_dosage
     ht = mt_snp.entries().select("rs1052553_dosage")
 
     out_tsv = "cohort_rs1052553_additive_raw.tsv"
-    print(f"Exporting rs1052553 dosages to {out_tsv} via Hail export_table...")
-    hl.export_table(ht, out_tsv, header=True)
+    print(f"Exporting rs1052553 dosages to {out_tsv} via Hail Table.export...")
+    # IMPORTANT FIX: use ht.export(...) instead of hl.export_table(...)
+    ht.export(out_tsv)  # default is tab-delimited with header
+
     hl.stop()
 
-    # Now load the tiny table locally and normalize
+    # Load the exported TSV locally and normalize
     print("Reading exported TSV and normalizing to CSV...")
     df = pl.read_csv(out_tsv, sep="\t", infer_schema_length=1000)
 
-    # Identify sample column (whatever is not locus/alleles/dosage)
+    # Identify sample ID column: whatever is not locus/alleles/dosage
     candidate_sample_cols = [
         c for c in df.columns
         if c not in ("locus", "alleles", "rs1052553_dosage")
@@ -288,29 +244,8 @@ def build_cohort_from_microarray_hail():
     out_csv = "cohort_rs1052553_additive_raw.csv"
     df.write_csv(out_csv)
     print(f"Additive rs1052553 cohort written to {out_csv} (n={df.height}).")
+
     return out_csv
-
-
-def build_rs1052553_additive_cohort():
-    """
-    Orchestrate genotype cohort:
-
-    1. If RS1052553_GENOTYPE_CSV is set -> normalize & use that.
-    2. Else, try to derive from MICROARRAY_HAIL_STORAGE_PATH via Hail.
-    """
-    path = build_cohort_from_local_genotype()
-    if path:
-        return path
-
-    path = build_cohort_from_microarray_hail()
-    if path:
-        return path
-
-    raise RuntimeError(
-        "Unable to build rs1052553 cohort: "
-        "set RS1052553_GENOTYPE_CSV to a local genotype file or "
-        "ensure MICROARRAY_HAIL_STORAGE_PATH is defined and contains rs1052553."
-    )
 
 
 # ======================= AoU covariates & phecodeX counts ======================
@@ -492,15 +427,13 @@ def main():
     # 1. Phenotype panel from ferromic
     target_phecodes = get_target_phecodes_from_ferromic()
 
-    # 2. rs1052553 additive cohort:
-    #    - from RS1052553_GENOTYPE_CSV if set
-    #    - else from MICROARRAY_HAIL_STORAGE_PATH via Hail
+    # 2. rs1052553 additive cohort from microarray Hail MT
     cohort_raw = build_rs1052553_additive_cohort()
 
-    # 3. Add AoU covariates (AoU only)
+    # 3. Add AoU covariates
     cohort_cov = add_aou_covariates(cohort_raw)
 
-    # 4. Build phecodeX counts from AoU EHR (AoU only)
+    # 4. Build phecodeX counts from AoU EHR
     phecode_counts_all = build_phecode_counts_x()
 
     # 5. Subset to ferromic-derived phecodes
