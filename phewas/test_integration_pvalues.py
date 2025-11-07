@@ -27,6 +27,12 @@ from phewas.tests import (
 pytestmark = pytest.mark.timeout(300)
 
 
+@pytest.fixture(params=[False, True], ids=["real_inversion", "null_inversion"])
+def inversion_mode(request):
+    """Fixture to run test with both real and null inversion."""
+    return request.param
+
+
 def _generate_dense_phenotypes(
     core_data: dict[str, pd.DataFrame],
     base_phenos: dict[str, dict[str, object]],
@@ -57,11 +63,16 @@ def _generate_dense_phenotypes(
     return phenos
 
 
-def test_pipeline_final_results_lambda_is_reasonable():
-    """Run the CLI pipeline, parse final results, and evaluate genomic inflation."""
+def test_pipeline_final_results_lambda_is_reasonable(inversion_mode):
+    """Run the CLI pipeline, parse final results, and evaluate genomic inflation.
+    
+    Args:
+        inversion_mode: If True, replace inversion dosages with random noise (no true associations)
+    """
+    null_inversion = inversion_mode
     with temp_workspace() as tmpdir, preserve_run_globals():
         core_data, base_phenos = make_realistic_followup_dataset(N=4200, seed=2025)
-        phenos = _generate_dense_phenotypes(core_data, base_phenos, extra=48)
+        phenos = _generate_dense_phenotypes(core_data, base_phenos, extra=97)
 
         cache_root = Path(tmpdir) / "phewas_cache"
         run.CACHE_DIR = str(cache_root)
@@ -89,9 +100,23 @@ def test_pipeline_final_results_lambda_is_reasonable():
             "MIN_NEFF_FILTER": 0,
         }
 
-        dosages_df = (
-            core_data["inversion_main"].reset_index().rename(columns={"person_id": "SampleID"})
-        )
+        # Optionally replace inversion with null (random noise)
+        if null_inversion:
+            print("\n" + "="*70)
+            print("NULL INVERSION MODE: Replacing inversion dosages with random noise")
+            print("="*70 + "\n")
+            rng = np.random.default_rng(seed=99999)
+            null_dosages = rng.normal(0.0, 0.58, size=len(core_data["inversion_main"]))
+            # Replace in core_data so it gets cached correctly
+            core_data["inversion_main"] = pd.DataFrame(
+                {TEST_TARGET_INVERSION: null_dosages},
+                index=core_data["inversion_main"].index
+            )
+            dosages_df = core_data["inversion_main"].reset_index().rename(columns={"person_id": "SampleID"})
+        else:
+            dosages_df = (
+                core_data["inversion_main"].reset_index().rename(columns={"person_id": "SampleID"})
+            )
         write_tsv(run.INVERSION_DOSAGES_FILE, dosages_df)
 
         defs_df = prime_all_caches_for_run(
@@ -221,5 +246,59 @@ def test_pipeline_final_results_lambda_is_reasonable():
         assert not parsed.empty, "Expected at least one valid p-value entry"
 
         lambda_gc = qq_plot.calculate_lambda_gc(parsed.to_numpy())
+        
+        # Calculate lambda for synthetic (null) phenotypes only
+        synthetic_results = final_results[final_results['Phenotype'].str.startswith('Synthetic_')]
+        synthetic_pvalues = pd.to_numeric(synthetic_results[qq_plot.P_COL], errors='coerce').dropna()
+        lambda_gc_synthetic = qq_plot.calculate_lambda_gc(synthetic_pvalues.to_numpy()) if len(synthetic_pvalues) > 0 else np.nan
+        
+        mode_label = "NULL INVERSION (random noise)" if null_inversion else "REAL INVERSION (true associations)"
+        print(f"\n{'='*70}")
+        print(f"TEST MODE: {mode_label}")
+        print(f"{'='*70}")
+        print(f"GENOMIC INFLATION FACTOR (Lambda) - ALL: {lambda_gc:.6f}")
+        print(f"GENOMIC INFLATION FACTOR (Lambda) - SYNTHETIC ONLY: {lambda_gc_synthetic:.6f}")
+        print(f"Total associations tested: {len(final_results)}")
+        print(f"  - Base phenotypes: {len(final_results) - len(synthetic_results)}")
+        print(f"  - Synthetic phenotypes: {len(synthetic_results)}")
+        print(f"Valid p-values: {len(parsed)}")
+        print(f"Test threshold: < 1.1")
+        print(f"Test passes: {lambda_gc < 1.1}")
+        print(f"{'='*70}\n")
+        
+        # Analyze associations
+        print(f"\n{'='*70}")
+        print("ASSOCIATION ANALYSIS")
+        print(f"{'='*70}")
+        print(f"\nColumns in results: {list(final_results.columns)}")
+        
+        # Show top significant associations
+        sig_threshold = 0.05
+        sig_results = final_results[final_results[qq_plot.P_COL] < sig_threshold].copy()
+        sig_results = sig_results.sort_values(qq_plot.P_COL)
+        
+        print(f"\nSignificant associations (p < {sig_threshold}): {len(sig_results)}")
+        if len(sig_results) > 0:
+            print("\nTop 10 most significant associations:")
+            display_cols = [col for col in ['Phenotype', 'P_Value_x', 'OR', 'Beta', 'N_Total', 'N_Cases', 'N_Controls'] if col in sig_results.columns]
+            print(sig_results[display_cols].head(10).to_string(index=False))
+        
+        # Check for base phenotypes specifically
+        base_pheno_names = ['Metabolic_strong', 'Neuro_moderate', 'Inflammation_low']
+        base_results = final_results[final_results['Phenotype'].isin(base_pheno_names)]
+        if len(base_results) > 0:
+            print(f"\n\nBase phenotypes (designed with inversion effects):")
+            print(base_results[display_cols].to_string(index=False))
+        
+        # Summary statistics
+        print(f"\n\nSummary of all {len(final_results)} associations:")
+        print(f"  Bonferroni threshold (0.05/{len(final_results)}): {0.05/len(final_results):.2e}")
+        bonf_sig = final_results[final_results[qq_plot.P_COL] < 0.05/len(final_results)]
+        print(f"  Bonferroni significant: {len(bonf_sig)}")
+        print(f"  Nominal significant (p<0.05): {len(sig_results)}")
+        print(f"  Non-significant: {len(final_results) - len(sig_results)}")
+        
+        print(f"\n{'='*70}\n")
+        
         assert np.isfinite(lambda_gc)
-        assert lambda_gc < 1.1, "Inflation factor should remain below nominal bound"
+        assert lambda_gc < 1.1, f"Inflation factor {lambda_gc:.6f} should remain below nominal bound 1.1"
