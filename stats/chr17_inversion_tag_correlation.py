@@ -237,6 +237,9 @@ def create_pvalue_correlation_plot(data, x_pval_col, y_pval_col, output_path):
     # Calculate correlation
     r, p_value = stats.pearsonr(x, y)
 
+    # Print actual p-value for confirmation
+    print(f"  Raw correlation p-value: {p_value}")
+
     # Calculate regression line
     slope, intercept = np.polyfit(x, y, 1)
     x_line = np.array([x.min(), x.max()])
@@ -254,8 +257,14 @@ def create_pvalue_correlation_plot(data, x_pval_col, y_pval_col, output_path):
     ax.set_ylabel('Inversion -log₁₀(P)', fontsize=12)
     ax.set_title('Chr17 Inversion vs Tag SNP P-values', fontsize=14, pad=20)
 
+    # Format p-value for display (handle very small values)
+    if p_value < 1e-20:
+        p_text = 'p < 1e-20'
+    else:
+        p_text = f'p = {p_value:.2e}'
+
     # Add statistics text box
-    stats_text = f'r = {r:.3f}\np = {p_value:.2e}\nn = {len(x)}'
+    stats_text = f'r = {r:.3f}\n{p_text}\nn = {len(x)}'
     ax.text(0.05, 0.95, stats_text,
            transform=ax.transAxes, fontsize=11,
            verticalalignment='top',
