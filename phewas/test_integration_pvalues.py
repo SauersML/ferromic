@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pandas as pd
 import pytest
+from scipy import stats
 
 from stats import qq_plot
 
@@ -61,6 +62,27 @@ def _generate_dense_phenotypes(
         }
 
     return phenos
+
+
+def _lambda_gc_upper_bound(num_tests: int, quantile: float = 0.95) -> float:
+    """Return the expected lambda_GC quantile under the null for ``num_tests`` p-values."""
+    if num_tests <= 0:
+        return np.inf
+
+    df = 1
+    chi2_median = stats.chi2.ppf(0.5, df)
+
+    if num_tests % 2 == 1:
+        a = (num_tests + 1) // 2
+        b = a
+    else:
+        a = num_tests // 2
+        b = a + 1
+
+    # Lambda increases as the sample median decreases, so invert the quantile.
+    p_thresh = stats.beta.ppf(1 - quantile, a, b)
+    chi2_thresh = stats.chi2.ppf(1 - p_thresh, df)
+    return chi2_thresh / chi2_median
 
 
 def test_pipeline_final_results_lambda_is_reasonable(inversion_mode):
@@ -252,11 +274,17 @@ def test_pipeline_final_results_lambda_is_reasonable(inversion_mode):
         assert not parsed.empty, "Expected at least one valid p-value entry"
 
         lambda_gc = qq_plot.calculate_lambda_gc(parsed.to_numpy())
-        
+        lambda_threshold = _lambda_gc_upper_bound(len(parsed), quantile=0.95)
+
         # Calculate lambda for synthetic (null) phenotypes only
         synthetic_results = final_results[final_results['Phenotype'].str.startswith('Synthetic_')]
         synthetic_pvalues = pd.to_numeric(synthetic_results[qq_plot.P_COL], errors='coerce').dropna()
-        lambda_gc_synthetic = qq_plot.calculate_lambda_gc(synthetic_pvalues.to_numpy()) if len(synthetic_pvalues) > 0 else np.nan
+        lambda_gc_synthetic = (
+            qq_plot.calculate_lambda_gc(synthetic_pvalues.to_numpy())
+            if len(synthetic_pvalues) > 0
+            else np.nan
+        )
+        lambda_threshold_synth = _lambda_gc_upper_bound(len(synthetic_pvalues), quantile=0.95)
         
         mode_label = "NULL INVERSION (random noise)" if null_inversion else "REAL INVERSION (true associations)"
         print(f"\n{'='*70}")
@@ -268,8 +296,16 @@ def test_pipeline_final_results_lambda_is_reasonable(inversion_mode):
         print(f"  - Base phenotypes: {len(final_results) - len(synthetic_results)}")
         print(f"  - Synthetic phenotypes: {len(synthetic_results)}")
         print(f"Valid p-values: {len(parsed)}")
-        print(f"Test threshold: < 1.1")
-        print(f"Test passes: {lambda_gc < 1.1}")
+        print(
+            "Test threshold (95th null percentile):"
+            f" < {lambda_threshold:.3f} for {len(parsed)} tests"
+        )
+        print(f"Test passes: {lambda_gc < lambda_threshold}")
+        if np.isfinite(lambda_gc_synthetic):
+            print(
+                "Synthetic threshold (95th null percentile):"
+                f" < {lambda_threshold_synth:.3f} for {len(synthetic_pvalues)} tests"
+            )
         print(f"{'='*70}\n")
         
         # Analyze associations
@@ -307,4 +343,9 @@ def test_pipeline_final_results_lambda_is_reasonable(inversion_mode):
         print(f"\n{'='*70}\n")
         
         assert np.isfinite(lambda_gc)
-        assert lambda_gc < 1.1, f"Inflation factor {lambda_gc:.6f} should remain below nominal bound 1.1"
+        assert (
+            lambda_gc < lambda_threshold
+        ), (
+            f"Inflation factor {lambda_gc:.6f} exceeded {lambda_threshold:.3f}, the"
+            f" expected 95th percentile under the null for {len(parsed)} tests"
+        )
