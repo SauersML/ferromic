@@ -174,7 +174,9 @@ def main():
     plt.ylim(0.9, 1.1)
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
-    plt.show()
+    plt.savefig("lambda/lambda_vs_maf.png", dpi=150)
+    print("Saved figure: lambda/lambda_vs_maf.png")
+    plt.close()
 
     # Test 2: Varying number of phenotypes
     print("\n" + "="*60)
@@ -213,7 +215,9 @@ def main():
     plt.ylim(0.9, 1.1)
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
-    plt.show()
+    plt.savefig("lambda/lambda_vs_n_phenotypes.png", dpi=150)
+    print("Saved figure: lambda/lambda_vs_n_phenotypes.png")
+    plt.close()
 
     # Test 3: Varying phenotype correlation
     print("\n" + "="*60)
@@ -251,7 +255,9 @@ def main():
     plt.ylim(0.9, 1.1)
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
-    plt.show()
+    plt.savefig("lambda/lambda_vs_correlation.png", dpi=150)
+    print("Saved figure: lambda/lambda_vs_correlation.png")
+    plt.close()
 
 
 if __name__ == "__main__":
