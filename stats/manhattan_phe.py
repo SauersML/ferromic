@@ -6,7 +6,6 @@ import numpy as np
 import pandas as pd
 import matplotlib
 import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
 from matplotlib.patches import FancyArrowPatch
 import warnings
 
@@ -58,22 +57,15 @@ FIG_HEIGHT      = 7.8
 AXES_BBOX       = (0.12, 0.12, 0.76, 0.76)  # left, bottom, width, height
 
 # Markers & style
-TRI_BASE_SIZE   = 195.0    # non-significant triangle area (pt^2) - 130 × 1.5
-TRI_SIG_BASE    = 225.0    # baseline significant triangle area (pt^2) - 150 × 1.5
-TRI_SIG_MAG_MIN = 0.67     # minimum OR for scaling (protective effects) - changed from 0.5
-TRI_SIG_MAG_MAX = 1.5      # maximum OR for scaling (risk effects) - changed from 2.0
-TRI_SIZE_MULTIPLIER = 2.5  # Multiplier to make size differences more dramatic - reduced from 3.0
-CIRCLE_SIZE     = 450.0    # FDR circle area (pt^2) - 300 × 1.5
+TRI_BASE_SIZE   = 195.0    # triangle area (pt^2) when OR = 1.0
+TRI_OR_MIN      = 0.67     # minimum OR for scaling (protective effects)
+TRI_OR_MAX      = 1.5      # maximum OR for scaling (risk effects)
 POINT_EDGE_LW   = 0.45
-POINT_ALPHA_SIG = 0.98     # significant points
-POINT_ALPHA_NONSIG = 0.25  # non-significant points (75% transparent)
-CIRCLE_EDGE_LW  = 1.3
+POINT_ALPHA     = 0.9
 
 # Risk direction palette
 INCOLOR_HEX     = "#2B6CB0"
 DECOLOR_HEX     = "#C53030"
-NON_SIG_LIGHTEN = 0.55
-SIG_DARKEN      = 0.35
 
 # Label/legend
 LABEL_FONTSZ    = 22.0     # phenotype labels
@@ -163,43 +155,17 @@ def sanitize_filename(s: str) -> str:
     return s[:200] if s else "NA"
 
 # Palette & shading
-def lighten_color(hex_color: str, amount: float) -> str:
-    r, g, b = mcolors.to_rgb(hex_color)
-    r = min(1.0, r + (1.0 - r) * amount)
-    g = min(1.0, g + (1.0 - g) * amount)
-    b = min(1.0, b + (1.0 - b) * amount)
-    return mcolors.to_hex((r, g, b))
-
-def darken_color(hex_color: str, amount: float) -> str:
-    r, g, b = mcolors.to_rgb(hex_color)
-    r = max(0.0, r * (1.0 - amount))
-    g = max(0.0, g * (1.0 - amount))
-    b = max(0.0, b * (1.0 - amount))
-    return mcolors.to_hex((r, g, b))
-
 def scale_all_sizes(or_values: pd.Series) -> np.ndarray:
-    """
-    Scale marker sizes based on odds ratio magnitude, clamped to [0.67, 1.5] range.
-    Uses REDUCED exponential scaling to make differences less dramatic.
-    Larger markers for stronger effects (further from OR=1.0):
-    - OR = 0.67 or 1.5 -> magnitude = 1.5 -> size = 150 × 1.5^1.0 = 225 pt² (LARGER)
-    - OR = 1.0 -> magnitude = 1.0 -> size = 150 × 1.0^1.0 = 150 pt² (SMALLER - baseline)
-    """
+    """Scale marker sizes linearly with the odds ratio (clamped to [0.67, 1.5])."""
     arr = pd.to_numeric(or_values, errors="coerce").to_numpy()
-    arr = np.nan_to_num(arr, nan=1.0, posinf=1.5, neginf=0.67)
+    arr = np.nan_to_num(arr, nan=1.0, posinf=TRI_OR_MAX, neginf=TRI_OR_MIN)
     arr[arr <= 0] = 1.0
-    
+
     # Clamp to [0.67, 1.5] range first
-    arr = np.clip(arr, TRI_SIG_MAG_MIN, TRI_SIG_MAG_MAX)
-    
-    # Convert to magnitude: both protective and risk scale the same
-    # Larger magnitude = further from 1.0 = stronger effect = LARGER marker
-    # OR >= 1.0: magnitude = OR (e.g., 1.5 -> 1.5)
-    # OR < 1.0: magnitude = 1/OR (e.g., 0.67 -> 1.49)
-    mags = np.where(arr >= 1.0, arr, 1.0 / arr)
-    
-    # Apply LINEAR scaling (power of 1.0) to make differences less dramatic
-    return TRI_SIG_BASE * (mags ** 1.0)
+    arr = np.clip(arr, TRI_OR_MIN, TRI_OR_MAX)
+
+    # Linear scaling: OR=1.0 keeps baseline size, OR<1 shrinks, OR>1 enlarges
+    return TRI_BASE_SIZE * arr
 
 def pts_to_px(fig, pts):  # points -> pixels
     return pts * (fig.dpi / 72.0)
@@ -437,17 +403,36 @@ def plot_one_inversion(
     # categories
     g["cat_name"] = g["phecode_category"].fillna(UNCAT_NAME)
     g["cat_num"]  = g["category_num_num"].fillna(9999)
-    cat_order = (
-        g[["cat_name","cat_num"]]
+
+    cat_counts = g.groupby("cat_name").size()
+    cat_meta = (
+        g[["cat_name", "cat_num"]]
         .drop_duplicates()
-        .sort_values(["cat_num","cat_name"], kind="mergesort")
-        .reset_index(drop=True)
-    )["cat_name"].tolist()
+        .set_index("cat_name")
+    )
+    cat_info: list[tuple[str, int, float]] = []
+    for cat, count in cat_counts.items():
+        meta_val = float(cat_meta.at[cat, "cat_num"]) if cat in cat_meta.index else 9999.0
+        cat_info.append((cat, int(count), meta_val))
+    cat_info.sort(key=lambda x: (x[1], x[2], x[0]))
+
+    cat_order: list[str] = []
+    lo, hi = 0, len(cat_info) - 1
+    take_small = True
+    while lo <= hi:
+        if take_small:
+            cat_order.append(cat_info[lo][0])
+            lo += 1
+        else:
+            cat_order.append(cat_info[hi][0])
+            hi -= 1
+        take_small = not take_small
 
     # x positions within category:
     # left side (dec) sorted by q; right side (inc) sorted by q
     pieces, centers, ticklabels = [], [], []
     start = 0
+    cat_order_plotted: list[str] = []
     for cat in cat_order:
         cat_df = g[g["cat_name"] == cat].copy()
         dec_df = cat_df[cat_df["risk_dir"] == "dec"].sort_values(P_Q_COL, kind="mergesort")
@@ -473,6 +458,7 @@ def plot_one_inversion(
             centers.append(start + (n_tot - 1)/2.0)
             ticklabels.append(cat)
             start += n_tot
+            cat_order_plotted.append(cat)
 
     if not pieces: return None
     g = pd.concat(pieces, ignore_index=False).sort_values("x")
@@ -484,14 +470,7 @@ def plot_one_inversion(
         sig_mask_full = pd.Series(False, index=g.index)
 
     base_color_lookup = {"inc": INCOLOR_HEX, "dec": DECOLOR_HEX}
-    plot_colors: list[str] = []
-    for idx, row in g.iterrows():
-        base = base_color_lookup.get(row.get("risk_dir"), INCOLOR_HEX)
-        if bool(sig_mask_full.get(idx, False)):
-            plot_colors.append(darken_color(base, SIG_DARKEN))
-        else:
-            plot_colors.append(lighten_color(base, NON_SIG_LIGHTEN))
-    g["plot_color"] = plot_colors
+    g["plot_color"] = g["risk_dir"].map(lambda rd: base_color_lookup.get(rd, INCOLOR_HEX))
 
     # Scale ALL points by odds ratio (not just significant ones)
     size_array = scale_all_sizes(g[OR_COL])
@@ -510,63 +489,29 @@ def plot_one_inversion(
     ax.spines['right'].set_visible(False)
 
     obstacles = []
-    # FDR circles (behind triangles)
-    circ=None
-    if sig_mask_full.any():
-        circ = ax.scatter(
-            g.loc[sig_mask_full,"x"], g.loc[sig_mask_full,"y"],
-            s=CIRCLE_SIZE, marker="o",
-            facecolors="white", edgecolors="black",
-            linewidths=CIRCLE_EDGE_LW, zorder=1.5, alpha=1.0,
-            label="FDR significant"
-        )
-        obstacles.append(circ)
-
-    # triangles - split by significance for different alpha values
-    inc = g["risk_dir"]=="inc"
+    inc = g["risk_dir"] == "inc"
     dec = ~inc
-    inc_sig = inc & sig_mask_full
-    inc_nonsig = inc & ~sig_mask_full
-    dec_sig = dec & sig_mask_full
-    dec_nonsig = dec & ~sig_mask_full
-    
-    # Plot significant points with full opacity
-    tri_inc_sig = ax.scatter(
-        g.loc[inc_sig,"x"], g.loc[inc_sig,"y"],
-        s=g.loc[inc_sig,"plot_size"], marker="^",
-        c=g.loc[inc_sig,"plot_color"], edgecolors="black",
-        linewidths=POINT_EDGE_LW, alpha=POINT_ALPHA_SIG, zorder=2.0,
-        label="Risk increasing (darker = FDR sig.)"
-    ) if inc_sig.any() else None
-    
-    # Plot non-significant points with 50% transparency
-    tri_inc_nonsig = ax.scatter(
-        g.loc[inc_nonsig,"x"], g.loc[inc_nonsig,"y"],
-        s=g.loc[inc_nonsig,"plot_size"], marker="^",
-        c=g.loc[inc_nonsig,"plot_color"], edgecolors="black",
-        linewidths=POINT_EDGE_LW, alpha=POINT_ALPHA_NONSIG, zorder=2.0
-    ) if inc_nonsig.any() else None
-    
-    tri_dec_sig = ax.scatter(
-        g.loc[dec_sig,"x"], g.loc[dec_sig,"y"],
-        s=g.loc[dec_sig,"plot_size"], marker="v",
-        c=g.loc[dec_sig,"plot_color"], edgecolors="black",
-        linewidths=POINT_EDGE_LW, alpha=POINT_ALPHA_SIG, zorder=2.0,
-        label="Risk decreasing (darker = FDR sig.)"
-    ) if dec_sig.any() else None
-    
-    tri_dec_nonsig = ax.scatter(
-        g.loc[dec_nonsig,"x"], g.loc[dec_nonsig,"y"],
-        s=g.loc[dec_nonsig,"plot_size"], marker="v",
-        c=g.loc[dec_nonsig,"plot_color"], edgecolors="black",
-        linewidths=POINT_EDGE_LW, alpha=POINT_ALPHA_NONSIG, zorder=2.0
-    ) if dec_nonsig.any() else None
-    
-    # Collect for obstacles (use significant ones for collision detection)
-    tri_inc = tri_inc_sig if tri_inc_sig is not None else tri_inc_nonsig
-    tri_dec = tri_dec_sig if tri_dec_sig is not None else tri_dec_nonsig
-    if tri_inc is not None: obstacles.append(tri_inc)
-    if tri_dec is not None: obstacles.append(tri_dec)
+
+    tri_inc = ax.scatter(
+        g.loc[inc, "x"], g.loc[inc, "y"],
+        s=g.loc[inc, "plot_size"], marker="^",
+        c=g.loc[inc, "plot_color"], edgecolors="black",
+        linewidths=POINT_EDGE_LW, alpha=POINT_ALPHA, zorder=2.0,
+        label="Risk increasing"
+    ) if inc.any() else None
+
+    tri_dec = ax.scatter(
+        g.loc[dec, "x"], g.loc[dec, "y"],
+        s=g.loc[dec, "plot_size"], marker="v",
+        c=g.loc[dec, "plot_color"], edgecolors="black",
+        linewidths=POINT_EDGE_LW, alpha=POINT_ALPHA, zorder=2.0,
+        label="Risk decreasing"
+    ) if dec.any() else None
+
+    if tri_inc is not None:
+        obstacles.append(tri_inc)
+    if tri_dec is not None:
+        obstacles.append(tri_dec)
 
     # establish consistent x-limits prior to layout/annotation work
     raw_xmin = float(g["x"].min())
@@ -630,12 +575,11 @@ def plot_one_inversion(
     pts_px = []
     rad_px = []
     tri_radius_by_rowid = {idx: tri_radius_px(fig, float(g.at[idx, "plot_size"])) for idx in g.index}
-    circ_r = tri_radius_px(fig, CIRCLE_SIZE)  # consistent scale conversion
     for i, r in g.iterrows():
         px = ax.transData.transform((float(r["x"]), float(r["y"])))
         pts_px.append(np.array(px))
         tri_r = tri_radius_by_rowid.get(i, tri_radius_px(fig, TRI_BASE_SIZE))
-        rad_px.append(max(tri_r, circ_r if bool(sig_mask_full.get(i, False)) else tri_r))
+        rad_px.append(tri_r)
     pts_px = np.vstack(pts_px)
     rad_px = np.array(rad_px)
     resolve_overlaps_strict(ax, texts, pts_px, rad_px, max_iter=450, step_px=2.5)
@@ -672,7 +616,7 @@ def plot_one_inversion(
     ax.tick_params(axis="y", labelsize=TICK_FONTSZ)
 
     # category separators
-    cum = np.cumsum([len(g[g["cat_name"]==c]) for c in cat_order])
+    cum = np.cumsum([len(g[g["cat_name"] == c]) for c in cat_order_plotted])
     for x0 in cum[:-1]:
         ax.axvline(x=x0 - 0.5, color="#e6e6ee", linestyle="-", linewidth=0.7, zorder=1)
 
@@ -682,32 +626,29 @@ def plot_one_inversion(
     if handles:
         legend1 = ax.legend(handles, labels, fontsize=LEGEND_FONTSZ, loc="upper right", frameon=False)
 
-    if sig_mask_full.any():
-        or_levels = [0.67, 1.0, 1.5]
-        or_labels = [f"{val:.2f}" if val < 1.0 else f"{val:.1f}" for val in or_levels]
-        sig_color_sample = darken_color(INCOLOR_HEX, SIG_DARKEN)
-        size_handles = [
-            ax.scatter(
-                [], [],
-                s=scale_all_sizes(pd.Series([val]))[0],
-                marker="^", facecolors=sig_color_sample,
-                edgecolors="black", linewidths=POINT_EDGE_LW,
-                alpha=POINT_ALPHA_SIG
-            )
-            for val in or_levels
-        ]
-        legend2 = ax.legend(
-            size_handles, or_labels,
-            title="Odds ratio",
-            fontsize=LEGEND_FONTSZ, title_fontsize=LEGEND_TITLE_SZ,
-            loc="upper left", frameon=False,
-            borderaxespad=0.8
+    or_levels = [0.67, 1.0, 1.5]
+    or_labels = [f"{val:.2f}" if val < 1.0 else f"{val:.1f}" for val in or_levels]
+    sample_color = INCOLOR_HEX
+    size_handles = [
+        ax.scatter(
+            [], [],
+            s=scale_all_sizes(pd.Series([val]))[0],
+            marker="^", facecolors=sample_color,
+            edgecolors="black", linewidths=POINT_EDGE_LW,
+            alpha=POINT_ALPHA
         )
-        if legend1 is not None:
-            ax.add_artist(legend1)
-        ax.add_artist(legend2)
-    elif legend1 is not None:
+        for val in or_levels
+    ]
+    legend2 = ax.legend(
+        size_handles, or_labels,
+        title="Odds ratio",
+        fontsize=LEGEND_FONTSZ, title_fontsize=LEGEND_TITLE_SZ,
+        loc="upper left", frameon=False,
+        borderaxespad=0.8
+    )
+    if legend1 is not None:
         ax.add_artist(legend1)
+    ax.add_artist(legend2)
 
     # connectors (AFTER final layout; color by exact rowid)
     fig.canvas.draw()
