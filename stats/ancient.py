@@ -28,6 +28,9 @@ SELECTION_GZ_NAME = "Selection_Summary_Statistics_01OCT2025.tsv.gz"
 SELECTION_TSV_NAME = "Selection_Summary_Statistics_01OCT2025.tsv"
 SELECTION_TSV_PATH = OUTPUT_DIR / SELECTION_TSV_NAME
 
+PHY_ZIP_URL = "https://sharedspace.s3.msi.umn.edu/public_internet/all_phy/phy_files.zip"
+PHY_ZIP_LOCAL = Path("phy_files.zip")
+
 
 def get_dataset_metadata():
     """Fetch dataset metadata from the Dataverse API."""
@@ -178,10 +181,134 @@ def download_file(file_id: int, filename: str, expected_md5: str | None):
     return output_path, is_gz
 
 
+def install_liftover():
+    """Download and install the UCSC liftOver tool if not already present."""
+    which_result = subprocess.run(
+        ["which", "liftOver"],
+        capture_output=True,
+        text=True,
+    )
+    
+    if which_result.returncode == 0:
+        print("✓ liftOver tool already installed")
+        return
+    
+    print("liftOver tool not found. Installing...")
+    
+    # Determine the appropriate binary URL based on system architecture
+    import platform
+    system = platform.system().lower()
+    machine = platform.machine().lower()
+    
+    if system == "linux" and machine == "x86_64":
+        liftover_url = "http://hgdownload.soe.ucsc.edu/admin/exe/linux.x86_64/liftOver"
+    elif system == "darwin" and machine == "x86_64":
+        liftover_url = "http://hgdownload.soe.ucsc.edu/admin/exe/macOSX.x86_64/liftOver"
+    elif system == "darwin" and machine == "arm64":
+        liftover_url = "http://hgdownload.soe.ucsc.edu/admin/exe/macOSX.arm64/liftOver"
+    else:
+        raise RuntimeError(
+            f"Unsupported platform: {system} {machine}. "
+            "Please install liftOver manually from UCSC."
+        )
+    
+    # Create a local bin directory if it doesn't exist
+    local_bin = Path.home() / ".local" / "bin"
+    local_bin.mkdir(parents=True, exist_ok=True)
+    
+    liftover_path = local_bin / "liftOver"
+    
+    print(f"  Downloading liftOver from {liftover_url}...")
+    req = urllib.request.Request(liftover_url, headers={"User-Agent": "Mozilla/5.0"})
+    
+    with urllib.request.urlopen(req) as response:
+        with liftover_path.open("wb") as f:
+            f.write(response.read())
+    
+    # Make it executable
+    liftover_path.chmod(0o755)
+    
+    print(f"✓ liftOver installed to {liftover_path}")
+    
+    # Add to PATH for current session
+    current_path = os.environ.get("PATH", "")
+    if str(local_bin) not in current_path:
+        os.environ["PATH"] = f"{local_bin}:{current_path}"
+        print(f"  Added {local_bin} to PATH for this session")
+
+
+def download_and_unzip_phy():
+    """Download and unzip the PHY files."""
+    import zipfile
+    
+    if PHY_ZIP_LOCAL.exists():
+        print(f"✓ PHY zip file {PHY_ZIP_LOCAL.name} already exists")
+    else:
+        print(f"Downloading PHY files from {PHY_ZIP_URL}...")
+        req = urllib.request.Request(PHY_ZIP_URL, headers={"User-Agent": "Mozilla/5.0"})
+        
+        with urllib.request.urlopen(req) as response:
+            content_length = response.headers.get("Content-Length")
+            file_size = int(content_length) if content_length is not None else None
+            if file_size is not None:
+                print(f"  File size: {format_size(file_size)}")
+            
+            bytes_read = 0
+            chunk_size = 8192 * 1024
+            
+            with PHY_ZIP_LOCAL.open("wb") as f:
+                while True:
+                    chunk = response.read(chunk_size)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    bytes_read += len(chunk)
+                    mb_read = bytes_read / (1024 * 1024)
+                    if file_size:
+                        progress = bytes_read / file_size * 100
+                        print(
+                            f"\r  Progress: {progress:.1f}% ({mb_read:.1f} MB)",
+                            end="",
+                        )
+                    else:
+                        print(f"\r  Downloaded: {mb_read:.1f} MB", end="")
+        
+        print()
+        print("✓ Download complete")
+    
+    # Unzip the file
+    phy_extract_dir = Path("phy_files")
+    if phy_extract_dir.exists() and any(phy_extract_dir.iterdir()):
+        print(f"✓ PHY files already extracted to {phy_extract_dir}")
+    else:
+        print(f"Extracting {PHY_ZIP_LOCAL.name}...")
+        phy_extract_dir.mkdir(exist_ok=True)
+        
+        with zipfile.ZipFile(PHY_ZIP_LOCAL, 'r') as zip_ref:
+            file_list = zip_ref.namelist()
+            total_files = len(file_list)
+            print(f"  Extracting {total_files} files...")
+            
+            for i, file in enumerate(file_list, 1):
+                zip_ref.extract(file, phy_extract_dir)
+                if i % 100 == 0 or i == total_files:
+                    print(f"\r  Extracted: {i}/{total_files} files", end="")
+            
+            print()
+        
+        print(f"✓ Extracted to {phy_extract_dir}")
+
+
 def main():
     """
     Download the target selection summary statistics file if present in the dataset.
     """
+    # Download and unzip PHY files first
+    download_and_unzip_phy()
+    
+    # Install liftOver tool if not present
+    install_liftover()
+    
     OUTPUT_DIR.mkdir(exist_ok=True)
 
     metadata = get_dataset_metadata()
@@ -280,17 +407,6 @@ def liftover_coordinates_batch(regions, from_build: str, to_build: str):
         with urllib.request.urlopen(req) as response, chain_file.open("wb") as out:
             out.write(response.read())
         print("  ✓ Downloaded chain file")
-
-    which_result = subprocess.run(
-        ["which", "liftOver"],
-        capture_output=True,
-        text=True,
-    )
-    if which_result.returncode != 0:
-        bed_input_path.unlink(missing_ok=True)
-        raise RuntimeError(
-            "liftOver tool not found in PATH. Install it from UCSC before running."
-        )
 
     cmd = [
         "liftOver",
@@ -800,5 +916,8 @@ if __name__ == "__main__":
             print("✗ Download failed")
             sys.exit(exit_code)
         print()
+    
+    # Ensure liftOver is installed before running analysis
+    install_liftover()
 
     compare_selection_coefficients()
