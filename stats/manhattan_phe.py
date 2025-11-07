@@ -57,11 +57,13 @@ FIG_HEIGHT      = 7.8
 AXES_BBOX       = (0.12, 0.12, 0.76, 0.76)  # left, bottom, width, height
 
 # Markers & style
-TRI_BASE_SIZE   = 195.0    # triangle area (pt^2) when OR = 1.0
+TRI_BASE_SIZE   = 260.0    # triangle area (pt^2) when OR = 1.0 (larger baseline)
 TRI_OR_MIN      = 0.67     # minimum OR for scaling (protective effects)
 TRI_OR_MAX      = 1.5      # maximum OR for scaling (risk effects)
 POINT_EDGE_LW   = 0.45
-POINT_ALPHA     = 0.9
+POINT_ALPHA_SIG = 0.95
+POINT_ALPHA_NONSIG = 0.30
+
 
 # Risk direction palette
 INCOLOR_HEX     = "#2B6CB0"
@@ -155,6 +157,22 @@ def sanitize_filename(s: str) -> str:
     return s[:200] if s else "NA"
 
 # Palette & shading
+def lighten_color(hex_color: str, amount: float) -> str:
+    r, g, b = mcolors.to_rgb(hex_color)
+    r = min(1.0, r + (1.0 - r) * amount)
+    g = min(1.0, g + (1.0 - g) * amount)
+    b = min(1.0, b + (1.0 - b) * amount)
+    return mcolors.to_hex((r, g, b))
+
+
+def darken_color(hex_color: str, amount: float) -> str:
+    r, g, b = mcolors.to_rgb(hex_color)
+    r = max(0.0, r * (1.0 - amount))
+    g = max(0.0, g * (1.0 - amount))
+    b = max(0.0, b * (1.0 - amount))
+    return mcolors.to_hex((r, g, b))
+
+
 def scale_all_sizes(or_values: pd.Series) -> np.ndarray:
     """Scale marker sizes linearly with the odds ratio (clamped to [0.67, 1.5])."""
     arr = pd.to_numeric(or_values, errors="coerce").to_numpy()
@@ -470,7 +488,14 @@ def plot_one_inversion(
         sig_mask_full = pd.Series(False, index=g.index)
 
     base_color_lookup = {"inc": INCOLOR_HEX, "dec": DECOLOR_HEX}
-    g["plot_color"] = g["risk_dir"].map(lambda rd: base_color_lookup.get(rd, INCOLOR_HEX))
+    plot_colors: list[str] = []
+    for idx, row in g.iterrows():
+        base_color = base_color_lookup.get(row.get("risk_dir"), INCOLOR_HEX)
+        if bool(sig_mask_full.get(idx, False)):
+            plot_colors.append(darken_color(base_color, SIG_DARKEN))
+        else:
+            plot_colors.append(lighten_color(base_color, NON_SIG_LIGHTEN))
+    g["plot_color"] = plot_colors
 
     # Scale ALL points by odds ratio (not just significant ones)
     size_array = scale_all_sizes(g[OR_COL])
@@ -491,27 +516,50 @@ def plot_one_inversion(
     obstacles = []
     inc = g["risk_dir"] == "inc"
     dec = ~inc
+    inc_sig = inc & sig_mask_full
+    inc_nonsig = inc & ~sig_mask_full
+    dec_sig = dec & sig_mask_full
+    dec_nonsig = dec & ~sig_mask_full
 
-    tri_inc = ax.scatter(
-        g.loc[inc, "x"], g.loc[inc, "y"],
-        s=g.loc[inc, "plot_size"], marker="^",
-        c=g.loc[inc, "plot_color"], edgecolors="black",
-        linewidths=POINT_EDGE_LW, alpha=POINT_ALPHA, zorder=2.0,
-        label="Risk increasing"
-    ) if inc.any() else None
+    tri_inc_sig = tri_inc_nonsig = tri_dec_sig = tri_dec_nonsig = None
 
-    tri_dec = ax.scatter(
-        g.loc[dec, "x"], g.loc[dec, "y"],
-        s=g.loc[dec, "plot_size"], marker="v",
-        c=g.loc[dec, "plot_color"], edgecolors="black",
-        linewidths=POINT_EDGE_LW, alpha=POINT_ALPHA, zorder=2.0,
-        label="Risk decreasing"
-    ) if dec.any() else None
+    if inc_sig.any():
+        tri_inc_sig = ax.scatter(
+            g.loc[inc_sig, "x"], g.loc[inc_sig, "y"],
+            s=g.loc[inc_sig, "plot_size"], marker="^",
+            c=g.loc[inc_sig, "plot_color"], edgecolors="black",
+            linewidths=POINT_EDGE_LW, alpha=POINT_ALPHA_SIG, zorder=2.0,
+            label="Risk increasing"
+        )
+        obstacles.append(tri_inc_sig)
+    if inc_nonsig.any():
+        tri_inc_nonsig = ax.scatter(
+            g.loc[inc_nonsig, "x"], g.loc[inc_nonsig, "y"],
+            s=g.loc[inc_nonsig, "plot_size"], marker="^",
+            c=g.loc[inc_nonsig, "plot_color"], edgecolors="black",
+            linewidths=POINT_EDGE_LW, alpha=POINT_ALPHA_NONSIG, zorder=2.0,
+            label="Risk increasing" if tri_inc_sig is None else None
+        )
+        obstacles.append(tri_inc_nonsig)
 
-    if tri_inc is not None:
-        obstacles.append(tri_inc)
-    if tri_dec is not None:
-        obstacles.append(tri_dec)
+    if dec_sig.any():
+        tri_dec_sig = ax.scatter(
+            g.loc[dec_sig, "x"], g.loc[dec_sig, "y"],
+            s=g.loc[dec_sig, "plot_size"], marker="v",
+            c=g.loc[dec_sig, "plot_color"], edgecolors="black",
+            linewidths=POINT_EDGE_LW, alpha=POINT_ALPHA_SIG, zorder=2.0,
+            label="Risk decreasing"
+        )
+        obstacles.append(tri_dec_sig)
+    if dec_nonsig.any():
+        tri_dec_nonsig = ax.scatter(
+            g.loc[dec_nonsig, "x"], g.loc[dec_nonsig, "y"],
+            s=g.loc[dec_nonsig, "plot_size"], marker="v",
+            c=g.loc[dec_nonsig, "plot_color"], edgecolors="black",
+            linewidths=POINT_EDGE_LW, alpha=POINT_ALPHA_NONSIG, zorder=2.0,
+            label="Risk decreasing" if tri_dec_sig is None else None
+        )
+        obstacles.append(tri_dec_nonsig)
 
     # establish consistent x-limits prior to layout/annotation work
     raw_xmin = float(g["x"].min())
@@ -628,14 +676,14 @@ def plot_one_inversion(
 
     or_levels = [0.67, 1.0, 1.5]
     or_labels = [f"{val:.2f}" if val < 1.0 else f"{val:.1f}" for val in or_levels]
-    sample_color = INCOLOR_HEX
+    sample_color = darken_color(INCOLOR_HEX, SIG_DARKEN)
     size_handles = [
         ax.scatter(
             [], [],
             s=scale_all_sizes(pd.Series([val]))[0],
             marker="^", facecolors=sample_color,
             edgecolors="black", linewidths=POINT_EDGE_LW,
-            alpha=POINT_ALPHA
+            alpha=POINT_ALPHA_SIG
         )
         for val in or_levels
     ]
