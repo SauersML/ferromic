@@ -253,8 +253,8 @@ def create_pvalue_correlation_plot(data, x_pval_col, y_pval_col, output_path):
               color=POINT_COLOR, edgecolors='white', linewidth=0.5)
 
     # Labels and title
-    ax.set_xlabel('Tagging SNPs -log10p', fontsize=12)
-    ax.set_ylabel('Imputed dosage -log10p', fontsize=12)
+    ax.set_xlabel('Tagging SNPs -log₁₀(P)', fontsize=12)
+    ax.set_ylabel('Imputed dosage -log₁₀(P)', fontsize=12)
     ax.set_title('Chr17 Inversion vs Tag SNP P-values', fontsize=14, pad=20)
 
     # Format p-value for display (handle very small values)
