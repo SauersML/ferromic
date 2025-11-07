@@ -5,7 +5,7 @@ N_INDIVIDUALS = 10_000
 N_PHENOTYPES = 5_000
 MAF_LIST = [0.01, 0.10, 0.30]
 PHENOTYPE_LIST = [10, 100, 1_000]
-N_REPLICATES = 3
+N_REPLICATES = 5
 
 # Median of chi-square with 1 degree of freedom
 CHI2_MEDIAN_1DF = 0.454936423119572
@@ -103,7 +103,7 @@ def main():
         lambdas[maf] = maf_values
 
     print("Genomic control lambda values")
-    print("Each row: one MAF; entries: three replicate null PheWAS runs.")
+    print("Each row: one MAF; entries: five replicate null PheWAS runs.")
     for maf in MAF_LIST:
         vals = lambdas[maf]
         formatted = "  ".join(f"{v:.6f}" for v in vals)
@@ -141,7 +141,7 @@ def main():
         lambdas_phenotypes[n_pheno] = pheno_values
 
     print("\nGenomic control lambda values")
-    print("Each row: one phenotype count; entries: three replicate null PheWAS runs.")
+    print("Each row: one phenotype count; entries: five replicate null PheWAS runs.")
     for n_pheno in PHENOTYPE_LIST:
         vals = lambdas_phenotypes[n_pheno]
         formatted = "  ".join(f"{v:.6f}" for v in vals)
