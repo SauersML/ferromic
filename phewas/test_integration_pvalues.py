@@ -94,7 +94,7 @@ def test_pipeline_final_results_lambda_is_reasonable(inversion_mode):
     null_inversion = inversion_mode
     with temp_workspace() as tmpdir, preserve_run_globals():
         core_data, base_phenos = make_realistic_followup_dataset(N=4200, seed=2025)
-        phenos = _generate_dense_phenotypes(core_data, base_phenos, extra=97)
+        phenos = _generate_dense_phenotypes(core_data, base_phenos, extra=497)
 
         cache_root = Path(tmpdir) / "phewas_cache"
         run.CACHE_DIR = str(cache_root)
