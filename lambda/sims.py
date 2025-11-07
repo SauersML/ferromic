@@ -48,17 +48,17 @@ def compute_chi2_stats(x, y):
 
 
 def simulate_lambda_for_maf(maf, n_replicates=N_REPLICATES):
-    """Vectorized over replicates."""
+    """Process one replicate at a time to minimize memory usage."""
     n = N_INDIVIDUALS
     m = N_PHENOTYPES
 
-    # Generate all replicates at once
-    genotypes = np.random.binomial(2, maf, size=(n_replicates, n)).astype(np.float32)
-    phenotypes = np.random.normal(0.0, 1.0, size=(n_replicates, n, m)).astype(np.float32)
-
     lambda_values = []
     for i in range(n_replicates):
-        chi2_stats = compute_chi2_stats(genotypes[i], phenotypes[i])
+        # Generate one replicate at a time
+        genotype = np.random.binomial(2, maf, size=n).astype(np.float32)
+        phenotypes = np.random.normal(0.0, 1.0, size=(n, m)).astype(np.float32)
+
+        chi2_stats = compute_chi2_stats(genotype, phenotypes)
         lambda_gc = np.median(chi2_stats) / CHI2_MEDIAN_1DF
         lambda_values.append(lambda_gc)
 
@@ -66,45 +66,85 @@ def simulate_lambda_for_maf(maf, n_replicates=N_REPLICATES):
 
 
 def simulate_lambda_for_n_phenotypes(n_phenotypes, maf=0.10, n_replicates=N_REPLICATES):
-    """Vectorized over replicates."""
+    """Process one replicate at a time to minimize memory usage."""
     n = N_INDIVIDUALS
     m = n_phenotypes
 
-    # Generate all replicates at once
-    genotypes = np.random.binomial(2, maf, size=(n_replicates, n)).astype(np.float32)
-    phenotypes = np.random.normal(0.0, 1.0, size=(n_replicates, n, m)).astype(np.float32)
-
     lambda_values = []
     for i in range(n_replicates):
-        chi2_stats = compute_chi2_stats(genotypes[i], phenotypes[i])
+        # Generate one replicate at a time
+        genotype = np.random.binomial(2, maf, size=n).astype(np.float32)
+        phenotypes = np.random.normal(0.0, 1.0, size=(n, m)).astype(np.float32)
+
+        chi2_stats = compute_chi2_stats(genotype, phenotypes)
         lambda_gc = np.median(chi2_stats) / CHI2_MEDIAN_1DF
         lambda_values.append(lambda_gc)
 
     return lambda_values
 
 
-def simulate_lambda_with_correlated_phenotypes(correlation, maf=0.10, n_individuals=None, n_phenotypes=None, n_replicates=N_REPLICATES):
-    """Vectorized over replicates."""
+def simulate_lambda_with_correlated_phenotypes(correlation, maf=0.10, n_individuals=None, n_phenotypes=None, n_replicates=N_REPLICATES, block_size=100):
+    """
+    Process one replicate at a time, streaming phenotypes in blocks.
+
+    This dramatically reduces memory usage by:
+    1. Not stacking across replicates (saves factor of n_replicates)
+    2. Processing phenotypes in blocks (peak memory ~n_individuals × block_size instead of n_individuals × n_phenotypes)
+
+    For n_individuals=100k, n_phenotypes=1000, block_size=100:
+    Peak memory per replicate: ~120MB instead of ~2GB
+    """
     n = n_individuals if n_individuals is not None else N_INDIVIDUALS
     m = n_phenotypes if n_phenotypes is not None else N_PHENOTYPES
     rho = correlation
 
-    # Generate all replicates at once
-    genotypes = np.random.binomial(2, maf, size=(n_replicates, n)).astype(np.float32)
-
-    # Generate correlated phenotypes using a common factor model
-    # For correlation rho, Y_i = sqrt(rho) * Z + sqrt(1-rho) * epsilon_i
-    common_factor = np.random.normal(0.0, 1.0, size=(n_replicates, n, 1)).astype(np.float32)
-    independent_noise = np.random.normal(0.0, 1.0, size=(n_replicates, n, m)).astype(np.float32)
-
-    if rho == 0.0:
-        phenotypes = independent_noise
-    else:
-        phenotypes = np.sqrt(rho) * common_factor + np.sqrt(1.0 - rho) * independent_noise
-
     lambda_values = []
-    for i in range(n_replicates):
-        chi2_stats = compute_chi2_stats(genotypes[i], phenotypes[i])
+
+    for rep in range(n_replicates):
+        # Generate genotype for this replicate
+        genotype = np.random.binomial(2, maf, size=n).astype(np.float32)
+
+        # Center genotype once
+        x_centered = genotype - genotype.mean()
+        sxx = np.sum(x_centered ** 2)
+
+        # Generate common factor once per replicate (if rho > 0)
+        if rho > 0.0:
+            common_factor = np.random.normal(0.0, 1.0, size=(n, 1)).astype(np.float32)
+
+        # Pre-allocate array for chi-square statistics
+        chi2_stats = np.empty(m, dtype=np.float32)
+
+        # Process phenotypes in blocks
+        idx = 0
+        for start_idx in range(0, m, block_size):
+            end_idx = min(start_idx + block_size, m)
+            block_m = end_idx - start_idx
+
+            # Generate correlated phenotypes for this block
+            # Model: Y_i = sqrt(rho) * Z + sqrt(1-rho) * epsilon_i
+            if rho == 0.0:
+                phenotype_block = np.random.normal(0.0, 1.0, size=(n, block_m)).astype(np.float32)
+            else:
+                independent_noise = np.random.normal(0.0, 1.0, size=(n, block_m)).astype(np.float32)
+                phenotype_block = np.sqrt(rho) * common_factor + np.sqrt(1.0 - rho) * independent_noise
+
+            # Center phenotypes
+            y_centered = phenotype_block - phenotype_block.mean(axis=0, keepdims=True)
+
+            # Compute sufficient statistics for this block
+            sxy = x_centered @ y_centered  # (block_m,)
+            syy = np.sum(y_centered ** 2, axis=0)  # (block_m,)
+
+            # Compute chi-square for this block
+            r_squared = (sxy ** 2) / (sxx * syy)
+            block_chi2 = (n - 2) * r_squared / (1.0 - r_squared)
+
+            # Store results
+            chi2_stats[idx:idx+block_m] = block_chi2
+            idx += block_m
+
+        # Compute lambda_GC from all chi-square statistics
         lambda_gc = np.median(chi2_stats) / CHI2_MEDIAN_1DF
         lambda_values.append(lambda_gc)
 
