@@ -16,17 +16,13 @@ FERROMIC_URL = (
 )
 
 
-# -------------- helpers: label normalization & ferromic panel -----------------
-
+# ======================= label normalization & ferromic panel =======================
 
 def norm_label(s: str) -> str:
     """
-    Normalize phenotype strings so label styles match between
-    ferromic 'Phenotype' and PheTK 'phecode_string'.
-
-    Examples:
-      'Melanocytic_nevi' -> 'melanocytic_nevi'
+    Normalize phenotype strings:
       'Melanocytic nevi' -> 'melanocytic_nevi'
+      'Melanocytic_nevi' -> 'melanocytic_nevi'
     """
     s = s.strip().lower()
     out = []
@@ -44,16 +40,14 @@ def norm_label(s: str) -> str:
 
 def get_target_phecodes_from_ferromic():
     """
-    1. Load ferromic PheWAS results from FERROMIC_URL.
-    2. Use the 'Phenotype' column.
-    3. Deduplicate.
-    4. Map those phenotype labels to PheTK phecodeX definitions:
-       - Normalize both ferromic Phenotype and phecodeX phecode_string.
-       - Build mapping norm(phecode_string) -> phecode.
-       - Keep only successfully mapped phecodes.
-    5. Return a sorted list of unique phecodes.
-    """
+    Build the target phecodeX panel from ferromic:
 
+    1. Load ferromic PheWAS results.
+    2. Take unique 'Phenotype' labels.
+    3. Normalize.
+    4. Map to PheTK phecodeX via normalized phecode_string.
+    5. Return sorted unique phecode list.
+    """
     print(f"Loading ferromic PheWAS results from: {FERROMIC_URL}")
     ferro = pd.read_csv(FERROMIC_URL, sep="\t", low_memory=False)
 
@@ -80,7 +74,7 @@ def get_target_phecodes_from_ferromic():
 
     phe_map = pl.read_csv(
         phecode_map_path,
-        dtypes={
+        schema_overrides={
             "phecode": pl.Utf8,
             "ICD": pl.Utf8,
             "flag": pl.Int8,
@@ -96,7 +90,7 @@ def get_target_phecodes_from_ferromic():
             "cannot map ferromic Phenotype labels."
         )
 
-    # Build norm(phecode_string) -> phecode mapping
+    # norm(phecode_string) -> phecode
     mapping = {}
     for row in phe_map.iter_rows(named=True):
         ps = row["phecode_string"]
@@ -135,163 +129,198 @@ def get_target_phecodes_from_ferromic():
     return targets
 
 
-# -------------- helpers: rs1052553 cohort from AoU hail MTs -------------------
+# ======================= rs1052553 cohort: local or microarray MT ====================
 
-
-def select_mt_with_rs1052553():
+def build_cohort_from_local_genotype():
     """
-    Search for rs1052553 in available AoU v8 Hail MatrixTables by rsID.
+    If RS1052553_GENOTYPE_CSV is set, use that file.
 
-    Tries, in order:
-      - Exome split MT (WGS_EXOME_SPLIT_HAIL_PATH)
-      - Exome multi MT (WGS_EXOME_MULTI_HAIL_PATH)
-      - Microarray MT (MICROARRAY_HAIL_STORAGE_PATH)
+    Expected columns:
+      - person_id
+      - rs1052553_dosage  (or rs1052553 / dosage)
 
-    Returns:
-      (label, mt_snp)
-    where mt_snp is a MatrixTable filtered to rs1052553 rows.
-
-    Raises:
-      RuntimeError if rs1052553 not found in any candidate.
+    Returns path to normalized CSV or None if env var not set.
     """
-    candidates = []
-
-    exome_split = os.getenv("WGS_EXOME_SPLIT_HAIL_PATH")
-    exome_multi = os.getenv("WGS_EXOME_MULTI_HAIL_PATH")
-    micro_mt = os.getenv("MICROARRAY_HAIL_STORAGE_PATH")
-
-    if exome_split:
-        candidates.append(("WGS_EXOME_SPLIT_HAIL_PATH", exome_split))
-    if exome_multi:
-        candidates.append(("WGS_EXOME_MULTI_HAIL_PATH", exome_multi))
-    if micro_mt:
-        candidates.append(("MICROARRAY_HAIL_STORAGE_PATH", micro_mt))
-
-    if not candidates:
+    path = os.getenv("RS1052553_GENOTYPE_CSV")
+    if not path:
+        return None
+    if not os.path.exists(path):
         raise RuntimeError(
-            "No candidate genotype MatrixTable env vars set "
-            "(WGS_EXOME_SPLIT_HAIL_PATH / WGS_EXOME_MULTI_HAIL_PATH / MICROARRAY_HAIL_STORAGE_PATH)."
+            f"RS1052553_GENOTYPE_CSV is set to '{path}' but file does not exist."
         )
 
-    for label, path in candidates:
-        print(f"Searching for rs1052553 in {label}: {path}")
-        mt = hl.read_matrix_table(path)
+    print(f"Using precomputed genotype cohort from: {path}")
+    df = pl.read_csv(path, infer_schema_length=1000)
+    cols = set(df.columns)
 
-        row_fields = set(mt.row)
-        mt_snp = None
+    if "person_id" not in cols:
+        raise RuntimeError(
+            f"Genotype file {path} must contain 'person_id' column. "
+            f"Columns: {df.columns}"
+        )
 
-        if "rsid" in row_fields:
-            mt_snp = mt.filter_rows(mt.rsid == "rs1052553")
-        elif "ID" in row_fields:
-            mt_snp = mt.filter_rows(mt.ID == "rs1052553")
+    dosage_col = None
+    for cand in ("rs1052553_dosage", "rs1052553", "dosage"):
+        if cand in cols:
+            dosage_col = cand
+            break
 
-        if mt_snp is None:
-            print(f"  No 'rsid' or 'ID' field in {label}; skipping.")
-            continue
+    if dosage_col is None:
+        raise RuntimeError(
+            f"Genotype file {path} must contain rs1052553 dosage column "
+            f"(one of rs1052553_dosage, rs1052553, dosage). "
+            f"Columns: {df.columns}"
+        )
 
-        n = mt_snp.count_rows()
-        if n > 0:
-            print(f"  Found rs1052553 in {label} with {n} row(s).")
-            return label, mt_snp
-
-        print(f"  rs1052553 not found in {label} by rsid; trying next candidate.")
-
-    raise RuntimeError(
-        "rs1052553 not found in any candidate MatrixTable. "
-        "Verify that this SNP is present and rsid annotations exist in AoU v8."
+    df = df.select(["person_id", dosage_col])
+    df = df.rename({dosage_col: "rs1052553_dosage"})
+    df = df.drop_nulls(["rs1052553_dosage"])
+    df = df.with_columns(
+        pl.col("person_id").cast(pl.Int64),
+        pl.col("rs1052553_dosage").cast(pl.Int64),
     )
+    df = df.unique(subset=["person_id"])
+
+    out = "cohort_rs1052553_additive_raw.csv"
+    df.write_csv(out)
+    print(f"Normalized local genotype cohort written to {out} (n={df.height}).")
+    return out
 
 
-def build_rs1052553_additive_cohort():
+def build_cohort_from_microarray_hail():
     """
-    Build additive genotype-defined cohort for rs1052553 from AoU v8.
+    Fallback: derive rs1052553 dosage from AoU microarray Hail MT.
 
-    Logic:
-      - Initialize Hail in AoU RW environment.
-      - Find an MT containing rs1052553 by rsID (see select_mt_with_rs1052553).
-      - Compute additive dosage:
-          rs1052553_dosage = number of alt alleles (0, 1, or 2)
-      - Map sample IDs to person_id (int).
-      - Drop missing dosages, deduplicate.
-      - Write: cohort_rs1052553_additive_raw.csv
+    Uses:
+      MICROARRAY_HAIL_STORAGE_PATH
+
+    Steps:
+      - Filter rows by rsid/ID == 'rs1052553'.
+      - Compute GT.n_alt_alleles() as rs1052553_dosage.
+      - Export via hl.export_table (no to_pandas on full cohort).
+      - Normalize to CSV: person_id, rs1052553_dosage.
 
     Returns:
-      Path to cohort CSV.
+      path to CSV, or None if MICROARRAY_HAIL_STORAGE_PATH not set.
     """
+    micro_mt_path = os.getenv("MICROARRAY_HAIL_STORAGE_PATH")
+    if not micro_mt_path:
+        return None
 
-    print("Initializing Hail for rs1052553 additive cohort...")
-    hl.init(app_name="rs1052553_additive_phewas",
+    print("Initializing Hail to derive rs1052553 cohort from microarray MT...")
+    hl.init(app_name="rs1052553_additive_from_microarray",
             quiet=True,
-            log="/tmp/hail_rs1052553.log")
+            log="/tmp/hail_rs1052553_microarray.log")
 
-    label, mt_snp = select_mt_with_rs1052553()
+    print(f"Reading microarray MT: {micro_mt_path}")
+    mt = hl.read_matrix_table(micro_mt_path)
+
+    row_fields = set(mt.row)
+    if "rsid" in row_fields:
+        mt_snp = mt.filter_rows(mt.rsid == "rs1052553")
+    elif "ID" in row_fields:
+        mt_snp = mt.filter_rows(mt.ID == "rs1052553")
+    else:
+        hl.stop()
+        raise RuntimeError(
+            "Microarray MT does not have 'rsid' or 'ID' row field; "
+            "cannot locate rs1052553."
+        )
+
+    n = mt_snp.count_rows()
+    if n == 0:
+        hl.stop()
+        raise RuntimeError(
+            "rs1052553 not found in MICROARRAY_HAIL_STORAGE_PATH by rsid/ID."
+        )
+
+    print(f"Found rs1052553 with {n} row(s) in microarray MT.")
 
     if "GT" not in mt_snp.entry:
         hl.stop()
         raise RuntimeError(
-            f"Selected MatrixTable {label} does not have a 'GT' field; "
+            "Microarray MT for rs1052553 lacks 'GT' entry field; "
             "cannot compute additive dosage."
         )
 
-    # Compute dosage per sample: number of alt alleles
+    # Additive dosage = # alt alleles = 0/1/2
     mt_snp = mt_snp.select_entries(
         rs1052553_dosage=mt_snp.GT.n_alt_alleles()
     )
     ht = mt_snp.entries().select("rs1052553_dosage")
 
-    print("Collecting rs1052553 dosages to a local table...")
-    df = ht.to_pandas()
+    out_tsv = "cohort_rs1052553_additive_raw.tsv"
+    print(f"Exporting rs1052553 dosages to {out_tsv} via Hail export_table...")
+    hl.export_table(ht, out_tsv, header=True)
+    hl.stop()
 
-    # Identify sample ID column
-    sample_col = None
-    for cand in ("s", "sample_id", "participant_id", "person_id"):
-        if cand in df.columns:
-            sample_col = cand
-            break
+    # Now load the tiny table locally and normalize
+    print("Reading exported TSV and normalizing to CSV...")
+    df = pl.read_csv(out_tsv, sep="\t", infer_schema_length=1000)
 
-    if sample_col is None:
-        hl.stop()
+    # Identify sample column (whatever is not locus/alleles/dosage)
+    candidate_sample_cols = [
+        c for c in df.columns
+        if c not in ("locus", "alleles", "rs1052553_dosage")
+    ]
+    if not candidate_sample_cols:
         raise RuntimeError(
-            "Cannot find sample ID column in rs1052553 entries table. "
-            f"Columns: {list(df.columns)}"
+            f"Could not identify sample ID column in exported table. "
+            f"Columns: {df.columns}"
+        )
+    if len(candidate_sample_cols) > 1:
+        print(
+            f"Warning: multiple candidate sample ID columns found "
+            f"{candidate_sample_cols}; using {candidate_sample_cols[0]}"
         )
 
-    df = df[[sample_col, "rs1052553_dosage"]].dropna(subset=["rs1052553_dosage"])
+    sample_col = candidate_sample_cols[0]
 
-    # Standardize to person_id as int
-    df = df.rename(columns={sample_col: "person_id"})
-    df["person_id"] = df["person_id"].astype("int64")
-    df["rs1052553_dosage"] = df["rs1052553_dosage"].astype("int64")
-    df = df.drop_duplicates(subset=["person_id"])
+    df = df.select([sample_col, "rs1052553_dosage"])
+    df = df.rename({sample_col: "person_id"})
+    df = df.drop_nulls(["rs1052553_dosage"])
+    df = df.with_columns(
+        pl.col("person_id").cast(pl.Int64),
+        pl.col("rs1052553_dosage").cast(pl.Int64),
+    )
+    df = df.unique(subset=["person_id"])
 
-    out = "cohort_rs1052553_additive_raw.csv"
-    df.to_csv(out, index=False)
+    out_csv = "cohort_rs1052553_additive_raw.csv"
+    df.write_csv(out_csv)
+    print(f"Additive rs1052553 cohort written to {out_csv} (n={df.height}).")
+    return out_csv
 
-    print(
-        f"Additive rs1052553 cohort written to {out} "
-        f"(n={len(df)}) from {label}."
+
+def build_rs1052553_additive_cohort():
+    """
+    Orchestrate genotype cohort:
+
+    1. If RS1052553_GENOTYPE_CSV is set -> normalize & use that.
+    2. Else, try to derive from MICROARRAY_HAIL_STORAGE_PATH via Hail.
+    """
+    path = build_cohort_from_local_genotype()
+    if path:
+        return path
+
+    path = build_cohort_from_microarray_hail()
+    if path:
+        return path
+
+    raise RuntimeError(
+        "Unable to build rs1052553 cohort: "
+        "set RS1052553_GENOTYPE_CSV to a local genotype file or "
+        "ensure MICROARRAY_HAIL_STORAGE_PATH is defined and contains rs1052553."
     )
 
-    hl.stop()
-    return out
 
-
-# -------------- helpers: AoU covariates & phecode counts ----------------------
-
+# ======================= AoU covariates & phecodeX counts ======================
 
 def add_aou_covariates(cohort_path):
     """
-    Enrich rs1052553 cohort with AoU covariates via PheTK.Cohort.add_covariates:
+    Use PheTK Cohort(platform='aou') to add:
       - age_at_last_event
       - sex_at_birth
-      - first 10 genetic PCs
-      - drop rows missing any of these
-
-    Writes:
-      cohort_rs1052553_additive_cov.csv
-
-    Returns:
-      Path to enriched cohort CSV.
+      - first 10 PCs
     """
     print(f"Adding AoU covariates to cohort: {cohort_path}")
     cohort = Cohort(platform="aou", aou_db_version=8)
@@ -312,16 +341,7 @@ def add_aou_covariates(cohort_path):
 
 def build_phecode_counts_x():
     """
-    Use PheTK.Phecode with platform='aou' to:
-      - pull ICD from All of Us CDR
-      - map to phecodeX
-      - aggregate counts per person/phecode
-
-    Writes:
-      phecode_counts_x_all.csv
-
-    Returns:
-      Path to phecode counts CSV.
+    Use AoU EHR only to get phecodeX counts via PheTK.
     """
     print("Building phecodeX counts from All of Us EHR via PheTK...")
     phe = Phecode(platform="aou")
@@ -340,13 +360,7 @@ def build_phecode_counts_x():
 
 def subset_phecode_counts(phecode_counts_path, target_phecodes):
     """
-    Restrict phecode_counts to the target phecode set from ferromic mapping.
-
-    Writes:
-      phecode_counts_x_ferromic_panel.csv
-
-    Returns:
-      Path to subset CSV.
+    Restrict phecode counts to ferromic-derived phecodes.
     """
     print(
         f"Subsetting {phecode_counts_path} to "
@@ -381,20 +395,17 @@ def subset_phecode_counts(phecode_counts_path, target_phecodes):
     return out
 
 
-# -------------- helpers: infer covariates & run PheWAS ------------------------
-
+# ======================= covariate inference & PheWAS run ======================
 
 def infer_covariates_from_cohort(cohort_path):
     """
-    Inspect cohort file to determine:
-      - sex column name
-      - covariate columns to use (age + PCs)
-    Only uses columns that actually exist.
+    Inspect cohort file to choose:
+      - sex_at_birth_col
+      - covariate_cols (age + PCs)
     """
     df = pl.read_csv(cohort_path, n_rows=5, infer_schema_length=1000)
     cols = set(df.columns)
 
-    # Sex column for PheTK's sex_at_birth_col
     if "sex_at_birth" in cols:
         sex_col = "sex_at_birth"
     elif "sex" in cols:
@@ -407,13 +418,11 @@ def infer_covariates_from_cohort(cohort_path):
 
     covariates = []
 
-    # Age-like covariates
     if "age_at_last_event" in cols:
         covariates.append("age_at_last_event")
     if "natural_age" in cols:
         covariates.append("natural_age")
 
-    # PCs
     for i in range(1, 21):
         pc = f"pc{i}"
         if pc in cols:
@@ -430,14 +439,10 @@ def infer_covariates_from_cohort(cohort_path):
 
 def run_phewas(cohort_path, phecode_counts_path, target_phecodes):
     """
-    Run PheTK.PheWAS with:
+    Run PheTK PheWAS:
       - phecode_version = X
-      - independent_variable_of_interest = 'rs1052553_dosage' (0/1/2 additive)
-      - covariates inferred from cohort file
-      - restricted to target_phecodes from ferromic
-
-    Writes:
-      phewas_rs1052553_additive_ferromic_panel.csv
+      - independent_variable_of_interest = rs1052553_dosage
+      - restricted to target_phecodes
     """
     print("Inferring covariates from enriched cohort...")
     sex_col, covariate_cols = infer_covariates_from_cohort(cohort_path)
@@ -471,8 +476,7 @@ def run_phewas(cohort_path, phecode_counts_path, target_phecodes):
     )
 
 
-# -------------- main ----------------------------------------------------------
-
+# ======================= main ======================
 
 def main():
     cdr = os.getenv("WORKSPACE_CDR")
@@ -485,25 +489,27 @@ def main():
         )
         sys.exit(1)
 
-    # 1. Build target phecode set from ferromic Phenotype labels
+    # 1. Phenotype panel from ferromic
     target_phecodes = get_target_phecodes_from_ferromic()
 
-    # 2. Build rs1052553 additive cohort from AoU v8 genotype data
+    # 2. rs1052553 additive cohort:
+    #    - from RS1052553_GENOTYPE_CSV if set
+    #    - else from MICROARRAY_HAIL_STORAGE_PATH via Hail
     cohort_raw = build_rs1052553_additive_cohort()
 
-    # 3. Add AoU covariates
+    # 3. Add AoU covariates (AoU only)
     cohort_cov = add_aou_covariates(cohort_raw)
 
-    # 4. Build phecodeX counts from AoU EHR
+    # 4. Build phecodeX counts from AoU EHR (AoU only)
     phecode_counts_all = build_phecode_counts_x()
 
-    # 5. Subset phecode counts to ferromic-derived phecodes
+    # 5. Subset to ferromic-derived phecodes
     phecode_counts_subset = subset_phecode_counts(
         phecode_counts_all,
         target_phecodes,
     )
 
-    # 6. Run PheWAS with additive rs1052553 dosage
+    # 6. Run PheWAS
     run_phewas(
         cohort_cov,
         phecode_counts_subset,
