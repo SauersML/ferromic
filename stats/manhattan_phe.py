@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import matplotlib
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 from matplotlib.patches import FancyArrowPatch
 import warnings
 
@@ -31,7 +32,7 @@ matplotlib.use('Agg')
 from _inv_common import map_inversion_series
 
 # ---------- Config ----------
-INFILE = "phewas_results.tsv"
+INFILE = "data/phewas_results.tsv"
 PHECODE_FILE = "phecodeX_R_labels.csv"
 PHECODE_URL = "https://raw.githubusercontent.com/PheWAS/PhecodeX/refs/heads/main/phecodeX_R_labels.csv"
 OUTDIR = "phewas_plots"
@@ -68,6 +69,8 @@ POINT_ALPHA_NONSIG = 0.30
 # Risk direction palette
 INCOLOR_HEX     = "#2B6CB0"
 DECOLOR_HEX     = "#C53030"
+SIG_DARKEN      = 0.10     # darken amount for significant points
+NON_SIG_LIGHTEN = 0.25     # lighten amount for non-significant points
 
 # Label/legend
 LABEL_FONTSZ    = 22.0     # phenotype labels
@@ -714,7 +717,20 @@ def plot_one_inversion(
 
 # ---------- Main ----------
 def main():
-    if not os.path.exists(INFILE): sys.exit(f"ERROR: Cannot find {INFILE}")
+    # Check for input file in current directory first, then try data/ directory
+    infile_path = INFILE
+    if not os.path.exists(infile_path):
+        # Try alternative location (current directory if INFILE has data/ prefix, or data/ prefix if it doesn't)
+        if infile_path.startswith("data/"):
+            alt_path = infile_path.replace("data/", "", 1)
+        else:
+            alt_path = os.path.join("data", infile_path)
+
+        if os.path.exists(alt_path):
+            infile_path = alt_path
+        else:
+            sys.exit(f"ERROR: Cannot find {INFILE} or {alt_path}")
+
     ensure_phecode_file(PHECODE_FILE, PHECODE_URL)
 
     if not _ADJUST_TEXT_AVAILABLE:
@@ -723,7 +739,7 @@ def main():
             file=sys.stderr,
         )
 
-    df = pd.read_csv(INFILE, sep="\t", dtype=str)
+    df = pd.read_csv(infile_path, sep="\t", dtype=str)
     for col in [PHENO_COL, INV_COL, P_Q_COL]:
         if col not in df.columns: sys.exit(f"ERROR: {INFILE} missing required column '{col}'")
 
