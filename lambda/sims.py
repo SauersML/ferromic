@@ -8,6 +8,7 @@ N_PHENOTYPES = 5_000
 MAF_LIST = [0.01, 0.10, 0.30]
 PHENOTYPE_LIST = [10, 100, 1_000]
 CORRELATION_LIST = [0.0, 0.2, 0.8]
+CLUSTER_LIST = [1, 2, 4, 8, 20, 80, 200, 500]
 N_REPLICATES = 5
 
 # Median of chi-square with 1 degree of freedom
@@ -151,6 +152,85 @@ def simulate_lambda_with_correlated_phenotypes(correlation, maf=0.10, n_individu
     return lambda_values
 
 
+def simulate_lambda_with_clustered_phenotypes(n_clusters, within_cluster_correlation=0.5, maf=0.10, n_individuals=None, n_phenotypes=100, n_replicates=N_REPLICATES):
+    """
+    Simulate lambda_GC with phenotypes organized into clusters.
+
+    Within each cluster, phenotypes have correlation = within_cluster_correlation.
+    Between clusters, phenotypes are independent (correlation = 0).
+
+    Args:
+        n_clusters: Number of phenotype clusters
+        within_cluster_correlation: Correlation within each cluster (default 0.5)
+        maf: Minor allele frequency
+        n_individuals: Number of individuals
+        n_phenotypes: Total number of phenotypes (default 100)
+        n_replicates: Number of replicates
+
+    Returns:
+        List of lambda_GC values, one per replicate
+    """
+    n = n_individuals if n_individuals is not None else N_INDIVIDUALS
+    m = n_phenotypes
+    rho = within_cluster_correlation
+
+    # Compute phenotypes per cluster
+    phenotypes_per_cluster = m // n_clusters
+    remainder = m % n_clusters
+
+    lambda_values = []
+
+    for rep in range(n_replicates):
+        # Generate genotype for this replicate
+        genotype = np.random.binomial(2, maf, size=n).astype(np.float32)
+
+        # Center genotype once
+        x_centered = genotype - genotype.mean()
+        sxx = np.sum(x_centered ** 2)
+
+        # Pre-allocate array for chi-square statistics
+        chi2_stats = np.empty(m, dtype=np.float32)
+
+        # Generate phenotypes cluster by cluster
+        idx = 0
+        for cluster_idx in range(n_clusters):
+            # Determine cluster size (distribute remainder across first few clusters)
+            cluster_size = phenotypes_per_cluster + (1 if cluster_idx < remainder else 0)
+
+            # Generate cluster-specific common factor
+            if rho > 0.0:
+                cluster_common_factor = np.random.normal(0.0, 1.0, size=(n, 1)).astype(np.float32)
+
+            # Generate phenotypes for this cluster
+            # Model: Y_i = sqrt(rho) * Z_cluster + sqrt(1-rho) * epsilon_i
+            if rho == 0.0:
+                phenotype_cluster = np.random.normal(0.0, 1.0, size=(n, cluster_size)).astype(np.float32)
+            else:
+                independent_noise = np.random.normal(0.0, 1.0, size=(n, cluster_size)).astype(np.float32)
+                phenotype_cluster = np.sqrt(rho) * cluster_common_factor + np.sqrt(1.0 - rho) * independent_noise
+
+            # Center phenotypes
+            y_centered = phenotype_cluster - phenotype_cluster.mean(axis=0, keepdims=True)
+
+            # Compute sufficient statistics for this cluster
+            sxy = x_centered @ y_centered  # (cluster_size,)
+            syy = np.sum(y_centered ** 2, axis=0)  # (cluster_size,)
+
+            # Compute chi-square for this cluster
+            r_squared = (sxy ** 2) / (sxx * syy)
+            cluster_chi2 = (n - 2) * r_squared / (1.0 - r_squared)
+
+            # Store results
+            chi2_stats[idx:idx+cluster_size] = cluster_chi2
+            idx += cluster_size
+
+        # Compute lambda_GC from all chi-square statistics
+        lambda_gc = np.median(chi2_stats) / CHI2_MEDIAN_1DF
+        lambda_values.append(lambda_gc)
+
+    return lambda_values
+
+
 def main():
     np.random.seed(20251107)
     
@@ -267,6 +347,51 @@ def main():
     plt.tight_layout()
     plt.savefig("lambda/lambda_vs_correlation.png", dpi=150)
     print("Saved figure: lambda/lambda_vs_correlation.png")
+    plt.close()
+
+    # Test 4: Varying number of phenotype clusters with within-cluster correlation
+    print("\n" + "="*60)
+    print("Varying number of phenotype clusters (fixed MAF=0.10)")
+    print("100 phenotypes total, 0.5 correlation within each cluster")
+    print("="*60)
+
+    lambdas_clusters = {}
+
+    for n_clusters in CLUSTER_LIST:
+        lambdas_clusters[n_clusters] = simulate_lambda_with_clustered_phenotypes(
+            n_clusters=n_clusters,
+            within_cluster_correlation=0.5,
+            n_phenotypes=100,
+            n_individuals=N_INDIVIDUALS
+        )
+
+    print("\nGenomic control lambda values")
+    print("Each row: one cluster count; entries: five replicate null PheWAS runs.")
+    for n_clusters in CLUSTER_LIST:
+        vals = lambdas_clusters[n_clusters]
+        formatted = "  ".join(f"{v:.6f}" for v in vals)
+        pheno_per_cluster = 100 // n_clusters
+        print(f"Clusters {n_clusters:3d} ({pheno_per_cluster:3d} pheno/cluster):  {formatted}")
+
+    x_vals_clusters = []
+    y_vals_clusters = []
+    for n_clusters in CLUSTER_LIST:
+        for lam in lambdas_clusters[n_clusters]:
+            x_vals_clusters.append(n_clusters)
+            y_vals_clusters.append(lam)
+
+    plt.figure(figsize=(8, 5))
+    plt.scatter(x_vals_clusters, y_vals_clusters)
+    plt.xlabel("Number of phenotype clusters")
+    plt.ylabel("Genomic control lambda")
+    plt.title("Null PheWAS lambdas: 100 phenotypes with 0.5 within-cluster correlation")
+    plt.xscale("log")
+    plt.axhline(y=1.0, color='gray', linestyle='--', alpha=0.5, label='Expected λ=1')
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig("lambda/lambda_vs_clusters.png", dpi=150)
+    print("Saved figure: lambda/lambda_vs_clusters.png")
     plt.close()
 
 
