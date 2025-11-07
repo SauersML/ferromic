@@ -141,7 +141,11 @@ def simulate_lambda_with_correlated_phenotypes(correlation, maf=0.10, n_individu
 
 def main():
     np.random.seed(20251107)
-
+    
+    # Create output directory if it doesn't exist
+    import os
+    os.makedirs("lambda", exist_ok=True)
+    
     # Test 1: Varying MAF
     lambdas = {}
 
