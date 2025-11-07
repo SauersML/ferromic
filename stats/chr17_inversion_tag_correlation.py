@@ -258,10 +258,8 @@ def create_pvalue_correlation_plot(data, x_pval_col, y_pval_col, output_path):
     ax.set_title('Chr17 Inversion vs Tag SNP P-values', fontsize=14, pad=20)
 
     # Format p-value for display (handle very small values)
-    if p_value < 1e-300:
-        p_text = 'p < 1e-300'
-    elif p_value < 1e-100:
-        p_text = f'p < 1e-{int(-np.log10(p_value))}'
+    if p_value < 1e-20:
+        p_text = 'p < 1e-20'
     else:
         p_text = f'p = {p_value:.2e}'
 
