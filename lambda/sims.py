@@ -1,4 +1,6 @@
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')  # Non-interactive backend
 import matplotlib.pyplot as plt
 
 N_INDIVIDUALS = 10_000
@@ -12,131 +14,101 @@ N_REPLICATES = 5
 CHI2_MEDIAN_1DF = 0.454936423119572
 
 
-def simulate_lambda_for_maf(maf):
+def compute_chi2_stats(x, y):
+    """
+    Compute chi-square statistics for simple linear regression.
+
+    x: (n,) genotype vector
+    y: (n, m) phenotype matrix
+
+    Returns: (m,) array of chi-square statistics
+
+    Uses closed-form formula avoiding residual matrix:
+    r^2 = (sxy^2) / (sxx * syy)
+    chi2 = (n - 2) * r^2 / (1 - r^2)
+    """
+    n = x.shape[0]
+
+    # Center x
+    x_centered = x - x.mean()
+    sxx = np.sum(x_centered ** 2)
+
+    # Center y
+    y_centered = y - y.mean(axis=0, keepdims=True)
+
+    # Sufficient statistics
+    sxy = x_centered @ y_centered  # (m,)
+    syy = np.sum(y_centered ** 2, axis=0)  # (m,)
+
+    # Correlation-based chi-square
+    r_squared = (sxy ** 2) / (sxx * syy)
+    chi2 = (n - 2) * r_squared / (1.0 - r_squared)
+
+    return chi2
+
+
+def simulate_lambda_for_maf(maf, n_replicates=N_REPLICATES):
+    """Vectorized over replicates."""
     n = N_INDIVIDUALS
     m = N_PHENOTYPES
 
-    p = maf
-    probs = [(1.0 - p) ** 2, 2.0 * p * (1.0 - p), p ** 2]
+    # Generate all replicates at once
+    genotypes = np.random.binomial(2, maf, size=(n_replicates, n)).astype(np.float32)
+    phenotypes = np.random.normal(0.0, 1.0, size=(n_replicates, n, m)).astype(np.float32)
 
-    genotypes = np.random.choice([0.0, 1.0, 2.0], size=n, p=probs)
+    lambda_values = []
+    for i in range(n_replicates):
+        chi2_stats = compute_chi2_stats(genotypes[i], phenotypes[i])
+        lambda_gc = np.median(chi2_stats) / CHI2_MEDIAN_1DF
+        lambda_values.append(lambda_gc)
 
-    phenotypes = np.random.normal(loc=0.0, scale=1.0, size=(n, m))
-
-    x = genotypes
-    x_mean = x.mean()
-    x_centered = x - x_mean
-    sxx = np.sum(x_centered ** 2)
-
-    y = phenotypes
-    y_mean = y.mean(axis=0, keepdims=True)
-    y_centered = y - y_mean
-
-    sxy = x_centered @ y_centered
-
-    beta1 = sxy / sxx
-
-    residuals = y_centered - np.outer(x_centered, beta1)
-
-    sse = np.sum(residuals ** 2, axis=0)
-
-    sigma2_hat = sse / (n - 2)
-    var_beta1 = sigma2_hat / sxx
-
-    t_stats = beta1 / np.sqrt(var_beta1)
-
-    chi2_stats = t_stats ** 2
-
-    lambda_gc = np.median(chi2_stats) / CHI2_MEDIAN_1DF
-    return lambda_gc
+    return lambda_values
 
 
-def simulate_lambda_for_n_phenotypes(n_phenotypes, maf=0.10):
+def simulate_lambda_for_n_phenotypes(n_phenotypes, maf=0.10, n_replicates=N_REPLICATES):
+    """Vectorized over replicates."""
     n = N_INDIVIDUALS
     m = n_phenotypes
 
-    p = maf
-    probs = [(1.0 - p) ** 2, 2.0 * p * (1.0 - p), p ** 2]
+    # Generate all replicates at once
+    genotypes = np.random.binomial(2, maf, size=(n_replicates, n)).astype(np.float32)
+    phenotypes = np.random.normal(0.0, 1.0, size=(n_replicates, n, m)).astype(np.float32)
 
-    genotypes = np.random.choice([0.0, 1.0, 2.0], size=n, p=probs)
+    lambda_values = []
+    for i in range(n_replicates):
+        chi2_stats = compute_chi2_stats(genotypes[i], phenotypes[i])
+        lambda_gc = np.median(chi2_stats) / CHI2_MEDIAN_1DF
+        lambda_values.append(lambda_gc)
 
-    phenotypes = np.random.normal(loc=0.0, scale=1.0, size=(n, m))
-
-    x = genotypes
-    x_mean = x.mean()
-    x_centered = x - x_mean
-    sxx = np.sum(x_centered ** 2)
-
-    y = phenotypes
-    y_mean = y.mean(axis=0, keepdims=True)
-    y_centered = y - y_mean
-
-    sxy = x_centered @ y_centered
-
-    beta1 = sxy / sxx
-
-    residuals = y_centered - np.outer(x_centered, beta1)
-
-    sse = np.sum(residuals ** 2, axis=0)
-
-    sigma2_hat = sse / (n - 2)
-    var_beta1 = sigma2_hat / sxx
-
-    t_stats = beta1 / np.sqrt(var_beta1)
-
-    chi2_stats = t_stats ** 2
-
-    lambda_gc = np.median(chi2_stats) / CHI2_MEDIAN_1DF
-    return lambda_gc
+    return lambda_values
 
 
-def simulate_lambda_with_correlated_phenotypes(correlation, maf=0.10, n_individuals=None, n_phenotypes=None):
+def simulate_lambda_with_correlated_phenotypes(correlation, maf=0.10, n_individuals=None, n_phenotypes=None, n_replicates=N_REPLICATES):
+    """Vectorized over replicates."""
     n = n_individuals if n_individuals is not None else N_INDIVIDUALS
     m = n_phenotypes if n_phenotypes is not None else N_PHENOTYPES
+    rho = correlation
 
-    p = maf
-    probs = [(1.0 - p) ** 2, 2.0 * p * (1.0 - p), p ** 2]
-
-    genotypes = np.random.choice([0.0, 1.0, 2.0], size=n, p=probs)
+    # Generate all replicates at once
+    genotypes = np.random.binomial(2, maf, size=(n_replicates, n)).astype(np.float32)
 
     # Generate correlated phenotypes using a common factor model
     # For correlation rho, Y_i = sqrt(rho) * Z + sqrt(1-rho) * epsilon_i
-    # where Z is a common factor and epsilon_i are independent noise terms
-    rho = correlation
-    common_factor = np.random.normal(loc=0.0, scale=1.0, size=(n, 1))
-    independent_noise = np.random.normal(loc=0.0, scale=1.0, size=(n, m))
+    common_factor = np.random.normal(0.0, 1.0, size=(n_replicates, n, 1)).astype(np.float32)
+    independent_noise = np.random.normal(0.0, 1.0, size=(n_replicates, n, m)).astype(np.float32)
 
     if rho == 0.0:
         phenotypes = independent_noise
     else:
         phenotypes = np.sqrt(rho) * common_factor + np.sqrt(1.0 - rho) * independent_noise
 
-    x = genotypes
-    x_mean = x.mean()
-    x_centered = x - x_mean
-    sxx = np.sum(x_centered ** 2)
+    lambda_values = []
+    for i in range(n_replicates):
+        chi2_stats = compute_chi2_stats(genotypes[i], phenotypes[i])
+        lambda_gc = np.median(chi2_stats) / CHI2_MEDIAN_1DF
+        lambda_values.append(lambda_gc)
 
-    y = phenotypes
-    y_mean = y.mean(axis=0, keepdims=True)
-    y_centered = y - y_mean
-
-    sxy = x_centered @ y_centered
-
-    beta1 = sxy / sxx
-
-    residuals = y_centered - np.outer(x_centered, beta1)
-
-    sse = np.sum(residuals ** 2, axis=0)
-
-    sigma2_hat = sse / (n - 2)
-    var_beta1 = sigma2_hat / sxx
-
-    t_stats = beta1 / np.sqrt(var_beta1)
-
-    chi2_stats = t_stats ** 2
-
-    lambda_gc = np.median(chi2_stats) / CHI2_MEDIAN_1DF
-    return lambda_gc
+    return lambda_values
 
 
 def main():
@@ -150,11 +122,7 @@ def main():
     lambdas = {}
 
     for maf in MAF_LIST:
-        maf_values = []
-        for _ in range(N_REPLICATES):
-            lam = simulate_lambda_for_maf(maf)
-            maf_values.append(lam)
-        lambdas[maf] = maf_values
+        lambdas[maf] = simulate_lambda_for_maf(maf)
 
     print("Genomic control lambda values")
     print("Each row: one MAF; entries: five replicate null PheWAS runs.")
@@ -175,8 +143,9 @@ def main():
     plt.xlabel("Minor allele frequency")
     plt.ylabel("Genomic control lambda")
     plt.title("Null PheWAS lambdas across MAF and replicates")
-    plt.ylim(0.9, 1.1)
+    plt.axhline(y=1.0, color='gray', linestyle='--', alpha=0.5, label='Expected λ=1')
     plt.grid(True, alpha=0.3)
+    plt.legend()
     plt.tight_layout()
     plt.savefig("lambda/lambda_vs_maf.png", dpi=150)
     print("Saved figure: lambda/lambda_vs_maf.png")
@@ -190,11 +159,7 @@ def main():
     lambdas_phenotypes = {}
 
     for n_pheno in PHENOTYPE_LIST:
-        pheno_values = []
-        for _ in range(N_REPLICATES):
-            lam = simulate_lambda_for_n_phenotypes(n_pheno)
-            pheno_values.append(lam)
-        lambdas_phenotypes[n_pheno] = pheno_values
+        lambdas_phenotypes[n_pheno] = simulate_lambda_for_n_phenotypes(n_pheno)
 
     print("\nGenomic control lambda values")
     print("Each row: one phenotype count; entries: five replicate null PheWAS runs.")
@@ -216,8 +181,9 @@ def main():
     plt.ylabel("Genomic control lambda")
     plt.title("Null PheWAS lambdas across phenotype count and replicates")
     plt.xscale("log")
-    plt.ylim(0.9, 1.1)
+    plt.axhline(y=1.0, color='gray', linestyle='--', alpha=0.5, label='Expected λ=1')
     plt.grid(True, alpha=0.3)
+    plt.legend()
     plt.tight_layout()
     plt.savefig("lambda/lambda_vs_n_phenotypes.png", dpi=150)
     print("Saved figure: lambda/lambda_vs_n_phenotypes.png")
@@ -232,11 +198,9 @@ def main():
     lambdas_correlation = {}
 
     for corr in CORRELATION_LIST:
-        corr_values = []
-        for _ in range(N_REPLICATES):
-            lam = simulate_lambda_with_correlated_phenotypes(corr, n_individuals=100_000, n_phenotypes=1_000)
-            corr_values.append(lam)
-        lambdas_correlation[corr] = corr_values
+        lambdas_correlation[corr] = simulate_lambda_with_correlated_phenotypes(
+            corr, n_individuals=100_000, n_phenotypes=1_000
+        )
 
     print("\nGenomic control lambda values")
     print("Each row: one correlation coefficient; entries: five replicate null PheWAS runs.")
@@ -257,8 +221,9 @@ def main():
     plt.xlabel("Phenotype correlation coefficient")
     plt.ylabel("Genomic control lambda")
     plt.title("Null PheWAS lambdas across phenotype correlation and replicates")
-    plt.ylim(0.9, 1.1)
+    plt.axhline(y=1.0, color='gray', linestyle='--', alpha=0.5, label='Expected λ=1')
     plt.grid(True, alpha=0.3)
+    plt.legend()
     plt.tight_layout()
     plt.savefig("lambda/lambda_vs_correlation.png", dpi=150)
     print("Saved figure: lambda/lambda_vs_correlation.png")
