@@ -6,7 +6,6 @@ import numpy as np
 import pandas as pd
 import matplotlib
 import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
 from matplotlib.patches import FancyArrowPatch
 import warnings
 
@@ -65,11 +64,10 @@ POINT_EDGE_LW   = 0.45
 POINT_ALPHA_SIG = 0.95
 POINT_ALPHA_NONSIG = 0.30
 
+
 # Risk direction palette
 INCOLOR_HEX     = "#2B6CB0"
 DECOLOR_HEX     = "#C53030"
-NON_SIG_LIGHTEN = 0.55
-SIG_DARKEN      = 0.35
 
 # Label/legend
 LABEL_FONTSZ    = 22.0     # phenotype labels
