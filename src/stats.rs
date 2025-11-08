@@ -1172,6 +1172,25 @@ impl DensePopulationSummary {
     }
 }
 
+#[cfg(test)]
+impl DensePopulationSummary {
+    pub(crate) fn from_parts_for_test(
+        alt_counts: Vec<u32>,
+        called_counts: Vec<u32>,
+        haplotype_capacity: usize,
+        segregating_sites: usize,
+        pi_sum: f64,
+    ) -> Self {
+        DensePopulationSummary {
+            alt_counts: Arc::from(alt_counts.into_boxed_slice()),
+            called_counts: Arc::from(called_counts.into_boxed_slice()),
+            haplotype_capacity,
+            segregating_sites,
+            pi_sum,
+        }
+    }
+}
+
 const SUMMARY_PARALLEL_THRESHOLD: usize = 2048;
 
 pub fn build_dense_population_summary(
@@ -1358,6 +1377,7 @@ struct HudsonSummaryTotals {
     pi1_sum: f64,
     pi2_sum: f64,
     dxy_sum_all: f64,
+    dxy_uncallable_sites: usize,
 }
 
 fn aggregate_hudson_components_from_summaries(
@@ -1375,6 +1395,7 @@ fn aggregate_hudson_components_from_summaries(
         let n1 = called1[idx] as usize;
         let n2 = called2[idx] as usize;
         if n1 == 0 || n2 == 0 {
+            totals.dxy_uncallable_sites += 1;
             continue;
         }
 
@@ -1450,24 +1471,23 @@ fn dxy_from_summaries(
     if sequence_length <= 0 {
         return None;
     }
-    let len = pop1.alt_counts().len().min(pop2.alt_counts().len());
-    let alt1 = pop1.alt_counts();
-    let alt2 = pop2.alt_counts();
-    let called1 = pop1.called_counts();
-    let called2 = pop2.called_counts();
-    let mut sum_dxy = 0.0_f64;
 
-    for idx in 0..len {
-        let n1 = called1[idx] as usize;
-        let alt_count1 = alt1[idx] as usize;
-        let n2 = called2[idx] as usize;
-        let alt_count2 = alt2[idx] as usize;
-        if let Some(dxy) = dense_dxy_from_biallelic_counts(n1, alt_count1, n2, alt_count2) {
-            sum_dxy += dxy;
-        }
+    let totals = aggregate_hudson_components_from_summaries(pop1, pop2);
+    let effective_length = (sequence_length as i64)
+        .saturating_sub(totals.dxy_uncallable_sites as i64);
+
+    if effective_length > 0 {
+        Some(totals.dxy_sum_all / effective_length as f64)
+    } else {
+        log(
+            LogLevel::Warning,
+            &format!(
+                "Cannot calculate Dxy from summaries: no callable sites shared (sequence length {}, uncallable {}).",
+                sequence_length, totals.dxy_uncallable_sites
+            ),
+        );
+        None
     }
-
-    Some(sum_dxy / sequence_length as f64)
 }
 
 #[inline(always)]
@@ -3281,7 +3301,24 @@ fn calculate_hudson_fst_for_pair_core<'a>(
             );
             None
         } else {
-            Some(totals.dxy_sum_all / pop1_context.sequence_length as f64)
+            let effective_length = pop1_context
+                .sequence_length
+                .saturating_sub(totals.dxy_uncallable_sites as i64);
+            if effective_length > 0 {
+                Some(totals.dxy_sum_all / effective_length as f64)
+            } else {
+                log(
+                    LogLevel::Warning,
+                    &format!(
+                        "Cannot calculate Dxy for pops {:?}/{:?}: no callable sites shared between summaries (sequence length {}, uncallable {}).",
+                        pop1_context.id,
+                        pop2_context.id,
+                        pop1_context.sequence_length,
+                        totals.dxy_uncallable_sites,
+                    ),
+                );
+                None
+            }
         };
 
         (pi1_raw, pi2_raw, DxyHudsonResult { d_xy: dxy_value })
