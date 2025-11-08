@@ -18,12 +18,17 @@ jobs:
       - name: Prepare directories
         run: |
           set -euo pipefail
+          echo "[Prepare directories] Current working directory: $(pwd)"
+          echo "[Prepare directories] Listing parent directory before creation:"
+          ls -al ..
           mkdir -p ../vcfs
+          echo "[Prepare directories] Ensured ../vcfs exists"
 
       - name: Download VCF and index files
         run: |
           set -euo pipefail
           temp_dir="$(mktemp -d)"
+          echo "[Download VCF] Created temporary directory: $temp_dir"
           pushd "$temp_dir"
           urls=(
             "https://sharedspace.s3.msi.umn.edu/public_internet/chr1.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz"
@@ -73,37 +78,66 @@ jobs:
             "https://sharedspace.s3.msi.umn.edu/public_internet/chr22.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz.tbi"
             "https://sharedspace.s3.msi.umn.edu/public_internet/chrX.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz.tbi"
           )
+          echo "[Download VCF] Total URLs to fetch: ${#urls[@]}"
           for url in "${urls[@]}"; do
+            echo "[Download VCF] Attempting to download: $url"
             curl --fail --location --remote-name "$url"
+            echo "[Download VCF] Successfully downloaded: $url"
           done
+          echo "[Download VCF] Files downloaded to $temp_dir:"
+          ls -alh
           popd
+          echo "[Download VCF] Moving files from $temp_dir to ../vcfs"
           mv "$temp_dir"/* ../vcfs/
+          echo "[Download VCF] Contents of ../vcfs after move:"
+          ls -alh ../vcfs
           rmdir "$temp_dir"
+          echo "[Download VCF] Removed temporary directory"
 
       - name: Download configuration and reference files
         run: |
           set -euo pipefail
           temp_dir="$(mktemp -d)"
+          echo "[Download config] Created temporary directory: $temp_dir"
           pushd "$temp_dir"
+          echo "[Download config] Starting downloads"
           curl --fail --location --remote-name "https://sharedspace.s3.msi.umn.edu/public_internet/hg19.fa"
           curl --fail --location --remote-name "https://sharedspace.s3.msi.umn.edu/public_internet/hg38.fa"
           curl --fail --location --remote-name "https://sharedspace.s3.msi.umn.edu/public_internet/variants_freeze4inv_sv_inv_hg38_processed_arbigent_filtered_manualDotplot_filtered_PAVgenAdded_withInvCategs_syncWithWH.fixedPH.simpleINV.mod.tsv"
           curl --fail --location --remote-name "https://sharedspace.s3.msi.umn.edu/public_internet/gencode.v47.basic.annotation.gtf"
           curl --fail --location --remote-name "https://sharedspace.s3.msi.umn.edu/public_internet/hardmask.hg38.v4_acroANDsdOnly.over99.bed"
+          echo "[Download config] Downloaded files:"
+          ls -alh
           popd
+          echo "[Download config] Moving configuration files to repository root"
           mv "$temp_dir"/hg19.fa ../
           mv "$temp_dir"/hg38.fa ../
           mv "$temp_dir"/variants_freeze4inv_sv_inv_hg38_processed_arbigent_filtered_manualDotplot_filtered_PAVgenAdded_withInvCategs_syncWithWH.fixedPH.simpleINV.mod.tsv ../
           mv "$temp_dir"/gencode.v47.basic.annotation.gtf ../
           mv "$temp_dir"/hardmask.hg38.v4_acroANDsdOnly.over99.bed ../
           cp ../hg38.fa ../hg38.no_alt.fa
+          echo "[Download config] Listing repository root after moving files:"
+          ls -alh .. | head -n 50
           rmdir "$temp_dir"
+          echo "[Download config] Removed temporary directory"
 
       - name: Build release binary
-        run: cargo build --release
+        run: |
+          echo "[Build] Rust version information:"
+          rustc --version
+          cargo --version
+          echo "[Build] Starting cargo build --release"
+          cargo build --release
+          echo "[Build] Finished cargo build --release"
 
       - name: Run VCF pipeline
         run: |
+          echo "[Run pipeline] Current directory: $(pwd)"
+          echo "[Run pipeline] Available disk space:"
+          df -h .
+          echo "[Run pipeline] Listing ../vcfs contents:"
+          ls -alh ../vcfs | head -n 50
+          echo "[Run pipeline] Starting cargo run"
           cargo run --release --bin run_vcf -- \
             --vcf_folder ../vcfs \
             --config_file ../variants_freeze4inv_sv_inv_hg38_processed_arbigent_filtered_manualDotplot_filtered_PAVgenAdded_withInvCategs_syncWithWH.fixedPH.simpleINV.mod.tsv \
@@ -111,17 +145,22 @@ jobs:
             --reference ../hg38.no_alt.fa \
             --gtf ../gencode.v47.basic.annotation.gtf \
             --fst
+          echo "[Run pipeline] Finished cargo run"
 
       - name: Archive PHY files
         run: |
           set -euo pipefail
+          echo "[Archive PHY] Searching for *.phy files in $(pwd)"
           shopt -s nullglob
           phy_files=( *.phy )
+          echo "[Archive PHY] Found ${#phy_files[@]} PHY files"
           if [ "${#phy_files[@]}" -eq 0 ]; then
             echo "No PHY files were generated." >&2
             exit 1
           fi
+          echo "[Archive PHY] Listing PHY files: ${phy_files[*]}"
           zip -r phy_outputs.zip "${phy_files[@]}"
+          echo "[Archive PHY] Created phy_outputs.zip"
 
       - name: Upload CSV artifact
         uses: actions/upload-artifact@v4
