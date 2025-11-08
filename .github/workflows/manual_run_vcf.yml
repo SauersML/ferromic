@@ -205,7 +205,7 @@ jobs:
           echo "[Download config] Starting downloads"
           config_urls=(
             "https://sharedspace.s3.msi.umn.edu/public_internet/hg19.fa"
-            "https://sharedspace.s3.msi.umn.edu/public_internet/hg38.fa"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/hg38.no_alt.fa"
             "https://sharedspace.s3.msi.umn.edu/public_internet/hg38.no_alt.fa.fai"
             "https://sharedspace.s3.msi.umn.edu/public_internet/variants_freeze4inv_sv_inv_hg38_processed_arbigent_filtered_manualDotplot_filtered_PAVgenAdded_withInvCategs_syncWithWH.fixedPH.simpleINV.mod.tsv"
             "https://sharedspace.s3.msi.umn.edu/public_internet/gencode.v47.basic.annotation.gtf"
@@ -219,12 +219,11 @@ jobs:
           popd
           echo "[Download config] Moving configuration files to repository root"
           mv "$temp_dir"/hg19.fa ../
-          mv "$temp_dir"/hg38.fa ../
+          mv "$temp_dir"/hg38.no_alt.fa ../
           mv "$temp_dir"/hg38.no_alt.fa.fai ../
           mv "$temp_dir"/variants_freeze4inv_sv_inv_hg38_processed_arbigent_filtered_manualDotplot_filtered_PAVgenAdded_withInvCategs_syncWithWH.fixedPH.simpleINV.mod.tsv ../
           mv "$temp_dir"/gencode.v47.basic.annotation.gtf ../
           mv "$temp_dir"/hardmask.hg38.v4_acroANDsdOnly.over99.bed ../
-          cp ../hg38.fa ../hg38.no_alt.fa
           echo "[Download config] Listing repository root after moving files:"
           ls -alh .. | head -n 50
           rmdir "$temp_dir"
