@@ -52,7 +52,6 @@ jobs:
           https://sharedspace.s3.msi.umn.edu/public_internet/gene_inversion_fixed_differences.tsv
           https://sharedspace.s3.msi.umn.edu/public_internet/gene_inversion_permutation.tsv
           https://sharedspace.s3.msi.umn.edu/public_internet/glm_category_coefs.tsv
-          https://sharedspace.s3.msi.umn.edu/public_internet/hudson_fst_results.tsv
           https://sharedspace.s3.msi.umn.edu/public_internet/inv_info.tsv
           https://sharedspace.s3.msi.umn.edu/public_internet/inversion_fst_estimates.tsv
           https://sharedspace.s3.msi.umn.edu/public_internet/inversion_level_counts.tsv
@@ -61,11 +60,8 @@ jobs:
           https://sharedspace.s3.msi.umn.edu/public_internet/fst_tests_summary.csv
           https://sharedspace.s3.msi.umn.edu/public_internet/inversion_statistical_results.csv
           https://sharedspace.s3.msi.umn.edu/public_internet/inv_info.csv
-          https://sharedspace.s3.msi.umn.edu/public_internet/output.csv
           https://sharedspace.s3.msi.umn.edu/public_internet/phewas_results.tsv
           https://sharedspace.s3.msi.umn.edu/public_internet/all_pairwise_results.csv
-          https://sharedspace.s3.msi.umn.edu/public_internet/per_site_diversity_output.falsta
-          https://sharedspace.s3.msi.umn.edu/public_internet/per_site_fst_output.falsta
           EOF
 
           mkdir -p analysis_downloads
@@ -89,6 +85,185 @@ jobs:
             head -n 10 "$f" || true
             echo
           done < analysis_downloads/.downloaded_files
+
+      - name: Download manual VCF workflow artefacts
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          python - <<'PY'
+          import io
+          import os
+          import shutil
+          import tempfile
+          import zipfile
+          from pathlib import Path
+
+          import requests
+
+          repo = os.environ.get("GITHUB_REPOSITORY")
+          token = os.environ.get("GITHUB_TOKEN")
+          if not repo:
+              raise SystemExit("GITHUB_REPOSITORY environment variable is required")
+          if not token:
+              raise SystemExit("GITHUB_TOKEN environment variable is required to download artefacts")
+
+          workflow_file = "manual_run_vcf.yml"
+          session = requests.Session()
+          session.headers.update(
+              {
+                  "Authorization": f"Bearer {token}",
+                  "Accept": "application/vnd.github+json",
+                  "X-GitHub-Api-Version": "2022-11-28",
+              }
+          )
+
+          def api_get(url: str, **params):
+              response = session.get(url, params=params)
+              response.raise_for_status()
+              return response
+
+          runs_url = f"https://api.github.com/repos/{repo}/actions/workflows/{workflow_file}/runs"
+          runs = api_get(runs_url, status="success", exclude_pull_requests="true", per_page=1).json().get("workflow_runs", [])
+          if not runs:
+              raise SystemExit("No successful runs found for manual_run_vcf.yml")
+
+          run = runs[0]
+          run_id = run["id"]
+          print(f"Using manual_run_vcf.yml artefacts from run {run_id} ({run['html_url']})")
+
+          artifacts_url = f"https://api.github.com/repos/{repo}/actions/runs/{run_id}/artifacts"
+          artifacts = {
+              artifact["name"]: artifact
+              for artifact in api_get(artifacts_url, per_page=100).json().get("artifacts", [])
+          }
+
+          required = {
+              "run-vcf-output-csv": "output.csv",
+              "run-vcf-falsta": None,
+              "run-vcf-phy-outputs": None,
+              "run-vcf-hudson-fst": "hudson_fst_results.tsv",
+          }
+
+          missing = [name for name in required if name not in artifacts]
+          if missing:
+              raise SystemExit(f"Missing required artefacts from manual_run_vcf.yml: {', '.join(missing)}")
+
+          repo_root = Path(".").resolve()
+          downloads_root = repo_root / "analysis_downloads"
+          public_root = downloads_root / "public_internet"
+          public_root.mkdir(parents=True, exist_ok=True)
+          download_log = downloads_root / ".downloaded_files"
+          download_log.parent.mkdir(parents=True, exist_ok=True)
+          if not download_log.exists():
+              download_log.touch()
+
+          def download_artifact(artifact):
+              url = artifact["archive_download_url"]
+              print(f"Downloading artefact: {artifact['name']}")
+              resp = session.get(url)
+              resp.raise_for_status()
+              return zipfile.ZipFile(io.BytesIO(resp.content))
+
+          log_entries = []
+          phy_written = 0
+
+          # output.csv
+          with download_artifact(artifacts["run-vcf-output-csv"]) as zf:
+              for member in zf.namelist():
+                  if member.endswith("output.csv"):
+                      target = public_root / "output.csv"
+                      target.parent.mkdir(parents=True, exist_ok=True)
+                      with target.open("wb") as fh:
+                          fh.write(zf.read(member))
+                      log_entries.append(target)
+                      print(f"Wrote {target.relative_to(repo_root)}")
+                      break
+              else:
+                  raise SystemExit("output.csv not found in run-vcf-output-csv artefact")
+
+          # FALSTA files
+          with download_artifact(artifacts["run-vcf-falsta"]) as zf:
+              extracted = False
+              for member in zf.namelist():
+                  if member.endswith(".falsta"):
+                      target = public_root / Path(member).name
+                      target.parent.mkdir(parents=True, exist_ok=True)
+                      with target.open("wb") as fh:
+                          fh.write(zf.read(member))
+                      log_entries.append(target)
+                      print(f"Wrote {target.relative_to(repo_root)}")
+                      extracted = True
+              if not extracted:
+                  raise SystemExit("No .falsta files found in run-vcf-falsta artefact")
+
+          # Hudson FST results
+          with download_artifact(artifacts["run-vcf-hudson-fst"]) as zf:
+              for member in zf.namelist():
+                  if member.endswith("hudson_fst_results.tsv"):
+                      target = public_root / "hudson_fst_results.tsv"
+                      target.parent.mkdir(parents=True, exist_ok=True)
+                      with target.open("wb") as fh:
+                          fh.write(zf.read(member))
+                      log_entries.append(target)
+                      print(f"Wrote {target.relative_to(repo_root)}")
+                      break
+              else:
+                  raise SystemExit("hudson_fst_results.tsv not found in run-vcf-hudson-fst artefact")
+
+          # PHY files
+          with download_artifact(artifacts["run-vcf-phy-outputs"]) as zf:
+              members = zf.namelist()
+              if not members:
+                  raise SystemExit("run-vcf-phy-outputs artefact is empty")
+              tmpdir = Path(tempfile.mkdtemp())
+              try:
+                  zf.extractall(tmpdir)
+                  inner_archives = list(tmpdir.glob("*.zip"))
+                  if not inner_archives:
+                      raise SystemExit("No zip archives found inside run-vcf-phy-outputs artefact")
+                  for archive in inner_archives:
+                      with zipfile.ZipFile(archive, "r") as inner:
+                          if archive.name == "phy_outputs.zip":
+                              phy_zip_bytes = archive.read_bytes()
+                              phy_zip_dest = downloads_root / "manual_run_vcf" / "phy_files.zip"
+                              phy_zip_dest.parent.mkdir(parents=True, exist_ok=True)
+                              phy_zip_dest.write_bytes(phy_zip_bytes)
+                              shutil.copy2(phy_zip_dest, repo_root / "phy_files.zip")
+                              print(
+                                  f"Stored phy_files.zip at {phy_zip_dest.relative_to(repo_root)} and repository root"
+                              )
+                          for inner_member in inner.namelist():
+                              if inner_member.endswith(".phy"):
+                                  filename = Path(inner_member).name
+                                  data = inner.read(inner_member)
+                                  targets = [
+                                      public_root / filename,
+                                      public_root / "all_phy" / filename,
+                                  ]
+                                  for target in targets:
+                                      target.parent.mkdir(parents=True, exist_ok=True)
+                                      with target.open("wb") as fh:
+                                          fh.write(data)
+                                  root_target = repo_root / filename
+                                  with root_target.open("wb") as fh:
+                                      fh.write(data)
+                                  phy_written += 1
+                                  print(f"Extracted {filename} from phy_outputs.zip")
+              finally:
+                  shutil.rmtree(tmpdir)
+
+          if phy_written:
+              print(f"Extracted {phy_written} PHY files from manual_run_vcf artefact")
+
+          with download_log.open("a", encoding="utf-8") as fh:
+              for path in log_entries:
+                  try:
+                      fh.write(str(path.relative_to(repo_root)) + "\n")
+                  except ValueError:
+                      fh.write(str(path) + "\n")
+          PY
 
       - name: Run replicate_figures.py
         id: run-figures
