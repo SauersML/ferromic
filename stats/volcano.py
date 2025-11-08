@@ -267,7 +267,10 @@ def plot_volcano(df, out_pdf):
     xpad = xmax * 0.06
     xlim = (-xmax - xpad, xmax + xpad)
 
-    fig, ax = plt.subplots(figsize=(13, 8.5))
+    target_width_px = 2000
+    target_height_px = 900
+    export_dpi = 300
+    fig, ax = plt.subplots(figsize=(target_width_px / export_dpi, target_height_px / export_dpi))
 
     for spine_name in ("top", "right"):
         ax.spines[spine_name].set_visible(False)
@@ -410,8 +413,8 @@ def plot_volcano(df, out_pdf):
     # Save
     fig.tight_layout()
     with PdfPages(OUTPUT_PDF) as pdf:
-        pdf.savefig(fig, dpi=300)
-    fig.savefig(OUTPUT_PNG, dpi=300, bbox_inches='tight')
+        pdf.savefig(fig, dpi=export_dpi)
+    fig.savefig(OUTPUT_PNG, dpi=export_dpi)
     plt.close(fig)
     print(f"Saved: {OUTPUT_PDF} and {OUTPUT_PNG}")
 
