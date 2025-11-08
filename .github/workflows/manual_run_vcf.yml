@@ -1,0 +1,154 @@
+name: Manual Run VCF Pipeline
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-and-run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Prepare directories
+        run: |
+          set -euo pipefail
+          mkdir -p ../vcfs
+
+      - name: Download VCF and index files
+        run: |
+          set -euo pipefail
+          temp_dir="$(mktemp -d)"
+          pushd "$temp_dir"
+          urls=(
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr1.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr2.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr3.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr4.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr5.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr6.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr7.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr8.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr9.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr10.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr11.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr12.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr13.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr14.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr15.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr16.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr17.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr18.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr19.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr20.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr21.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr22.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chrX.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr1.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz.tbi"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr2.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz.tbi"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr3.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz.tbi"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr4.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz.tbi"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr5.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz.tbi"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr6.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz.tbi"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr7.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz.tbi"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr8.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz.tbi"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr9.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz.tbi"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr10.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz.tbi"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr11.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz.tbi"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr12.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz.tbi"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr13.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz.tbi"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr14.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz.tbi"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr15.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz.tbi"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr16.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz.tbi"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr17.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz.tbi"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr18.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz.tbi"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr19.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz.tbi"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr20.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz.tbi"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr21.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz.tbi"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chr22.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz.tbi"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/chrX.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz.tbi"
+          )
+          for url in "${urls[@]}"; do
+            curl --fail --location --remote-name "$url"
+          done
+          popd
+          mv "$temp_dir"/* ../vcfs/
+          rmdir "$temp_dir"
+
+      - name: Download configuration and reference files
+        run: |
+          set -euo pipefail
+          temp_dir="$(mktemp -d)"
+          pushd "$temp_dir"
+          curl --fail --location --remote-name "https://sharedspace.s3.msi.umn.edu/public_internet/hg19.fa"
+          curl --fail --location --remote-name "https://sharedspace.s3.msi.umn.edu/public_internet/hg38.fa"
+          curl --fail --location --remote-name "https://sharedspace.s3.msi.umn.edu/public_internet/variants_freeze4inv_sv_inv_hg38_processed_arbigent_filtered_manualDotplot_filtered_PAVgenAdded_withInvCategs_syncWithWH.fixedPH.simpleINV.mod.tsv"
+          curl --fail --location --remote-name "https://sharedspace.s3.msi.umn.edu/public_internet/gencode.v47.basic.annotation.gtf"
+          curl --fail --location --remote-name "https://sharedspace.s3.msi.umn.edu/public_internet/hardmask.hg38.v4_acroANDsdOnly.over99.bed"
+          popd
+          mv "$temp_dir"/hg19.fa ../
+          mv "$temp_dir"/hg38.fa ../
+          mv "$temp_dir"/variants_freeze4inv_sv_inv_hg38_processed_arbigent_filtered_manualDotplot_filtered_PAVgenAdded_withInvCategs_syncWithWH.fixedPH.simpleINV.mod.tsv ../
+          mv "$temp_dir"/gencode.v47.basic.annotation.gtf ../
+          mv "$temp_dir"/hardmask.hg38.v4_acroANDsdOnly.over99.bed ../
+          cp ../hg38.fa ../hg38.no_alt.fa
+          rmdir "$temp_dir"
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Run VCF pipeline
+        run: |
+          cargo run --release --bin run_vcf -- \
+            --vcf_folder ../vcfs \
+            --config_file ../variants_freeze4inv_sv_inv_hg38_processed_arbigent_filtered_manualDotplot_filtered_PAVgenAdded_withInvCategs_syncWithWH.fixedPH.simpleINV.mod.tsv \
+            --mask_file ../hardmask.hg38.v4_acroANDsdOnly.over99.bed \
+            --reference ../hg38.no_alt.fa \
+            --gtf ../gencode.v47.basic.annotation.gtf \
+            --fst
+
+      - name: Archive PHY files
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          phy_files=( *.phy )
+          if [ "${#phy_files[@]}" -eq 0 ]; then
+            echo "No PHY files were generated." >&2
+            exit 1
+          fi
+          zip -r phy_outputs.zip "${phy_files[@]}"
+
+      - name: Upload CSV artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-vcf-output-csv
+          path: output.csv
+          if-no-files-found: error
+
+      - name: Upload PHY artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-vcf-phy-outputs
+          path: phy_outputs.zip
+          if-no-files-found: error
+
+      - name: Upload FALSTA artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-vcf-falsta
+          path: |
+            per_site_diversity_output.falsta
+            per_site_fst_output.falsta
+          if-no-files-found: error
+
+      - name: Upload Hudson FST results
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-vcf-hudson-fst
+          path: hudson_fst_results.tsv
+          if-no-files-found: error
