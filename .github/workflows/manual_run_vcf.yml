@@ -27,6 +27,58 @@ jobs:
       - name: Download VCF and index files
         run: |
           set -euo pipefail
+
+          download_with_diagnostics() {
+            local url="$1"
+            local context="$2"
+            local max_attempts=3
+            local attempt=1
+            local sleep_seconds=10
+            local filename
+
+            filename="$(basename "${url%%\?*}")"
+
+            while (( attempt <= max_attempts )); do
+              echo "$context Attempt $attempt/$max_attempts for $filename"
+              echo "$context Performing HEAD request to inspect availability"
+
+              local head_output head_status
+              if ! head_output="$(curl --silent --show-error --location --head "$url" 2>&1)"; then
+                echo "$context HEAD request failed for $url"
+                head_status="curl_failed"
+              else
+                head_status="$(echo "$head_output" | awk 'toupper($1) ~ /^HTTP/ {code=$2} END{print code}')"
+              fi
+
+              if [[ -n "$head_output" ]]; then
+                echo "$context HEAD response for $filename:"
+                echo "$head_output"
+              fi
+
+              if [[ "$head_status" != "200" && "$head_status" != "206" ]]; then
+                echo "$context Warning: HEAD request returned status '$head_status' for $filename"
+              fi
+
+              echo "$context Starting download for $filename"
+              if curl --fail --show-error --location --remote-name "$url"; then
+                echo "$context Successfully downloaded $filename"
+                return 0
+              fi
+
+              local exit_code=$?
+              echo "$context ERROR: curl exited with code $exit_code for $filename"
+              (( attempt++ ))
+
+              if (( attempt <= max_attempts )); then
+                echo "$context Retrying download for $filename after $sleep_seconds seconds"
+                sleep "$sleep_seconds"
+              fi
+            done
+
+            echo "$context FATAL: Failed to download $filename after $max_attempts attempts"
+            return 1
+          }
+
           temp_dir="$(mktemp -d)"
           echo "[Download VCF] Created temporary directory: $temp_dir"
           pushd "$temp_dir"
@@ -80,9 +132,7 @@ jobs:
           )
           echo "[Download VCF] Total URLs to fetch: ${#urls[@]}"
           for url in "${urls[@]}"; do
-            echo "[Download VCF] Attempting to download: $url"
-            curl --fail --location --remote-name "$url"
-            echo "[Download VCF] Successfully downloaded: $url"
+            download_with_diagnostics "$url" "[Download VCF]"
           done
           echo "[Download VCF] Files downloaded to $temp_dir:"
           ls -alh
@@ -97,17 +147,74 @@ jobs:
       - name: Download configuration and reference files
         run: |
           set -euo pipefail
+
+          download_with_diagnostics() {
+            local url="$1"
+            local context="$2"
+            local max_attempts=3
+            local attempt=1
+            local sleep_seconds=10
+            local filename
+
+            filename="$(basename "${url%%\?*}")"
+
+            while (( attempt <= max_attempts )); do
+              echo "$context Attempt $attempt/$max_attempts for $filename"
+              echo "$context Performing HEAD request to inspect availability"
+
+              local head_output head_status
+              if ! head_output="$(curl --silent --show-error --location --head "$url" 2>&1)"; then
+                echo "$context HEAD request failed for $url"
+                head_status="curl_failed"
+              else
+                head_status="$(echo "$head_output" | awk 'toupper($1) ~ /^HTTP/ {code=$2} END{print code}')"
+              fi
+
+              if [[ -n "$head_output" ]]; then
+                echo "$context HEAD response for $filename:"
+                echo "$head_output"
+              fi
+
+              if [[ "$head_status" != "200" && "$head_status" != "206" ]]; then
+                echo "$context Warning: HEAD request returned status '$head_status' for $filename"
+              fi
+
+              echo "$context Starting download for $filename"
+              if curl --fail --show-error --location --remote-name "$url"; then
+                echo "$context Successfully downloaded $filename"
+                return 0
+              fi
+
+              local exit_code=$?
+              echo "$context ERROR: curl exited with code $exit_code for $filename"
+              (( attempt++ ))
+
+              if (( attempt <= max_attempts )); then
+                echo "$context Retrying download for $filename after $sleep_seconds seconds"
+                sleep "$sleep_seconds"
+              fi
+            done
+
+            echo "$context FATAL: Failed to download $filename after $max_attempts attempts"
+            return 1
+          }
+
           temp_dir="$(mktemp -d)"
           echo "[Download config] Created temporary directory: $temp_dir"
           pushd "$temp_dir"
           echo "[Download config] Starting downloads"
-          curl --fail --location --remote-name "https://sharedspace.s3.msi.umn.edu/public_internet/hg19.fa"
-          curl --fail --location --remote-name "https://sharedspace.s3.msi.umn.edu/public_internet/hg19.fa.fai"
-          curl --fail --location --remote-name "https://sharedspace.s3.msi.umn.edu/public_internet/hg38.fa"
-          curl --fail --location --remote-name "https://sharedspace.s3.msi.umn.edu/public_internet/hg38.fa.fai"
-          curl --fail --location --remote-name "https://sharedspace.s3.msi.umn.edu/public_internet/variants_freeze4inv_sv_inv_hg38_processed_arbigent_filtered_manualDotplot_filtered_PAVgenAdded_withInvCategs_syncWithWH.fixedPH.simpleINV.mod.tsv"
-          curl --fail --location --remote-name "https://sharedspace.s3.msi.umn.edu/public_internet/gencode.v47.basic.annotation.gtf"
-          curl --fail --location --remote-name "https://sharedspace.s3.msi.umn.edu/public_internet/hardmask.hg38.v4_acroANDsdOnly.over99.bed"
+          config_urls=(
+            "https://sharedspace.s3.msi.umn.edu/public_internet/hg19.fa"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/hg19.fa.fai"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/hg38.fa"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/hg38.fa.fai"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/variants_freeze4inv_sv_inv_hg38_processed_arbigent_filtered_manualDotplot_filtered_PAVgenAdded_withInvCategs_syncWithWH.fixedPH.simpleINV.mod.tsv"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/gencode.v47.basic.annotation.gtf"
+            "https://sharedspace.s3.msi.umn.edu/public_internet/hardmask.hg38.v4_acroANDsdOnly.over99.bed"
+          )
+          for url in "${config_urls[@]}"; do
+            download_with_diagnostics "$url" "[Download config]"
+          done
           echo "[Download config] Downloaded files:"
           ls -alh
           popd
