@@ -395,17 +395,49 @@ def build_layout(df: pd.DataFrame):
 
 # --------------------------- Plot ---------------------------
 
-def plot_forest(df: pd.DataFrame, out_pdf=OUT_PDF, out_png=OUT_PNG, legend_position="top_right"):
+def compute_padded_or_range(or_lows, or_highs, pad_fraction=0.10):
+    """Compute a padded [min, max] OR range from arrays of CI bounds."""
+    los = np.asarray(or_lows, dtype=float)
+    his = np.asarray(or_highs, dtype=float)
+
+    mask = np.isfinite(los) & np.isfinite(his) & (los > 0) & (his > 0)
+    if not np.any(mask):
+        raise ValueError("No finite OR bounds provided to compute range.")
+
+    leftmost = float(np.min(los[mask]))
+    rightmost = float(np.max(his[mask]))
+    if not (rightmost > 0 and leftmost > 0):
+        raise ValueError("OR bounds must be positive to compute range.")
+
+    pad_fraction = float(np.clip(pad_fraction, 0.0, 1.0))
+    x_or_left = max(0.0001, leftmost * (1.0 - pad_fraction))
+    x_or_right = rightmost * (1.0 + pad_fraction)
+    if not (x_or_right > x_or_left):
+        raise ValueError("Invalid OR range computed (max must exceed min).")
+
+    return x_or_left, x_or_right
+
+
+def plot_forest(
+    df: pd.DataFrame,
+    *,
+    or_range,
+    out_pdf=OUT_PDF,
+    out_png=OUT_PNG,
+    legend_position="top_right",
+):
     sections, y_max = build_layout(df)
     point_style_for_q = make_qvalue_point_scaler(sections)
 
-    # X-limits from CI extremes ONLY, then ±10%
-    all_los = [row["OR_lo"] for sec in sections for row in sec["rows"]]
-    all_his = [row["OR_hi"] for sec in sections for row in sec["rows"]]
-    leftmost  = float(np.min(all_los))
-    rightmost = float(np.max(all_his))
-    x_or_left  = max(0.0001, leftmost * 0.90)   # 10% further left of min CI
-    x_or_right = rightmost * 1.10               # 10% further right of max CI
+    # X-limits come from explicit OR range shared across plots
+    try:
+        x_or_left, x_or_right = (float(or_range[0]), float(or_range[1]))
+    except (TypeError, ValueError, IndexError):
+        raise ValueError("or_range must be an iterable with two numeric entries")
+    if not (np.isfinite(x_or_left) and np.isfinite(x_or_right)):
+        raise ValueError("or_range bounds must be finite numbers")
+    if not (x_or_right > x_or_left > 0):
+        raise ValueError("or_range must be strictly increasing positive bounds")
 
     # Figure sizing
     n_rows_total = sum(len(sec["rows"]) for sec in sections)
@@ -661,34 +693,69 @@ def main():
     # Load all significant associations
     df = load_and_prepare(INPUT_FILE)
 
+    # Determine the OR range for the full dataset (used as baseline)
+    try:
+        full_or_range = compute_padded_or_range(df["OR_lo"], df["OR_hi"])
+    except ValueError as exc:
+        raise RuntimeError("Unable to compute odds-ratio range for the full dataset") from exc
+
     # 1) Generate the original forest plot with ALL significant associations
     print("\n=== Generating original forest plot (all significant associations) ===")
-    plot_forest(df, out_pdf=OUT_PDF, out_png=OUT_PNG)
+    plot_forest(df, or_range=full_or_range, out_pdf=OUT_PDF, out_png=OUT_PNG)
 
     # 2) Generate forest plot with ONLY chr17:45,585,159-46,292,045
     print("\n=== Generating forest plot for ONLY chr17:45,585,159-46,292,045 ===")
     # After mapping, the chr17 inversion is "chr17:45,585,159-46,292,045" (with commas)
     CHR17_INVERSION = "chr17:45,585,159-46,292,045"
     df_chr17_only = df[df["Inversion"] == CHR17_INVERSION].copy()
+    df_excluding_chr17 = df[df["Inversion"] != CHR17_INVERSION].copy()
+
+    shared_or_range = None
+    if not df_chr17_only.empty and not df_excluding_chr17.empty:
+        try:
+            combined_los = np.concatenate([
+                df_chr17_only["OR_lo"].to_numpy(dtype=float),
+                df_excluding_chr17["OR_lo"].to_numpy(dtype=float),
+            ])
+            combined_his = np.concatenate([
+                df_chr17_only["OR_hi"].to_numpy(dtype=float),
+                df_excluding_chr17["OR_hi"].to_numpy(dtype=float),
+            ])
+            shared_or_range = compute_padded_or_range(combined_los, combined_his)
+        except ValueError:
+            shared_or_range = None
 
     if df_chr17_only.empty:
         print(f"WARNING: No significant associations found for {CHR17_INVERSION}")
     else:
-        plot_forest(df_chr17_only,
-                   out_pdf="phewas_forest_chr17_only.pdf",
-                   out_png="phewas_forest_chr17_only.png")
+        if shared_or_range is None:
+            chr17_or_range = compute_padded_or_range(df_chr17_only["OR_lo"], df_chr17_only["OR_hi"])
+        else:
+            chr17_or_range = shared_or_range
+        plot_forest(
+            df_chr17_only,
+            or_range=chr17_or_range,
+            out_pdf="phewas_forest_chr17_only.pdf",
+            out_png="phewas_forest_chr17_only.png",
+        )
 
     # 3) Generate forest plot EXCLUDING chr17:45,585,159-46,292,045
     print("\n=== Generating forest plot EXCLUDING chr17:45,585,159-46,292,045 ===")
-    df_excluding_chr17 = df[df["Inversion"] != CHR17_INVERSION].copy()
 
     if df_excluding_chr17.empty:
         print(f"WARNING: No significant associations remaining after excluding {CHR17_INVERSION}")
     else:
-        plot_forest(df_excluding_chr17,
-                   out_pdf="phewas_forest_excluding_chr17.pdf",
-                   out_png="phewas_forest_excluding_chr17.png",
-                   legend_position="top_left")
+        if shared_or_range is None:
+            excluding_or_range = compute_padded_or_range(df_excluding_chr17["OR_lo"], df_excluding_chr17["OR_hi"])
+        else:
+            excluding_or_range = shared_or_range
+        plot_forest(
+            df_excluding_chr17,
+            or_range=excluding_or_range,
+            out_pdf="phewas_forest_excluding_chr17.pdf",
+            out_png="phewas_forest_excluding_chr17.png",
+            legend_position="top_left",
+        )
 
     print("\n=== All forest plots generated successfully ===")
 
