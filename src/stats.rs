@@ -1319,9 +1319,36 @@ fn calculate_pi_from_summary_with_precomputed(
         return f64::INFINITY;
     }
 
+    let uncallable_sites = summary
+        .called_counts()
+        .iter()
+        .filter(|&&called| called < 2)
+        .count();
+    let effective_length = seq_length.saturating_sub(uncallable_sites as i64);
+    if effective_length == 0 {
+        log(
+            LogLevel::Warning,
+            &format!(
+                "Cannot calculate pi: no callable sites within {} bp summary ({} sites lacked ≥2 haplotypes)",
+                seq_length, uncallable_sites
+            ),
+        );
+        return 0.0;
+    }
+
     let sum_pi = precomputed.unwrap_or_else(|| summary.cached_pi_sum());
 
-    sum_pi / seq_length as f64
+    if uncallable_sites > 0 {
+        log(
+            LogLevel::Info,
+            &format!(
+                "Excluded {} uncallable summary sites when calculating π (effective length {}/{} bp)",
+                uncallable_sites, effective_length, seq_length
+            ),
+        );
+    }
+
+    sum_pi / effective_length as f64
 }
 
 #[derive(Clone, Copy, Default)]
@@ -3973,35 +4000,52 @@ pub fn calculate_pi(
         .unwrap_or(0);
     let membership = HapMembership::build(sample_count, haplotypes_in_group);
 
-    let (sum_pi, variant_count) = variants
+    let (sum_pi, callable_variant_count, skipped_sites) = variants
         .par_iter()
         .fold(
-            || (PiComputationState::default(), 0.0_f64, 0usize),
-            |(mut state, mut partial_sum, mut partial_count), variant| {
+            || (PiComputationState::default(), 0.0_f64, 0usize, 0usize),
+            |(mut state, mut partial_sum, mut partial_count, mut partial_skipped), variant| {
                 let metrics = compute_pi_metrics_fast(variant, &membership, &mut state);
                 if let Some(pi_site) = metrics.pi() {
                     partial_sum += pi_site;
                     partial_count += 1;
+                } else if metrics.total_called < 2 {
+                    partial_skipped += 1;
                 }
-                (state, partial_sum, partial_count)
+                (state, partial_sum, partial_count, partial_skipped)
             },
         )
-        .map(|(_, sum, count)| (sum, count))
+        .map(|(_, sum, count, skipped)| (sum, count, skipped))
         .reduce(
-            || (0.0_f64, 0usize),
-            |(sum_a, count_a), (sum_b, count_b)| (sum_a + sum_b, count_a + count_b),
+            || (0.0_f64, 0usize, 0usize),
+            |(sum_a, count_a, skipped_a), (sum_b, count_b, skipped_b)| {
+                (sum_a + sum_b, count_a + count_b, skipped_a + skipped_b)
+            },
         );
 
-    // Final π = sum of per-site π values divided by sequence length
+    let effective_length = seq_length.saturating_sub(skipped_sites as i64);
+    if effective_length == 0 {
+        spinner.finish_and_clear();
+        log(
+            LogLevel::Warning,
+            &format!(
+                "Cannot calculate pi: no callable sites within {} bp ({} sites lacked ≥2 haplotypes)",
+                seq_length, skipped_sites
+            ),
+        );
+        return 0.0;
+    }
+
+    // Final π = sum of per-site π values divided by callable sequence length
     // Monomorphic sites (including those not in variants list) contribute 0
-    let pi = sum_pi / seq_length as f64;
+    let pi = sum_pi / effective_length as f64;
 
     spinner.finish_and_clear();
     log(
         LogLevel::Info,
         &format!(
-            "π = {:.6} (from {} variant sites over {} bp total length)",
-            pi, variant_count, seq_length
+            "π = {:.6} (from {} callable variant sites; excluded {} uncallable sites; effective length {}/{} bp)",
+            pi, callable_variant_count, skipped_sites, effective_length, seq_length
         ),
     );
 
@@ -4019,29 +4063,40 @@ fn calculate_pi_dense_biallelic(
     }
     let stride = matrix.stride();
     let data = matrix.data();
-    let mut sum_pi = 0.0_f64;
     let parallel = dense_should_parallelize(matrix.variant_count(), offsets.len());
 
-    if let Some(bits) = matrix.missing_slice() {
+    let (sum_pi, skipped_sites) = if let Some(bits) = matrix.missing_slice() {
         if parallel {
-            sum_pi = (0..matrix.variant_count())
+            (0..matrix.variant_count())
                 .into_par_iter()
                 .map(|variant_idx| {
                     let base = variant_idx * stride;
                     let (total_called, alt_count) =
                         dense_sum_alt_with_missing(data, base, offsets, bits);
-                    dense_pi_from_counts(total_called, alt_count).unwrap_or(0.0)
+                    match dense_pi_from_counts(total_called, alt_count) {
+                        Some(value) => (value, 0usize),
+                        None => (0.0, 1usize),
+                    }
                 })
-                .sum();
+                .reduce(
+                    || (0.0_f64, 0usize),
+                    |(sum_a, skipped_a), (sum_b, skipped_b)| {
+                        (sum_a + sum_b, skipped_a + skipped_b)
+                    },
+                )
         } else {
+            let mut sum_pi = 0.0_f64;
+            let mut skipped = 0usize;
             for variant_idx in 0..matrix.variant_count() {
                 let base = variant_idx * stride;
                 let (total_called, alt_count) =
                     dense_sum_alt_with_missing(data, base, offsets, bits);
-                if let Some(pi) = dense_pi_from_counts(total_called, alt_count) {
-                    sum_pi += pi;
+                match dense_pi_from_counts(total_called, alt_count) {
+                    Some(value) => sum_pi += value,
+                    None => skipped += 1,
                 }
             }
+            (sum_pi, skipped)
         }
     } else {
         let total = offsets.len();
@@ -4051,6 +4106,7 @@ fn calculate_pi_dense_biallelic(
         let n = total as f64;
         let scale = n / (n - 1.0);
         let inv_n_sq = 1.0 / (n * n);
+        let mut sum_pi = 0.0_f64;
         if parallel {
             sum_pi = (0..matrix.variant_count())
                 .into_par_iter()
@@ -4080,9 +4136,15 @@ fn calculate_pi_dense_biallelic(
                 sum_pi += scale * (1.0 - sum_sq * inv_n_sq);
             }
         }
+        (sum_pi, 0usize)
+    };
+
+    let effective_length = seq_length.saturating_sub(skipped_sites as i64);
+    if effective_length == 0 {
+        return 0.0;
     }
 
-    sum_pi / seq_length as f64
+    sum_pi / effective_length as f64
 }
 
 fn calculate_pi_dense(
@@ -4127,6 +4189,7 @@ fn calculate_pi_dense(
     let mut counts = vec![0u32; 256];
     let mut used = Vec::with_capacity(8);
     let mut sum_pi = 0.0_f64;
+    let mut skipped_sites = 0usize;
 
     for variant_idx in 0..matrix.variant_count() {
         let (total_called, sum_counts_sq) =
@@ -4135,11 +4198,18 @@ fn calculate_pi_dense(
             let n = total_called as f64;
             let sum_p2 = sum_counts_sq / (n * n);
             sum_pi += n / (n - 1.0) * (1.0 - sum_p2);
+        } else {
+            skipped_sites += 1;
         }
         dense_reset_counts(&mut counts, &mut used);
     }
 
-    sum_pi / seq_length as f64
+    let effective_length = seq_length.saturating_sub(skipped_sites as i64);
+    if effective_length == 0 {
+        return 0.0;
+    }
+
+    sum_pi / effective_length as f64
 }
 
 pub fn calculate_pi_for_population(context: &PopulationContext<'_>) -> f64 {

@@ -382,12 +382,31 @@ mod tests {
             create_variant(100, vec![Some(vec![0, 0]), Some(vec![0, 0])]), // Same
             create_variant(200, vec![Some(vec![1, 1]), Some(vec![1, 1])]), // Same
         ];
-        
+
         // Create haplotype group
         let haplotypes = vec![(0, HaplotypeSide::Left), (0, HaplotypeSide::Right), (1, HaplotypeSide::Left), (1, HaplotypeSide::Right)];
-        
+
         let pi = calculate_pi(&variants, &haplotypes, 1000);
         assert_eq!(pi, 0.0); // No diversity
+    }
+
+    #[test]
+    fn test_calculate_pi_excludes_uncallable_sites_from_denominator() {
+        let variants = vec![
+            create_variant(10, vec![Some(vec![0, 0]), Some(vec![1, 1])]),
+            create_variant(20, vec![None, None]),
+        ];
+
+        let haplotypes = vec![
+            (0, HaplotypeSide::Left),
+            (0, HaplotypeSide::Right),
+            (1, HaplotypeSide::Left),
+            (1, HaplotypeSide::Right),
+        ];
+
+        let pi = calculate_pi(&variants, &haplotypes, 2);
+        let expected = 2.0 / 3.0;
+        assert!((pi - expected).abs() < 1e-9, "expected π ≈ {}, observed {}", expected, pi);
     }
 
     #[test]
