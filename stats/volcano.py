@@ -25,6 +25,17 @@ plt.rcParams['pdf.fonttype'] = 42
 plt.rcParams['ps.fonttype'] = 42
 plt.rcParams['svg.fonttype'] = 'none'
 
+# Font scaling (larger everywhere for improved readability)
+BASE_FONT_SIZE = 20
+AXIS_LABEL_FONT_SIZE = 28
+TICK_LABEL_FONT_SIZE = 22
+LEGEND_FONT_SIZE = 21
+ANNOTATION_FONT_SIZE = 21
+
+plt.rcParams.update({
+    "font.size": BASE_FONT_SIZE,
+})
+
 # --------------------------- Data ---------------------------
 
 def load_and_prepare(path):
@@ -276,7 +287,7 @@ def plot_volcano(df, out_pdf):
         ax.spines[spine_name].set_visible(False)
     for spine_name in ("left", "bottom"):
         ax.spines[spine_name].set_linewidth(1.2)
-    ax.tick_params(axis='both', which='major', labelsize=15, width=1.2)
+    ax.tick_params(axis='both', which='major', labelsize=TICK_LABEL_FONT_SIZE, width=1.2)
 
     # FULL LOG REGION: we already plot ln(OR) on a linear axis, so the entire axis is logarithmic in OR with no linear band.
     ax.set_xlim(xlim)
@@ -325,12 +336,12 @@ def plot_volcano(df, out_pdf):
             )
 
     # Axis labels & ticks
-    ax.set_ylabel(r"$-\log_{10}(p)$", fontsize=18)  # italic p
-    ax.set_xlabel("Odds Ratio", fontsize=18)
+    ax.set_ylabel(r"$-\log_{10}(p)$", fontsize=AXIS_LABEL_FONT_SIZE)  # italic p
+    ax.set_xlabel("Odds Ratio", fontsize=AXIS_LABEL_FONT_SIZE)
     xticks, xlabels = make_or_ticks_sparse(ax.get_xlim())
     if len(xticks) >= 3:
         ax.set_xticks(xticks)
-        ax.set_xticklabels(xlabels, fontsize=15)
+        ax.set_xticklabels(xlabels, fontsize=TICK_LABEL_FONT_SIZE)
 
     # Legend inside top-right; include dotted FDR sample
     handles, ncol = create_legend_handles(
@@ -340,7 +351,7 @@ def plot_volcano(df, out_pdf):
         handles=handles,
         loc="upper right", frameon=False, ncol=ncol,
         borderaxespad=0.8, handlelength=1.6, columnspacing=1.0, labelspacing=0.6,
-        fontsize=13
+        fontsize=LEGEND_FONT_SIZE
     )
 
     # -------------------- BINNED LABELING --------------------
@@ -375,7 +386,7 @@ def plot_volcano(df, out_pdf):
                 tx, ha = x + dx_data, "left"
             else:
                 tx, ha = x - dx_data, "right"
-            t = ax.text(tx, y, label_text, fontsize=13.0, ha=ha, va="bottom",
+            t = ax.text(tx, y, label_text, fontsize=ANNOTATION_FONT_SIZE, ha=ha, va="bottom",
                         color="black", zorder=3.5)
             texts[idx] = t
 
