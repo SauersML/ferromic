@@ -1300,7 +1300,7 @@ fn calculate_pi_from_summary_with_precomputed(
                 summary.haplotype_capacity()
             ),
         );
-        return 0.0;
+        return f64::NAN;
     }
 
     if seq_length < 0 {
@@ -3949,7 +3949,7 @@ pub fn calculate_watterson_theta(seg_sites: usize, n: usize, seq_length: i64) ->
 /// handling missing data by only considering sites where both haplotypes have alleles.
 ///
 /// # Returns
-/// * `0.0` if fewer than two haplotypes are provided or if no callable pairs exist
+/// * `f64::NAN` if fewer than two haplotypes are provided or if no callable pairs exist
 /// * `f64::INFINITY` when `seq_length` is zero (mirrors the legacy behaviour expected by callers)
 /// * Otherwise, the average π across all sites scaled by the provided `seq_length`
 pub fn calculate_pi(
@@ -3965,7 +3965,7 @@ pub fn calculate_pi(
                 haplotypes_in_group.len()
             ),
         );
-        return 0.0;
+        return f64::NAN;
     }
 
     if seq_length < 0 {
