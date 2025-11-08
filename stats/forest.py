@@ -452,15 +452,18 @@ def plot_forest(df: pd.DataFrame, out_pdf=OUT_PDF, out_png=OUT_PNG, legend_posit
     inv_colors = palette_cool_no_yellow_or_orange_or_brown(len(inv_names))
     inv_to_color = {inv: inv_colors[i] for i, inv in enumerate(inv_names)}
 
-    # Alternating background bands per section
+    # Alternating background bands per phenotype row (phecode)
     xr0, xr1 = axR.get_xlim()
-    for i, sec in enumerate(sections):
-        if i % 2 == 0:
-            y0, y1 = sec["sec_y0"], sec["sec_y1"]
-            axL.add_patch(Rectangle((0, y0), 1, (y1 - y0), transform=yxf,
-                                    color="#2f4f4f", alpha=BAND_ALPHA, zorder=0))
-            axR.add_patch(Rectangle((xr0, y0), (xr1 - xr0), (y1 - y0),
-                                    transform=axR.transData, color="#2f4f4f", alpha=BAND_ALPHA, zorder=0))
+    row_idx = 0
+    for sec in sections:
+        for row in sec["rows"]:
+            if row_idx % 2 == 0:
+                y0, y1 = row["row_y0"], row["row_y1"]
+                axL.add_patch(Rectangle((0, y0), 1.0, (y1 - y0), transform=yxf,
+                                        color="#2f4f4f", alpha=BAND_ALPHA, zorder=0))
+                axR.add_patch(Rectangle((xr0, y0), (xr1 - xr0), (y1 - y0),
+                                        transform=axR.transData, color="#2f4f4f", alpha=BAND_ALPHA, zorder=0))
+            row_idx += 1
 
     # --- Place texts and graphics; keep references for overlap detection ---
     header_texts = []           # list of dicts: {"text": Text, "sec": sec}
