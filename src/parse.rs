@@ -602,33 +602,73 @@ pub fn read_reference_sequence(
         )));
     }
 
-    let invalid_chars: Vec<(usize, u8)> = sequence
-        .iter()
-        .enumerate()
-        .filter(|&(_, &b)| !matches!(b.to_ascii_uppercase(), b'A' | b'C' | b'G' | b'T' | b'N'))
-        .take(10)
-        .map(|(i, &b)| (i, b))
-        .collect();
+    let mut invalid_chars: Vec<(usize, u8)> = Vec::new();
+    let mut total_invalid = 0usize;
+    for (idx, &base) in sequence.iter().enumerate() {
+        if !matches!(base.to_ascii_uppercase(), b'A' | b'C' | b'G' | b'T' | b'N') {
+            total_invalid += 1;
+            if invalid_chars.len() < 10 {
+                invalid_chars.push((idx, base));
+            }
+        }
+    }
 
-    if !invalid_chars.is_empty() {
+    if total_invalid > 0 {
         log(
             LogLevel::Warning,
-            "Found invalid characters in reference sequence:",
+            &format!(
+                "Found {} invalid character(s) in reference sequence (showing up to 10):",
+                total_invalid
+            ),
         );
-        for (pos, ch) in invalid_chars {
-            log(
-                LogLevel::Warning,
-                &format!(
-                    "Position {}: '{}' (ASCII: {})",
-                    pos,
-                    String::from_utf8_lossy(&[ch]),
-                    ch
-                ),
+
+        let mut detailed_entries = Vec::new();
+        for &(pos, ch) in &invalid_chars {
+            let absolute_pos = clamped_start + pos as u64;
+            let context_start = pos.saturating_sub(5);
+            let context_end = usize::min(sequence.len(), pos + 6);
+            let context: String = sequence[context_start..context_end]
+                .iter()
+                .map(|b| {
+                    if b.is_ascii_graphic() {
+                        *b as char
+                    } else if *b == b' ' {
+                        ' '
+                    } else {
+                        '.'
+                    }
+                })
+                .collect();
+            let display_char = String::from_utf8_lossy(&[ch]).to_string();
+            let entry = format!(
+                "offset {offset} (abs {abs_pos}): '{ch}' [ASCII {ascii}] context '{context}'",
+                offset = pos,
+                abs_pos = absolute_pos,
+                ch = display_char,
+                ascii = ch,
+                context = context
             );
+            detailed_entries.push(entry.clone());
+            log(LogLevel::Warning, &entry);
         }
+
+        let diagnostics = if detailed_entries.is_empty() {
+            "no detailed invalid characters captured".to_string()
+        } else {
+            detailed_entries.join("; ")
+        };
+
         return Err(VcfError::Parse(format!(
-            "Invalid nucleotides found in sequence for region {}:{}-{}",
-            actual_chr_name, clamped_start, clamped_end
+            concat!(
+                "Invalid nucleotides found in FASTA {fasta} for region {chr}:{start}-{end}. ",
+                "Total invalid: {total}. Details: {details}"
+            ),
+            fasta = fasta_path.display(),
+            chr = actual_chr_name,
+            start = clamped_start,
+            end = clamped_end,
+            total = total_invalid,
+            details = diagnostics,
         )));
     }
 
