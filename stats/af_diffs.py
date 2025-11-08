@@ -154,8 +154,9 @@ def read_phylip_sequences(path):
     show = min(3, len(seqs))
     for i in range(show):
         prefix = seqs[i][:50]
-        print(f"[READ] {path}: seq[{i}] name={names[i]!r if i < len(names) else 'NA'} "
-              f"prefix={prefix!r} ... len={len(seqs[i])}")
+        seq_name = names[i] if i < len(names) else 'NA'
+        seq_len = len(seqs[i])
+        print(f"[READ] {path}: seq[{i}] name={seq_name!r} prefix={prefix!r} ... len={seq_len}")
 
     return seqs
 
