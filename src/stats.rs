@@ -2484,18 +2484,17 @@ fn compute_pi_metrics_fast(
         if membership.left.get(sample_index).copied().unwrap_or(false) {
             if let Some(&allele) = genotype.get(0) {
                 let allele_value = i16::from(allele);
-                if allele_value < 0 {
-                    continue;
+                if allele_value >= 0 {
+                    let idx = allele_value as usize;
+                    if idx >= state.counts.len() {
+                        state.counts.resize(idx + 1, 0);
+                    }
+                    if state.counts[idx] == 0 {
+                        state.used_indices.push(idx);
+                    }
+                    state.counts[idx] += 1;
+                    total_called += 1;
                 }
-                let idx = allele_value as usize;
-                if idx >= state.counts.len() {
-                    state.counts.resize(idx + 1, 0);
-                }
-                if state.counts[idx] == 0 {
-                    state.used_indices.push(idx);
-                }
-                state.counts[idx] += 1;
-                total_called += 1;
             }
         }
         if membership.right.get(sample_index).copied().unwrap_or(false) {
