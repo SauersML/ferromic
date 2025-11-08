@@ -334,11 +334,11 @@ mod tests {
     }
 
     #[test]
-    fn test_calculate_watterson_theta_pi_n1() {
+    fn test_calculate_watterson_theta_pi_n1_nan() {
         let variants = vec![create_variant(100, vec![Some(vec![0, 1])])];
         let haplotypes = vec![(0, HaplotypeSide::Left)];
         let pi = calculate_pi(&variants, &haplotypes, 1000);
-        assert_eq!(pi, 0.0); // Single haplotype has no diversity
+        assert!(pi.is_nan()); // Single haplotype has insufficient data
     }
 
     #[test]
@@ -437,19 +437,19 @@ mod tests {
     }
 
     #[test]
-    fn test_calculate_pi_n1_infinite() {
+    fn test_calculate_pi_n1_nan() {
         let variants = vec![create_variant(100, vec![Some(vec![0, 1])])];
         let haplotypes = vec![(0, HaplotypeSide::Left)];
         let pi = calculate_pi(&variants, &haplotypes, 1000);
-        assert_eq!(pi, 0.0); // Single haplotype has no diversity
+        assert!(pi.is_nan()); // Single haplotype has insufficient data
     }
 
     #[test]
-    fn test_calculate_pi_n0_infinite() {
+    fn test_calculate_pi_n0_nan() {
         let variants = vec![create_variant(100, vec![Some(vec![0, 1])])];
         let haplotypes = vec![]; // No haplotypes
         let pi = calculate_pi(&variants, &haplotypes, 1000);
-        assert_eq!(pi, 0.0); // No haplotypes means no diversity
+        assert!(pi.is_nan()); // No haplotypes means statistic is undefined
     }
 
     #[test]
