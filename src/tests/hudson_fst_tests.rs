@@ -1,5 +1,7 @@
 #[cfg(test)]
 mod hudson_fst_tests {
+    use std::sync::Arc;
+
     use crate::process::*;
     use crate::stats::*;
 
@@ -1286,5 +1288,156 @@ mod hudson_fst_tests {
                 fst
             );
         }
+    }
+
+    #[test]
+    fn test_hudson_dxy_excludes_uncallable_summary_sites() {
+        // Two callable variant sites and two sites where population 2 has no data.
+        // Dxy should be averaged over the two callable sites only.
+        let pop1_summary = DensePopulationSummary::from_parts_for_test(
+            vec![0_u32, 1, 0, 0],
+            vec![2_u32, 2, 2, 2],
+            2,
+            1,
+            1.0,
+        );
+
+        let pop2_summary = DensePopulationSummary::from_parts_for_test(
+            vec![2_u32, 1, 0, 0],
+            vec![2_u32, 2, 0, 0],
+            2,
+            1,
+            1.0,
+        );
+
+        let sample_names = vec!["s1".to_string()];
+        let variants: Vec<Variant> = Vec::new();
+
+        let pop1_context = PopulationContext {
+            id: PopulationId::HaplotypeGroup(0),
+            haplotypes: vec![(0, HaplotypeSide::Left), (0, HaplotypeSide::Right)],
+            variants: &variants,
+            sample_names: &sample_names,
+            sequence_length: 4,
+            dense_genotypes: None,
+            dense_summary: Some(Arc::new(pop1_summary)),
+        };
+
+        let pop2_context = PopulationContext {
+            id: PopulationId::HaplotypeGroup(1),
+            haplotypes: vec![(0, HaplotypeSide::Left), (0, HaplotypeSide::Right)],
+            variants: &variants,
+            sample_names: &sample_names,
+            sequence_length: 4,
+            dense_genotypes: None,
+            dense_summary: Some(Arc::new(pop2_summary)),
+        };
+
+        let outcome = calculate_hudson_fst_for_pair(&pop1_context, &pop2_context)
+            .expect("Hudson FST calculation should succeed with dense summaries");
+
+        // Callable sites: 2 (indices 0 and 1). Dxy contributions = 1.0 and 0.5 → average 0.75.
+        assert!(outcome.d_xy.is_some(), "Dxy should be computed for callable sites");
+        let dxy = outcome.d_xy.unwrap();
+        assert!((dxy - 0.75).abs() < 1e-12, "Unexpected Dxy value: {dxy}");
+    }
+
+    #[test]
+    fn test_hudson_dxy_from_summaries_matches_callable_denominator() {
+        let pop1_summary = DensePopulationSummary::from_parts_for_test(
+            vec![0_u32, 1, 0, 0],
+            vec![2_u32, 2, 2, 2],
+            2,
+            1,
+            1.0,
+        );
+
+        let pop2_summary = DensePopulationSummary::from_parts_for_test(
+            vec![2_u32, 1, 0, 0],
+            vec![2_u32, 2, 0, 0],
+            2,
+            1,
+            1.0,
+        );
+
+        let sample_names = vec!["s1".to_string()];
+        let variants: Vec<Variant> = Vec::new();
+
+        let pop1_context = PopulationContext {
+            id: PopulationId::HaplotypeGroup(0),
+            haplotypes: vec![(0, HaplotypeSide::Left), (0, HaplotypeSide::Right)],
+            variants: &variants,
+            sample_names: &sample_names,
+            sequence_length: 4,
+            dense_genotypes: None,
+            dense_summary: Some(Arc::new(pop1_summary)),
+        };
+
+        let pop2_context = PopulationContext {
+            id: PopulationId::HaplotypeGroup(1),
+            haplotypes: vec![(0, HaplotypeSide::Left), (0, HaplotypeSide::Right)],
+            variants: &variants,
+            sample_names: &sample_names,
+            sequence_length: 4,
+            dense_genotypes: None,
+            dense_summary: Some(Arc::new(pop2_summary)),
+        };
+
+        let result = calculate_d_xy_hudson(&pop1_context, &pop2_context)
+            .expect("Dxy calculation should succeed with dense summaries");
+
+        assert!(result.d_xy.is_some(), "Dxy should be computed for callable sites");
+        let dxy = result.d_xy.unwrap();
+        assert!((dxy - 0.75).abs() < 1e-12, "Unexpected Dxy value from summaries: {dxy}");
+    }
+
+    #[test]
+    fn test_hudson_dxy_from_summaries_none_when_no_shared_callable_sites() {
+        let pop1_summary = DensePopulationSummary::from_parts_for_test(
+            vec![0_u32, 1],
+            vec![2_u32, 2],
+            1,
+            1,
+            1.0,
+        );
+
+        let pop2_summary = DensePopulationSummary::from_parts_for_test(
+            vec![0_u32, 0],
+            vec![0_u32, 0],
+            0,
+            0,
+            1.0,
+        );
+
+        let sample_names = vec!["s1".to_string()];
+        let variants: Vec<Variant> = Vec::new();
+
+        let pop1_context = PopulationContext {
+            id: PopulationId::HaplotypeGroup(0),
+            haplotypes: vec![(0, HaplotypeSide::Left), (0, HaplotypeSide::Right)],
+            variants: &variants,
+            sample_names: &sample_names,
+            sequence_length: 2,
+            dense_genotypes: None,
+            dense_summary: Some(Arc::new(pop1_summary)),
+        };
+
+        let pop2_context = PopulationContext {
+            id: PopulationId::HaplotypeGroup(1),
+            haplotypes: vec![(0, HaplotypeSide::Left), (0, HaplotypeSide::Right)],
+            variants: &variants,
+            sample_names: &sample_names,
+            sequence_length: 2,
+            dense_genotypes: None,
+            dense_summary: Some(Arc::new(pop2_summary)),
+        };
+
+        let result = calculate_d_xy_hudson(&pop1_context, &pop2_context)
+            .expect("Dxy calculation should succeed even without callable sites");
+
+        assert!(
+            result.d_xy.is_none(),
+            "Dxy should be None when no callable sites are shared"
+        );
     }
 }
