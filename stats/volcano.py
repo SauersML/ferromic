@@ -278,8 +278,8 @@ def plot_volcano(df, out_pdf):
     xpad = xmax * 0.06
     xlim = (-xmax - xpad, xmax + xpad)
 
-    target_width_px = 2000
-    target_height_px = 900
+    target_width_px = 3900
+    target_height_px = 2550
     export_dpi = 300
     fig, ax = plt.subplots(figsize=(target_width_px / export_dpi, target_height_px / export_dpi))
 
