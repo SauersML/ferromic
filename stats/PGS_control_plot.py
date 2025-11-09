@@ -41,6 +41,8 @@ plt.rcParams.update({
 COLOR_RISK_INC = "#2B6CB0"    # blue for risk increasing (OR > 1)
 COLOR_RISK_DEC = "#C53030"    # red for risk decreasing (OR < 1)
 COLOR_NEUTRAL = "#CCCCCC"     # gray for non-significant
+COLOR_WITHOUT_CONTROLS = "#C53030"  # red for unadjusted
+COLOR_WITH_CONTROLS = "#2B6CB0"     # blue for adjusted
 ALPHA_POINT = 0.75
 EDGE_COLOR = "#333333"
 EDGE_WIDTH = 0.8
