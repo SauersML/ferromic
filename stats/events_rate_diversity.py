@@ -4,6 +4,9 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+plt.rcParams['pdf.fonttype'] = 42
+plt.rcParams['ps.fonttype'] = 42
+
 from statsmodels.nonparametric.smoothers_lowess import lowess
 import statsmodels.api as sm
 from scipy.stats import (
