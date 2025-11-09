@@ -83,16 +83,16 @@ def load_data(path: str) -> pd.DataFrame:
 
 
 def scale_all_sizes(or_values: pd.Series) -> np.ndarray:
-    """Scale marker sizes linearly with the odds ratio (clamped to [0.67, 1.5])."""
+    """Scale marker sizes with amplified deviation from OR=1.0."""
     arr = pd.to_numeric(or_values, errors="coerce").to_numpy()
     arr = np.nan_to_num(arr, nan=1.0, posinf=TRI_OR_MAX, neginf=TRI_OR_MIN)
     arr[arr <= 0] = 1.0
 
-    # Clamp to [0.67, 1.5] range first
+    # Clamp to [0.8, 1.2] range first
     arr = np.clip(arr, TRI_OR_MIN, TRI_OR_MAX)
 
-    # Linear scaling: OR=1.0 keeps baseline size, OR<1 shrinks, OR>1 enlarges
-    return TRI_BASE_SIZE * arr
+    # Amplified scaling: 2x the deviation from OR=1.0
+    return TRI_BASE_SIZE * (1 + 2 * (arr - 1))
 
 
 def plot_volcano(df: pd.DataFrame, out_pdf: str, out_png: str):
@@ -155,7 +155,7 @@ def plot_volcano(df: pd.DataFrame, out_pdf: str, out_png: str):
         ax.annotate(row["Phenotype_Clean"],
                    xy=(row["or_adj"], row["log10_p_adj"]),
                    xytext=(6, 6), textcoords='offset points',
-                   fontsize=9, alpha=0.85)
+                   fontsize=18, alpha=0.85)
     
     ax.set_xlabel("Odds Ratio", fontsize=14)
     ax.set_ylabel("-log₁₀(P-value)", fontsize=14)
@@ -287,12 +287,12 @@ def plot_comparison(df: pd.DataFrame, out_pdf: str, out_png: str):
             ax.annotate(row["Phenotype_Clean"],
                        xy=(row["x_adj_jitter"], row["log10_p_adj"]),
                        xytext=(8, 0), textcoords='offset points',
-                       fontsize=9, alpha=0.85, va='center', ha='left')
+                       fontsize=18, alpha=0.85, va='center', ha='left')
         else:  # Odd counter: label on left
             ax.annotate(row["Phenotype_Clean"],
                        xy=(row["x_adj_jitter"], row["log10_p_adj"]),
                        xytext=(-8, 0), textcoords='offset points',
-                       fontsize=9, alpha=0.85, va='center', ha='right')
+                       fontsize=18, alpha=0.85, va='center', ha='right')
 
     # Significance line at p=0.05
     sig_line_y = -np.log10(0.05)
