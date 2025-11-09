@@ -49,8 +49,8 @@ EDGE_WIDTH = 0.8
 
 # Triangle sizing (matching manhattan_phe.py)
 TRI_BASE_SIZE = 260.0    # triangle area (pt^2) when OR = 1.0
-TRI_OR_MIN = 0.67        # minimum OR for scaling (protective effects)
-TRI_OR_MAX = 1.5         # maximum OR for scaling (risk effects)
+TRI_OR_MIN = 0.8         # minimum OR for scaling (protective effects)
+TRI_OR_MAX = 1.2         # maximum OR for scaling (risk effects)
 
 
 def load_data(path: str) -> pd.DataFrame:
@@ -97,39 +97,50 @@ def scale_all_sizes(or_values: pd.Series) -> np.ndarray:
 
 def plot_volcano(df: pd.DataFrame, out_pdf: str, out_png: str):
     """Create volcano plot comparing effect sizes vs significance."""
-    
+
     fig, ax = plt.subplots(figsize=(10, 8))
-    
+
     # Prepare data
     df_plot = df.copy()
-    
+
     # Unadjusted (without controls) - use OR directly
     df_plot["or_unadj"] = df_plot["OR_NoCustomControls"]
     df_plot["log10_p_unadj"] = -np.log10(df_plot["P_Value_NoCustomControls"])
-    
+
     # Adjusted (with controls) - use OR directly
     df_plot["or_adj"] = df_plot["OR"]
     df_plot["log10_p_adj"] = -np.log10(df_plot["P_Value"])
-    
+
+    # Scale marker sizes by OR (matching manhattan_phe.py approach)
+    df_plot["size_unadj"] = scale_all_sizes(df_plot["OR_NoCustomControls"])
+    df_plot["size_adj"] = scale_all_sizes(df_plot["OR"])
+
+    # Determine risk direction and markers based on OR
+    # OR > 1 = risk increasing (triangle up), OR < 1 = risk decreasing (triangle down)
+    df_plot["marker_unadj"] = df_plot["OR_NoCustomControls"].apply(lambda x: "^" if x >= 1.0 else "v")
+    df_plot["marker_adj"] = df_plot["OR"].apply(lambda x: "^" if x >= 1.0 else "v")
+
     # Draw arrows from unadjusted to adjusted
     for _, row in df_plot.iterrows():
-        ax.annotate('', 
+        ax.annotate('',
                    xy=(row["or_adj"], row["log10_p_adj"]),
                    xytext=(row["or_unadj"], row["log10_p_unadj"]),
-                   arrowprops=dict(arrowstyle='->', color='#888888', 
+                   arrowprops=dict(arrowstyle='->', color='#888888',
                                  lw=1.2, alpha=0.5, shrinkA=5, shrinkB=5))
-    
-    # Plot unadjusted points (without controls)
-    ax.scatter(df_plot["or_unadj"], df_plot["log10_p_unadj"],
-              s=100, c=COLOR_WITHOUT_CONTROLS, alpha=ALPHA_POINT,
-              edgecolors=EDGE_COLOR, linewidths=EDGE_WIDTH, 
-              zorder=3, label='Unadjusted')
-    
-    # Plot adjusted points (with controls)
-    ax.scatter(df_plot["or_adj"], df_plot["log10_p_adj"],
-              s=100, c=COLOR_WITH_CONTROLS, alpha=ALPHA_POINT,
-              edgecolors=EDGE_COLOR, linewidths=EDGE_WIDTH,
-              zorder=4, label='Adjusted for PGS')
+
+    # Plot unadjusted points (without controls) with triangles
+    for _, row in df_plot.iterrows():
+        ax.scatter(row["or_unadj"], row["log10_p_unadj"],
+                  s=row["size_unadj"], marker=row["marker_unadj"],
+                  c=COLOR_WITHOUT_CONTROLS, alpha=ALPHA_POINT,
+                  edgecolors=EDGE_COLOR, linewidths=EDGE_WIDTH, zorder=3)
+
+    # Plot adjusted points (with controls) with triangles
+    for _, row in df_plot.iterrows():
+        ax.scatter(row["or_adj"], row["log10_p_adj"],
+                  s=row["size_adj"], marker=row["marker_adj"],
+                  c=COLOR_WITH_CONTROLS, alpha=ALPHA_POINT,
+                  edgecolors=EDGE_COLOR, linewidths=EDGE_WIDTH, zorder=4)
     
     # Null line at OR=1
     ax.axvline(1.0, color='#999999', linestyle='-', linewidth=1, alpha=0.5, zorder=1)
@@ -150,10 +161,50 @@ def plot_volcano(df: pd.DataFrame, out_pdf: str, out_png: str):
     ax.set_ylabel("-log₁₀(P-value)", fontsize=14)
     ax.grid(True, alpha=0.2, linestyle=':', linewidth=0.8)
     ax.set_axisbelow(True)
-    
-    # Legend
-    ax.legend(loc='upper left', frameon=True, fancybox=False, 
-             shadow=False, fontsize=11)
+
+    # Create combined legend for adjustment status, direction, and OR scaling
+    or_levels = [TRI_OR_MIN, 1.0, TRI_OR_MAX]
+    or_labels = [f"OR = {val:.2f}" for val in or_levels]
+    or_sizes = scale_all_sizes(pd.Series(or_levels))
+
+    legend_elements = [
+        # Adjustment status
+        Line2D([0], [0], marker='^', color='w',
+               markerfacecolor=COLOR_WITHOUT_CONTROLS, markersize=10,
+               label='Unadjusted',
+               markeredgecolor=EDGE_COLOR, markeredgewidth=EDGE_WIDTH),
+        Line2D([0], [0], marker='^', color='w',
+               markerfacecolor=COLOR_WITH_CONTROLS, markersize=10,
+               label='Adjusted for PGS',
+               markeredgecolor=EDGE_COLOR, markeredgewidth=EDGE_WIDTH),
+        # Direction indicators
+        Line2D([0], [0], marker='^', color='w',
+               markerfacecolor='#666666', markersize=10,
+               label='Risk increasing (OR > 1)',
+               markeredgecolor=EDGE_COLOR, markeredgewidth=EDGE_WIDTH),
+        Line2D([0], [0], marker='v', color='w',
+               markerfacecolor='#666666', markersize=10,
+               label='Risk decreasing (OR < 1)',
+               markeredgecolor=EDGE_COLOR, markeredgewidth=EDGE_WIDTH),
+        # Size legend spacer
+        Line2D([0], [0], linestyle='None', label=''),
+        # OR scaling examples
+        Line2D([0], [0], marker='^', color='w',
+               markerfacecolor='#666666', markersize=np.sqrt(or_sizes[0]/10),
+               label=or_labels[0],
+               markeredgecolor=EDGE_COLOR, markeredgewidth=EDGE_WIDTH),
+        Line2D([0], [0], marker='^', color='w',
+               markerfacecolor='#666666', markersize=np.sqrt(or_sizes[1]/10),
+               label=or_labels[1],
+               markeredgecolor=EDGE_COLOR, markeredgewidth=EDGE_WIDTH),
+        Line2D([0], [0], marker='^', color='w',
+               markerfacecolor='#666666', markersize=np.sqrt(or_sizes[2]/10),
+               label=or_labels[2],
+               markeredgecolor=EDGE_COLOR, markeredgewidth=EDGE_WIDTH),
+    ]
+
+    ax.legend(handles=legend_elements, loc='upper left', frameon=True,
+             fancybox=False, shadow=False, fontsize=10)
     
     plt.tight_layout()
     
