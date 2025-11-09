@@ -301,7 +301,7 @@ def plot_comparison(df: pd.DataFrame, out_pdf: str, out_png: str):
 
     # Styling
     ax.set_xticks([x_unadj, x_adj])
-    ax.set_xticklabels(['PGS-unadjusted', 'PGS-adjusted'], fontsize=24)
+    ax.set_xticklabels(['PGS-unadjusted', 'PGS-adjusted'], fontsize=21)
     ax.set_ylabel("-log₁₀(P-value)", fontsize=23)
     ax.set_xlim(-0.3, 1.5)
     ax.grid(True, alpha=0.2, linestyle=':', linewidth=0.8, axis='y')
@@ -344,7 +344,7 @@ def plot_comparison(df: pd.DataFrame, out_pdf: str, out_png: str):
         legend_labels.append(or_labels[i])
 
     ax.legend(legend_handles, legend_labels, loc='upper right', frameon=True,
-             fancybox=False, shadow=False, fontsize=20)
+             fancybox=False, shadow=False, fontsize=15)
 
     plt.tight_layout()
 
