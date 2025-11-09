@@ -21,6 +21,8 @@ plt.rcParams['font.sans-serif'] = ['Helvetica', 'Arial', 'DejaVu Sans']
 plt.rcParams['font.weight'] = 'normal'
 plt.rcParams['axes.labelweight'] = 'normal'
 plt.rcParams['axes.titleweight'] = 'normal'
+plt.rcParams['pdf.fonttype'] = 42
+plt.rcParams['ps.fonttype'] = 42
 
 # ---------- Config ----------
 INFILE = "data/phewas_results.tsv"
