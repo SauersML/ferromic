@@ -29,7 +29,7 @@ plt.rcParams['svg.fonttype'] = 'none'
 BASE_FONT_SIZE = 20
 AXIS_LABEL_FONT_SIZE = 28
 TICK_LABEL_FONT_SIZE = 22
-LEGEND_FONT_SIZE = 21
+LEGEND_FONT_SIZE = 16  # 25% smaller than original 21
 ANNOTATION_FONT_SIZE = 21
 
 plt.rcParams.update({
@@ -350,7 +350,7 @@ def plot_volcano(df, out_pdf):
     ax.legend(
         handles=handles,
         loc="upper right", frameon=False, ncol=ncol,
-        borderaxespad=0.8, handlelength=1.6, columnspacing=1.0, labelspacing=0.6,
+        borderaxespad=0.8, handlelength=1.6, columnspacing=1.0, labelspacing=0.45,
         fontsize=LEGEND_FONT_SIZE
     )
 
