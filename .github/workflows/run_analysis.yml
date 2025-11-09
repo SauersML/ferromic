@@ -167,7 +167,7 @@ jobs:
               return zipfile.ZipFile(io.BytesIO(resp.content))
 
           log_entries = []
-          phy_written = 0
+          phy_archives_stored = 0
 
           # output.csv
           with download_artifact(artifacts["run-vcf-output-csv"]) as zf:
@@ -231,31 +231,25 @@ jobs:
                               phy_zip_dest.parent.mkdir(parents=True, exist_ok=True)
                               phy_zip_dest.write_bytes(phy_zip_bytes)
                               shutil.copy2(phy_zip_dest, repo_root / "phy_files.zip")
+                              phy_archives_stored += 1
                               print(
-                                  f"Stored phy_files.zip at {phy_zip_dest.relative_to(repo_root)} and repository root"
+                                  "Stored phy_files.zip at "
+                                  f"{phy_zip_dest.relative_to(repo_root)} and repository root;"
+                                  " skipping extraction of individual PHY files."
                               )
+                              continue
+
                           for inner_member in inner.namelist():
-                              if inner_member.endswith(".phy"):
-                                  filename = Path(inner_member).name
-                                  data = inner.read(inner_member)
-                                  targets = [
-                                      public_root / filename,
-                                      public_root / "all_phy" / filename,
-                                  ]
-                                  for target in targets:
-                                      target.parent.mkdir(parents=True, exist_ok=True)
-                                      with target.open("wb") as fh:
-                                          fh.write(data)
-                                  root_target = repo_root / filename
-                                  with root_target.open("wb") as fh:
-                                      fh.write(data)
-                                  phy_written += 1
-                                  print(f"Extracted {filename} from phy_outputs.zip")
+                              target = public_root / Path(inner_member).name
+                              target.parent.mkdir(parents=True, exist_ok=True)
+                              with target.open("wb") as fh:
+                                  fh.write(inner.read(inner_member))
+                              print(f"Extracted {target.relative_to(repo_root)} from {archive.name}")
               finally:
                   shutil.rmtree(tmpdir)
 
-          if phy_written:
-              print(f"Extracted {phy_written} PHY files from manual_run_vcf artefact")
+          if phy_archives_stored:
+              print("Stored PHY archive(s) without extracting individual alignments.")
 
           with download_log.open("a", encoding="utf-8") as fh:
               for path in log_entries:
