@@ -24,13 +24,13 @@ plt.rcParams.update({
     "savefig.dpi": 300,
     "font.family": "sans-serif",
     "font.sans-serif": ["Arial", "Helvetica", "DejaVu Sans"],
-    "font.size": 12,
-    "axes.labelsize": 14,
-    "axes.titlesize": 16,
+    "font.size": 24,
+    "axes.labelsize": 28,
+    "axes.titlesize": 32,
     "axes.linewidth": 1.2,
-    "xtick.labelsize": 11,
-    "ytick.labelsize": 11,
-    "legend.fontsize": 11,
+    "xtick.labelsize": 22,
+    "ytick.labelsize": 22,
+    "legend.fontsize": 22,
     "axes.spines.top": False,
     "axes.spines.right": False,
     "pdf.fonttype": 42,
@@ -155,10 +155,10 @@ def plot_volcano(df: pd.DataFrame, out_pdf: str, out_png: str):
         ax.annotate(row["Phenotype_Clean"],
                    xy=(row["or_adj"], row["log10_p_adj"]),
                    xytext=(6, 6), textcoords='offset points',
-                   fontsize=18, alpha=0.85)
-    
-    ax.set_xlabel("Odds Ratio", fontsize=14)
-    ax.set_ylabel("-log₁₀(P-value)", fontsize=14)
+                   fontsize=14, alpha=0.85)
+
+    ax.set_xlabel("Odds Ratio", fontsize=28)
+    ax.set_ylabel("-log₁₀(P-value)", fontsize=28)
     ax.grid(True, alpha=0.2, linestyle=':', linewidth=0.8)
     ax.set_axisbelow(True)
 
@@ -208,7 +208,7 @@ def plot_volcano(df: pd.DataFrame, out_pdf: str, out_png: str):
         legend_labels.append(or_labels[i])
 
     ax.legend(legend_handles, legend_labels, loc='upper left', frameon=True,
-             fancybox=False, shadow=False, fontsize=10)
+             fancybox=False, shadow=False, fontsize=20)
     
     plt.tight_layout()
     
@@ -287,12 +287,12 @@ def plot_comparison(df: pd.DataFrame, out_pdf: str, out_png: str):
             ax.annotate(row["Phenotype_Clean"],
                        xy=(row["x_adj_jitter"], row["log10_p_adj"]),
                        xytext=(8, 0), textcoords='offset points',
-                       fontsize=18, alpha=0.85, va='center', ha='left')
+                       fontsize=14, alpha=0.85, va='center', ha='left')
         else:  # Odd counter: label on left
             ax.annotate(row["Phenotype_Clean"],
                        xy=(row["x_adj_jitter"], row["log10_p_adj"]),
                        xytext=(-8, 0), textcoords='offset points',
-                       fontsize=18, alpha=0.85, va='center', ha='right')
+                       fontsize=14, alpha=0.85, va='center', ha='right')
 
     # Significance line at p=0.05
     sig_line_y = -np.log10(0.05)
@@ -301,8 +301,8 @@ def plot_comparison(df: pd.DataFrame, out_pdf: str, out_png: str):
 
     # Styling
     ax.set_xticks([x_unadj, x_adj])
-    ax.set_xticklabels(['PGS-unadjusted', 'PGS-adjusted'], fontsize=12)
-    ax.set_ylabel("-log₁₀(P-value)", fontsize=14)
+    ax.set_xticklabels(['PGS-unadjusted', 'PGS-adjusted'], fontsize=24)
+    ax.set_ylabel("-log₁₀(P-value)", fontsize=28)
     ax.set_xlim(-0.3, 1.5)
     ax.grid(True, alpha=0.2, linestyle=':', linewidth=0.8, axis='y')
     ax.set_axisbelow(True)
@@ -344,7 +344,7 @@ def plot_comparison(df: pd.DataFrame, out_pdf: str, out_png: str):
         legend_labels.append(or_labels[i])
 
     ax.legend(legend_handles, legend_labels, loc='upper right', frameon=True,
-             fancybox=False, shadow=False, fontsize=10)
+             fancybox=False, shadow=False, fontsize=20)
 
     plt.tight_layout()
 
