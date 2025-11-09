@@ -155,7 +155,7 @@ def plot_volcano(df: pd.DataFrame, out_pdf: str, out_png: str):
         ax.annotate(row["Phenotype_Clean"],
                    xy=(row["or_adj"], row["log10_p_adj"]),
                    xytext=(6, 6), textcoords='offset points',
-                   fontsize=9, alpha=0.85)
+                   fontsize=18, alpha=0.85)
     
     ax.set_xlabel("Odds Ratio", fontsize=14)
     ax.set_ylabel("-log₁₀(P-value)", fontsize=14)
@@ -287,12 +287,12 @@ def plot_comparison(df: pd.DataFrame, out_pdf: str, out_png: str):
             ax.annotate(row["Phenotype_Clean"],
                        xy=(row["x_adj_jitter"], row["log10_p_adj"]),
                        xytext=(8, 0), textcoords='offset points',
-                       fontsize=9, alpha=0.85, va='center', ha='left')
+                       fontsize=18, alpha=0.85, va='center', ha='left')
         else:  # Odd counter: label on left
             ax.annotate(row["Phenotype_Clean"],
                        xy=(row["x_adj_jitter"], row["log10_p_adj"]),
                        xytext=(-8, 0), textcoords='offset points',
-                       fontsize=9, alpha=0.85, va='center', ha='right')
+                       fontsize=18, alpha=0.85, va='center', ha='right')
 
     # Significance line at p=0.05
     sig_line_y = -np.log10(0.05)
