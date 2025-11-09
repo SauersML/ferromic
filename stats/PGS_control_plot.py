@@ -38,11 +38,11 @@ plt.rcParams.update({
 })
 
 # Colors - modern palette (matching manhattan_phe.py for risk direction)
-COLOR_RISK_INC = "#2B6CB0"    # blue for risk increasing (OR > 1)
-COLOR_RISK_DEC = "#C53030"    # red for risk decreasing (OR < 1)
+COLOR_RISK_INC = "#C53030"    # red for risk increasing (OR > 1)
+COLOR_RISK_DEC = "#2B6CB0"    # blue for risk decreasing (OR < 1)
 COLOR_NEUTRAL = "#CCCCCC"     # gray for non-significant
-COLOR_WITHOUT_CONTROLS = "#C53030"  # red for unadjusted
-COLOR_WITH_CONTROLS = "#2B6CB0"     # blue for adjusted
+COLOR_WITHOUT_CONTROLS = "#D8B4FE"  # light purple for unadjusted
+COLOR_WITH_CONTROLS = "#7C3AED"     # dark purple for adjusted
 ALPHA_POINT = 0.75
 EDGE_COLOR = "#333333"
 EDGE_WIDTH = 0.8
