@@ -167,43 +167,47 @@ def plot_volcano(df: pd.DataFrame, out_pdf: str, out_png: str):
     or_labels = [f"OR = {val:.2f}" for val in or_levels]
     or_sizes = scale_all_sizes(pd.Series(or_levels))
 
-    legend_elements = [
+    # Create size handles using scatter (area-based, matching actual plot markers)
+    size_handles = [
+        ax.scatter([], [], s=or_sizes[i], marker='^',
+                  facecolors='#666666', edgecolors=EDGE_COLOR,
+                  linewidths=EDGE_WIDTH, alpha=ALPHA_POINT)
+        for i in range(len(or_levels))
+    ]
+
+    legend_handles = [
         # Adjustment status
         Line2D([0], [0], marker='^', color='w',
                markerfacecolor=COLOR_WITHOUT_CONTROLS, markersize=10,
-               label='Unadjusted',
                markeredgecolor=EDGE_COLOR, markeredgewidth=EDGE_WIDTH),
         Line2D([0], [0], marker='^', color='w',
                markerfacecolor=COLOR_WITH_CONTROLS, markersize=10,
-               label='Adjusted for PGS',
                markeredgecolor=EDGE_COLOR, markeredgewidth=EDGE_WIDTH),
         # Direction indicators
         Line2D([0], [0], marker='^', color='w',
                markerfacecolor='#666666', markersize=10,
-               label='Risk increasing (OR > 1)',
                markeredgecolor=EDGE_COLOR, markeredgewidth=EDGE_WIDTH),
         Line2D([0], [0], marker='v', color='w',
                markerfacecolor='#666666', markersize=10,
-               label='Risk decreasing (OR < 1)',
                markeredgecolor=EDGE_COLOR, markeredgewidth=EDGE_WIDTH),
         # Size legend spacer
-        Line2D([0], [0], linestyle='None', label=''),
-        # OR scaling examples - use proportional sizing directly
-        Line2D([0], [0], marker='^', color='w',
-               markerfacecolor='#666666', markersize=6.0 * TRI_OR_MIN,
-               label=or_labels[0],
-               markeredgecolor=EDGE_COLOR, markeredgewidth=EDGE_WIDTH),
-        Line2D([0], [0], marker='^', color='w',
-               markerfacecolor='#666666', markersize=6.0 * 1.0,
-               label=or_labels[1],
-               markeredgecolor=EDGE_COLOR, markeredgewidth=EDGE_WIDTH),
-        Line2D([0], [0], marker='^', color='w',
-               markerfacecolor='#666666', markersize=6.0 * TRI_OR_MAX,
-               label=or_labels[2],
-               markeredgecolor=EDGE_COLOR, markeredgewidth=EDGE_WIDTH),
+        Line2D([0], [0], linestyle='None'),
     ]
 
-    ax.legend(handles=legend_elements, loc='upper left', frameon=True,
+    legend_labels = [
+        'Unadjusted',
+        'Adjusted for PGS',
+        'Risk increasing (OR > 1)',
+        'Risk decreasing (OR < 1)',
+        '',
+    ]
+
+    # Add OR scaling examples using scatter handles (area-based sizing)
+    for i in range(len(or_levels)):
+        legend_handles.append(size_handles[i])
+        legend_labels.append(or_labels[i])
+
+    ax.legend(legend_handles, legend_labels, loc='upper left', frameon=True,
              fancybox=False, shadow=False, fontsize=10)
     
     plt.tight_layout()
@@ -308,34 +312,38 @@ def plot_comparison(df: pd.DataFrame, out_pdf: str, out_png: str):
     or_labels = [f"OR = {val:.2f}" for val in or_levels]
     or_sizes = scale_all_sizes(pd.Series(or_levels))
 
-    legend_elements = [
+    # Create size handles using scatter (area-based, matching actual plot markers)
+    size_handles = [
+        ax.scatter([], [], s=or_sizes[i], marker='^',
+                  facecolors='#666666', edgecolors=EDGE_COLOR,
+                  linewidths=EDGE_WIDTH, alpha=ALPHA_POINT)
+        for i in range(len(or_levels))
+    ]
+
+    legend_handles = [
         # Direction indicators
         Line2D([0], [0], marker='^', color='w',
                markerfacecolor=COLOR_RISK_INC, markersize=10,
-               label='Risk increasing (OR > 1)',
                markeredgecolor=EDGE_COLOR, markeredgewidth=EDGE_WIDTH),
         Line2D([0], [0], marker='v', color='w',
                markerfacecolor=COLOR_RISK_DEC, markersize=10,
-               label='Risk decreasing (OR < 1)',
                markeredgecolor=EDGE_COLOR, markeredgewidth=EDGE_WIDTH),
         # Size legend spacer
-        Line2D([0], [0], linestyle='None', label=''),
-        # OR scaling examples - use proportional sizing directly
-        Line2D([0], [0], marker='^', color='w',
-               markerfacecolor='#666666', markersize=6.0 * TRI_OR_MIN,
-               label=or_labels[0],
-               markeredgecolor=EDGE_COLOR, markeredgewidth=EDGE_WIDTH),
-        Line2D([0], [0], marker='^', color='w',
-               markerfacecolor='#666666', markersize=6.0 * 1.0,
-               label=or_labels[1],
-               markeredgecolor=EDGE_COLOR, markeredgewidth=EDGE_WIDTH),
-        Line2D([0], [0], marker='^', color='w',
-               markerfacecolor='#666666', markersize=6.0 * TRI_OR_MAX,
-               label=or_labels[2],
-               markeredgecolor=EDGE_COLOR, markeredgewidth=EDGE_WIDTH),
+        Line2D([0], [0], linestyle='None'),
     ]
 
-    ax.legend(handles=legend_elements, loc='upper right', frameon=True,
+    legend_labels = [
+        'Risk increasing (OR > 1)',
+        'Risk decreasing (OR < 1)',
+        '',
+    ]
+
+    # Add OR scaling examples using scatter handles (area-based sizing)
+    for i in range(len(or_levels)):
+        legend_handles.append(size_handles[i])
+        legend_labels.append(or_labels[i])
+
+    ax.legend(legend_handles, legend_labels, loc='upper right', frameon=True,
              fancybox=False, shadow=False, fontsize=10)
 
     plt.tight_layout()
