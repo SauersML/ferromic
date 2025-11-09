@@ -95,8 +95,6 @@ jobs:
           python - <<'PY'
           import io
           import os
-          import shutil
-          import tempfile
           import zipfile
           from pathlib import Path
 
@@ -142,7 +140,6 @@ jobs:
           required = {
               "run-vcf-output-csv": "output.csv",
               "run-vcf-falsta": None,
-              "run-vcf-phy-outputs": None,
               "run-vcf-hudson-fst": "hudson_fst_results.tsv",
           }
 
@@ -167,8 +164,6 @@ jobs:
               return zipfile.ZipFile(io.BytesIO(resp.content))
 
           log_entries = []
-          phy_written = 0
-
           # output.csv
           with download_artifact(artifacts["run-vcf-output-csv"]) as zf:
               for member in zf.namelist():
@@ -211,51 +206,6 @@ jobs:
                       break
               else:
                   raise SystemExit("hudson_fst_results.tsv not found in run-vcf-hudson-fst artefact")
-
-          # PHY files
-          with download_artifact(artifacts["run-vcf-phy-outputs"]) as zf:
-              members = zf.namelist()
-              if not members:
-                  raise SystemExit("run-vcf-phy-outputs artefact is empty")
-              tmpdir = Path(tempfile.mkdtemp())
-              try:
-                  zf.extractall(tmpdir)
-                  inner_archives = list(tmpdir.glob("*.zip"))
-                  if not inner_archives:
-                      raise SystemExit("No zip archives found inside run-vcf-phy-outputs artefact")
-                  for archive in inner_archives:
-                      with zipfile.ZipFile(archive, "r") as inner:
-                          if archive.name == "phy_outputs.zip":
-                              phy_zip_bytes = archive.read_bytes()
-                              phy_zip_dest = downloads_root / "manual_run_vcf" / "phy_files.zip"
-                              phy_zip_dest.parent.mkdir(parents=True, exist_ok=True)
-                              phy_zip_dest.write_bytes(phy_zip_bytes)
-                              shutil.copy2(phy_zip_dest, repo_root / "phy_files.zip")
-                              print(
-                                  f"Stored phy_files.zip at {phy_zip_dest.relative_to(repo_root)} and repository root"
-                              )
-                          for inner_member in inner.namelist():
-                              if inner_member.endswith(".phy"):
-                                  filename = Path(inner_member).name
-                                  data = inner.read(inner_member)
-                                  targets = [
-                                      public_root / filename,
-                                      public_root / "all_phy" / filename,
-                                  ]
-                                  for target in targets:
-                                      target.parent.mkdir(parents=True, exist_ok=True)
-                                      with target.open("wb") as fh:
-                                          fh.write(data)
-                                  root_target = repo_root / filename
-                                  with root_target.open("wb") as fh:
-                                      fh.write(data)
-                                  phy_written += 1
-                                  print(f"Extracted {filename} from phy_outputs.zip")
-              finally:
-                  shutil.rmtree(tmpdir)
-
-          if phy_written:
-              print(f"Extracted {phy_written} PHY files from manual_run_vcf artefact")
 
           with download_log.open("a", encoding="utf-8") as fh:
               for path in log_entries:

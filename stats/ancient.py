@@ -8,6 +8,7 @@ import tempfile
 import urllib.request
 from collections import defaultdict
 from pathlib import Path
+from typing import Set
 
 import numpy as np
 import pandas as pd
@@ -355,8 +356,34 @@ def liftover_coordinates_batch(regions, from_build: str, to_build: str):
 # PHY management
 # ----------------------------------------------------------------------
 
+def required_inversion_phy_filenames() -> Set[str]:
+    """Return the set of inversion-group PHYLIP filenames required by this module."""
+
+    required: Set[str] = set()
+    try:
+        inversions = load_inversion_properties()
+    except RuntimeError as exc:
+        print(f"✗ Unable to load inversion properties: {exc}")
+        return required
+
+    for inv in inversions:
+        chrom = inv.get("chrom")
+        start = inv.get("start")
+        end = inv.get("end")
+        if chrom is None or start is None or end is None:
+            continue
+        for group in (0, 1):
+            required.add(f"inversion_group{group}_{chrom}_start{start}_end{end}.phy")
+
+    return required
+
+
 def download_and_unzip_phy():
     import zipfile
+
+    required = required_inversion_phy_filenames()
+    if not required:
+        raise RuntimeError("Unable to determine required inversion .phy files")
 
     if PHY_ZIP_LOCAL.exists():
         print(f"✓ PHY archive {PHY_ZIP_LOCAL.name} already exists")
@@ -385,23 +412,48 @@ def download_and_unzip_phy():
         print()
         print("✓ PHY archive downloaded")
 
-    if PHY_DIR.exists() and any(PHY_DIR.iterdir()):
-        print(f"✓ PHY files already extracted in {PHY_DIR}")
-        return
-
-    print(f"Extracting {PHY_ZIP_LOCAL.name}...")
     PHY_DIR.mkdir(exist_ok=True)
 
+    # Remove any leftover .phy files that are not required for the analyses.
+    removed = 0
+    for existing in PHY_DIR.glob("*.phy"):
+        if existing.name not in required:
+            try:
+                existing.unlink()
+                removed += 1
+            except OSError as exc:
+                print(f"  ⚠️  Unable to delete obsolete file {existing}: {exc}")
+    if removed:
+        print(f"  Removed {removed} obsolete PHY files from {PHY_DIR}")
+
     with zipfile.ZipFile(PHY_ZIP_LOCAL, "r") as z:
-        members = z.namelist()
-        total = len(members)
-        print(f"  Extracting {total} files...")
-        for i, name in enumerate(members, 1):
-            z.extract(name, PHY_DIR)
-            if i % 100 == 0 or i == total:
-                print(f"\r  Extracted {i}/{total}", end="")
-    print()
-    print(f"✓ Extracted PHY files to {PHY_DIR}")
+        members = {Path(name).name: name for name in z.namelist() if name.endswith(".phy")}
+        missing = sorted(name for name in required if name not in members)
+        if missing:
+            print("  ⚠️  The archive is missing some required inversion PHY files:")
+            for name in missing[:10]:
+                print(f"      - {name}")
+            if len(missing) > 10:
+                print(f"      ... and {len(missing) - 10} more")
+
+        to_extract = [
+            (name, members[name])
+            for name in sorted(required)
+            if name in members and not (PHY_DIR / name).exists()
+        ]
+
+        if not to_extract:
+            print(f"✓ Required inversion PHY files already present in {PHY_DIR}")
+            return
+
+        print(f"Extracting {len(to_extract)} inversion PHY files to {PHY_DIR}...")
+        for idx, (basename, archive_name) in enumerate(to_extract, 1):
+            with z.open(archive_name) as src:
+                (PHY_DIR / basename).write_bytes(src.read())
+            if idx % 50 == 0 or idx == len(to_extract):
+                print(f"  Progress: {idx}/{len(to_extract)} extracted")
+
+    print(f"✓ Extracted {len(to_extract)} inversion PHY files to {PHY_DIR}")
 
 
 def load_inversion_phy_file(path: Path):
