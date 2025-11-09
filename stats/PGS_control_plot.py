@@ -157,8 +157,8 @@ def plot_volcano(df: pd.DataFrame, out_pdf: str, out_png: str):
                    xytext=(6, 6), textcoords='offset points',
                    fontsize=14, alpha=0.85)
 
-    ax.set_xlabel("Odds Ratio", fontsize=28)
-    ax.set_ylabel("-log₁₀(P-value)", fontsize=28)
+    ax.set_xlabel("Odds Ratio", fontsize=23)
+    ax.set_ylabel("-log₁₀(P-value)", fontsize=23)
     ax.grid(True, alpha=0.2, linestyle=':', linewidth=0.8)
     ax.set_axisbelow(True)
 
@@ -208,10 +208,10 @@ def plot_volcano(df: pd.DataFrame, out_pdf: str, out_png: str):
         legend_labels.append(or_labels[i])
 
     ax.legend(legend_handles, legend_labels, loc='upper left', frameon=True,
-             fancybox=False, shadow=False, fontsize=20)
-    
+             fancybox=False, shadow=False, fontsize=14, markerscale=0.7)
+
     plt.tight_layout()
-    
+
     # Save
     fig.savefig(out_pdf, bbox_inches='tight', dpi=300)
     fig.savefig(out_png, bbox_inches='tight', dpi=300)
@@ -302,7 +302,7 @@ def plot_comparison(df: pd.DataFrame, out_pdf: str, out_png: str):
     # Styling
     ax.set_xticks([x_unadj, x_adj])
     ax.set_xticklabels(['PGS-unadjusted', 'PGS-adjusted'], fontsize=24)
-    ax.set_ylabel("-log₁₀(P-value)", fontsize=28)
+    ax.set_ylabel("-log₁₀(P-value)", fontsize=23)
     ax.set_xlim(-0.3, 1.5)
     ax.grid(True, alpha=0.2, linestyle=':', linewidth=0.8, axis='y')
     ax.set_axisbelow(True)
