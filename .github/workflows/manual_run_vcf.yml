@@ -276,6 +276,7 @@ jobs:
           name: run-vcf-output-csv
           path: output.csv
           if-no-files-found: error
+          visibility: public
 
       - name: Upload PHY artifact
         uses: actions/upload-artifact@v4
@@ -283,6 +284,7 @@ jobs:
           name: run-vcf-phy-outputs
           path: phy_outputs.zip
           if-no-files-found: error
+          visibility: public
 
       - name: Upload FALSTA artifacts
         uses: actions/upload-artifact@v4
@@ -292,6 +294,7 @@ jobs:
             per_site_diversity_output.falsta
             per_site_fst_output.falsta
           if-no-files-found: error
+          visibility: public
 
       - name: Upload Hudson FST results
         uses: actions/upload-artifact@v4
@@ -299,3 +302,4 @@ jobs:
           name: run-vcf-hudson-fst
           path: hudson_fst_results.tsv
           if-no-files-found: error
+          visibility: public
