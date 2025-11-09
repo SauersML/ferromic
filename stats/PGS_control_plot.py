@@ -188,17 +188,17 @@ def plot_volcano(df: pd.DataFrame, out_pdf: str, out_png: str):
                markeredgecolor=EDGE_COLOR, markeredgewidth=EDGE_WIDTH),
         # Size legend spacer
         Line2D([0], [0], linestyle='None', label=''),
-        # OR scaling examples
+        # OR scaling examples - use proportional sizing directly
         Line2D([0], [0], marker='^', color='w',
-               markerfacecolor='#666666', markersize=np.sqrt(or_sizes[0]/10),
+               markerfacecolor='#666666', markersize=6.0 * TRI_OR_MIN,
                label=or_labels[0],
                markeredgecolor=EDGE_COLOR, markeredgewidth=EDGE_WIDTH),
         Line2D([0], [0], marker='^', color='w',
-               markerfacecolor='#666666', markersize=np.sqrt(or_sizes[1]/10),
+               markerfacecolor='#666666', markersize=6.0 * 1.0,
                label=or_labels[1],
                markeredgecolor=EDGE_COLOR, markeredgewidth=EDGE_WIDTH),
         Line2D([0], [0], marker='^', color='w',
-               markerfacecolor='#666666', markersize=np.sqrt(or_sizes[2]/10),
+               markerfacecolor='#666666', markersize=6.0 * TRI_OR_MAX,
                label=or_labels[2],
                markeredgecolor=EDGE_COLOR, markeredgewidth=EDGE_WIDTH),
     ]
@@ -320,17 +320,17 @@ def plot_comparison(df: pd.DataFrame, out_pdf: str, out_png: str):
                markeredgecolor=EDGE_COLOR, markeredgewidth=EDGE_WIDTH),
         # Size legend spacer
         Line2D([0], [0], linestyle='None', label=''),
-        # OR scaling examples
+        # OR scaling examples - use proportional sizing directly
         Line2D([0], [0], marker='^', color='w',
-               markerfacecolor='#666666', markersize=np.sqrt(or_sizes[0]/10),
+               markerfacecolor='#666666', markersize=6.0 * TRI_OR_MIN,
                label=or_labels[0],
                markeredgecolor=EDGE_COLOR, markeredgewidth=EDGE_WIDTH),
         Line2D([0], [0], marker='^', color='w',
-               markerfacecolor='#666666', markersize=np.sqrt(or_sizes[1]/10),
+               markerfacecolor='#666666', markersize=6.0 * 1.0,
                label=or_labels[1],
                markeredgecolor=EDGE_COLOR, markeredgewidth=EDGE_WIDTH),
         Line2D([0], [0], marker='^', color='w',
-               markerfacecolor='#666666', markersize=np.sqrt(or_sizes[2]/10),
+               markerfacecolor='#666666', markersize=6.0 * TRI_OR_MAX,
                label=or_labels[2],
                markeredgecolor=EDGE_COLOR, markeredgewidth=EDGE_WIDTH),
     ]
