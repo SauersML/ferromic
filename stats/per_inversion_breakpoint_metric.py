@@ -229,6 +229,7 @@ class FRFResult:
     frf_mu_edge: float
     frf_mu_mid: float
     frf_delta: float
+    frf_null_delta_mean: float
     frf_a: float
     frf_b: float
     frf_var_delta: float
@@ -655,6 +656,7 @@ def fit_inversion_frf_and_null(
                 length=inversion.length, n_windows=inversion.n_windows, n_sites=n_sites_total,
                 block_size_windows=1, n_blocks=0,
                 frf_mu_edge=float("nan"), frf_mu_mid=float("nan"), frf_delta=float("nan"),
+                frf_null_delta_mean=float("nan"),
                 frf_a=float("nan"), frf_b=float("nan"),
                 frf_var_delta=float("nan"), frf_se_delta=float("nan"),
                 usable_for_meta=False,
@@ -683,6 +685,7 @@ def fit_inversion_frf_and_null(
                 length=inversion.length, n_windows=inversion.n_windows, n_sites=n_sites_total,
                 block_size_windows=block_size_inv, n_blocks=0,
                 frf_mu_edge=float("nan"), frf_mu_mid=float("nan"), frf_delta=float("nan"),
+                frf_null_delta_mean=float("nan"),
                 frf_a=float("nan"), frf_b=float("nan"),
                 frf_var_delta=float("nan"), frf_se_delta=float("nan"),
                 usable_for_meta=False,
@@ -707,6 +710,7 @@ def fit_inversion_frf_and_null(
 
         frf_var_delta = float("nan")
         frf_se_delta = float("nan")
+        frf_null_delta_mean = float("nan")
 
         if can_permute:
             orig_to_comp = np.full(n_all, -1, dtype=int)
@@ -747,6 +751,7 @@ def fit_inversion_frf_and_null(
             null_deltas = np.concatenate(deltas_accum, axis=0)[:total]
             finite_mask = np.isfinite(null_deltas)
             if np.sum(finite_mask) > 1:
+                frf_null_delta_mean = float(np.mean(null_deltas[finite_mask]))
                 frf_var_delta = float(np.var(null_deltas[finite_mask], ddof=1))
                 if frf_var_delta > 0.0:
                     frf_se_delta = float(math.sqrt(frf_var_delta))
@@ -759,6 +764,7 @@ def fit_inversion_frf_and_null(
             length=inversion.length, n_windows=inversion.n_windows, n_sites=n_sites_total,
             block_size_windows=block_size_inv, n_blocks=n_blocks,
             frf_mu_edge=frf_mu_edge, frf_mu_mid=frf_mu_mid, frf_delta=frf_delta,
+            frf_null_delta_mean=frf_null_delta_mean,
             frf_a=frf_a, frf_b=frf_b,
             frf_var_delta=frf_var_delta, frf_se_delta=frf_se_delta,
             usable_for_meta=bool(usable_for_meta),
@@ -909,7 +915,7 @@ def run_random_effects_meta_regression(df: pd.DataFrame) -> Optional[Dict[str, f
     mask = (
         df["STATUS"].isin([0, 1])
         & df["usable_for_meta"]
-        & np.isfinite(df["frf_delta"])
+        & np.isfinite(df.get("frf_delta_centered", df["frf_delta"]))
         & np.isfinite(df["frf_var_delta"])
         & (df["frf_var_delta"] > 0.0)
     )
@@ -917,7 +923,10 @@ def run_random_effects_meta_regression(df: pd.DataFrame) -> Optional[Dict[str, f
     if sub.empty:
         log.warning("No inversions with usable FRF variance and group labels")
         return None
-    y = sub["frf_delta"].to_numpy(dtype=float)
+    if "frf_delta_centered" in sub.columns:
+        y = sub["frf_delta_centered"].to_numpy(dtype=float)
+    else:
+        y = sub["frf_delta"].to_numpy(dtype=float)
     s2 = sub["frf_var_delta"].to_numpy(dtype=float)
     is_single = (sub["STATUS"] == 0).to_numpy(dtype=float)
     if np.all(is_single == 0.0) or np.all(is_single == 1.0):
@@ -1127,6 +1136,10 @@ def main():
     log.info(f"Matched {n_matched} inversions to inv_properties.tsv by chrom/start/end")
 
     merged["usable_for_meta"] = merged["usable_for_meta"].astype(bool)
+    if "frf_null_delta_mean" in merged.columns:
+        merged["frf_delta_centered"] = merged["frf_delta"] - merged["frf_null_delta_mean"]
+    else:
+        merged["frf_delta_centered"] = merged["frf_delta"]
     per_inv_out = OUTDIR / "per_inversion_frf_effects.tsv"
     merged.to_csv(per_inv_out, sep="\t", index=False)
     log.info(f"Per-inversion FRF results (with group labels) written to: {per_inv_out}")
@@ -1173,12 +1186,12 @@ def main():
     mask = (
         merged["STATUS"].isin([0, 1])
         & merged["usable_for_meta"]
-        & np.isfinite(merged["frf_delta"])
+        & np.isfinite(merged["frf_delta_centered"])
         & np.isfinite(merged["frf_var_delta"])
         & (merged["frf_var_delta"] > 0.0)
     )
     sub = merged.loc[mask].copy()
-    y = sub["frf_delta"].to_numpy(dtype=float)
+    y = sub["frf_delta_centered"].to_numpy(dtype=float)
     s2 = sub["frf_var_delta"].to_numpy(dtype=float)
     is_single = (sub["STATUS"] == 0).to_numpy(dtype=float)
 
