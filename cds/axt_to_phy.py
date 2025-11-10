@@ -21,8 +21,8 @@ from contextlib import contextmanager
 METADATA_FILE = 'phy_metadata.tsv'
 
 # UCSC hg38 vs PanTro6 net AXT
-AXT_URL = 'http://hgdownload.soe.ucsc.edu/goldenpath/hg38/vsPanTro6/hg38.PanTro6.net.axt.gz'
-AXT_GZ_FILENAME = 'hg38.PanTro6.net.axt.gz'
+AXT_URL = 'http://hgdownload.soe.ucsc.edu/goldenpath/hg38/vsPanTro6/hg38.panTro6.net.axt.gz'
+AXT_GZ_FILENAME = 'hg38.panTro6.net.axt.gz'
 AXT_FILENAME = 'hg38.PanTro6.net.axt'
 
 # Divergence QC threshold (%)
