@@ -145,6 +145,18 @@ def worker_logging_init(log_q):
     root.handlers[:] = [QueueHandler(log_q)]
     root.setLevel(logging.INFO)
 
+
+_worker_logging_configured = False
+
+
+def ensure_worker_logging(log_q):
+    """Initialize queue logging exactly once within a worker process."""
+    global _worker_logging_configured
+    if _worker_logging_configured or log_q is None:
+        return
+    worker_logging_init(log_q)
+    _worker_logging_configured = True
+
 # --- Paths to Executables ---
 # Assumes executables are in specific locations relative to the script's runtime directory.
 IQTREE_PATH = os.path.abspath('../iqtree-3.0.1-Linux/bin/iqtree3')
@@ -997,8 +1009,9 @@ def count_variable_codon_sites(phy_path, taxa_subset=None, max_sites_check=50000
     return var_codons
 
 
-def region_worker(region, iqtree_threads):
+def region_worker(region, iqtree_threads, log_q=None):
     """Run IQ-TREE for a region after basic QC and cache its tree."""
+    ensure_worker_logging(log_q)
     label = region['label']
     path = region['path']
     start_time = datetime.now()
@@ -1074,8 +1087,9 @@ def run_codeml_in(run_dir, ctl_path, timeout):
     logging.info(f"REPRODUCE PAML: {repro_cmd}")
     run_command(cmd, run_dir, timeout=timeout, input_data="\n")
 
-def codeml_worker(gene_info, region_tree_file, region_label):
+def codeml_worker(gene_info, region_tree_file, region_label, log_q=None):
     """Run codeml for a gene using the provided region tree."""
+    ensure_worker_logging(log_q)
     gene_name = gene_info['label']
     final_result = {'gene': gene_name, 'region': region_label, 'status': 'runtime_error', 'reason': 'Unknown failure'}
     temp_dir = None
@@ -1793,14 +1807,12 @@ def run_overlapped(region_infos, region_gene_map, log_q, status_dict):
     # Ensure workers use the 'spawn' context and our queue logger
     mpctx = multiprocessing.get_context("spawn")
 
-    with ProcessPoolExecutor(max_workers=PAML_WORKERS, mp_context=mpctx,
-                             initializer=worker_logging_init, initargs=(log_q,)) as paml_exec, \
-         ProcessPoolExecutor(max_workers=REGION_WORKERS, mp_context=mpctx,
-                             initializer=worker_logging_init, initargs=(log_q,)) as region_exec:
+    with ProcessPoolExecutor(max_workers=PAML_WORKERS, mp_context=mpctx) as paml_exec, \
+         ProcessPoolExecutor(max_workers=REGION_WORKERS, mp_context=mpctx) as region_exec:
 
         iqtree_threads = max(1, CPU_COUNT // REGION_WORKERS)
         logging.info(f"Submitting {len(region_infos)} region tasks to pool (using {iqtree_threads} threads per job)...")
-        region_futs = {region_exec.submit(region_worker, r, iqtree_threads) for r in region_infos}
+        region_futs = {region_exec.submit(region_worker, r, iqtree_threads, log_q) for r in region_infos}
 
         region_pbar = tqdm(as_completed(region_futs), total=len(region_futs), desc="Processing regions")
         for region_future in region_pbar:
@@ -1830,7 +1842,7 @@ def run_overlapped(region_infos, region_gene_map, log_q, status_dict):
             logging.info(f"Region {label} complete. Submitting {len(genes_for_region)} PAML jobs.")
             for gene_info in genes_for_region:
                 flushed = submit_with_cap(
-                    paml_exec, codeml_worker, (gene_info, tree, label), inflight, cap)
+                    paml_exec, codeml_worker, (gene_info, tree, label, log_q), inflight, cap)
                 status_dict['paml_running'] = len(inflight)
                 for paml_future in flushed:
                     try:
