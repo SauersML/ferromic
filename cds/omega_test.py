@@ -1958,13 +1958,16 @@ def main():
         # Whitelist filter: retain only regions explicitly listed in ALLOWED_REGIONS.
         if len(ALLOWED_REGIONS) > 0:
             before = len(region_infos)
+            allowed_set = set(ALLOWED_REGIONS)
             region_infos = [
                 r for r in region_infos
-                #if (r['chrom'], r['start'], r['end']) in ALLOWED_REGIONS
+                if (r['chrom'], r['start'], r['end']) in allowed_set
             ]
             dropped = before - len(region_infos)
             if dropped:
                 logging.info(f"Whitelist active: kept {len(region_infos)} region(s); dropped {dropped} non-whitelisted region(s).")
+            else:
+                logging.info("Whitelist active: no non-whitelisted regions were dropped.")
             present = {(r['chrom'], r['start'], r['end']) for r in region_infos}
             missing = [t for t in ALLOWED_REGIONS if t not in present]
             if missing:
