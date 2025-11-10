@@ -1014,16 +1014,6 @@ def estimate_tau2_reml(
         upper *= 4.0
     return tau2_est
 
-def z_to_p_one_sided_greater(z: float) -> float:
-    if not math.isfinite(z):
-        return float("nan")
-    return 0.5 * math.erfc(z / math.sqrt(2.0))
-
-def z_to_p_two_sided(z: float) -> float:
-    if not math.isfinite(z):
-        return float("nan")
-    return math.erfc(abs(z) / math.sqrt(2.0))
-
 def compute_meta_group_effect(y: np.ndarray, s2: np.ndarray, is_single: np.ndarray) -> Tuple[float, float, float, float]:
     X = np.column_stack([np.ones_like(is_single), is_single])
     tau2 = estimate_tau2_reml(y, s2, X)
@@ -1083,18 +1073,12 @@ def run_random_effects_meta_regression(df: pd.DataFrame) -> Optional[Dict[str, f
         mu_recurrent = float("nan")
         mu_single = float("nan")
 
-    p_one_sided = z_to_p_one_sided_greater(z)
-    p_two_sided = z_to_p_two_sided(z)
-
     return {
         "tau2": float(tau2),
         "mu_recurrent": mu_recurrent,
         "mu_single": mu_single,
         "beta_group": float(beta_group),
         "se_group": float(se_group),
-        "z_group": float(z),
-        "p_one_sided_single_gt_recurrent": float(p_one_sided),
-        "p_two_sided": float(p_two_sided),
         "n_total": float(sub.shape[0]),
         "n_single": float(int(np.sum(sub["STATUS"] == 0))),
         "n_recurrent": float(int(np.sum(sub["STATUS"] == 1))),
@@ -1448,9 +1432,6 @@ def main():
     mu_single = meta_results["mu_single"]
     beta_group = meta_results["beta_group"]
     se_group = meta_results["se_group"]
-    z_group = meta_results["z_group"]
-    p_one = meta_results["p_one_sided_single_gt_recurrent"]
-    p_two = meta_results["p_two_sided"]
 
     n_total = int(meta_results["n_total"])
     n_single = int(meta_results["n_single"])
@@ -1465,9 +1446,6 @@ def main():
     log.info(f"Mean frf_delta (single,   group 0): {mu_single:+.4f}")
     log.info(f"Difference (single - recurrent):   {beta_group:+.4f}")
     log.info(f"SE(diff): {se_group:.4f}")
-    log.info(f"z-statistic: {z_group:.3f}")
-    log.info(f"One-sided p (normal theory): {p_one:.4g}")
-    log.info(f"Two-sided p (normal theory): {p_two:.4g}")
     log.info("")
 
     # Meta-level permutation p-values
