@@ -1237,13 +1237,24 @@ def main():
         log.error("No FRF results obtained. Exiting.")
         sys.exit(1)
 
-    plans = [prep.plan for prep in prepared_results if prep.plan is not None]
+    def plan_cost(plan: PermutationPlan) -> int:
+        # Prioritize plans that have more valid windows and require more chunks,
+        # which is a cheap surrogate for overall permutation workload.
+        return max(1, int(plan.n_valid)) * max(1, plan.n_chunks)
+
+    plans = sorted(
+        (prep.plan for prep in prepared_results if prep.plan is not None),
+        key=plan_cost,
+        reverse=True,
+    )
     results_by_key = {prep.result.inv_key: prep.result for prep in prepared_results}
 
-    chunk_tasks = []
-    for plan in plans:
-        for chunk_index in range(plan.n_chunks):
-            chunk_tasks.append((plan, chunk_index))
+    max_chunks = max((plan.n_chunks for plan in plans), default=0)
+    chunk_tasks: List[Tuple[PermutationPlan, int]] = []
+    for chunk_index in range(max_chunks):
+        for plan in plans:
+            if chunk_index < plan.n_chunks:
+                chunk_tasks.append((plan, chunk_index))
 
     stats_by_inv = {
         plan.inv_key: {"n": 0, "sum": 0.0, "sum_sq": 0.0, "count_ge": 0}
