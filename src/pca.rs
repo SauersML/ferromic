@@ -1,16 +1,16 @@
-use efficient_pca::pca::NEAR_ZERO_THRESHOLD;
 use efficient_pca::PCA;
+use efficient_pca::pca::NEAR_ZERO_THRESHOLD;
 use faer::linalg::matmul::matmul;
 use faer::linalg::solvers::SelfAdjointEigen;
 use faer::mat::{AsMatMut, AsMatRef, Mat};
 use faer::{
-    diag::DiagRef,
-    stats::{row_mean, row_varm, NanHandling},
     Accum, ColMut, MatMut, Par, Row, Side, Stride, Unbind,
+    diag::DiagRef,
+    stats::{NanHandling, row_mean, row_varm},
 };
-use ndarray::s;
 use ndarray::Array2;
 use ndarray::ShapeBuilder;
+use ndarray::s;
 use numpy::ndarray::ArrayView3;
 use rayon::prelude::*;
 
@@ -21,11 +21,11 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::Path;
 
+use crate::Variant;
 use crate::process::VcfError;
 use crate::progress::{
-    create_spinner, display_status_box, log, set_stage, LogLevel, ProcessingStage, StatusBox,
+    LogLevel, ProcessingStage, StatusBox, create_spinner, display_status_box, log, set_stage,
 };
-use crate::Variant;
 
 /// Structure to hold PCA results per chromosome
 pub struct PcaResult {
@@ -78,7 +78,7 @@ pub fn compute_chromosome_pca(
 
         let mut allele_sum = 0usize;
         let mut complete = true;
-        for genotype in &variant.genotypes {
+        for genotype in variant.genotypes.iter() {
             let Some(alleles) = genotype else {
                 complete = false;
                 break;
@@ -928,10 +928,15 @@ pub fn run_chromosome_pca_analysis(
         ));
     }
 
-    log(LogLevel::Info, &format!(
-        "Chromosome-specific PCA analysis completed successfully. Processed {}/{} chromosomes. Results saved to {}",
-        successful, total_chr, output_dir.display()
-    ));
+    log(
+        LogLevel::Info,
+        &format!(
+            "Chromosome-specific PCA analysis completed successfully. Processed {}/{} chromosomes. Results saved to {}",
+            successful,
+            total_chr,
+            output_dir.display()
+        ),
+    );
 
     Ok(())
 }
@@ -1087,9 +1092,9 @@ pub fn run_global_pca_analysis(
     log(
         LogLevel::Info,
         &format!(
-        "Memory-efficient per-chromosome PCA analysis completed successfully. Results saved to {}",
-        output_dir.display()
-    ),
+            "Memory-efficient per-chromosome PCA analysis completed successfully. Results saved to {}",
+            output_dir.display()
+        ),
     );
 
     Ok(())
