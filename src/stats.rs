@@ -2,8 +2,8 @@ use crate::process::{
     HaplotypeSide, QueryRegion, Variant, VcfError, ZeroBasedHalfOpen, ZeroBasedPosition,
 };
 use crate::progress::{
-    create_spinner, display_status_box, finish_step_progress, init_step_progress, log, set_stage,
-    update_step_progress, LogLevel, ProcessingStage, StatusBox,
+    LogLevel, ProcessingStage, StatusBox, create_spinner, display_status_box, finish_step_progress,
+    init_step_progress, log, set_stage, update_step_progress,
 };
 use rayon::prelude::*;
 use std::cmp::Ordering;
@@ -512,9 +512,10 @@ pub fn calculate_fst_wc_haplotype_groups(
         LogLevel::Info,
         &format!(
             "Beginning FST calculation between haplotype groups (e.g., 0 vs 1) for region {}:{}..{}",
-            sample_names
-                .get(0)
-                .map_or("UnknownChr", |s_name| s_name.split('_').next().unwrap_or("UnknownChr")),
+            sample_names.get(0).map_or("UnknownChr", |s_name| s_name
+                .split('_')
+                .next()
+                .unwrap_or("UnknownChr")),
             ZeroBasedPosition(region.start).to_one_based(),
             ZeroBasedPosition(region.end).to_one_based()
         ),
@@ -649,9 +650,10 @@ pub fn calculate_fst_wc_csv_populations(
         &format!(
             "Beginning FST calculation between population groups defined in {} for region {}:{}..{}",
             csv_path.display(),
-            sample_names
-                .get(0)
-                .map_or("UnknownChr", |s| s.split('_').next().unwrap_or("UnknownChr")),
+            sample_names.get(0).map_or("UnknownChr", |s| s
+                .split('_')
+                .next()
+                .unwrap_or("UnknownChr")),
             ZeroBasedPosition(region.start).to_one_based(),
             ZeroBasedPosition(region.end).to_one_based()
         ),
@@ -797,10 +799,10 @@ pub fn parse_population_csv(csv_path: &Path) -> Result<HashMap<String, Vec<Strin
             log(
                 LogLevel::Warning,
                 &format!(
-                "Population '{}' in CSV file '{}' has no associated sample IDs listed on its line.",
-                population,
-                csv_path.display()
-            ),
+                    "Population '{}' in CSV file '{}' has no associated sample IDs listed on its line.",
+                    population,
+                    csv_path.display()
+                ),
             );
         }
     }
@@ -1473,8 +1475,8 @@ fn dxy_from_summaries(
     }
 
     let totals = aggregate_hudson_components_from_summaries(pop1, pop2);
-    let effective_length = (sequence_length as i64)
-        .saturating_sub(totals.dxy_uncallable_sites as i64);
+    let effective_length =
+        (sequence_length as i64).saturating_sub(totals.dxy_uncallable_sites as i64);
 
     if effective_length > 0 {
         Some(totals.dxy_sum_all / effective_length as f64)
@@ -1660,7 +1662,8 @@ fn calculate_fst_wc_at_site_with_membership(
             continue;
         };
 
-        if let Some(&allele) = genotype.get(0) {
+        if !genotype.is_empty() {
+            let allele = genotype[0];
             let group = membership
                 .left
                 .get(sample_idx)
@@ -1675,7 +1678,8 @@ fn calculate_fst_wc_at_site_with_membership(
             }
         }
 
-        if let Some(&allele) = genotype.get(1) {
+        if genotype.len() > 1 {
+            let allele = genotype[1];
             let group = membership
                 .right
                 .get(sample_idx)
@@ -2191,10 +2195,16 @@ pub fn calculate_d_xy_hudson<'a>(
     }
 
     if pop1_context.haplotypes.is_empty() || pop2_context.haplotypes.is_empty() {
-        log(LogLevel::Warning, &format!(
-            "Cannot calculate Dxy for pops {:?}/{:?}: one or both have no haplotypes ({} and {} respectively).",
-            pop1_context.id, pop2_context.id, pop1_context.haplotypes.len(), pop2_context.haplotypes.len()
-        ));
+        log(
+            LogLevel::Warning,
+            &format!(
+                "Cannot calculate Dxy for pops {:?}/{:?}: one or both have no haplotypes ({} and {} respectively).",
+                pop1_context.id,
+                pop2_context.id,
+                pop1_context.haplotypes.len(),
+                pop2_context.haplotypes.len()
+            ),
+        );
         return Ok(DxyHudsonResult { d_xy: None });
     }
 
@@ -2419,13 +2429,13 @@ fn freq_summary_for_pop(variant: &Variant, membership: &HapMembership) -> Allele
             continue;
         };
         if membership.left.get(idx).copied().unwrap_or(false) {
-            if let Some(&allele) = genotype.get(0) {
-                summary.record(allele as i32);
+            if !genotype.is_empty() {
+                summary.record(genotype[0] as i32);
             }
         }
         if membership.right.get(idx).copied().unwrap_or(false) {
-            if let Some(&allele) = genotype.get(1) {
-                summary.record(allele as i32);
+            if genotype.len() > 1 {
+                summary.record(genotype[1] as i32);
             }
         }
     }
@@ -2502,8 +2512,8 @@ fn compute_pi_metrics_fast(
             continue;
         };
         if membership.left.get(sample_index).copied().unwrap_or(false) {
-            if let Some(&allele) = genotype.get(0) {
-                let allele_value = i16::from(allele);
+            if !genotype.is_empty() {
+                let allele_value = i16::from(genotype[0]);
                 if allele_value >= 0 {
                     let idx = allele_value as usize;
                     if idx >= state.counts.len() {
@@ -2518,8 +2528,8 @@ fn compute_pi_metrics_fast(
             }
         }
         if membership.right.get(sample_index).copied().unwrap_or(false) {
-            if let Some(&allele) = genotype.get(1) {
-                let allele_value = i16::from(allele);
+            if genotype.len() > 1 {
+                let allele_value = i16::from(genotype[1]);
                 if allele_value < 0 {
                     continue;
                 }
@@ -3136,10 +3146,13 @@ pub fn compute_hudson_fst_outcome(
             } else {
                 // Dxy is effectively zero or negative, but Pi_xy_avg is substantially different,
                 // or Dxy is non-finite.
-                log(LogLevel::Warning, &format!(
-                    "Cannot calculate Hudson FST: Dxy ({:.4e}) is too small or invalid relative to Pi_xy_avg ({:.4e}).",
-                    dxy_val, pi_xy_avg_val
-                ));
+                log(
+                    LogLevel::Warning,
+                    &format!(
+                        "Cannot calculate Hudson FST: Dxy ({:.4e}) is too small or invalid relative to Pi_xy_avg ({:.4e}).",
+                        dxy_val, pi_xy_avg_val
+                    ),
+                );
                 outcome.fst = None;
             }
         } else {
@@ -3566,7 +3579,7 @@ pub fn count_segregating_sites(variants: &[Variant]) -> usize {
 
 fn variant_is_segregating(variant: &Variant) -> bool {
     let mut first = None;
-    for genotype_opt in &variant.genotypes {
+    for genotype_opt in variant.genotypes.iter() {
         if let Some(genotype) = genotype_opt {
             for &allele in genotype {
                 match first {
@@ -3954,10 +3967,14 @@ pub fn calculate_watterson_theta(seg_sites: usize, n: usize, seq_length: i64) ->
     if harmonic_value <= 1e-9 {
         // Using an epsilon for safety with float comparison
         // This case should be rare if n > 1.
-        log(LogLevel::Error, &format!( // Error because this indicates an unexpected issue if n > 1
-            "Harmonic value (a_n) is unexpectedly near zero ({}) for Watterson's theta calculation with n={}. S={}, L={}",
-            harmonic_value, n, seg_sites, seq_length
-        ));
+        log(
+            LogLevel::Error,
+            &format!(
+                // Error because this indicates an unexpected issue if n > 1
+                "Harmonic value (a_n) is unexpectedly near zero ({}) for Watterson's theta calculation with n={}. S={}, L={}",
+                harmonic_value, n, seg_sites, seq_length
+            ),
+        );
         if seg_sites == 0 {
             return f64::NAN;
         } else {
@@ -4116,9 +4133,7 @@ fn calculate_pi_dense_biallelic(
                 })
                 .reduce(
                     || (0.0_f64, 0usize),
-                    |(sum_a, skipped_a), (sum_b, skipped_b)| {
-                        (sum_a + sum_b, skipped_a + skipped_b)
-                    },
+                    |(sum_a, skipped_a), (sum_b, skipped_b)| (sum_a + sum_b, skipped_a + skipped_b),
                 )
         } else {
             let mut sum_pi = 0.0_f64;
@@ -4365,11 +4380,7 @@ pub fn calculate_per_site_diversity(
             let distinct_alleles = metrics.distinct_alleles;
             let watterson_value = if distinct_alleles > 1 {
                 let denom = harmonic_cached(total_called - 1);
-                if denom > 0.0 {
-                    1.0 / denom
-                } else {
-                    0.0
-                }
+                if denom > 0.0 { 1.0 / denom } else { 0.0 }
             } else {
                 0.0
             };

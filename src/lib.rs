@@ -22,25 +22,25 @@ use std::sync::{Arc, OnceLock};
 
 use numpy::ndarray::{Array3, ArrayView3};
 use numpy::{PyArray1, PyArray2, PyReadonlyArray1, PyReadonlyArray3};
+use pyo3::IntoPy;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyIterator, PyList, PyTuple};
-use pyo3::IntoPy;
 
 use crate::pca::{
-    compute_chromosome_pca, compute_chromosome_pca_from_dense, run_chromosome_pca_analysis,
-    run_global_pca_analysis, write_chromosome_pca_to_file, PcaResult,
+    PcaResult, compute_chromosome_pca, compute_chromosome_pca_from_dense,
+    run_chromosome_pca_analysis, run_global_pca_analysis, write_chromosome_pca_to_file,
 };
-use crate::process::{HaplotypeSide, QueryRegion, Variant, VcfError};
+use crate::process::{HaplotypeSide, PackedGenotype, QueryRegion, Variant, VcfError};
 use crate::stats::{
+    DenseGenotypeMatrix, DensePopulationSummary, DxyHudsonResult, FstEstimate, FstWcResults,
+    HudsonFSTOutcome, PopulationContext, PopulationId, SiteDiversity, SiteFstHudson, SiteFstWc,
     build_dense_population_summary, calculate_adjusted_sequence_length, calculate_d_xy_hudson,
     calculate_fst_wc_haplotype_groups, calculate_hudson_fst_for_pair,
     calculate_hudson_fst_for_pair_with_sites, calculate_hudson_fst_per_site,
     calculate_inversion_allele_frequency, calculate_pairwise_differences,
     calculate_per_site_diversity, calculate_pi, calculate_pi_for_population,
     calculate_watterson_theta, count_segregating_sites, count_segregating_sites_for_population,
-    DenseGenotypeMatrix, DensePopulationSummary, DxyHudsonResult, FstEstimate, FstWcResults,
-    HudsonFSTOutcome, PopulationContext, PopulationId, SiteDiversity, SiteFstHudson, SiteFstWc,
 };
 
 // Module declarations so that cargo exposes the command line utilities as well.
@@ -1147,7 +1147,7 @@ where
     for variant_idx in 0..variant_count {
         let mut genotypes = Vec::with_capacity(sample_count);
         for sample_idx in 0..sample_count {
-            let mut alleles = Vec::with_capacity(ploidy);
+            let mut alleles = PackedGenotype::new();
             let mut missing = false;
             for allele_idx in 0..ploidy {
                 let value = view[(variant_idx, sample_idx, allele_idx)];
@@ -1183,7 +1183,7 @@ where
 
         variants.push(Variant {
             position: positions[variant_idx],
-            genotypes,
+            genotypes: Arc::from(genotypes),
         });
     }
 
@@ -1280,7 +1280,7 @@ fn extract_positions(positions_obj: &PyAny, expected_len: usize) -> PyResult<Vec
     ))
 }
 
-fn parse_genotypes(genotypes_obj: &PyAny) -> PyResult<Vec<Option<Vec<u8>>>> {
+fn parse_genotypes(genotypes_obj: &PyAny) -> PyResult<Arc<[Option<PackedGenotype>]>> {
     let mut genotypes = Vec::new();
     let iterator = PyIterator::from_object(genotypes_obj.py(), genotypes_obj)?;
     for entry in iterator {
@@ -1291,12 +1291,14 @@ fn parse_genotypes(genotypes_obj: &PyAny) -> PyResult<Vec<Option<Vec<u8>>>> {
         }
 
         if let Ok(value) = entry.extract::<u8>() {
-            genotypes.push(Some(vec![value]));
+            let mut packed = PackedGenotype::new();
+            packed.push(value);
+            genotypes.push(Some(packed));
             continue;
         }
 
         if let Ok(seq) = PyIterator::from_object(entry.py(), entry) {
-            let mut alleles = Vec::new();
+            let mut alleles = PackedGenotype::new();
             for allele in seq {
                 alleles.push(allele?.extract::<u8>()?);
             }
@@ -1308,7 +1310,7 @@ fn parse_genotypes(genotypes_obj: &PyAny) -> PyResult<Vec<Option<Vec<u8>>>> {
             "genotypes must be sequences of allele integers or None",
         ));
     }
-    Ok(genotypes)
+    Ok(Arc::from(genotypes))
 }
 
 fn parse_side(obj: &PyAny) -> PyResult<HaplotypeSide> {
