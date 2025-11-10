@@ -494,7 +494,7 @@ def process_axt_chunk(chunk_start, chunk_end, bin_index):
 
                 axt_chr = parts[1]  # e.g., 'chr7'
                 try:
-                    human_pos = int(parts[2])  # tStart
+                    human_pos = int(parts[2]) + 1  # convert 0-based tStart to 1-based
                 except ValueError:
                     # Malformed; skip 2 sequence lines to stay aligned
                     f.readline(); f.readline()

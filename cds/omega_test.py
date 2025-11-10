@@ -42,7 +42,7 @@ RUN_CLADE_MODEL_TEST = True
 
 # === REGION WHITELIST =========================================================
 # Only regions whose (chromosome, start, end) triple appears in this list will run.
-# Coordinates are inclusive and must exactly match the parsed filename values.
+# Coordinates are 1-based, inclusive, and must exactly match the parsed filename values.
 ALLOWED_REGIONS = [
     ("chr12", 46896694, 46915975),
     ("chr17", 45585159, 46292045),
