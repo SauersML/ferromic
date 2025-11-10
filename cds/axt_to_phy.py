@@ -20,10 +20,10 @@ from contextlib import contextmanager
 
 METADATA_FILE = 'phy_metadata.tsv'
 
-# UCSC hg38 vs panTro6 net AXT
-AXT_URL = 'http://hgdownload.soe.ucsc.edu/goldenpath/hg38/vspanTro6/hg38.panTro6.net.axt.gz'
-AXT_GZ_FILENAME = 'hg38.panTro6.net.axt.gz'
-AXT_FILENAME = 'hg38.panTro6.net.axt'
+# UCSC hg38 vs PanTro6 net AXT
+AXT_URL = 'http://hgdownload.soe.ucsc.edu/goldenpath/hg38/vsPanTro6/hg38.PanTro6.net.axt.gz'
+AXT_GZ_FILENAME = 'hg38.PanTro6.net.axt.gz'
+AXT_FILENAME = 'hg38.PanTro6.net.axt'
 
 # Divergence QC threshold (%)
 DIVERGENCE_THRESHOLD = 10.0
@@ -770,7 +770,7 @@ def build_outgroups_and_filter(transcripts, regions):
 
             with open(outname, 'w') as f_out:
                 f_out.write(f" 1 {len(final_seq)}\n")
-                f_out.write(f"{'panTro6':<10}{final_seq}\n")
+                f_out.write(f"{'PanTro6':<10}{final_seq}\n")
             tx_written += 1
             progress_bar("[TX write]", i, total_tx)
         if total_tx:
@@ -839,7 +839,7 @@ def build_outgroups_and_filter(transcripts, regions):
 
             with open(outname, 'w') as f_out:
                 f_out.write(f" 1 {len(final_seq)}\n")
-                f_out.write(f"{'panTro6':<10}{final_seq}\n")
+                f_out.write(f"{'PanTro6':<10}{final_seq}\n")
             rg_written += 1
             progress_bar("[RG write]", i, total_rg)
         if total_rg:
