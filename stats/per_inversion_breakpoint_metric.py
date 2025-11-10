@@ -925,6 +925,17 @@ def run_random_effects_meta_regression(df: pd.DataFrame) -> Optional[Dict[str, f
 
 # ------------------------- META-LEVEL PERMUTATION -------------------------
 
+def _meta_perm_chunk_worker(args) -> np.ndarray:
+    """Worker function for meta-level permutation - must be module-level for pickling."""
+    start_idx, size, seed, y, s2, is_single, use_stat = args
+    rng = np.random.default_rng(seed)
+    stats = np.empty(size, dtype=float)
+    for i in range(size):
+        perm_labels = rng.permutation(is_single)
+        _, b, se, z = compute_meta_group_effect(y, s2, perm_labels)
+        stats[i] = b if use_stat == "beta" else z
+    return stats
+
 def meta_permutation_pvalue(
     y: np.ndarray,
     s2: np.ndarray,
@@ -958,7 +969,8 @@ def meta_permutation_pvalue(
         while idx < n_perm:
             take = min(chunk, n_perm - idx)
             seed = base_seed + 1 + (idx // chunk)
-            tasks.append(pool.submit(run_perm_chunk, idx, take, seed))
+            args = (idx, take, seed, y, s2, is_single, use_stat)
+            tasks.append(pool.submit(_meta_perm_chunk_worker, args))
             idx += take
         perm_stats: List[np.ndarray] = []
         for fut in as_completed(tasks):
