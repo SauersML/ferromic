@@ -877,8 +877,6 @@ def estimate_tau2_reml(
 def z_to_p_one_sided_greater(z: float) -> float:
     if not math.isfinite(z):
         return float("nan")
-    if z <= 0.0:
-        return 1.0
     return 0.5 * math.erfc(z / math.sqrt(2.0))
 
 def z_to_p_two_sided(z: float) -> float:
