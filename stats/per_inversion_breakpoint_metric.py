@@ -63,7 +63,7 @@ MIN_BLOCKS_FOR_PERMUTATION = 5
 
 AUTOCORR_MIN_PAIRS = 5
 AUTOCORR_TARGET = 0.3
-FRF_CANDIDATE_CHUNK_SIZE = 2048
+FRF_CANDIDATE_CHUNK_SIZE = 8192
 
 META_PERMUTATIONS = 10000
 META_PERM_CHUNK = 1000
@@ -242,6 +242,28 @@ class FRFResult:
     frf_var_delta: float
     frf_se_delta: float
     usable_for_meta: bool
+
+
+def estimate_inversion_workload(inv: Inversion) -> Tuple[int, int, int, int]:
+    """Estimate work for scheduling purposes.
+
+    We approximate cost by prioritizing inversions with the most valid sites,
+    windows, and physical span (proxy for candidate count).
+    """
+
+    valid_windows = sum(
+        1
+        for w in inv.windows
+        if w.denominator_sum > EPS_DENOM and w.n_sites > 0
+    )
+    total_sites = sum(w.n_sites for w in inv.windows)
+    approx_candidates = max(0, valid_windows * max(0, valid_windows - 1) // 2)
+    return (
+        approx_candidates,
+        total_sites,
+        inv.n_windows,
+        inv.length,
+    )
 
 # ------------------------- DATA LOADING -------------------------
 
@@ -772,8 +794,15 @@ def fit_inversion_frf_and_null(
                 return batch_deltas
 
             if inner_threads > 1 and n_batches > 1:
+                batch_indices = list(range(n_batches))
+                batch_indices.sort(
+                    key=lambda b: (
+                        batch_size if (b + 1) * batch_size <= total else (total - b * batch_size)
+                    ),
+                    reverse=True,
+                )
                 with ThreadPoolExecutor(max_workers=inner_threads) as pool:
-                    futures = {pool.submit(run_batch, b): b for b in range(n_batches)}
+                    futures = [pool.submit(run_batch, b) for b in batch_indices]
                     for fut in as_completed(futures):
                         deltas_accum.append(fut.result())
             else:
@@ -1029,7 +1058,15 @@ def meta_permutation_pvalue(
     else:
         T_obs = obs_z
 
-    tasks = []
+    task_specs: List[Tuple[int, int, int, Tuple[Any, ...]]] = []
+    idx = 0
+    while idx < n_perm:
+        take = min(chunk, n_perm - idx)
+        seed = base_seed + 1 + (idx // chunk)
+        args = (idx, take, seed, y, s2, is_single, use_stat)
+        task_specs.append((take, idx, seed, args))
+        idx += take
+
     with ProcessPoolExecutor(max_workers=n_workers) as pool:
         idx = 0
         while idx < n_perm:
@@ -1103,18 +1140,24 @@ def main():
     active_counter = mp.Value('i', 0)
     all_results: List[FRFResult] = []
 
+    prioritized_inversions = sorted(
+        inversions,
+        key=lambda inv: estimate_inversion_workload(inv),
+        reverse=True,
+    )
+
     with ProcessPoolExecutor(
         max_workers=n_workers,
         initializer=init_worker,
         initargs=(active_counter, TOTAL_CPUS),
     ) as executor:
-        futures = {
-            executor.submit(
+        futures = {}
+        for inv in prioritized_inversions:
+            future = executor.submit(
                 fit_inversion_worker,
                 (inv, N_PERMUTATIONS, DEFAULT_BLOCK_SIZE_WINDOWS),
-            ): inv
-            for inv in inversions
-        }
+            )
+            futures[future] = inv
         completed = 0
         for future in as_completed(futures):
             inv = futures[future]
