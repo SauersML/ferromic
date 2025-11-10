@@ -34,6 +34,15 @@ DEBUG_REGION = None       # e.g., 'inv_7_60911891_61578023'
 
 # Bin size (bp) for interval indexing over the genome (faster than per-base maps)
 BIN_SIZE = int(os.environ.get("BIN_SIZE", "1000"))
+VALID_BASES = {"A", "C", "G", "T"}
+
+# Cache containers populated at runtime
+_PHY_CACHE = {}
+_BIN_INDEX = None
+
+_AXT_HEADER_RE = re.compile(
+    r"^(-?\d+)\s+(\S+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(\d+)\s+(\d+)\s+([+-])\s+(\d+)$"
+)
 
 # Verbosity knobs
 DEBUG_VERBOSE = os.environ.get("DEBUG_VERBOSE", "0") == "1"
@@ -241,11 +250,16 @@ def ungzip_file():
 
 def read_phy_sequences(filename):
     """Reads all sequences from a simple PHYLIP file. Returns list[str]."""
+    cached = _PHY_CACHE.get(filename)
+    if cached is not None:
+        return cached
+
     sequences = []
     try:
         with open(filename, 'r') as f:
             lines = f.readlines()
             if len(lines) < 2:
+                _PHY_CACHE[filename] = []
                 return []
             for line in lines[1:]:
                 line = line.strip()
@@ -255,7 +269,10 @@ def read_phy_sequences(filename):
                 if m:
                     sequences.append(m.group(0).upper())
     except Exception:
-        pass
+        _PHY_CACHE[filename] = []
+        return []
+
+    _PHY_CACHE[filename] = sequences
     return sequences
 
 # =========================
@@ -455,7 +472,7 @@ def _bin_range(start, end, bin_size):
 def build_bin_index(transcripts, regions):
     """
     Builds per-chromosome bin index: index[chrom][bin_id] -> list(records)
-    record = ('TX'|'RG', id, seg_start, seg_end, offset)
+    record = (id, seg_start, seg_end, offset)
     """
     print_always("Building bin index (overlap-aware) for transcripts and regions...")
     t0 = time.time()
@@ -475,7 +492,7 @@ def build_bin_index(transcripts, regions):
         for s, e in t['segments']:
             chrom_bins = index.setdefault(chrom, {})
             for b in _bin_range(s, e, BIN_SIZE):
-                chrom_bins.setdefault(b, []).append(('TX', t_id, s, e, offset))
+                chrom_bins.setdefault(b, []).append((t_id, s, e, offset))
             offset += (e - s + 1)
             done_tx += 1
             if done_tx % 50 == 0 or done_tx == total_tx:
@@ -495,7 +512,7 @@ def build_bin_index(transcripts, regions):
         (s, e) = r['segments'][0]
         chrom_bins = index.setdefault(chrom, {})
         for b in _bin_range(s, e, BIN_SIZE):
-            chrom_bins.setdefault(b, []).append(('RG', r_id, s, e, 0))
+            chrom_bins.setdefault(b, []).append((r_id, s, e, 0))
         done_rg += 1
         if done_rg % 20 == 0 or done_rg == total_rg:
             progress_bar("[BinIndex RG]", done_rg, total_rg if total_rg else 1)
@@ -515,11 +532,38 @@ def build_bin_index(transcripts, regions):
 # --- AXT Processing -------
 # =========================
 
-def process_axt_chunk(chunk_start, chunk_end, bin_index):
+def _parse_axt_header_line(line):
+    match = _AXT_HEADER_RE.match(line)
+    if not match:
+        return None
+    try:
+        score, t_name, t_start, t_end, q_name, q_start, q_end, strand, q_size = match.groups()
+        return (
+            int(score),
+            normalize_chromosome(t_name),
+            int(t_start),
+            int(t_end),
+            q_name,
+            int(q_start),
+            int(q_end),
+            strand,
+            int(q_size),
+        )
+    except ValueError:
+        return None
+
+
+def process_axt_chunk(chunk_start, chunk_end, bin_index=None):
     """
     Worker to parse a slice of the AXT file and collect chimp bases.
     Returns dict: id -> {target_idx: base}
     """
+    if bin_index is None:
+        bin_index = _BIN_INDEX
+    if bin_index is None:
+        raise RuntimeError("Bin index not initialized for worker process.")
+
+    bin_index_get = bin_index.get
     results = defaultdict(dict)  # id -> {pos_idx: base}
     parsed_headers = 0
     try:
@@ -528,29 +572,35 @@ def process_axt_chunk(chunk_start, chunk_end, bin_index):
             if chunk_start != 0:
                 f.readline()  # align to line boundary
 
-            while f.tell() < chunk_end:
-                header = f.readline()
-                if not header:
+            while True:
+                line_start = f.tell()
+                if chunk_end is not None and line_start >= chunk_end:
                     break
-                header = header.strip()
-                if not header:
+
+                header_line = f.readline()
+                if not header_line:
+                    break
+                header_line = header_line.strip()
+                if not header_line:
                     continue
 
-                parts = header.split()
-                if len(parts) != 9:
-                    # Skip non-AXT lines (shouldn't occur in .net.axt)
-                    # Also skip two seq lines to stay aligned if this was a header-ish line.
-                    _ = f.readline()
-                    _ = f.readline()
+                parsed = _parse_axt_header_line(header_line)
+                if not parsed:
                     continue
 
-                axt_chr = normalize_chromosome(parts[1])  # e.g., 'chr7'
-                try:
-                    human_pos = int(parts[2]) + 1  # convert 0-based tStart to 1-based
-                except ValueError:
-                    # Malformed; skip 2 sequence lines to stay aligned
-                    f.readline(); f.readline()
-                    continue
+                (
+                    _score,
+                    axt_chr,
+                    human_start,
+                    _human_end,
+                    _q_name,
+                    _q_start,
+                    _q_end,
+                    _strand,
+                    _q_size,
+                ) = parsed
+
+                human_pos = human_start
 
                 human_seq = f.readline()
                 chimp_seq = f.readline()
@@ -564,22 +614,20 @@ def process_axt_chunk(chunk_start, chunk_end, bin_index):
                 if not axt_chr:
                     continue
                 if DEBUG_CHUNK_SAMPLE and (parsed_headers % DEBUG_CHUNK_SAMPLE == 0):
-                    # Light periodic debug from worker
-                    print_dbg(f"Worker chunk[{chunk_start}:{chunk_end}] parsed {parsed_headers} blocks (tell={f.tell()})")
+                    print_dbg(
+                        f"Worker chunk[{chunk_start}:{chunk_end}] parsed {parsed_headers} blocks (tell={f.tell()})"
+                    )
 
-                # If chromosome not indexed at all, skip fast
-                chrom_bins = bin_index.get(axt_chr)
+                chrom_bins = bin_index_get(axt_chr)
                 if not chrom_bins:
                     continue
 
-                # Iterate alignment columns
                 for h_char, c_char in zip(human_seq, chimp_seq):
                     if h_char != '-':
-                        # Query bin
                         bin_id = (human_pos - 1) // BIN_SIZE
                         records = chrom_bins.get(bin_id)
                         if records:
-                            for kind, ident, seg_start, seg_end, offset in records:
+                            for ident, seg_start, seg_end, offset in records:
                                 if seg_start <= human_pos <= seg_end:
                                     target_idx = offset + (human_pos - seg_start)
                                     if target_idx not in results[ident]:
@@ -593,43 +641,23 @@ def process_axt_chunk(chunk_start, chunk_end, bin_index):
 
     return dict(results)
 
-def _safe_pool_create(desired):
-    """Create a ThreadPool with fallback reductions if creation is slow/fails."""
-    from multiprocessing.dummy import Pool as ThreadPool
-    attempts = []
-    plan = [desired]
-    if desired > 32:
-        plan.append(32)
-    if desired > 16:
-        plan.append(16)
-    if desired > 8:
-        plan.append(8)
-    if desired > 4:
-        plan.append(4)
-    plan = list(dict.fromkeys(plan))  # uniq, preserve order
 
-    last_exc = None
-    for n in plan:
-        print_always(f"Creating thread pool with {n} workers ...")
-        t0 = time.time()
-        try:
-            pool = ThreadPool(processes=n)
-            dt = time.time() - t0
-            print_always(f"Thread pool ready ({n} workers) in {dt:.2f}s.")
-            return pool, n
-        except Exception as e:
-            last_exc = e
-            attempts.append((n, f"{e}"))
-            print_always(f"Pool creation failed for {n}: {e}. Trying fewer ...")
-    raise RuntimeError(f"Unable to create pool. Attempts: {attempts}") from last_exc
+def _init_worker(bin_index):
+    """Initializer for worker processes to set the global bin index."""
+    global _BIN_INDEX
+    _BIN_INDEX = bin_index
+
+
+def process_axt_chunk_worker(args):
+    """Wrapper to unpack chunk arguments for pool workers."""
+    chunk_start, chunk_end = args
+    return process_axt_chunk(chunk_start, chunk_end)
 
 def _workers_cap():
     try:
         cpu = len(os.sched_getaffinity(0))
     except Exception:
         cpu = multiprocessing.cpu_count()
-    # Default cap to prevent spawn stalls on big nodes
-    default = min(cpu, 32)
     env = os.environ.get("AXT_WORKERS")
     if env:
         try:
@@ -637,7 +665,20 @@ def _workers_cap():
             return min(want, cpu)
         except ValueError:
             pass
-    return default
+    return cpu
+
+
+def _merge_partial_results(res, tx_scaffolds, rg_scaffolds):
+    for ident, posmap in res.items():
+        if ident in tx_scaffolds:
+            sc = tx_scaffolds[ident]
+        elif ident in rg_scaffolds:
+            sc = rg_scaffolds[ident]
+        else:
+            continue
+        for pos_idx, base in posmap.items():
+            if 0 <= pos_idx < len(sc) and sc[pos_idx] == '-':
+                sc[pos_idx] = base
 
 def _print_system_limits():
     pid = os.getpid()
@@ -648,15 +689,60 @@ def _print_system_limits():
     print_always(f"Process PID={pid} | RSS={rss} KB | FDs={fds} | RLIMIT_NPROC={nproc} | RLIMIT_NOFILE={nofile}")
 
 def _chunk_plan(file_size, n_workers):
-    # guard tiny chunks
-    base = max(1, file_size // n_workers)
-    offsets = []
-    start = 0
-    for i in range(n_workers):
-        end = file_size if i == n_workers - 1 else min(file_size, start + base)
-        offsets.append((start, end))
-        start = end
-    return offsets
+    if n_workers <= 1 or file_size == 0:
+        return [(0, None)]
+
+    approx_size = max(1, file_size // n_workers)
+    targets = [approx_size * i for i in range(1, n_workers)]
+    boundaries = [0]
+
+    with open(AXT_FILENAME, 'r', buffering=1024 * 1024) as f:
+        for target in targets:
+            f.seek(target)
+            f.readline()  # finish current line
+
+            while True:
+                pos = f.tell()
+                if pos >= file_size:
+                    boundaries.append(file_size)
+                    break
+                line = f.readline()
+                if not line:
+                    boundaries.append(file_size)
+                    break
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                if _parse_axt_header_line(stripped):
+                    boundaries.append(pos)
+                    break
+
+            if boundaries[-1] >= file_size:
+                break
+
+    if boundaries[-1] != file_size:
+        boundaries.append(file_size)
+
+    deduped = []
+    last = None
+    for b in boundaries:
+        if last is None or b > last:
+            deduped.append(b)
+            last = b
+
+    ranges = []
+    for i in range(len(deduped) - 1):
+        start = deduped[i]
+        end = deduped[i + 1]
+        if start < end:
+            ranges.append((start, end))
+
+    if not ranges:
+        return [(0, None)]
+
+    last_start, last_end = ranges[-1]
+    ranges[-1] = (last_start, None)
+    return ranges
 
 def build_outgroups_and_filter(transcripts, regions):
     """
@@ -674,7 +760,7 @@ def build_outgroups_and_filter(transcripts, regions):
     tx_scaffolds = {t['info']['transcript_id']: ['-'] * t['info']['expected_len'] for t in transcripts}
     rg_scaffolds = {r['info']['region_id']: ['-'] * r['info']['expected_len'] for r in regions}
 
-    print_always(f"Processing '{AXT_FILENAME}' in parallel (threaded)...")
+    print_always(f"Processing '{AXT_FILENAME}' in parallel (process pool)...")
     if not os.path.exists(AXT_FILENAME):
         print_always("FATAL: AXT plain file missing.")
         sys.exit(1)
@@ -697,27 +783,21 @@ def build_outgroups_and_filter(transcripts, regions):
     chunk_ranges = _chunk_plan(file_size, workers)
     print_dbg(f"AXT file size: {human_bytes(file_size)}; chunk ranges (first 5): {chunk_ranges[:5]}")
 
-    # Create pool (with fallbacks)
+    # Create pool of worker processes
+    print_always(f"Creating process pool with {workers} workers ...")
     t_pool_create0 = time.time()
-    pool, actual_workers = _safe_pool_create(workers)
+    pool = multiprocessing.Pool(processes=workers, initializer=_init_worker, initargs=(bin_index,))
     t_pool_create1 = time.time()
-    print_dbg(f"Pool creation took {t_pool_create1 - t_pool_create0:.2f}s; actual workers={actual_workers}")
+    print_always(f"Process pool ready ({workers} workers) in {t_pool_create1 - t_pool_create0:.2f}s.")
 
     # Kick off work
     t0 = time.time()
     print_always(f"[AXT parse] START — scheduling {len(chunk_ranges)} chunks")
     progress_bar("[AXT parse]", 0, len(chunk_ranges))
-    parts = []
 
-    # Use a wrapper to include bin_index by reference without copying
-    def _runner(args):
-        cs, ce = args
-        return process_axt_chunk(cs, ce, bin_index)
-
-    # imap_unordered returns results as ready; keep UI responsive
     try:
         completed = 0
-        for res in pool.imap_unordered(_runner, chunk_ranges):
+        for res in pool.imap_unordered(process_axt_chunk_worker, chunk_ranges, chunksize=1):
             completed += 1
             progress_bar("[AXT parse]", completed, len(chunk_ranges))
             # Handle worker error sentinel
@@ -726,44 +806,15 @@ def build_outgroups_and_filter(transcripts, regions):
                 print(res["__error__"])
                 print(res.get("__trace__", ""))
                 print(f"Chunk: {res.get('__chunk__')}, parsed headers before error: {res.get('__parsed__')}")
-                # Continue rather than die; we keep partial results
                 continue
-            parts.append(res)
+            _merge_partial_results(res, tx_scaffolds, rg_scaffolds)
     finally:
-        try:
-            pool.close()
-            pool.join()
-        except Exception:
-            pass
+        pool.close()
+        pool.join()
+
     progress_bar("[AXT parse]", len(chunk_ranges), len(chunk_ranges))
     print()
     print_always(f"Finished parallel AXT processing in {time.time() - t0:.2f} seconds.")
-    print_always(f"Collected {len(parts)} partial result maps.")
-
-    # Merge results
-    print_always("Merging results into scaffolds (with divergence QC later)...")
-    with time_block("Merge results"):
-        total_parts = len(parts)
-        merged = 0
-        last_print = time.time()
-        for res in parts:
-            for ident, posmap in res.items():
-                if ident in tx_scaffolds:
-                    sc = tx_scaffolds[ident]
-                elif ident in rg_scaffolds:
-                    sc = rg_scaffolds[ident]
-                else:
-                    continue
-                for pos_idx, base in posmap.items():
-                    if 0 <= pos_idx < len(sc) and sc[pos_idx] == '-':
-                        sc[pos_idx] = base
-            merged += 1
-            if time.time() - last_print > 0.1 or merged == total_parts:
-                progress_bar("[Merge]", merged, total_parts)
-                last_print = time.time()
-        if total_parts:
-            progress_bar("[Merge]", total_parts, total_parts)
-            print()
 
     # --- Write transcripts ---
     print_always("Writing transcript outgroups (after divergence QC)...")
@@ -804,6 +855,8 @@ def build_outgroups_and_filter(transcripts, regions):
             comp = 0
             for h, c in zip(human_ref, final_seq):
                 if h != '-' and c != '-':
+                    if h not in VALID_BASES or c not in VALID_BASES:
+                        continue
                     comp += 1
                     if h != c:
                         diff += 1
@@ -873,6 +926,8 @@ def build_outgroups_and_filter(transcripts, regions):
                     comp = 0
                     for h, c in zip(human_ref, final_seq):
                         if h != '-' and c != '-':
+                            if h not in VALID_BASES or c not in VALID_BASES:
+                                continue
                             comp += 1
                             if h != c:
                                 diff += 1
