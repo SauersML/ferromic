@@ -436,7 +436,7 @@ def estimate_correlation_length(
         corr_length = float(lags[-1])
     block_size = int(round(max(1.0, corr_length)))
     block_size = max(1, min(block_size, n))
-    return block_size, corr_length, lags[-1], len(lags))
+    return block_size, corr_length, lags[-1], len(lags)
 
 def precompute_block_structure(n: int, block_size: int) -> List[np.ndarray]:
     if n <= 0:
