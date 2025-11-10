@@ -834,33 +834,45 @@ def estimate_tau2_reml(
         return 0.0
     var_y = float(np.var(y)) if y.size > 1 else 0.0
     mean_s2 = float(np.mean(s2))
-    upper = max(1e-8, var_y + mean_s2 * 2.0)
-    if upper <= 0.0:
-        return 0.0
-    a = 0.0
-    b = upper
-    invphi = 0.6180339887498949
-    c = b - invphi * (b - a)
-    d = a + invphi * (b - a)
-    fc = reml_negloglik_tau2(c, y, s2, X)
-    fd = reml_negloglik_tau2(d, y, s2, X)
-    for _ in range(max_iter):
-        if abs(b - a) < tol * (1.0 + a + b):
+    base_upper = max(1e-8, var_y + mean_s2 * 10.0)
+
+    def golden_section_search(upper: float) -> Tuple[float, bool]:
+        if upper <= 0.0:
+            return 0.0, False
+        a = 0.0
+        b = upper
+        invphi = 0.6180339887498949
+        c = b - invphi * (b - a)
+        d = a + invphi * (b - a)
+        fc = reml_negloglik_tau2(c, y, s2, X)
+        fd = reml_negloglik_tau2(d, y, s2, X)
+        for _ in range(max_iter):
+            if abs(b - a) < tol * (1.0 + a + b):
+                break
+            if fc < fd:
+                b = d
+                d = c
+                fd = fc
+                c = b - invphi * (b - a)
+                fc = reml_negloglik_tau2(c, y, s2, X)
+            else:
+                a = c
+                c = d
+                fc = fd
+                d = a + invphi * (b - a)
+                fd = reml_negloglik_tau2(d, y, s2, X)
+        tau2_est = max(0.0, (a + b) * 0.5)
+        hits_upper = tau2_est >= 0.95 * upper
+        return tau2_est, hits_upper
+
+    upper = base_upper
+    tau2_est = 0.0
+    for _ in range(6):
+        tau2_est, hits_upper = golden_section_search(upper)
+        if not hits_upper:
             break
-        if fc < fd:
-            b = d
-            d = c
-            fd = fc
-            c = b - invphi * (b - a)
-            fc = reml_negloglik_tau2(c, y, s2, X)
-        else:
-            a = c
-            c = d
-            fc = fd
-            d = a + invphi * (b - a)
-            fd = reml_negloglik_tau2(d, y, s2, X)
-    tau2 = max(0.0, (a + b) * 0.5)
-    return tau2
+        upper *= 4.0
+    return tau2_est
 
 def z_to_p_one_sided_greater(z: float) -> float:
     if not math.isfinite(z):
