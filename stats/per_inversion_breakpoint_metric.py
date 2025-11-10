@@ -3,6 +3,13 @@ from __future__ import annotations
 import logging
 import sys
 import os
+
+# Ensure BLAS-style math libraries do not oversubscribe threads when this module
+# is imported. Environment variables are respected only if they are unset so
+# that callers can still override the behaviour explicitly.
+for _env_var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+    os.environ.setdefault(_env_var, "1")
+
 import re
 import io
 import zipfile
@@ -229,6 +236,7 @@ class FRFResult:
     frf_mu_edge: float
     frf_mu_mid: float
     frf_delta: float
+    frf_null_delta_mean: float
     frf_a: float
     frf_b: float
     frf_var_delta: float
@@ -677,6 +685,7 @@ def fit_inversion_frf_and_null(
                 length=inversion.length, n_windows=inversion.n_windows, n_sites=n_sites_total,
                 block_size_windows=1, n_blocks=0,
                 frf_mu_edge=float("nan"), frf_mu_mid=float("nan"), frf_delta=float("nan"),
+                frf_null_delta_mean=float("nan"),
                 frf_a=float("nan"), frf_b=float("nan"),
                 frf_var_delta=float("nan"), frf_se_delta=float("nan"),
                 usable_for_meta=False,
@@ -705,6 +714,7 @@ def fit_inversion_frf_and_null(
                 length=inversion.length, n_windows=inversion.n_windows, n_sites=n_sites_total,
                 block_size_windows=block_size_inv, n_blocks=0,
                 frf_mu_edge=float("nan"), frf_mu_mid=float("nan"), frf_delta=float("nan"),
+                frf_null_delta_mean=float("nan"),
                 frf_a=float("nan"), frf_b=float("nan"),
                 frf_var_delta=float("nan"), frf_se_delta=float("nan"),
                 usable_for_meta=False,
@@ -729,6 +739,7 @@ def fit_inversion_frf_and_null(
 
         frf_var_delta = float("nan")
         frf_se_delta = float("nan")
+        frf_null_delta_mean = float("nan")
 
         if can_permute:
             orig_to_comp = np.full(n_all, -1, dtype=int)
@@ -741,15 +752,40 @@ def fit_inversion_frf_and_null(
             inner_threads = current_inner_threads()
             deltas_accum: List[np.ndarray] = []
 
+            block_comp_indices: List[np.ndarray] = []
+            for block in blocks:
+                comp = orig_to_comp[block]
+                comp = comp[comp >= 0]
+                block_comp_indices.append(comp)
+
+            block_lengths = np.array([comp.size for comp in block_comp_indices], dtype=int)
+            expected_valid = int(block_lengths.sum()) if block_lengths.size else 0
+            if expected_valid != n_valid:
+                raise RuntimeError(
+                    "Mismatch between block composition and number of valid windows"
+                )
+            max_block_len = int(block_lengths.max(initial=0)) if block_lengths.size else 0
+            block_index = (
+                np.full((n_blocks, max_block_len), -1, dtype=int)
+                if max_block_len > 0
+                else np.empty((n_blocks, 0), dtype=int)
+            )
+            for i, comp in enumerate(block_comp_indices):
+                if comp.size:
+                    block_index[i, : comp.size] = comp
+            has_padding = bool(np.any(block_lengths != max_block_len)) if block_lengths.size else False
+
             def run_batch(batch_index: int) -> np.ndarray:
                 rng = np.random.default_rng(base_seed + 1 + batch_index)
                 size = batch_size if (batch_index + 1) * batch_size <= total else (total - batch_index * batch_size)
-                perm_indices = np.empty((size, n_valid), dtype=int)
-                for j in range(size):
-                    idx_full = generate_block_permutation_indices(blocks, rng)
-                    idx_comp = orig_to_comp[idx_full]
-                    row = idx_comp[idx_comp >= 0]
-                    perm_indices[j, :] = row
+                if size == 0:
+                    return np.empty((0,), dtype=float)
+                block_orders = np.argsort(rng.random((size, n_blocks)), axis=1)
+                perm_indices = block_index[block_orders].reshape(size, -1)
+                if has_padding:
+                    perm_indices = perm_indices[perm_indices >= 0].reshape(size, n_valid)
+                else:
+                    perm_indices = perm_indices.reshape(size, n_valid)
                 fst_perm_batch = fst_v[perm_indices][:, order]
                 w_perm_batch = w_v[perm_indices][:, order]
                 _, _, batch_deltas, _, _ = run_frf_search(
@@ -776,6 +812,7 @@ def fit_inversion_frf_and_null(
             null_deltas = np.concatenate(deltas_accum, axis=0)[:total]
             finite_mask = np.isfinite(null_deltas)
             if np.sum(finite_mask) > 1:
+                frf_null_delta_mean = float(np.mean(null_deltas[finite_mask]))
                 frf_var_delta = float(np.var(null_deltas[finite_mask], ddof=1))
                 if frf_var_delta > 0.0:
                     frf_se_delta = float(math.sqrt(frf_var_delta))
@@ -788,6 +825,7 @@ def fit_inversion_frf_and_null(
             length=inversion.length, n_windows=inversion.n_windows, n_sites=n_sites_total,
             block_size_windows=block_size_inv, n_blocks=n_blocks,
             frf_mu_edge=frf_mu_edge, frf_mu_mid=frf_mu_mid, frf_delta=frf_delta,
+            frf_null_delta_mean=frf_null_delta_mean,
             frf_a=frf_a, frf_b=frf_b,
             frf_var_delta=frf_var_delta, frf_se_delta=frf_se_delta,
             usable_for_meta=bool(usable_for_meta),
@@ -936,7 +974,7 @@ def run_random_effects_meta_regression(df: pd.DataFrame) -> Optional[Dict[str, f
     mask = (
         df["STATUS"].isin([0, 1])
         & df["usable_for_meta"]
-        & np.isfinite(df["frf_delta"])
+        & np.isfinite(df.get("frf_delta_centered", df["frf_delta"]))
         & np.isfinite(df["frf_var_delta"])
         & (df["frf_var_delta"] > 0.0)
     )
@@ -944,7 +982,10 @@ def run_random_effects_meta_regression(df: pd.DataFrame) -> Optional[Dict[str, f
     if sub.empty:
         log.warning("No inversions with usable FRF variance and group labels")
         return None
-    y = sub["frf_delta"].to_numpy(dtype=float)
+    if "frf_delta_centered" in sub.columns:
+        y = sub["frf_delta_centered"].to_numpy(dtype=float)
+    else:
+        y = sub["frf_delta"].to_numpy(dtype=float)
     s2 = sub["frf_var_delta"].to_numpy(dtype=float)
     is_single = (sub["STATUS"] == 0).to_numpy(dtype=float)
     if np.all(is_single == 0.0) or np.all(is_single == 1.0):
@@ -990,7 +1031,7 @@ def run_random_effects_meta_regression(df: pd.DataFrame) -> Optional[Dict[str, f
 
 def _meta_perm_chunk_worker(args) -> np.ndarray:
     """Worker function for meta-level permutation - must be module-level for pickling."""
-    start_idx, size, seed, y, s2, is_single, use_stat = args
+    size, seed, y, s2, is_single, use_stat = args
     rng = np.random.default_rng(seed)
     stats = np.empty(size, dtype=float)
     for i in range(size):
@@ -1027,10 +1068,13 @@ def meta_permutation_pvalue(
         idx += take
 
     with ProcessPoolExecutor(max_workers=n_workers) as pool:
-        tasks = [
-            pool.submit(_meta_perm_chunk_worker, spec[3])
-            for spec in sorted(task_specs, key=lambda spec: (spec[0], -spec[1]), reverse=True)
-        ]
+        idx = 0
+        while idx < n_perm:
+            take = min(chunk, n_perm - idx)
+            seed = base_seed + 1 + (idx // chunk)
+            args = (take, seed, y, s2, is_single, use_stat)
+            tasks.append(pool.submit(_meta_perm_chunk_worker, args))
+            idx += take
         perm_stats: List[np.ndarray] = []
         for fut in as_completed(tasks):
             perm_stats.append(fut.result())
@@ -1165,6 +1209,10 @@ def main():
     log.info(f"Matched {n_matched} inversions to inv_properties.tsv by chrom/start/end")
 
     merged["usable_for_meta"] = merged["usable_for_meta"].astype(bool)
+    if "frf_null_delta_mean" in merged.columns:
+        merged["frf_delta_centered"] = merged["frf_delta"] - merged["frf_null_delta_mean"]
+    else:
+        merged["frf_delta_centered"] = merged["frf_delta"]
     per_inv_out = OUTDIR / "per_inversion_frf_effects.tsv"
     merged.to_csv(per_inv_out, sep="\t", index=False)
     log.info(f"Per-inversion FRF results (with group labels) written to: {per_inv_out}")
@@ -1211,12 +1259,12 @@ def main():
     mask = (
         merged["STATUS"].isin([0, 1])
         & merged["usable_for_meta"]
-        & np.isfinite(merged["frf_delta"])
+        & np.isfinite(merged["frf_delta_centered"])
         & np.isfinite(merged["frf_var_delta"])
         & (merged["frf_var_delta"] > 0.0)
     )
     sub = merged.loc[mask].copy()
-    y = sub["frf_delta"].to_numpy(dtype=float)
+    y = sub["frf_delta_centered"].to_numpy(dtype=float)
     s2 = sub["frf_var_delta"].to_numpy(dtype=float)
     is_single = (sub["STATUS"] == 0).to_numpy(dtype=float)
 
