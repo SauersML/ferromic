@@ -770,6 +770,33 @@ def fit_inversion_worker(args) -> FRFResult:
 
 # ------------------------- RANDOM-EFFECTS META-REGRESSION -------------------------
 
+CONDITION_NUMBER_LIMIT = 1e12
+
+
+def _solve_weighted_normal_equations(
+    XtWX: np.ndarray,
+    XtWy: np.ndarray,
+    *,
+    compute_inverse: bool,
+) -> Tuple[np.ndarray, Optional[np.ndarray], float]:
+    """Solve XtWX beta = XtWy while guarding against ill-conditioning."""
+
+    try:
+        cond = np.linalg.cond(XtWX)
+    except np.linalg.LinAlgError as exc:
+        raise exc
+    if not np.isfinite(cond) or cond > CONDITION_NUMBER_LIMIT:
+        raise np.linalg.LinAlgError("XtWX is ill-conditioned")
+
+    sign, logdet = np.linalg.slogdet(XtWX)
+    if sign <= 0.0 or not math.isfinite(logdet):
+        raise np.linalg.LinAlgError("XtWX is not positive definite")
+
+    beta_hat = np.linalg.solve(XtWX, XtWy)
+    inv_XtWX = np.linalg.solve(XtWX, np.eye(XtWX.shape[0])) if compute_inverse else None
+    return beta_hat, inv_XtWX, logdet
+
+
 def reml_negloglik_tau2(
     tau2: float,
     y: np.ndarray,
@@ -784,18 +811,16 @@ def reml_negloglik_tau2(
     w = 1.0 / v
     XtW = X.T * w
     XtWX = XtW @ X
-    det = XtWX[0, 0] * XtWX[1, 1] - XtWX[0, 1] * XtWX[1, 0]
-    if det <= 0.0:
+    XtWy = XtW @ y
+    try:
+        beta_hat, _, logdetXtWX = _solve_weighted_normal_equations(
+            XtWX, XtWy, compute_inverse=False
+        )
+    except np.linalg.LinAlgError:
         return 1e300
-    inv_XtWX = (1.0 / det) * np.array([
-        [XtWX[1, 1], -XtWX[0, 1]],
-        [-XtWX[1, 0], XtWX[0, 0]],
-    ])
-    beta_hat = inv_XtWX @ (XtW @ y)
     resid = y - X @ beta_hat
     sse = float(np.sum(w * resid * resid))
     logdetV = float(np.sum(np.log(v)))
-    logdetXtWX = math.log(det)
     return 0.5 * (logdetV + sse + logdetXtWX)
 
 def estimate_tau2_reml(
@@ -856,14 +881,13 @@ def compute_meta_group_effect(y: np.ndarray, s2: np.ndarray, is_single: np.ndarr
     w = 1.0 / v
     XtW = X.T * w
     XtWX = XtW @ X
-    det = XtWX[0, 0] * XtWX[1, 1] - XtWX[0, 1] * XtWX[1, 0]
-    if det <= 0.0:
+    XtWy = XtW @ y
+    try:
+        beta_hat, inv_XtWX, _ = _solve_weighted_normal_equations(
+            XtWX, XtWy, compute_inverse=True
+        )
+    except np.linalg.LinAlgError:
         return tau2, float("nan"), float("nan"), float("nan")
-    inv_XtWX = (1.0 / det) * np.array([
-        [XtWX[1, 1], -XtWX[0, 1]],
-        [-XtWX[1, 0], XtWX[0, 0]],
-    ])
-    beta_hat = inv_XtWX @ (XtW @ y)
     beta_group = float(beta_hat[1])
     se_group = float(inv_XtWX[1, 1]) ** 0.5 if inv_XtWX[1, 1] > 0.0 else float("nan")
     z = beta_group / se_group if (math.isfinite(se_group) and se_group > 0.0) else float("nan")
@@ -896,15 +920,15 @@ def run_random_effects_meta_regression(df: pd.DataFrame) -> Optional[Dict[str, f
     w = 1.0 / v
     XtW = X.T * w
     XtWX = XtW @ X
-    det = XtWX[0, 0] * XtWX[1, 1] - XtWX[0, 1] * XtWX[1, 0]
-    inv_XtWX = (1.0 / det) * np.array([
-        [XtWX[1, 1], -XtWX[0, 1]],
-        [-XtWX[1, 0], XtWX[0, 0]],
-    ])
-    beta_hat = inv_XtWX @ (XtW @ y)
-    beta0 = float(beta_hat[0])
-    mu_recurrent = beta0
-    mu_single = beta0 + beta_group
+    XtWy = XtW @ y
+    try:
+        beta_hat, _, _ = _solve_weighted_normal_equations(XtWX, XtWy, compute_inverse=False)
+        beta0 = float(beta_hat[0])
+        mu_recurrent = beta0
+        mu_single = beta0 + beta_group
+    except np.linalg.LinAlgError:
+        mu_recurrent = float("nan")
+        mu_single = float("nan")
 
     p_one_sided = z_to_p_one_sided_greater(z)
     p_two_sided = z_to_p_two_sided(z)
