@@ -888,23 +888,29 @@ def run_random_effects_meta_regression(df: pd.DataFrame) -> Optional[Dict[str, f
         log.warning("Only one group present among usable inversions")
         return None
     tau2, beta_group, se_group, z = compute_meta_group_effect(y, s2, is_single)
-    beta0_tau2, beta0_group, _, _ = compute_meta_group_effect(y, s2, np.zeros_like(is_single))
-    mu_recurrent = float(np.nan) if not math.isfinite(beta0_group) else float(beta0_tau2 * 0.0 + (np.nan if not math.isfinite(beta0_group) else ( (y*0.0).sum()*0.0 )))  # placeholder to avoid unused warnings
-    # Compute group means explicitly
-    X = np.column_stack([np.ones_like(is_single), is_single])
-    v = s2 + tau2
-    w = 1.0 / v
-    XtW = X.T * w
-    XtWX = XtW @ X
-    det = XtWX[0, 0] * XtWX[1, 1] - XtWX[0, 1] * XtWX[1, 0]
-    inv_XtWX = (1.0 / det) * np.array([
-        [XtWX[1, 1], -XtWX[0, 1]],
-        [-XtWX[1, 0], XtWX[0, 0]],
-    ])
-    beta_hat = inv_XtWX @ (XtW @ y)
-    beta0 = float(beta_hat[0])
-    mu_recurrent = beta0
-    mu_single = beta0 + beta_group
+
+    mu_recurrent = float("nan")
+    mu_single = float("nan")
+
+    if math.isfinite(tau2):
+        X = np.column_stack([np.ones_like(is_single), is_single])
+        v = s2 + tau2
+        if np.all(np.isfinite(v)) and np.all(v > 0.0):
+            w = 1.0 / v
+            XtW = X.T * w
+            XtWX = XtW @ X
+            if np.all(np.isfinite(XtWX)):
+                det = XtWX[0, 0] * XtWX[1, 1] - XtWX[0, 1] * XtWX[1, 0]
+                if det > 0.0:
+                    inv_XtWX = (1.0 / det) * np.array([
+                        [XtWX[1, 1], -XtWX[0, 1]],
+                        [-XtWX[1, 0], XtWX[0, 0]],
+                    ])
+                    beta_hat = inv_XtWX @ (XtW @ y)
+                    beta0 = float(beta_hat[0])
+                    mu_recurrent = beta0
+                    if math.isfinite(beta_group):
+                        mu_single = beta0 + float(beta_group)
 
     p_one_sided = z_to_p_one_sided_greater(z)
     p_two_sided = z_to_p_two_sided(z)
