@@ -1133,13 +1133,20 @@ def meta_permutation_pvalue(
     T = T[finite]
     if T.size == 0 or not math.isfinite(T_obs):
         return {
-            "p_perm_one_sided": float("nan"),
+            "p_perm_one_sided_upper": float("nan"),
+            "p_perm_one_sided_lower": float("nan"),
             "p_perm_two_sided": float("nan"),
             "T_obs": float(T_obs),
         }
-    p_one = (1.0 + float(np.sum(T >= T_obs))) / (1.0 + float(T.size))
+    p_one_upper = (1.0 + float(np.sum(T >= T_obs))) / (1.0 + float(T.size))
+    p_one_lower = (1.0 + float(np.sum(T <= T_obs))) / (1.0 + float(T.size))
     p_two = (1.0 + float(np.sum(np.abs(T) >= abs(T_obs)))) / (1.0 + float(T.size))
-    return {"p_perm_one_sided": float(p_one), "p_perm_two_sided": float(p_two), "T_obs": float(T_obs)}
+    return {
+        "p_perm_one_sided_upper": float(p_one_upper),
+        "p_perm_one_sided_lower": float(p_one_lower),
+        "p_perm_two_sided": float(p_two),
+        "T_obs": float(T_obs),
+    }
 
 # ------------------------- MAIN -------------------------
 
@@ -1472,18 +1479,13 @@ def main():
         n_workers=n_meta_workers,
         use_stat="beta",
     )
-    p_perm_one = perm_out["p_perm_one_sided"]
+    p_perm_one_upper = perm_out["p_perm_one_sided_upper"]
+    p_perm_one_lower = perm_out["p_perm_one_sided_lower"]
     p_perm_two = perm_out["p_perm_two_sided"]
-    log.info(f"Permutation p (one-sided, single > recurrent): {p_perm_one:.4g}")
+    log.info(f"Permutation p (one-sided, single > recurrent): {p_perm_one_upper:.4g}")
+    log.info(f"Permutation p (one-sided, recurrent > single): {p_perm_one_lower:.4g}")
     log.info(f"Permutation p (two-sided): {p_perm_two:.4g}")
     log.info("")
-
-    if math.isfinite(p_perm_one) and p_perm_one < 0.05:
-        log.info("Conclusion: Meta-analysis with label-exchange permutation supports higher breakpoint enrichment")
-        log.info("             for group 0 (single-event) inversions than for group 1 (recurrent).")
-    else:
-        log.info("Conclusion: Meta-analysis with permutation does not provide strong evidence that")
-        log.info("             group 0 (single-event) frf_delta exceeds group 1 (recurrent).")
 
 if __name__ == "__main__":
     main()
