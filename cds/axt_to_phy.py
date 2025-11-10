@@ -81,6 +81,49 @@ def human_bytes(n):
         s += 1
     return f"{v:.1f} {units[s]}"
 
+CHR_PREFIX = "chr"
+
+def normalize_chromosome(raw):
+    """Normalize chromosome identifiers to canonical 'chr*' form."""
+    if raw is None:
+        return None
+
+    chrom = str(raw).strip()
+    if not chrom:
+        return None
+
+    # Strip any repeated 'chr' prefixes (case-insensitive)
+    while chrom.lower().startswith(CHR_PREFIX):
+        chrom = chrom[3:]
+        chrom = chrom.strip()
+        if not chrom:
+            return None
+
+    chrom_lower = chrom.lower()
+
+    if chrom_lower in {"m", "mt", "mtdna", "mito", "mitochondrial"}:
+        core = "M"
+    elif chrom_lower == "x":
+        core = "X"
+    elif chrom_lower == "y":
+        core = "Y"
+    elif chrom_lower.isdigit():
+        try:
+            core = str(int(chrom_lower))
+        except ValueError:
+            core = chrom_lower
+    else:
+        core = chrom.upper()
+
+    return f"{CHR_PREFIX}{core}"
+
+def chromosome_to_bare(chrom):
+    """Return the non-'chr' portion of a chromosome label."""
+    normalized = normalize_chromosome(chrom)
+    if not normalized:
+        return None
+    return normalized[len(CHR_PREFIX):]
+
 def progress_bar(label, done, total, width=40):
     if total <= 0:
         bar = "-" * width
@@ -255,6 +298,11 @@ def parse_transcript_metadata():
                 continue
             seen.add(cds_key)
 
+            chrom_norm = normalize_chromosome(chrom)
+            if not chrom_norm:
+                logger.add("Metadata Parsing Error", f"L{line_num}: Invalid chromosome '{chrom}' for {t_id}.")
+                continue
+
             # Parse exon segments and expected length
             try:
                 segments = [(int(s), int(e)) for s, e in (p.split('-') for p in coords_str.split(';'))]
@@ -297,7 +345,7 @@ def parse_transcript_metadata():
             cds_info = {
                 'gene_name': gene,
                 'transcript_id': t_id,
-                'chromosome': 'chr' + chrom,
+                'chromosome': chrom_norm,
                 'expected_len': expected_len,
                 'start': start,
                 'end': end,
@@ -333,7 +381,10 @@ def find_region_sets():
         m = REGION_REGEX.match(name)
         if not m:
             continue
-        chrom = m.group('chrom')
+        chrom = normalize_chromosome(m.group('chrom'))
+        if not chrom:
+            logger.add("Region Parsing Error", f"Invalid chromosome '{m.group('chrom')}' in {name}; skipping group.")
+            continue
         start = int(m.group('start'))
         end = int(m.group('end'))
         grp = m.group('grp')
@@ -348,10 +399,11 @@ def find_region_sets():
     print_dbg(f"Region candidate groups: {total}")
     for (chrom, start, end), d in groups.items():
         expected_len = end - start + 1
-        region_id = f"inv_{chrom}_{start}_{end}"
+        chrom_bare = chromosome_to_bare(chrom)
+        region_id = f"inv_{chrom_bare}_{start}_{end}" if chrom_bare else f"inv_{chrom}_{start}_{end}"
         info = {
             'region_id': region_id,
-            'chromosome': 'chr' + str(chrom),
+            'chromosome': chrom,
             'expected_len': expected_len,
             'start': str(start),
             'end': str(end),
@@ -492,7 +544,7 @@ def process_axt_chunk(chunk_start, chunk_end, bin_index):
                     _ = f.readline()
                     continue
 
-                axt_chr = parts[1]  # e.g., 'chr7'
+                axt_chr = normalize_chromosome(parts[1])  # e.g., 'chr7'
                 try:
                     human_pos = int(parts[2]) + 1  # convert 0-based tStart to 1-based
                 except ValueError:
@@ -509,6 +561,8 @@ def process_axt_chunk(chunk_start, chunk_end, bin_index):
                 chimp_seq = chimp_seq.strip().upper()
 
                 parsed_headers += 1
+                if not axt_chr:
+                    continue
                 if DEBUG_CHUNK_SAMPLE and (parsed_headers % DEBUG_CHUNK_SAMPLE == 0):
                     # Light periodic debug from worker
                     print_dbg(f"Worker chunk[{chunk_start}:{chunk_end}] parsed {parsed_headers} blocks (tell={f.tell()})")
@@ -721,6 +775,7 @@ def build_outgroups_and_filter(transcripts, regions):
             t_id = info['transcript_id']
             gene = info['gene_name']
             chrom = info['chromosome']
+            chrom_label = chromosome_to_bare(chrom) or chrom
             start = info['start']
             end = info['end']
             g0_fname = info['g0_fname']
@@ -754,7 +809,7 @@ def build_outgroups_and_filter(transcripts, regions):
                         diff += 1
             divergence = (diff / comp) * 100 if comp else 0.0
 
-            outname = f"outgroup_{gene}_{t_id}_{chrom}_start{start}_end{end}.phy"
+            outname = f"outgroup_{gene}_{t_id}_{chrom_label}_start{start}_end{end}.phy"
             if divergence > DIVERGENCE_THRESHOLD:
                 logger.add("QC Filter: High Divergence", f"'{gene} ({t_id})' removed. Divergence vs chimp: {divergence:.2f}% (> {DIVERGENCE_THRESHOLD}%).")
                 if os.path.exists(outname):
@@ -786,7 +841,7 @@ def build_outgroups_and_filter(transcripts, regions):
         for i, r in enumerate(regions, 1):
             info = r['info']
             r_id = info['region_id']              # inv_<chrom>_<start>_<end>
-            chrom_label = info['chromosome'][3:]  # strip 'chr'
+            chrom_label = chromosome_to_bare(info['chromosome']) or info['chromosome']
             start = info['start']
             end = info['end']
             g0_fname = info['g0_fname'] or info['g1_fname']
@@ -853,7 +908,7 @@ def build_outgroups_and_filter(transcripts, regions):
 
 def calculate_and_print_differences_transcripts():
     print_always("--- Final Difference Calculation & Statistics (Transcripts) ---")
-    key_regex = re.compile(r"(ENST[0-9]+\.[0-9]+)_(chr[^_]+)_start([0-9]+)_end([0-9]+)")
+    key_regex = re.compile(r"(ENST[0-9]+\.[0-9]+)_([^_]+)_start([0-9]+)_end([0-9]+)")
     cds_groups = defaultdict(dict)
     all_phys = glob.glob('*.phy')
 
@@ -863,7 +918,13 @@ def calculate_and_print_differences_transcripts():
         base = os.path.basename(fpath)
         m = key_regex.search(base)
         if m:
-            cds_groups[m.groups()][base.split('_')[0]] = fpath
+            t_id, chrom_token, start_token, end_token = m.groups()
+            chrom_norm = normalize_chromosome(chrom_token)
+            if not chrom_norm:
+                logger.add("Stats Parsing Error", f"Skipped file '{base}' due to invalid chromosome '{chrom_token}'.")
+                continue
+            key = (t_id, chrom_norm, start_token, end_token)
+            cds_groups[key][base.split('_')[0]] = fpath
         if i % 25 == 0 or i == total_files:
             progress_bar("[TX stats: scan]", i, total_files if total_files else 1)
     if total_files:
@@ -988,13 +1049,25 @@ def calculate_and_print_differences_regions():
         base = os.path.basename(fpath)
         m = inv_regex.match(base)
         if m:
-            key = (m.group('chrom'), m.group('start'), m.group('end'))
-            role = f"group{m.group('grp')}"
-            groups[key][role] = fpath
+            chrom_norm = normalize_chromosome(m.group('chrom'))
+            if not chrom_norm:
+                logger.add("Region Stats Parsing Error", f"Skipped '{base}' due to invalid chromosome '{m.group('chrom')}'.")
+            else:
+                start = int(m.group('start'))
+                end = int(m.group('end'))
+                key = (chrom_norm, start, end)
+                role = f"group{m.group('grp')}"
+                groups[key][role] = fpath
         m2 = out_regex.match(base)
         if m2:
-            key2 = (m2.group('chrom'), m2.group('start'), m2.group('end'))
-            groups[key2]['outgroup'] = fpath
+            chrom_norm = normalize_chromosome(m2.group('chrom'))
+            if not chrom_norm:
+                logger.add("Region Stats Parsing Error", f"Skipped '{base}' due to invalid chromosome '{m2.group('chrom')}'.")
+            else:
+                start = int(m2.group('start'))
+                end = int(m2.group('end'))
+                key2 = (chrom_norm, start, end)
+                groups[key2]['outgroup'] = fpath
         if i % 25 == 0 or i == total_files:
             progress_bar("[RG stats: scan]", i, total_files if total_files else 1)
     if total_files:
@@ -1039,7 +1112,7 @@ def calculate_and_print_differences_regions():
 
             comparable_sets += 1
             n = L0
-            region_label = f"chr{key[0]}:{key[1]}-{key[2]}"
+            region_label = f"{key[0]}:{key[1]}-{key[2]}"
 
             local_fd = 0
             local_g0 = 0
