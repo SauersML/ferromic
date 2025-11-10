@@ -3,6 +3,13 @@ from __future__ import annotations
 import logging
 import sys
 import os
+
+# Ensure BLAS-style math libraries do not oversubscribe threads when this module
+# is imported. Environment variables are respected only if they are unset so
+# that callers can still override the behaviour explicitly.
+for _env_var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+    os.environ.setdefault(_env_var, "1")
+
 import re
 import io
 import zipfile
@@ -970,7 +977,7 @@ def run_random_effects_meta_regression(df: pd.DataFrame) -> Optional[Dict[str, f
 
 def _meta_perm_chunk_worker(args) -> np.ndarray:
     """Worker function for meta-level permutation - must be module-level for pickling."""
-    start_idx, size, seed, y, s2, is_single, use_stat = args
+    size, seed, y, s2, is_single, use_stat = args
     rng = np.random.default_rng(seed)
     stats = np.empty(size, dtype=float)
     for i in range(size):
@@ -1003,7 +1010,7 @@ def meta_permutation_pvalue(
         while idx < n_perm:
             take = min(chunk, n_perm - idx)
             seed = base_seed + 1 + (idx // chunk)
-            args = (idx, take, seed, y, s2, is_single, use_stat)
+            args = (take, seed, y, s2, is_single, use_stat)
             tasks.append(pool.submit(_meta_perm_chunk_worker, args))
             idx += take
         perm_stats: List[np.ndarray] = []
