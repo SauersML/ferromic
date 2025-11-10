@@ -1839,8 +1839,7 @@ def run_overlapped(region_infos, region_gene_map, log_q, status_dict):
 
             logging.info(f"Region {label} complete. Submitting {len(genes_for_region)} PAML jobs.")
             for gene_info in genes_for_region:
-                flushed = submit_with_cap(
-                    paml_exec, codeml_worker, (gene_info, tree, label, log_q), inflight, cap)
+                flushed = submit_with_cap(paml_exec, codeml_worker, (gene_info, tree, label), inflight, cap)
                 status_dict['paml_running'] = len(inflight)
                 for paml_future in flushed:
                     try:
