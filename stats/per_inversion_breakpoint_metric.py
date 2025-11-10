@@ -1,19 +1,7 @@
-"""
-Per-inversion metric: how much higher or lower are Hudson FST values at breakpoints vs middle?
-
-We use a flat-ramp-flat (FRF) model: two plateaus at the edges and center,
-connected by a linear ramp. A shared block-permutation null preserves spatial
-structure while estimating significance.
-
-Sign convention:
-  POSITIVE = FST higher at breakpoints
-  NEGATIVE = FST higher in middle
-"""
-
 from __future__ import annotations
+
 import logging
 import sys
-import time
 import os
 import re
 import io
@@ -31,13 +19,12 @@ import numpy as np
 import pandas as pd
 import requests
 
-# Logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
     handlers=[logging.StreamHandler(sys.stdout)],
 )
-log = logging.getLogger("per_inversion_breakpoint_test")
+log = logging.getLogger("frf_meta_analysis")
 
 # ------------------------- CONFIG -------------------------
 
@@ -45,61 +32,57 @@ GITHUB_REPO = "SauersML/ferromic"
 WORKFLOW_NAME = "manual_run_vcf.yml"
 ARTIFACT_NAME_FALSTA = "run-vcf-falsta"
 
-# Local paths
 OUTDIR = Path("per_inversion_breakpoint_tests")
-FALSTA_CACHE = Path("per_site_fst_output.falsta")  # Check current directory first
+FALSTA_CACHE = Path("per_site_fst_output.falsta")
 
-# Window parameters
+INV_PROPERTIES_PATH = Path("inv_properties.tsv")
+CHR_COL_INV = "Chromosome"
+START_COL_INV = "Start"
+END_COL_INV = "End"
+STATUS_COL = "0_single_1_recur_consensus"
+
 WINDOW_SIZE_BP = 1_000
-MIN_INVERSION_LENGTH = 0  # Disabled - allow all inversions (can change later if needed)
+MIN_INVERSION_LENGTH = 0
 MIN_WINDOWS_PER_INVERSION = 20
 
-# Permutation parameters
 N_PERMUTATIONS = 3_000
-DEFAULT_BLOCK_SIZE_WINDOWS = 5  # Fallback block size (windows) if autocorr unavailable
-PERMUTATION_BATCH_SIZE = 256    # Number of permutations processed per batch
+DEFAULT_BLOCK_SIZE_WINDOWS = 5
+PERMUTATION_BATCH_SIZE = 256
 MAX_INNER_THREADS = max(1, os.cpu_count() or 1)
 
 FRF_MIN_EDGE_WINDOWS = 1
 FRF_MIN_MID_WINDOWS = 1
-
-# Permutation validity threshold
 MIN_BLOCKS_FOR_PERMUTATION = 5
+
 AUTOCORR_MIN_PAIRS = 5
-AUTOCORR_TARGET = 0.3  # target correlation level for block size selection
+AUTOCORR_TARGET = 0.3
 FRF_CANDIDATE_CHUNK_SIZE = 2048
+
+META_PERMUTATIONS = 10000
+META_PERM_CHUNK = 1000
+META_PERM_BASE_SEED = 777
+
 TOTAL_CPUS = max(1, os.cpu_count() or 1)
 _ACTIVE_COUNTER = None
 _TOTAL_CPUS_SHARED = TOTAL_CPUS
 
-# Hudson FST constants
 EPS_DENOM = 1e-12
 
-# Regex for parsing Hudson FST headers
 _RE_HUD = re.compile(
     r">.*?hudson_pairwise_fst.*?_chr_?([\w.\-]+)_start_(\d+)_end_(\d+)",
     re.IGNORECASE,
 )
 
-
 # ------------------------- REPRODUCIBLE SEEDING -------------------------
 
 def stable_seed_from_key(key: str) -> int:
-    """
-    Generate a stable random seed from a string key.
-
-    Uses MD5 hash to ensure reproducibility across runs and machines,
-    unlike Python's hash() which is process-dependent.
-    """
     h = hashlib.md5(key.encode("utf-8")).hexdigest()
     return int(h[:8], 16)
-
 
 def init_worker(active_counter, total_cpus):
     global _ACTIVE_COUNTER, _TOTAL_CPUS_SHARED
     _ACTIVE_COUNTER = active_counter
     _TOTAL_CPUS_SHARED = total_cpus
-
 
 @contextmanager
 def worker_activity():
@@ -114,14 +97,12 @@ def worker_activity():
         with _ACTIVE_COUNTER.get_lock():
             _ACTIVE_COUNTER.value = max(0, _ACTIVE_COUNTER.value - 1)
 
-
 def current_inner_threads() -> int:
     if _ACTIVE_COUNTER is None or _TOTAL_CPUS_SHARED <= 1:
         return 1
     with _ACTIVE_COUNTER.get_lock():
         active = max(1, _ACTIVE_COUNTER.value)
     return max(1, min(MAX_INNER_THREADS, _TOTAL_CPUS_SHARED // active))
-
 
 # ------------------------- GITHUB ARTIFACT DOWNLOAD -------------------------
 
@@ -131,17 +112,13 @@ def download_latest_artifact(
     artifact_name: str,
     output_dir: Path
 ) -> Optional[Path]:
-    """Download the latest artifact from a GitHub Actions workflow."""
     log.info(f"Fetching latest artifact '{artifact_name}' from {repo}/{workflow_name}...")
 
-    # Check for GitHub token
     token = os.environ.get("GITHUB_TOKEN")
     if not token:
         log.error("GITHUB_TOKEN environment variable required to download artifacts")
-        log.error("Cannot proceed without authentication")
         return None
 
-    # Create session with proper headers (matching workflow)
     session = requests.Session()
     session.headers.update({
         "Authorization": f"Bearer {token}",
@@ -149,117 +126,97 @@ def download_latest_artifact(
         "X-GitHub-Api-Version": "2022-11-28",
     })
 
-    try:
-        # Get latest successful workflow run
-        runs_url = f"https://api.github.com/repos/{repo}/actions/workflows/{workflow_name}/runs"
-        response = session.get(runs_url, params={
-            "status": "success",
-            "exclude_pull_requests": "true",
-            "per_page": 1
-        })
-        response.raise_for_status()
-
-        runs = response.json().get("workflow_runs", [])
-        if not runs:
-            log.error(f"No successful runs found for workflow {workflow_name}")
-            return None
-
-        run = runs[0]
-        run_id = run["id"]
-        log.info(f"Using artifacts from run {run_id} ({run['html_url']})")
-
-        # Get artifacts from that run
-        artifacts_url = f"https://api.github.com/repos/{repo}/actions/runs/{run_id}/artifacts"
-        response = session.get(artifacts_url, params={"per_page": 100})
-        response.raise_for_status()
-
-        artifacts = {
-            artifact["name"]: artifact
-            for artifact in response.json().get("artifacts", [])
-        }
-
-        if artifact_name not in artifacts:
-            log.error(f"Artifact '{artifact_name}' not found in run {run_id}")
-            return None
-
-        # Download the artifact
-        artifact = artifacts[artifact_name]
-        download_url = artifact["archive_download_url"]
-        log.info(f"Downloading artifact: {artifact_name}")
-
-        response = session.get(download_url)
-        response.raise_for_status()
-
-        # Extract directly from memory (matching workflow approach)
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
-            extracted_files = []
-            for member in zf.namelist():
-                if member.endswith(".falsta"):
-                    target = output_dir / Path(member).name
-                    with target.open("wb") as fh:
-                        fh.write(zf.read(member))
-                    extracted_files.append(target)
-                    log.info(f"Extracted {target.name}")
-
-            if not extracted_files:
-                log.error("No .falsta files found in artifact")
-                return None
-
-            # Return the FST file specifically
-            for f in extracted_files:
-                if "fst" in f.name.lower():
-                    log.info(f"Successfully downloaded to {f}")
-                    return f
-
-            # If no FST file found, return first file
-            return extracted_files[0]
-
-    except Exception as e:
-        log.error(f"Error downloading artifact: {e}")
+    runs_url = f"https://api.github.com/repos/{repo}/actions/workflows/{workflow_name}/runs"
+    response = session.get(runs_url, params={
+        "status": "success",
+        "exclude_pull_requests": "true",
+        "per_page": 1,
+    })
+    if not response.ok:
+        log.error("Failed to fetch workflow runs")
         return None
 
+    runs = response.json().get("workflow_runs", [])
+    if not runs:
+        log.error(f"No successful runs found for workflow {workflow_name}")
+        return None
+
+    run = runs[0]
+    run_id = run["id"]
+    log.info(f"Using artifacts from run {run_id} ({run.get('html_url', '')})")
+
+    artifacts_url = f"https://api.github.com/repos/{repo}/actions/runs/{run_id}/artifacts"
+    response = session.get(artifacts_url, params={"per_page": 100})
+    if not response.ok:
+        log.error("Failed to list artifacts")
+        return None
+
+    artifacts = {a["name"]: a for a in response.json().get("artifacts", [])}
+    if artifact_name not in artifacts:
+        log.error(f"Artifact '{artifact_name}' not found in run {run_id}")
+        return None
+
+    artifact = artifacts[artifact_name]
+    download_url = artifact["archive_download_url"]
+
+    response = session.get(download_url)
+    if not response.ok:
+        log.error("Failed to download artifact archive")
+        return None
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
+        extracted_files: List[Path] = []
+        for member in zf.namelist():
+            if member.endswith(".falsta"):
+                target = output_dir / Path(member).name
+                with target.open("wb") as fh:
+                    fh.write(zf.read(member))
+                extracted_files.append(target)
+                log.info(f"Extracted {target.name}")
+
+    if not extracted_files:
+        log.error("No .falsta files found in artifact")
+        return None
+
+    for f in extracted_files:
+        if "fst" in f.name.lower():
+            log.info(f"Using FST file {f}")
+            return f
+
+    return extracted_files[0]
 
 # ------------------------- DATA STRUCTURES -------------------------
 
 @dataclass
 class Window:
-    """A genomic window with Hudson FST data."""
-    position: int  # Midpoint position
+    position: int
     numerator_sum: float
     denominator_sum: float
     n_sites: int
-
     @property
     def fst(self) -> float:
-        """Compute Hudson FST for this window."""
         if self.denominator_sum <= EPS_DENOM:
             return np.nan
         return self.numerator_sum / self.denominator_sum
 
-
 @dataclass
 class Inversion:
-    """An inversion with windowed FST data."""
     chrom: str
     start: int
     end: int
     length: int
     windows: List[Window]
-
     @property
     def n_windows(self) -> int:
         return len(self.windows)
-
     @property
     def inv_key(self) -> str:
         return f"{self.chrom}_{self.start}_{self.end}"
 
-
 @dataclass
-class TestResults:
-    """Flat-ramp-flat test results for one inversion."""
+class FRFResult:
     inv_key: str
     chrom: str
     start: int
@@ -267,168 +224,121 @@ class TestResults:
     length: int
     n_windows: int
     n_sites: int
-    n_blocks: int
     block_size_windows: int
-    corr_length_windows: float
-    autocorr_max_lag: int
-    autocorr_lags_evaluated: int
-    frf_permutation_valid: bool
-
+    n_blocks: int
     frf_mu_edge: float
     frf_mu_mid: float
-    frf_delta: float          # mu_edge - mu_mid (FST units)
+    frf_delta: float
     frf_a: float
     frf_b: float
-    frf_p: float
-
+    frf_var_delta: float
+    frf_se_delta: float
+    usable_for_meta: bool
 
 # ------------------------- DATA LOADING -------------------------
 
 def normalize_chromosome(chrom: str) -> str:
-    """Normalize chromosome names."""
-    chrom = str(chrom).strip().lower()
-    if chrom.startswith("chr_"):
-        chrom = chrom[4:]
-    elif chrom.startswith("chr"):
-        chrom = chrom[3:]
-    return f"chr{chrom}"
-
+    c = str(chrom).strip().lower()
+    if c.startswith("chr_"):
+        c = c[4:]
+    elif c.startswith("chr"):
+        c = c[3:]
+    return f"chr{c}"
 
 def parse_hudson_header(header: str) -> Optional[Dict[str, Any]]:
-    """Parse Hudson FST header to extract coordinates and component type."""
-    match = _RE_HUD.search(header)
-    if not match:
+    m = _RE_HUD.search(header)
+    if not m:
         return None
-
-    chrom_raw, start_str, end_str = match.groups()
+    chrom_raw, start_str, end_str = m.groups()
     chrom = normalize_chromosome(chrom_raw)
     start = int(start_str)
     end = int(end_str)
-
-    # Determine if numerator or denominator
-    header_lower = header.lower()
-    if "numerator" in header_lower:
+    h = header.lower()
+    if "numerator" in h:
         component = "numerator"
-    elif "denominator" in header_lower:
+    elif "denominator" in h:
         component = "denominator"
     else:
         return None
-
-    return {
-        "chrom": chrom,
-        "start": start,
-        "end": end,
-        "component": component
-    }
-
+    return {"chrom": chrom, "start": start, "end": end, "component": component}
 
 def parse_data_line(line: str) -> np.ndarray:
-    """Parse comma-separated FST data, handling NA values."""
     clean = line.strip()
     if not clean:
         return np.array([], dtype=np.float64)
-
-    # Normalize NA tokens to "nan" for fast parsing
     clean = re.sub(r"\bna\b", "nan", clean, flags=re.IGNORECASE)
     arr = np.fromstring(clean, sep=",", dtype=np.float64)
-
     if arr.size == 0 and clean:
-        # Fallback for pathological strings that np.fromstring cannot parse
         tokens = clean.split(",")
-        values = []
-        for token in tokens:
-            token_stripped = token.strip()
-            if not token_stripped or token_stripped.lower() == "na":
-                values.append(np.nan)
+        vals: List[float] = []
+        for t in tokens:
+            s = t.strip()
+            if not s or s.lower() == "na":
+                vals.append(np.nan)
             else:
                 try:
-                    values.append(float(token_stripped))
+                    vals.append(float(s))
                 except ValueError:
-                    values.append(np.nan)
-        arr = np.array(values, dtype=np.float64)
-
+                    vals.append(np.nan)
+        arr = np.array(vals, dtype=np.float64)
     return arr
 
-
 def load_hudson_data(falsta_path: Path) -> List[Inversion]:
-    """Load Hudson FST numerator/denominator pairs and create windowed inversions."""
     log.info(f"Loading Hudson FST data from {falsta_path}...")
-
-    # First pass: collect all numerator/denominator pairs
-    pairs_by_coords = {}
-
-    current_header = None
-    current_data_lines = []
-
-    with open(falsta_path, 'r') as f:
-        for line in f:
-            line = line.strip()
+    pairs_by_coords: Dict[Tuple[str, int, int], Dict[str, np.ndarray]] = {}
+    current_header: Optional[str] = None
+    current_data_lines: List[str] = []
+    with falsta_path.open("r") as f:
+        for raw in f:
+            line = raw.strip()
             if not line:
                 continue
-
             if line.startswith(">"):
-                # Process previous record
                 if current_header and current_data_lines:
                     parsed = parse_hudson_header(current_header)
                     if parsed:
                         data = parse_data_line("".join(current_data_lines))
                         key = (parsed["chrom"], parsed["start"], parsed["end"])
-
                         if key not in pairs_by_coords:
                             pairs_by_coords[key] = {}
-
                         pairs_by_coords[key][parsed["component"]] = data
-
-                # Start new record
                 current_header = line
                 current_data_lines = []
             else:
                 current_data_lines.append(line)
-
-        # Process last record
         if current_header and current_data_lines:
             parsed = parse_hudson_header(current_header)
             if parsed:
                 data = parse_data_line("".join(current_data_lines))
                 key = (parsed["chrom"], parsed["start"], parsed["end"])
-
                 if key not in pairs_by_coords:
                     pairs_by_coords[key] = {}
-
                 pairs_by_coords[key][parsed["component"]] = data
-
     log.info(f"Found {len(pairs_by_coords)} unique coordinate regions")
 
-    # Second pass: create windowed inversions
-    inversions = []
-
+    inversions: List[Inversion] = []
     for (chrom, start, end), components in pairs_by_coords.items():
         if "numerator" not in components or "denominator" not in components:
             continue
-
         numerator = components["numerator"]
         denominator = components["denominator"]
-
         if len(numerator) != len(denominator):
-            log.warning(f"Length mismatch for {chrom}:{start}-{end}, skipping")
             continue
-
         length = end - start
         if length < MIN_INVERSION_LENGTH:
             continue
-
         n_sites = len(numerator)
         if n_sites == 0:
             continue
 
         n_windows = max(1, (length + WINDOW_SIZE_BP - 1) // WINDOW_SIZE_BP)
-
         site_offsets = np.linspace(0, length, n_sites, endpoint=False)
         window_idx = np.clip((site_offsets // WINDOW_SIZE_BP).astype(int), 0, n_windows - 1)
 
         finite_num = np.isfinite(numerator)
         finite_den = np.isfinite(denominator)
         valid_mask = finite_num & finite_den
+
         num_clean = np.where(finite_num, numerator, 0.0)
         den_clean = np.where(finite_den, denominator, 0.0)
 
@@ -440,7 +350,7 @@ def load_hudson_data(falsta_path: Path) -> List[Inversion]:
         window_ends = np.minimum(window_starts + WINDOW_SIZE_BP, end)
         window_positions = ((window_starts + window_ends) // 2).astype(int)
 
-        windows = []
+        windows: List[Window] = []
         for idx in range(n_windows):
             den_sum = float(den_sums[idx])
             n_valid = int(n_valid_sites[idx])
@@ -449,104 +359,61 @@ def load_hudson_data(falsta_path: Path) -> List[Inversion]:
                     position=int(window_positions[idx]),
                     numerator_sum=float(num_sums[idx]),
                     denominator_sum=den_sum,
-                    n_sites=n_valid
+                    n_sites=n_valid,
                 ))
-
-        # Windows are already in order by construction, but sort for safety
         windows.sort(key=lambda w: w.position)
-
         if len(windows) >= MIN_WINDOWS_PER_INVERSION:
-            inversions.append(Inversion(
-                chrom=chrom,
-                start=start,
-                end=end,
-                length=length,
-                windows=windows
-            ))
+            inversions.append(Inversion(chrom=chrom, start=start, end=end, length=length, windows=windows))
 
     log.info(f"Created {len(inversions)} inversions with ≥{MIN_WINDOWS_PER_INVERSION} windows")
     return inversions
 
-
-# ------------------------- DISTANCE FOLDING -------------------------
+# ------------------------- FRF UTILITIES -------------------------
 
 def compute_folded_distances(inversion: Inversion) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Compute folded distance from breakpoints and prepare data for testing.
-
-    Returns:
-        x_normalized: Distance from nearest breakpoint, normalized to [0, 1]
-        fst_values: FST value for each window
-        weights: Denominator sum (weight) for each window
-    """
-    positions = np.array([w.position for w in inversion.windows])
-    fst_values = np.array([w.fst for w in inversion.windows])
-    weights = np.array([w.denominator_sum for w in inversion.windows])
-
-    # Distance from nearest breakpoint
-    dist_from_start = positions - inversion.start
-    dist_from_end = inversion.end - positions
+    positions = np.array([w.position for w in inversion.windows], dtype=float)
+    fst_values = np.array([w.fst for w in inversion.windows], dtype=float)
+    weights = np.array([w.denominator_sum for w in inversion.windows], dtype=float)
+    dist_from_start = positions - float(inversion.start)
+    dist_from_end = float(inversion.end) - positions
     dist_from_nearest = np.minimum(dist_from_start, dist_from_end)
-
-    # Normalize to [0, 1]: 0 at breakpoint, 1 at center
     max_dist = inversion.length / 2.0
-    x_normalized = dist_from_nearest / max_dist
-
+    if max_dist <= 0:
+        x_normalized = np.full_like(positions, np.nan)
+    else:
+        x_normalized = dist_from_nearest / max_dist
     return x_normalized, fst_values, weights
-
-
-# ------------------------- AUTOCORRELATION / BLOCK SIZE -------------------------
 
 def estimate_correlation_length(
     fst: np.ndarray,
     weights: np.ndarray,
-    max_global_block_size: int = DEFAULT_BLOCK_SIZE_WINDOWS
+    max_global_block_size: int = DEFAULT_BLOCK_SIZE_WINDOWS,
 ) -> Tuple[int, float, int, int]:
-    """
-    Estimate per-inversion correlation length (in windows) from FST fluctuations.
-
-    Returns:
-        block_size_windows: Suggested block size (>=2 windows when possible)
-        corr_length_windows: Estimated correlation length (float, NaN if unavailable)
-        max_lag_considered: Largest lag evaluated
-        lags_evaluated: Number of lag values with valid estimates
-    """
     valid = np.isfinite(fst) & np.isfinite(weights)
     values = fst[valid]
     w = weights[valid]
     n = len(values)
-
-    if n == 0:
-        return max(1, max_global_block_size), np.nan, 0, 0
-    if n == 1:
-        block_size = max(1, min(max_global_block_size, 1))
-        return block_size, np.nan, 0, 0
-
+    if n <= 1:
+        block_size = max(1, min(max_global_block_size, max(n, 1)))
+        return block_size, float("nan"), 0, 0
     if np.sum(w > 0) > 0:
-        mean = np.average(values, weights=w)
+        mean = float(np.average(values, weights=w))
     else:
         mean = float(np.mean(values))
     fluct = values - mean
-
     max_lag_candidate = n - 1
     if max_lag_candidate < 1:
         block_size = max(1, min(max_global_block_size, n))
-        return block_size, np.nan, 0, 0
-
+        return block_size, float("nan"), 0, 0
     autocorr_vals: List[float] = []
     lags: List[int] = []
-
     for lag in range(1, max_lag_candidate + 1):
         v1 = fluct[:-lag]
         v2 = fluct[lag:]
         if len(v1) < AUTOCORR_MIN_PAIRS:
             break
-
         num = float(np.dot(v1, v2)) / len(v1)
-        denom = np.sqrt(
-            (np.dot(v1, v1) / len(v1)) *
-            (np.dot(v2, v2) / len(v2))
-        )
+        denom = math.sqrt((np.dot(v1, v1) / len(v1)) * (np.dot(v2, v2) / len(v2)))
         if denom <= 1e-12:
             corr = 0.0
         else:
@@ -554,172 +421,103 @@ def estimate_correlation_length(
         if not np.isfinite(corr):
             corr = 0.0
         corr = float(np.clip(corr, -1.0, 1.0))
-
         autocorr_vals.append(corr)
         lags.append(lag)
-
     if not autocorr_vals:
         block_size = max(1, min(max_global_block_size, n))
-        return block_size, np.nan, 0 if not lags else lags[-1], 0
-
+        last_lag = lags[-1] if lags else 0
+        return block_size, float("nan"), last_lag, 0
     autocorr_array = np.array(autocorr_vals)
     monotone = np.minimum.accumulate(autocorr_array)
-
     target_idx = np.where(monotone <= AUTOCORR_TARGET)[0]
     if len(target_idx) > 0:
         corr_length = float(lags[target_idx[0]])
     else:
         corr_length = float(lags[-1])
-
     block_size = int(round(max(1.0, corr_length)))
-    block_size = max(1, block_size)
-    block_size = min(block_size, n)
-
-    return block_size, corr_length, lags[-1], len(lags)
-
-
-# ------------------------- PERMUTATION NULL -------------------------
+    block_size = max(1, min(block_size, n))
+    return block_size, corr_length, lags[-1], len(lags))
 
 def precompute_block_structure(n: int, block_size: int) -> List[np.ndarray]:
-    """
-    Precompute block index arrays once.
-
-    Returns list of index arrays, one per block.
-    """
     if n <= 0:
         return []
     if n <= block_size:
-        return [np.arange(n)]
-
+        return [np.arange(n, dtype=int)]
     n_blocks = (n + block_size - 1) // block_size
-    blocks = []
+    blocks: List[np.ndarray] = []
     for i in range(n_blocks):
         start = i * block_size
         end = min(start + block_size, n)
-        blocks.append(np.arange(start, end))
+        blocks.append(np.arange(start, end, dtype=int))
     return blocks
-
 
 def generate_block_permutation_indices(
     blocks: List[np.ndarray],
-    rng: np.random.Generator
+    rng: np.random.Generator,
 ) -> np.ndarray:
-    """
-    Generate one block-permuted index array.
-
-    Shuffles blocks and concatenates them.
-    """
-    shuffled_blocks = blocks.copy()
-    rng.shuffle(shuffled_blocks)
-    return np.concatenate(shuffled_blocks)
-
+    shuffled = list(blocks)
+    rng.shuffle(shuffled)
+    return np.concatenate(shuffled)
 
 def build_exhaustive_frf_candidates(
     x_sorted: np.ndarray,
     min_edge_windows: int,
-    min_mid_windows: int
+    min_mid_windows: int,
 ) -> Dict[str, np.ndarray]:
-    """Enumerate every coherent FRF split in folded-distance order."""
     n = len(x_sorted)
     min_edge_windows = max(1, int(min_edge_windows))
     min_mid_windows = max(1, int(min_mid_windows))
-
     if n == 0:
         empty_int = np.array([], dtype=int)
         empty_float = np.array([], dtype=float)
-        return {
-            "edge_end": empty_int,
-            "mid_start": empty_int,
-            "ramp_start": empty_int,
-            "ramp_end": empty_int,
-            "a_rel": empty_float,
-            "b_rel": empty_float,
-        }
-
+        return {"edge_end": empty_int, "mid_start": empty_int, "ramp_start": empty_int, "ramp_end": empty_int, "a_rel": empty_float, "b_rel": empty_float}
     max_edge_end = n - min_mid_windows - 1
     if max_edge_end < min_edge_windows - 1:
         empty_int = np.array([], dtype=int)
         empty_float = np.array([], dtype=float)
-        return {
-            "edge_end": empty_int,
-            "mid_start": empty_int,
-            "ramp_start": empty_int,
-            "ramp_end": empty_int,
-            "a_rel": empty_float,
-            "b_rel": empty_float,
-        }
-
+        return {"edge_end": empty_int, "mid_start": empty_int, "ramp_start": empty_int, "ramp_end": empty_int, "a_rel": empty_float, "b_rel": empty_float}
     max_mid_start = n - min_mid_windows
-
     edge_candidates = np.arange(min_edge_windows - 1, max_edge_end + 1, dtype=int)
     mid_counts = max_mid_start - (edge_candidates + 1) + 1
     mid_counts = np.clip(mid_counts, 0, None)
     valid_edges = mid_counts > 0
-
     if not np.any(valid_edges):
         empty_int = np.array([], dtype=int)
         empty_float = np.array([], dtype=float)
-        return {
-            "edge_end": empty_int,
-            "mid_start": empty_int,
-            "ramp_start": empty_int,
-            "ramp_end": empty_int,
-            "a_rel": empty_float,
-            "b_rel": empty_float,
-        }
-
+        return {"edge_end": empty_int, "mid_start": empty_int, "ramp_start": empty_int, "ramp_end": empty_int, "a_rel": empty_float, "b_rel": empty_float}
     edge_candidates = edge_candidates[valid_edges]
     mid_counts = mid_counts[valid_edges]
-
     edge_end_arr = np.repeat(edge_candidates, mid_counts)
-
-    mid_segments = [
-        np.arange(edge + 1, edge + 1 + count, dtype=int)
-        for edge, count in zip(edge_candidates, mid_counts)
-    ]
+    mid_segments: List[np.ndarray] = []
+    for edge, count in zip(edge_candidates, mid_counts):
+        mid_segments.append(np.arange(edge + 1, edge + 1 + count, dtype=int))
     mid_start_arr = np.concatenate(mid_segments, dtype=int) if mid_segments else np.array([], dtype=int)
-
     ramp_start_arr = edge_end_arr + 1
     ramp_end_arr = mid_start_arr
-
     a_rel_arr = x_sorted[edge_end_arr].astype(float)
     b_rel_arr = x_sorted[mid_start_arr].astype(float)
-
-    return {
-        "edge_end": edge_end_arr,
-        "mid_start": mid_start_arr,
-        "ramp_start": ramp_start_arr,
-        "ramp_end": ramp_end_arr,
-        "a_rel": a_rel_arr,
-        "b_rel": b_rel_arr,
-    }
-
+    return {"edge_end": edge_end_arr, "mid_start": mid_start_arr, "ramp_start": ramp_start_arr, "ramp_end": ramp_end_arr, "a_rel": a_rel_arr, "b_rel": b_rel_arr}
 
 def _prefix_with_zero(arr: np.ndarray) -> np.ndarray:
-    """Prefix sum with a leading zero column for 2D arrays."""
     if arr.ndim == 1:
         arr = arr[np.newaxis, :]
     out = np.zeros((arr.shape[0], arr.shape[1] + 1), dtype=arr.dtype)
     np.cumsum(arr, axis=1, out=out[:, 1:])
     return out
 
-
 def run_frf_search(
     fst_matrix: np.ndarray,
     weight_matrix: np.ndarray,
     x_sorted: np.ndarray,
     candidates: Dict[str, np.ndarray],
-    half_length_bp: float
+    half_length_bp: float,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Evaluate the exhaustive FRF search for one or more samples."""
     fst_matrix = np.asarray(fst_matrix, dtype=float)
     weight_matrix = np.asarray(weight_matrix, dtype=float)
-
     if fst_matrix.ndim != 2 or weight_matrix.ndim != 2:
-        raise ValueError("fst_matrix and weight_matrix must be 2-dimensional")
+        raise ValueError("fst_matrix and weight_matrix must be 2D")
     if fst_matrix.shape != weight_matrix.shape:
-        raise ValueError("fst_matrix and weight_matrix must have the same shape")
-
+        raise ValueError("fst_matrix and weight_matrix must have same shape")
     n_samples, n_windows = fst_matrix.shape
     if n_windows == 0 or candidates["edge_end"].size == 0 or half_length_bp <= 0:
         nan = np.full(n_samples, np.nan)
@@ -751,6 +549,10 @@ def run_frf_search(
     b_rel = candidates["b_rel"]
 
     n_candidates = edge_end.size
+    if n_candidates == 0:
+        nan = np.full(n_samples, np.nan)
+        return nan, nan, nan, nan, nan
+
     eps = 1e-12
     row_idx = np.arange(n_samples)
 
@@ -762,15 +564,14 @@ def run_frf_search(
     best_b_bp = np.full(n_samples, np.nan)
 
     chunk_size = max(1, min(FRF_CANDIDATE_CHUNK_SIZE, n_candidates))
-
-    for start in range(0, n_candidates, chunk_size):
-        end = min(start + chunk_size, n_candidates)
-        edge_chunk = edge_end[start:end]
-        mid_chunk = mid_start[start:end]
-        ramp_start_chunk = ramp_start[start:end]
-        ramp_end_chunk = ramp_end[start:end]
-        a_chunk = a_rel[start:end]
-        b_chunk = b_rel[start:end]
+    for start_idx in range(0, n_candidates, chunk_size):
+        end_idx = min(start_idx + chunk_size, n_candidates)
+        edge_chunk = edge_end[start_idx:end_idx]
+        mid_chunk = mid_start[start_idx:end_idx]
+        ramp_start_chunk = ramp_start[start_idx:end_idx]
+        ramp_end_chunk = ramp_end[start_idx:end_idx]
+        a_chunk = a_rel[start_idx:end_idx]
+        b_chunk = b_rel[start_idx:end_idx]
 
         edge_idx = edge_chunk + 1
         mid_idx = mid_chunk
@@ -800,16 +601,16 @@ def run_frf_search(
         ramp_sum_wx2 = np.take(prefix_wx2, ramp_end_chunk, axis=1) - np.take(prefix_wx2, ramp_start_chunk, axis=1)
         ramp_sum_wfx = np.take(prefix_wfx, ramp_end_chunk, axis=1) - np.take(prefix_wfx, ramp_start_chunk, axis=1)
 
-        delta = np.maximum(b_chunk - a_chunk, 1e-6)
-        slope = (mu_mid - mu_edge) / delta[np.newaxis, :]
+        delta_rel = np.maximum(b_chunk - a_chunk, 1e-6)
+        slope = (mu_mid - mu_edge) / delta_rel[np.newaxis, :]
         intercept = mu_edge - slope * a_chunk[np.newaxis, :]
 
         ramp_sse = (
             ramp_sum_wf2
-            - 2 * intercept * ramp_sum_wf
-            - 2 * slope * ramp_sum_wfx
+            - 2.0 * intercept * ramp_sum_wf
+            - 2.0 * slope * ramp_sum_wfx
             + (intercept ** 2) * ramp_sum_w
-            + 2 * intercept * slope * ramp_sum_wx
+            + 2.0 * intercept * slope * ramp_sum_wx
             + (slope ** 2) * ramp_sum_wx2
         )
 
@@ -821,13 +622,11 @@ def run_frf_search(
 
         if np.any(update_mask):
             best_sse[update_mask] = chunk_best_sse[update_mask]
-
             selected_mu_edge = mu_edge[row_idx, chunk_best_idx]
             selected_mu_mid = mu_mid[row_idx, chunk_best_idx]
             best_mu_edge[update_mask] = selected_mu_edge[update_mask]
             best_mu_mid[update_mask] = selected_mu_mid[update_mask]
             best_delta[update_mask] = (selected_mu_edge - selected_mu_mid)[update_mask]
-
             a_bp_vals = a_chunk[chunk_best_idx] * half_length_bp
             b_bp_vals = b_chunk[chunk_best_idx] * half_length_bp
             best_a_bp[update_mask] = a_bp_vals[update_mask]
@@ -835,371 +634,538 @@ def run_frf_search(
 
     return best_mu_edge, best_mu_mid, best_delta, best_a_bp, best_b_bp
 
+# ------------------------- PER-INVERSION FRF + NULL -------------------------
 
-def permutation_test(
+def fit_inversion_frf_and_null(
     inversion: Inversion,
     n_permutations: int,
-    block_size: int
-) -> TestResults:
-    """
-    Run the flat-ramp-flat test with a shared block-permutation null distribution.
+    default_block_size: int,
+) -> FRFResult:
+    with worker_activity():
+        x_full, fst_full, w_full = compute_folded_distances(inversion)
+        n_all = len(x_full)
 
-    Optimized version:
-    - Pre-filters data once for statistics computation
-    - Pre-allocates null arrays
-    - Precomputes block structure on FULL spatial grid (preserves spatial correlation)
-    - Precomputes FRF region indices
-    - Vectorizes FRF across permutations
-    """
-    log.info(f"Testing {inversion.inv_key} ({inversion.n_windows} windows)...")
+        valid = np.isfinite(x_full) & np.isfinite(fst_full) & np.isfinite(w_full)
+        n_valid = int(np.sum(valid))
+        n_sites_total = sum(w.n_sites for w in inversion.windows)
 
-    inner_threads = current_inner_threads()
+        if n_valid < 3 or inversion.length <= 0:
+            return FRFResult(
+                inv_key=inversion.inv_key, chrom=inversion.chrom, start=inversion.start, end=inversion.end,
+                length=inversion.length, n_windows=inversion.n_windows, n_sites=n_sites_total,
+                block_size_windows=1, n_blocks=0,
+                frf_mu_edge=float("nan"), frf_mu_mid=float("nan"), frf_delta=float("nan"),
+                frf_a=float("nan"), frf_b=float("nan"),
+                frf_var_delta=float("nan"), frf_se_delta=float("nan"),
+                usable_for_meta=False,
+            )
 
-    # Prepare data (full arrays, may contain NaN)
-    x_full, fst_full, w_full = compute_folded_distances(inversion)
-    n_all = len(x_full)
+        x_v = x_full[valid]
+        fst_v = fst_full[valid]
+        w_v = w_full[valid]
+        half_length = inversion.length / 2.0
 
-    # Identify valid windows
-    valid = np.isfinite(x_full) & np.isfinite(fst_full) & np.isfinite(w_full)
-    n_valid = int(np.sum(valid))
+        block_size_inv, _, _, _ = estimate_correlation_length(
+            fst_v, w_v, max_global_block_size=default_block_size
+        )
 
-    # Compressed valid-only arrays for computing statistics
-    x_v = x_full[valid]
-    fst_v = fst_full[valid]
-    w_v = w_full[valid]
+        order = np.argsort(x_v)
+        x_sorted = x_v[order]
+        fst_sorted = fst_v[order]
+        w_sorted = w_v[order]
 
-    # If insufficient data, tests will return NaN - don't skip the inversion
-    if n_valid < 3:
-        log.warning(f"  Very few valid windows ({n_valid}) for {inversion.inv_key}, results may be NaN")
+        candidates = build_exhaustive_frf_candidates(
+            x_sorted, FRF_MIN_EDGE_WINDOWS, FRF_MIN_MID_WINDOWS
+        )
+        if candidates["edge_end"].size == 0:
+            return FRFResult(
+                inv_key=inversion.inv_key, chrom=inversion.chrom, start=inversion.start, end=inversion.end,
+                length=inversion.length, n_windows=inversion.n_windows, n_sites=n_sites_total,
+                block_size_windows=block_size_inv, n_blocks=0,
+                frf_mu_edge=float("nan"), frf_mu_mid=float("nan"), frf_delta=float("nan"),
+                frf_a=float("nan"), frf_b=float("nan"),
+                frf_var_delta=float("nan"), frf_se_delta=float("nan"),
+                usable_for_meta=False,
+            )
 
-    half_length = inversion.length / 2.0
+        mu_edge_arr, mu_mid_arr, delta_arr, a_bp_arr, b_bp_arr = run_frf_search(
+            fst_sorted[np.newaxis, :],
+            w_sorted[np.newaxis, :],
+            x_sorted,
+            candidates,
+            half_length,
+        )
+        frf_mu_edge = float(mu_edge_arr[0])
+        frf_mu_mid = float(mu_mid_arr[0])
+        frf_delta = float(delta_arr[0])
+        frf_a = float(a_bp_arr[0])
+        frf_b = float(b_bp_arr[0])
 
-    # Estimate correlation length -> per-inversion block size
-    block_size_inv, corr_length_est, autocorr_max_lag, autocorr_lags_eval = estimate_correlation_length(
-        fst_v, w_v, max_global_block_size=block_size
-    )
+        blocks = precompute_block_structure(n_all, block_size_inv)
+        n_blocks = len(blocks)
+        can_permute = n_permutations > 0 and n_blocks >= MIN_BLOCKS_FOR_PERMUTATION
 
-    # Sort by folded distance for exhaustive FRF search
-    order = np.argsort(x_v)
-    x_sorted = x_v[order]
-    fst_sorted = fst_v[order]
-    w_sorted = w_v[order]
+        frf_var_delta = float("nan")
+        frf_se_delta = float("nan")
 
-    # Enumerate all coherent FRF candidates
-    frf_candidates = build_exhaustive_frf_candidates(
-        x_sorted,
-        FRF_MIN_EDGE_WINDOWS,
-        FRF_MIN_MID_WINDOWS,
-    )
+        if can_permute:
+            orig_to_comp = np.full(n_all, -1, dtype=int)
+            orig_to_comp[np.where(valid)[0]] = np.arange(n_valid, dtype=int)
+            base_seed = stable_seed_from_key(inversion.inv_key)
+            total = n_permutations
+            batch_size = PERMUTATION_BATCH_SIZE
+            n_batches = (total + batch_size - 1) // batch_size
 
-    # Observed FRF statistics (computed on valid data only)
-    obs_mu_edge_arr, obs_mu_mid_arr, obs_delta_arr, obs_a_bp_arr, obs_b_bp_arr = run_frf_search(
-        fst_sorted[np.newaxis, :],
-        w_sorted[np.newaxis, :],
-        x_sorted,
-        frf_candidates,
-        half_length,
-    )
+            inner_threads = current_inner_threads()
+            deltas_accum: List[np.ndarray] = []
 
-    obs_frf_edge = float(obs_mu_edge_arr[0])
-    obs_frf_mid = float(obs_mu_mid_arr[0])
-    obs_frf_delta = float(obs_delta_arr[0])
-    obs_frf_a = float(obs_a_bp_arr[0])
-    obs_frf_b = float(obs_b_bp_arr[0])
-
-    # Precompute block structure on FULL spatial grid (not compressed)
-    # This preserves spatial correlation structure in the null
-    blocks = precompute_block_structure(n_all, block_size_inv)
-    n_blocks = len(blocks)
-    enough_blocks = n_blocks >= MIN_BLOCKS_FOR_PERMUTATION
-
-    has_candidates = frf_candidates["edge_end"].size > 0
-
-    can_permute = (
-        enough_blocks
-        and n_valid > 0
-        and has_candidates
-    )
-    null_frf_delta = None
-    p_frf = np.nan
-
-    if can_permute:
-        # Create mapping from original (full) indices to compressed (valid-only) indices
-        orig_to_comp = np.full(n_all, -1, dtype=int)
-        orig_to_comp[np.where(valid)[0]] = np.arange(n_valid)
-
-        rng = np.random.default_rng(seed=stable_seed_from_key(inversion.inv_key))
-        batch_size = min(PERMUTATION_BATCH_SIZE, n_permutations)
-        batch_count = math.ceil(n_permutations / batch_size)
-        null_frf_delta = np.empty(n_permutations, dtype=float)
-
-        executor = None
-        futures = []
-        if inner_threads > 1:
-            executor = ThreadPoolExecutor(max_workers=inner_threads)
-
-        try:
-            generated = 0
-            batch_index = 0
-
-            while generated < n_permutations:
-                batch = min(batch_size, n_permutations - generated)
-                perm_indices = np.empty((batch, n_valid), dtype=int)
-
-                for j in range(batch):
+            def run_batch(batch_index: int) -> np.ndarray:
+                rng = np.random.default_rng(base_seed + 1 + batch_index)
+                size = batch_size if (batch_index + 1) * batch_size <= total else (total - batch_index * batch_size)
+                perm_indices = np.empty((size, n_valid), dtype=int)
+                for j in range(size):
                     idx_full = generate_block_permutation_indices(blocks, rng)
                     idx_comp = orig_to_comp[idx_full]
-                    perm_indices[j, :] = idx_comp[idx_comp >= 0]
-
+                    row = idx_comp[idx_comp >= 0]
+                    perm_indices[j, :] = row
                 fst_perm_batch = fst_v[perm_indices][:, order]
                 w_perm_batch = w_v[perm_indices][:, order]
+                _, _, batch_deltas, _, _ = run_frf_search(
+                    fst_perm_batch, w_perm_batch, x_sorted, candidates, half_length
+                )
+                return batch_deltas
 
-                if executor:
-                    fut = executor.submit(
-                        run_frf_search,
-                        fst_perm_batch,
-                        w_perm_batch,
-                        x_sorted,
-                        frf_candidates,
-                        half_length,
-                    )
-                    futures.append((batch_index, generated, batch, fut))
-                else:
-                    _, _, batch_deltas, _, _ = run_frf_search(
-                        fst_perm_batch,
-                        w_perm_batch,
-                        x_sorted,
-                        frf_candidates,
-                        half_length,
-                    )
-                    null_frf_delta[generated:generated + batch] = batch_deltas
+            if inner_threads > 1 and n_batches > 1:
+                with ThreadPoolExecutor(max_workers=inner_threads) as pool:
+                    futures = {pool.submit(run_batch, b): b for b in range(n_batches)}
+                    for fut in as_completed(futures):
+                        deltas_accum.append(fut.result())
+            else:
+                for b in range(n_batches):
+                    deltas_accum.append(run_batch(b))
 
-                generated += batch
-                batch_index += 1
+            null_deltas = np.concatenate(deltas_accum, axis=0)[:total]
+            finite_mask = np.isfinite(null_deltas)
+            if np.sum(finite_mask) > 1:
+                frf_var_delta = float(np.var(null_deltas[finite_mask], ddof=1))
+                if frf_var_delta > 0.0:
+                    frf_se_delta = float(math.sqrt(frf_var_delta))
 
-            if executor:
-                for batch_idx, offset, batch_len, fut in sorted(futures, key=lambda x: x[0]):
-                    _, _, batch_deltas, _, _ = fut.result()
-                    null_frf_delta[offset:offset + batch_len] = batch_deltas
-        finally:
-            if executor:
-                executor.shutdown(wait=True)
+        usable_for_meta = (
+            np.isfinite(frf_delta) and np.isfinite(frf_var_delta) and frf_var_delta > 0.0
+        )
+        return FRFResult(
+            inv_key=inversion.inv_key, chrom=inversion.chrom, start=inversion.start, end=inversion.end,
+            length=inversion.length, n_windows=inversion.n_windows, n_sites=n_sites_total,
+            block_size_windows=block_size_inv, n_blocks=n_blocks,
+            frf_mu_edge=frf_mu_edge, frf_mu_mid=frf_mu_mid, frf_delta=frf_delta,
+            frf_a=frf_a, frf_b=frf_b,
+            frf_var_delta=frf_var_delta, frf_se_delta=frf_se_delta,
+            usable_for_meta=bool(usable_for_meta),
+        )
 
-        def compute_p_value(obs, null_array):
-            if not np.isfinite(obs):
-                return np.nan
-            valid_null = null_array[np.isfinite(null_array)]
-            if len(valid_null) == 0:
-                return np.nan
-            count = np.sum(np.abs(valid_null) >= np.abs(obs))
-            return (count + 1) / (len(valid_null) + 1)
+def fit_inversion_worker(args) -> FRFResult:
+    inversion, n_permutations, default_block_size = args
+    return fit_inversion_frf_and_null(inversion, n_permutations, default_block_size)
 
-        p_frf = compute_p_value(obs_frf_delta, null_frf_delta)
-    else:
-        if not enough_blocks:
-            log.warning(
-                f"  Only {n_blocks} block(s); need >= {MIN_BLOCKS_FOR_PERMUTATION} for permutation p-values. "
-                "Reporting FRF effect size only."
-            )
-        elif not has_candidates:
-            log.warning("  No valid FRF candidates (insufficient edge/mid coverage); p-value unavailable.")
-        elif n_valid == 0:
-            log.warning("  No valid windows after filtering; p-value unavailable.")
+# ------------------------- RANDOM-EFFECTS META-REGRESSION -------------------------
 
-    # Compile results
-    n_sites_total = sum(w.n_sites for w in inversion.windows)
+def reml_negloglik_tau2(
+    tau2: float,
+    y: np.ndarray,
+    s2: np.ndarray,
+    X: np.ndarray,
+) -> float:
+    if tau2 < 0.0:
+        return 1e300
+    v = s2 + tau2
+    if np.any(v <= 0.0):
+        return 1e300
+    w = 1.0 / v
+    XtW = X.T * w
+    XtWX = XtW @ X
+    det = XtWX[0, 0] * XtWX[1, 1] - XtWX[0, 1] * XtWX[1, 0]
+    if det <= 0.0:
+        return 1e300
+    inv_XtWX = (1.0 / det) * np.array([
+        [XtWX[1, 1], -XtWX[0, 1]],
+        [-XtWX[1, 0], XtWX[0, 0]],
+    ])
+    beta_hat = inv_XtWX @ (XtW @ y)
+    resid = y - X @ beta_hat
+    sse = float(np.sum(w * resid * resid))
+    logdetV = float(np.sum(np.log(v)))
+    logdetXtWX = math.log(det)
+    return 0.5 * (logdetV + sse + logdetXtWX)
 
-    return TestResults(
-        inv_key=inversion.inv_key,
-        chrom=inversion.chrom,
-        start=inversion.start,
-        end=inversion.end,
-        length=inversion.length,
-        n_windows=inversion.n_windows,
-        n_sites=n_sites_total,
-        n_blocks=n_blocks,
-        block_size_windows=block_size_inv,
-        corr_length_windows=corr_length_est,
-        autocorr_max_lag=autocorr_max_lag,
-        autocorr_lags_evaluated=autocorr_lags_eval,
-        frf_permutation_valid=can_permute,
-        frf_mu_edge=obs_frf_edge,
-        frf_mu_mid=obs_frf_mid,
-        frf_delta=obs_frf_delta,
-        frf_a=obs_frf_a,
-        frf_b=obs_frf_b,
-        frf_p=p_frf,
+def estimate_tau2_reml(
+    y: np.ndarray,
+    s2: np.ndarray,
+    X: np.ndarray,
+    max_iter: int = 80,
+    tol: float = 1e-6,
+) -> float:
+    if y.size < 3:
+        return 0.0
+    var_y = float(np.var(y)) if y.size > 1 else 0.0
+    mean_s2 = float(np.mean(s2))
+    upper = max(1e-8, var_y + mean_s2 * 2.0)
+    if upper <= 0.0:
+        return 0.0
+    a = 0.0
+    b = upper
+    invphi = 0.6180339887498949
+    c = b - invphi * (b - a)
+    d = a + invphi * (b - a)
+    fc = reml_negloglik_tau2(c, y, s2, X)
+    fd = reml_negloglik_tau2(d, y, s2, X)
+    for _ in range(max_iter):
+        if abs(b - a) < tol * (1.0 + a + b):
+            break
+        if fc < fd:
+            b = d
+            d = c
+            fd = fc
+            c = b - invphi * (b - a)
+            fc = reml_negloglik_tau2(c, y, s2, X)
+        else:
+            a = c
+            c = d
+            fc = fd
+            d = a + invphi * (b - a)
+            fd = reml_negloglik_tau2(d, y, s2, X)
+    tau2 = max(0.0, (a + b) * 0.5)
+    return tau2
+
+def z_to_p_one_sided_greater(z: float) -> float:
+    if not math.isfinite(z):
+        return float("nan")
+    if z <= 0.0:
+        return 1.0
+    return 0.5 * math.erfc(z / math.sqrt(2.0))
+
+def z_to_p_two_sided(z: float) -> float:
+    if not math.isfinite(z):
+        return float("nan")
+    return math.erfc(abs(z) / math.sqrt(2.0))
+
+def compute_meta_group_effect(y: np.ndarray, s2: np.ndarray, is_single: np.ndarray) -> Tuple[float, float, float, float]:
+    X = np.column_stack([np.ones_like(is_single), is_single])
+    tau2 = estimate_tau2_reml(y, s2, X)
+    v = s2 + tau2
+    w = 1.0 / v
+    XtW = X.T * w
+    XtWX = XtW @ X
+    det = XtWX[0, 0] * XtWX[1, 1] - XtWX[0, 1] * XtWX[1, 0]
+    if det <= 0.0:
+        return tau2, float("nan"), float("nan"), float("nan")
+    inv_XtWX = (1.0 / det) * np.array([
+        [XtWX[1, 1], -XtWX[0, 1]],
+        [-XtWX[1, 0], XtWX[0, 0]],
+    ])
+    beta_hat = inv_XtWX @ (XtW @ y)
+    beta_group = float(beta_hat[1])
+    se_group = float(inv_XtWX[1, 1]) ** 0.5 if inv_XtWX[1, 1] > 0.0 else float("nan")
+    z = beta_group / se_group if (math.isfinite(se_group) and se_group > 0.0) else float("nan")
+    return tau2, beta_group, se_group, z
+
+def run_random_effects_meta_regression(df: pd.DataFrame) -> Optional[Dict[str, float]]:
+    mask = (
+        df["STATUS"].isin([0, 1])
+        & df["usable_for_meta"]
+        & np.isfinite(df["frf_delta"])
+        & np.isfinite(df["frf_var_delta"])
+        & (df["frf_var_delta"] > 0.0)
     )
+    sub = df.loc[mask].copy()
+    if sub.empty:
+        log.warning("No inversions with usable FRF variance and group labels")
+        return None
+    y = sub["frf_delta"].to_numpy(dtype=float)
+    s2 = sub["frf_var_delta"].to_numpy(dtype=float)
+    is_single = (sub["STATUS"] == 0).to_numpy(dtype=float)
+    if np.all(is_single == 0.0) or np.all(is_single == 1.0):
+        log.warning("Only one group present among usable inversions")
+        return None
+    tau2, beta_group, se_group, z = compute_meta_group_effect(y, s2, is_single)
+    beta0_tau2, beta0_group, _, _ = compute_meta_group_effect(y, s2, np.zeros_like(is_single))
+    mu_recurrent = float(np.nan) if not math.isfinite(beta0_group) else float(beta0_tau2 * 0.0 + (np.nan if not math.isfinite(beta0_group) else ( (y*0.0).sum()*0.0 )))  # placeholder to avoid unused warnings
+    # Compute group means explicitly
+    X = np.column_stack([np.ones_like(is_single), is_single])
+    v = s2 + tau2
+    w = 1.0 / v
+    XtW = X.T * w
+    XtWX = XtW @ X
+    det = XtWX[0, 0] * XtWX[1, 1] - XtWX[0, 1] * XtWX[1, 0]
+    inv_XtWX = (1.0 / det) * np.array([
+        [XtWX[1, 1], -XtWX[0, 1]],
+        [-XtWX[1, 0], XtWX[0, 0]],
+    ])
+    beta_hat = inv_XtWX @ (XtW @ y)
+    beta0 = float(beta_hat[0])
+    mu_recurrent = beta0
+    mu_single = beta0 + beta_group
 
+    p_one_sided = z_to_p_one_sided_greater(z)
+    p_two_sided = z_to_p_two_sided(z)
 
-def permutation_test_worker(inversion, n_permutations, block_size):
-    with worker_activity():
-        return permutation_test(inversion, n_permutations, block_size)
+    return {
+        "tau2": float(tau2),
+        "mu_recurrent": mu_recurrent,
+        "mu_single": mu_single,
+        "beta_group": float(beta_group),
+        "se_group": float(se_group),
+        "z_group": float(z),
+        "p_one_sided_single_gt_recurrent": float(p_one_sided),
+        "p_two_sided": float(p_two_sided),
+        "n_total": float(sub.shape[0]),
+        "n_single": float(int(np.sum(sub["STATUS"] == 0))),
+        "n_recurrent": float(int(np.sum(sub["STATUS"] == 1))),
+    }
 
+# ------------------------- META-LEVEL PERMUTATION -------------------------
+
+def meta_permutation_pvalue(
+    y: np.ndarray,
+    s2: np.ndarray,
+    is_single: np.ndarray,
+    n_perm: int,
+    chunk: int,
+    base_seed: int,
+    n_workers: int,
+    use_stat: str = "beta",
+) -> Dict[str, float]:
+    n = y.size
+    n_workers = max(1, min(n_workers, (n_perm + chunk - 1) // chunk))
+    obs_tau2, obs_beta, obs_se, obs_z = compute_meta_group_effect(y, s2, is_single)
+    if use_stat == "beta":
+        T_obs = obs_beta
+    else:
+        T_obs = obs_z
+
+    def run_perm_chunk(start_idx: int, size: int, seed: int) -> np.ndarray:
+        rng = np.random.default_rng(seed)
+        stats = np.empty(size, dtype=float)
+        for i in range(size):
+            perm_labels = rng.permutation(is_single)
+            _, b, se, z = compute_meta_group_effect(y, s2, perm_labels)
+            stats[i] = b if use_stat == "beta" else z
+        return stats
+
+    tasks = []
+    with ProcessPoolExecutor(max_workers=n_workers) as pool:
+        idx = 0
+        while idx < n_perm:
+            take = min(chunk, n_perm - idx)
+            seed = base_seed + 1 + (idx // chunk)
+            tasks.append(pool.submit(run_perm_chunk, idx, take, seed))
+            idx += take
+        perm_stats: List[np.ndarray] = []
+        for fut in as_completed(tasks):
+            perm_stats.append(fut.result())
+
+    T = np.concatenate(perm_stats, axis=0)[:n_perm]
+    finite = np.isfinite(T)
+    T = T[finite]
+    if T.size == 0 or not math.isfinite(T_obs):
+        return {
+            "p_perm_one_sided": float("nan"),
+            "p_perm_two_sided": float("nan"),
+            "T_obs": float(T_obs),
+        }
+    p_one = (1.0 + float(np.sum(T >= T_obs))) / (1.0 + float(T.size))
+    p_two = (1.0 + float(np.sum(np.abs(T) >= abs(T_obs)))) / (1.0 + float(T.size))
+    return {"p_perm_one_sided": float(p_one), "p_perm_two_sided": float(p_two), "T_obs": float(T_obs)}
 
 # ------------------------- MAIN -------------------------
 
 def main():
     log.info("=" * 80)
-    log.info("Per-Inversion Breakpoint vs Middle FST Test")
+    log.info("Flat–Ramp–Flat Breakpoint Enrichment: Random-Effects Meta-Analysis + Permutation")
     log.info("=" * 80)
     log.info("")
-    log.info("Sign convention:")
+    log.info("Sign convention: frf_delta = mu_edge - mu_mid")
     log.info("  POSITIVE = FST higher at breakpoints")
     log.info("  NEGATIVE = FST higher in middle")
     log.info("")
 
-    # Look for falsta file
-    falsta_path = None
-
-    # Check cache locations
+    falsta_path: Optional[Path] = None
     if FALSTA_CACHE.exists():
-        log.info(f"Found cached FST data: {FALSTA_CACHE}")
         falsta_path = FALSTA_CACHE
+        log.info(f"Found cached FST data: {falsta_path}")
     elif (OUTDIR / "per_site_fst_output.falsta").exists():
         falsta_path = OUTDIR / "per_site_fst_output.falsta"
         log.info(f"Found FST data: {falsta_path}")
 
-    # Try to download if not found locally
-    if not falsta_path:
-        log.info("FST data not found locally, attempting to download from GitHub Actions...")
-        falsta_path = download_latest_artifact(
-            GITHUB_REPO,
-            WORKFLOW_NAME,
-            ARTIFACT_NAME_FALSTA,
-            OUTDIR
-        )
+    if falsta_path is None:
+        log.info("FST data not found locally, attempting download from GitHub Actions...")
+        falsta_path = download_latest_artifact(GITHUB_REPO, WORKFLOW_NAME, ARTIFACT_NAME_FALSTA, OUTDIR)
 
-    if not falsta_path:
+    if falsta_path is None or not falsta_path.exists():
         log.error("")
         log.error("=" * 80)
         log.error("FST DATA NOT FOUND")
         log.error("=" * 80)
-        log.error("")
-        log.error("Please download per_site_fst_output.falsta from GitHub Actions:")
-        log.error(f"  1. Go to: https://github.com/{GITHUB_REPO}/actions/workflows/{WORKFLOW_NAME}")
-        log.error(f"  2. Click on the most recent successful run")
-        log.error(f"  3. Download the '{ARTIFACT_NAME_FALSTA}' artifact")
-        log.error(f"  4. Extract per_site_fst_output.falsta to current directory")
-        log.error("")
+        log.error("Obtain per_site_fst_output.falsta and place it in the current directory or OUTDIR.")
         sys.exit(1)
 
-    # Load data
     inversions = load_hudson_data(falsta_path)
-
     if not inversions:
         log.error("No inversions loaded. Exiting.")
         sys.exit(1)
 
-    log.info(f"Loaded {len(inversions)} inversions for testing")
-    log.info(f"Running {N_PERMUTATIONS} permutations with per-inversion block sizes (fallback={DEFAULT_BLOCK_SIZE_WINDOWS} windows)")
-    log.info(f"Minimum blocks required for FRF p-values: {MIN_BLOCKS_FOR_PERMUTATION}")
-    log.info("")
-
-    # Create output directory
     OUTDIR.mkdir(parents=True, exist_ok=True)
 
-    # Run tests in parallel
-    all_results = []
-    start_time = time.time()
-
-    # Determine number of workers
-    n_workers = min(os.cpu_count() or 1, len(inversions))
-    log.info(f"Using {n_workers} parallel workers")
+    log.info("")
+    log.info(f"Running FRF fitting and null permutations for {len(inversions)} inversions")
+    log.info(f"Permutations per inversion: {N_PERMUTATIONS}")
     log.info("")
 
+    n_workers = min(os.cpu_count() or 1, len(inversions))
     active_counter = mp.Value('i', 0)
+    all_results: List[FRFResult] = []
 
     with ProcessPoolExecutor(
         max_workers=n_workers,
         initializer=init_worker,
-        initargs=(active_counter, TOTAL_CPUS)
+        initargs=(active_counter, TOTAL_CPUS),
     ) as executor:
-        # Submit all jobs
-        future_to_inv = {
-            executor.submit(permutation_test_worker, inv, N_PERMUTATIONS, DEFAULT_BLOCK_SIZE_WINDOWS): inv
+        futures = {
+            executor.submit(
+                fit_inversion_worker,
+                (inv, N_PERMUTATIONS, DEFAULT_BLOCK_SIZE_WINDOWS),
+            ): inv
             for inv in inversions
         }
-
-        # Collect results as they complete
         completed = 0
-        for future in as_completed(future_to_inv):
-            inv = future_to_inv[future]
+        for future in as_completed(futures):
+            inv = futures[future]
+            res = future.result()
+            all_results.append(res)
             completed += 1
+            meta_flag = "usable" if res.usable_for_meta else "not-usable"
+            log.info(
+                f"[{completed}/{len(inversions)}] {res.inv_key} "
+                f"Δ={res.frf_delta:+.4f} "
+                f"(var={res.frf_var_delta:.3e}) "
+                f"[blocks={res.n_blocks}, block_size={res.block_size_windows}] "
+                f"[{meta_flag}]"
+            )
 
-            try:
-                result = future.result()
-                if result is not None:
-                    all_results.append(result)
+    if not all_results:
+        log.error("No FRF results obtained. Exiting.")
+        sys.exit(1)
 
-                    # Log summary
-                    log.info(f"[{completed}/{len(inversions)}] {result.inv_key}")
-                    if np.isfinite(result.frf_p):
-                        p_text = f"{result.frf_p:.4f}"
-                    elif not result.frf_permutation_valid:
-                        p_text = f"NA (blocks={result.n_blocks})"
-                    else:
-                        p_text = "NA"
-                    frf_info = f"Δ={result.frf_delta:+.4f}, p={p_text}"
-                    if np.isfinite(result.frf_a) and np.isfinite(result.frf_b):
-                        frf_info += f" [ramp: {result.frf_a/1000:.0f}-{result.frf_b/1000:.0f}kb]"
-                    frf_info += f" [block_size={result.block_size_windows}, blocks={result.n_blocks}]"
-                    log.info(f"  Flat-ramp-flat: {frf_info}")
-                    log.info("")
-                else:
-                    log.warning(f"[{completed}/{len(inversions)}] {inv.inv_key} - Insufficient data")
+    df = pd.DataFrame([vars(r) for r in all_results])
 
-            except Exception as e:
-                log.error(f"[{completed}/{len(inversions)}] {inv.inv_key} - Error: {e}", exc_info=True)
+    inv_props = pd.read_csv(INV_PROPERTIES_PATH, sep="\t").copy()
+    had_cols = set(inv_props.columns)
+    if CHR_COL_INV not in had_cols:
+        log.error(f"{INV_PROPERTIES_PATH} missing column: {CHR_COL_INV}")
+        sys.exit(1)
+    if START_COL_INV not in had_cols or END_COL_INV not in had_cols:
+        log.error(f"{INV_PROPERTIES_PATH} missing Start/End columns")
+        sys.exit(1)
+    if STATUS_COL not in had_cols:
+        log.error(f"{INV_PROPERTIES_PATH} missing column: {STATUS_COL}")
+        sys.exit(1)
 
-    elapsed = time.time() - start_time
+    inv_props["chrom_norm"] = inv_props[CHR_COL_INV].apply(normalize_chromosome)
+    df["chrom_norm"] = df["chrom"]
+    merged = pd.merge(
+        df,
+        inv_props[[CHR_COL_INV, START_COL_INV, END_COL_INV, STATUS_COL, "chrom_norm"]],
+        left_on=["chrom_norm", "start", "end"],
+        right_on=["chrom_norm", START_COL_INV, END_COL_INV],
+        how="inner",
+        validate="1:1",
+    )
+    merged = merged.rename(columns={STATUS_COL: "STATUS"})
+    merged.drop(columns=["chrom_norm"], inplace=True)
 
-    # Save results
-    if all_results:
-        df = pd.DataFrame([vars(r) for r in all_results])
+    n_matched = merged.shape[0]
+    log.info("")
+    log.info(f"Matched {n_matched} inversions to inv_properties.tsv by chrom/start/end")
 
-        # Sort by strongest evidence (lowest FRF p-value, NaNs last)
-        df = df.sort_values('frf_p', na_position='last')
+    merged["usable_for_meta"] = merged["usable_for_meta"].astype(bool)
+    per_inv_out = OUTDIR / "per_inversion_frf_effects.tsv"
+    merged.to_csv(per_inv_out, sep="\t", index=False)
+    log.info(f"Per-inversion FRF results (with group labels) written to: {per_inv_out}")
 
-        output_tsv = OUTDIR / "per_inversion_breakpoint_test_results.tsv"
-        df.to_csv(output_tsv, sep='\t', index=False)
+    meta_results = run_random_effects_meta_regression(merged)
 
-        log.info("")
-        log.info("=" * 80)
-        log.info("SUMMARY")
-        log.info("=" * 80)
-        log.info(f"Total inversions tested: {len(all_results)}")
-        log.info(f"Time elapsed: {elapsed:.1f}s ({elapsed/len(all_results):.1f}s per inversion)")
-        log.info("")
+    log.info("")
+    log.info("=" * 80)
+    log.info("RANDOM-EFFECTS META-ANALYSIS: group 0 (single) vs group 1 (recurrent)")
+    log.info("=" * 80)
 
-        n_valid_perm = int(np.sum(df['frf_permutation_valid']))
-        n_invalid_perm = len(df) - n_valid_perm
+    if meta_results is None:
+        log.warning("Meta-analysis could not be performed with available data.")
+        return
 
-        sig_mask = (df['frf_p'] < 0.05).fillna(False)
-        sig_frf = int(sig_mask.sum())
-        valid_denominator = max(n_valid_perm, 1)
+    tau2 = meta_results["tau2"]
+    mu_recurrent = meta_results["mu_recurrent"]
+    mu_single = meta_results["mu_single"]
+    beta_group = meta_results["beta_group"]
+    se_group = meta_results["se_group"]
+    z_group = meta_results["z_group"]
+    p_one = meta_results["p_one_sided_single_gt_recurrent"]
+    p_two = meta_results["p_two_sided"]
 
-        log.info(f"Valid permutation tests (>= {MIN_BLOCKS_FOR_PERMUTATION} blocks): {n_valid_perm}")
-        if n_invalid_perm > 0:
-            log.info(f"Inversions without valid permutations (p=NA): {n_invalid_perm}")
-        log.info(f"Significant at p<0.05:")
-        log.info(f"  Flat-ramp-flat: {sig_frf:3d} ({sig_frf/valid_denominator*100:5.1f}% of testable inversions)")
+    n_total = int(meta_results["n_total"])
+    n_single = int(meta_results["n_single"])
+    n_recurrent = int(meta_results["n_recurrent"])
 
-        # Direction consistency among significant results
-        if sig_mask.sum() > 0:
-            edges_higher = np.sum(df.loc[sig_mask, 'frf_delta'] > 0)
-            middle_higher = np.sum(df.loc[sig_mask, 'frf_delta'] < 0)
+    log.info(f"Usable inversions for meta-analysis: {n_total}")
+    log.info(f"  group 0 (single-event): {n_single}")
+    log.info(f"  group 1 (recurrent):    {n_recurrent}")
+    log.info(f"Estimated between-inversion variance tau^2: {tau2:.4e}")
+    log.info("")
+    log.info(f"Mean frf_delta (recurrent, group 1): {mu_recurrent:+.4f}")
+    log.info(f"Mean frf_delta (single,   group 0): {mu_single:+.4f}")
+    log.info(f"Difference (single - recurrent):   {beta_group:+.4f}")
+    log.info(f"SE(diff): {se_group:.4f}")
+    log.info(f"z-statistic: {z_group:.3f}")
+    log.info(f"One-sided p (normal theory): {p_one:.4g}")
+    log.info(f"Two-sided p (normal theory): {p_two:.4g}")
+    log.info("")
 
-            log.info(f"Among FRF-significant inversions (n={sig_mask.sum()}):")
-            log.info(f"  Edges higher:  {edges_higher}")
-            log.info(f"  Middle higher: {middle_higher}")
-            log.info("")
+    # Meta-level permutation p-values
+    mask = (
+        merged["STATUS"].isin([0, 1])
+        & merged["usable_for_meta"]
+        & np.isfinite(merged["frf_delta"])
+        & np.isfinite(merged["frf_var_delta"])
+        & (merged["frf_var_delta"] > 0.0)
+    )
+    sub = merged.loc[mask].copy()
+    y = sub["frf_delta"].to_numpy(dtype=float)
+    s2 = sub["frf_var_delta"].to_numpy(dtype=float)
+    is_single = (sub["STATUS"] == 0).to_numpy(dtype=float)
 
-        log.info(f"Results saved to: {output_tsv}")
-        log.info("")
+    n_meta_workers = min(TOTAL_CPUS, max(1, (META_PERMUTATIONS + META_PERM_CHUNK - 1) // META_PERM_CHUNK))
+    perm_out = meta_permutation_pvalue(
+        y=y,
+        s2=s2,
+        is_single=is_single,
+        n_perm=META_PERMUTATIONS,
+        chunk=META_PERM_CHUNK,
+        base_seed=stable_seed_from_key("meta-permutation") + META_PERM_BASE_SEED,
+        n_workers=n_meta_workers,
+        use_stat="beta",
+    )
+    p_perm_one = perm_out["p_perm_one_sided"]
+    p_perm_two = perm_out["p_perm_two_sided"]
+    log.info(f"Permutation p (one-sided, single > recurrent): {p_perm_one:.4g}")
+    log.info(f"Permutation p (two-sided): {p_perm_two:.4g}")
+    log.info("")
 
-    log.info("Done!")
-
+    if math.isfinite(p_perm_one) and p_perm_one < 0.05:
+        log.info("Conclusion: Meta-analysis with label-exchange permutation supports higher breakpoint enrichment")
+        log.info("             for group 0 (single-event) inversions than for group 1 (recurrent).")
+    else:
+        log.info("Conclusion: Meta-analysis with permutation does not provide strong evidence that")
+        log.info("             group 0 (single-event) frf_delta exceeds group 1 (recurrent).")
 
 if __name__ == "__main__":
     main()
