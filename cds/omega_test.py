@@ -870,13 +870,14 @@ def load_gene_metadata(tsv_path='phy_metadata.tsv'):
             f"Metadata: dropped {dropped_missing} rows with missing gene/enst/chr/start/end.")
 
     # Swap start/end if reversed
-    flipped = (df['_start'] > df['_end']).sum()
+    flipped_mask = df['_start'] > df['_end']
+    flipped = flipped_mask.sum()
     if flipped:
         logging.warning(
             f"Metadata: found {flipped} rows with start > end; swapping.")
-        s = df['_start'].copy()
-        df.loc[df['_start'] > df['_end'], '_start'] = df.loc[df['_start'] > df['_end'], '_end']
-        df.loc[df['_start'] > df['_end'], '_end'] = s[df['_start'] > df['_end']]
+        original_starts = df.loc[flipped_mask, '_start'].copy()
+        df.loc[flipped_mask, '_start'] = df.loc[flipped_mask, '_end']
+        df.loc[flipped_mask, '_end'] = original_starts
 
     # Collapse duplicates keeping widest span
     df['_width'] = (df['_end'] - df['_start']).abs()
