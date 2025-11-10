@@ -912,17 +912,17 @@ def run_random_effects_meta_regression(df: pd.DataFrame) -> Optional[Dict[str, f
         log.warning("Only one group present among usable inversions")
         return None
     tau2, beta_group, se_group, z = compute_meta_group_effect(y, s2, is_single)
-    beta0_tau2, beta0_group, _, _ = compute_meta_group_effect(y, s2, np.zeros_like(is_single))
-    mu_recurrent = float(np.nan) if not math.isfinite(beta0_group) else float(beta0_tau2 * 0.0 + (np.nan if not math.isfinite(beta0_group) else ( (y*0.0).sum()*0.0 )))  # placeholder to avoid unused warnings
-    # Compute group means explicitly
+    # Compute group means explicitly from the fitted model
     X = np.column_stack([np.ones_like(is_single), is_single])
     v = s2 + tau2
     w = 1.0 / v
     XtW = X.T * w
     XtWX = XtW @ X
     XtWy = XtW @ y
+    
     try:
-        beta_hat, _, _ = _solve_weighted_normal_equations(XtWX, XtWy, compute_inverse=False)
+        # Solve the normal equations using stable linear solver
+        beta_hat = np.linalg.solve(XtWX, XtWy)
         beta0 = float(beta_hat[0])
         mu_recurrent = beta0
         mu_single = beta0 + beta_group
@@ -977,15 +977,6 @@ def meta_permutation_pvalue(
         T_obs = obs_beta
     else:
         T_obs = obs_z
-
-    def run_perm_chunk(start_idx: int, size: int, seed: int) -> np.ndarray:
-        rng = np.random.default_rng(seed)
-        stats = np.empty(size, dtype=float)
-        for i in range(size):
-            perm_labels = rng.permutation(is_single)
-            _, b, se, z = compute_meta_group_effect(y, s2, perm_labels)
-            stats[i] = b if use_stat == "beta" else z
-        return stats
 
     tasks = []
     with ProcessPoolExecutor(max_workers=n_workers) as pool:
