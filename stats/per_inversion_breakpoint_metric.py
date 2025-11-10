@@ -856,8 +856,13 @@ def run_permutation_chunk(args) -> PermutationChunkResult:
         perm_indices = perm_indices[perm_indices >= 0].reshape(size, plan.n_valid)
     else:
         perm_indices = perm_indices.reshape(size, plan.n_valid)
+    
+    # Defensive check: ensure permutation indices have correct shape
+    if perm_indices.shape != (size, plan.n_valid):
+        raise RuntimeError(f"Permutation index shape mismatch: expected {(size, plan.n_valid)}, got {perm_indices.shape}")
 
     fst_perm_batch = plan.fst_values[perm_indices][:, plan.order]
+
     w_perm_batch = plan.weight_values[perm_indices][:, plan.order]
     _, _, deltas, _, _ = run_frf_search(
         fst_perm_batch,
@@ -1108,16 +1113,8 @@ def meta_permutation_pvalue(
     else:
         T_obs = obs_z
 
-    task_specs: List[Tuple[int, int, int, Tuple[Any, ...]]] = []
-    idx = 0
-    while idx < n_perm:
-        take = min(chunk, n_perm - idx)
-        seed = base_seed + 1 + (idx // chunk)
-        args = (idx, take, seed, y, s2, is_single, use_stat)
-        task_specs.append((take, idx, seed, args))
-        idx += take
-
     with ProcessPoolExecutor(max_workers=n_workers) as pool:
+        tasks = []
         idx = 0
         while idx < n_perm:
             take = min(chunk, n_perm - idx)
