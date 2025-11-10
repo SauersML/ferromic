@@ -730,15 +730,40 @@ def fit_inversion_frf_and_null(
             inner_threads = current_inner_threads()
             deltas_accum: List[np.ndarray] = []
 
+            block_comp_indices: List[np.ndarray] = []
+            for block in blocks:
+                comp = orig_to_comp[block]
+                comp = comp[comp >= 0]
+                block_comp_indices.append(comp)
+
+            block_lengths = np.array([comp.size for comp in block_comp_indices], dtype=int)
+            expected_valid = int(block_lengths.sum()) if block_lengths.size else 0
+            if expected_valid != n_valid:
+                raise RuntimeError(
+                    "Mismatch between block composition and number of valid windows"
+                )
+            max_block_len = int(block_lengths.max(initial=0)) if block_lengths.size else 0
+            block_index = (
+                np.full((n_blocks, max_block_len), -1, dtype=int)
+                if max_block_len > 0
+                else np.empty((n_blocks, 0), dtype=int)
+            )
+            for i, comp in enumerate(block_comp_indices):
+                if comp.size:
+                    block_index[i, : comp.size] = comp
+            has_padding = bool(np.any(block_lengths != max_block_len)) if block_lengths.size else False
+
             def run_batch(batch_index: int) -> np.ndarray:
                 rng = np.random.default_rng(base_seed + 1 + batch_index)
                 size = batch_size if (batch_index + 1) * batch_size <= total else (total - batch_index * batch_size)
-                perm_indices = np.empty((size, n_valid), dtype=int)
-                for j in range(size):
-                    idx_full = generate_block_permutation_indices(blocks, rng)
-                    idx_comp = orig_to_comp[idx_full]
-                    row = idx_comp[idx_comp >= 0]
-                    perm_indices[j, :] = row
+                if size == 0:
+                    return np.empty((0,), dtype=float)
+                block_orders = np.argsort(rng.random((size, n_blocks)), axis=1)
+                perm_indices = block_index[block_orders].reshape(size, -1)
+                if has_padding:
+                    perm_indices = perm_indices[perm_indices >= 0].reshape(size, n_valid)
+                else:
+                    perm_indices = perm_indices.reshape(size, n_valid)
                 fst_perm_batch = fst_v[perm_indices][:, order]
                 w_perm_batch = w_v[perm_indices][:, order]
                 _, _, batch_deltas, _, _ = run_frf_search(
