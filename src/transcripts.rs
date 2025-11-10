@@ -977,17 +977,62 @@ pub fn filter_and_log_transcripts(
             }
         }
 
+        let min_start = tcds
+            .segments
+            .iter()
+            .map(|seg| seg.start as i64)
+            .min()
+            .unwrap();
+        let max_end = tcds
+            .segments
+            .iter()
+            .map(|seg| seg.end as i64)
+            .max()
+            .unwrap();
+
         if total_coding_length % 3 != 0 {
             stats.non_divisible_by_three += 1;
+            let remainder = total_coding_length % 3;
+            let segment_summary = tcds
+                .segments
+                .iter()
+                .map(|seg| format!("{}-{}", seg.start, seg.end))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let gene_display = if tcds.gene_name.is_empty() {
+                &tcds.gene_id
+            } else {
+                &tcds.gene_name
+            };
             println!(
-                "  {} Warning: Total CDS length {} not divisible by 3",
+                concat!(
+                    "  {} Warning: Transcript {} (gene: {}, strand: {}) has total CDS length {} ",
+                    "not divisible by 3 (remainder {}, span {}-{}, segments: [{}])"
+                ),
                 "!".yellow(),
-                total_coding_length
+                tcds.transcript_id,
+                gene_display,
+                tcds.strand,
+                total_coding_length,
+                remainder,
+                min_start,
+                max_end,
+                segment_summary
             );
             writeln!(
                 log_file,
-                "  Warning: Total CDS length {} not divisible by 3",
-                total_coding_length
+                concat!(
+                    "  Warning: Transcript {} (gene: {}, strand: {}) has total CDS length {} ",
+                    "not divisible by 3 (remainder {}, span {}-{}, segments: [{}])"
+                ),
+                tcds.transcript_id,
+                gene_display,
+                tcds.strand,
+                total_coding_length,
+                remainder,
+                min_start,
+                max_end,
+                segment_summary
             )
             .expect("Failed to write to transcript_overlap.log");
 
@@ -995,13 +1040,13 @@ pub fn filter_and_log_transcripts(
                 LogLevel::Info,
                 &format!(
                     "    Remainder when divided by 3: {}",
-                    total_coding_length % 3
+                    remainder
                 ),
             );
             writeln!(
                 log_file,
                 "    Remainder when divided by 3: {}",
-                total_coding_length % 3
+                remainder
             )
             .expect("Failed to write to transcript_overlap.log");
 
@@ -1026,18 +1071,6 @@ pub fn filter_and_log_transcripts(
             .expect("Failed to write to transcript_overlap.log");
         }
 
-        let min_start = tcds
-            .segments
-            .iter()
-            .map(|seg| seg.start as i64)
-            .min()
-            .unwrap();
-        let max_end = tcds
-            .segments
-            .iter()
-            .map(|seg| seg.end as i64)
-            .max()
-            .unwrap();
         let transcript_span = max_end - min_start;
 
         log(
