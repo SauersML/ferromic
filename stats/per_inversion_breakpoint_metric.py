@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import sys
 import os
+import time
 
 # Ensure BLAS-style math libraries do not oversubscribe threads when this module
 # is imported. Environment variables are respected only if they are unset so
@@ -17,6 +18,7 @@ import hashlib
 import math
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict, Any
+from collections import deque
 from dataclasses import dataclass
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import numpy as np
@@ -163,6 +165,22 @@ def download_latest_artifact(
     return extracted_files[0]
 
 # ------------------------- DATA STRUCTURES -------------------------
+
+
+def _format_duration(seconds: float) -> str:
+    if not math.isfinite(seconds) or seconds < 0:
+        return "unknown"
+    seconds = int(seconds)
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes, seconds = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{minutes}m {seconds}s"
+    hours, minutes = divmod(minutes, 60)
+    if hours < 24:
+        return f"{hours}h {minutes}m"
+    days, hours = divmod(hours, 24)
+    return f"{days}d {hours}h"
 
 @dataclass
 class Window:
@@ -1233,24 +1251,104 @@ def main():
     }
 
     if chunk_tasks:
+        total_chunks = len(chunk_tasks)
         log.info(
-            f"Running {len(chunk_tasks)} permutation chunks across {len(plans)} inversions"
+            f"Running {total_chunks} permutation chunks across {len(plans)} inversions"
         )
-        perm_workers = min(TOTAL_CPUS, len(chunk_tasks))
+        perm_workers = min(TOTAL_CPUS, total_chunks)
         perm_workers = max(1, perm_workers)
+        inv_chunk_totals = {plan.inv_key: plan.n_chunks for plan in plans}
+        inv_progress = {key: 0 for key in inv_chunk_totals}
+        completed_inversions: set[str] = set()
+        start_time = time.time()
+        recent_completions: deque[float] = deque(maxlen=min(50, total_chunks))
+        chunks_completed = 0
+        last_reported_percent = -1
+        last_report_time = start_time
+        last_reported_chunk = 0
+        min_chunk_interval = max(1, total_chunks // 200)
+        max_report_interval = 30.0
         with ProcessPoolExecutor(max_workers=perm_workers) as executor:
             future_map = {
                 executor.submit(run_permutation_chunk, task): task for task in chunk_tasks
             }
             for future in as_completed(future_map):
                 chunk_result = future.result()
-                stats = stats_by_inv.get(chunk_result.inv_key)
-                if stats is None:
-                    continue
-                stats["n"] += chunk_result.n_finite
-                stats["sum"] += chunk_result.sum_delta
-                stats["sum_sq"] += chunk_result.sum_sq_delta
-                stats["count_ge"] += chunk_result.count_ge_observed
+                now = time.time()
+                recent_completions.append(now)
+                chunks_completed += 1
+                inv_key = chunk_result.inv_key
+                inv_progress[inv_key] = inv_progress.get(inv_key, 0) + 1
+                stats = stats_by_inv.get(inv_key)
+                if stats is not None:
+                    stats["n"] += chunk_result.n_finite
+                    stats["sum"] += chunk_result.sum_delta
+                    stats["sum_sq"] += chunk_result.sum_sq_delta
+                    stats["count_ge"] += chunk_result.count_ge_observed
+
+                report_reason = False
+                percent_complete = (chunks_completed / total_chunks) * 100.0
+                percent_bucket = int(percent_complete)
+                if percent_bucket > last_reported_percent:
+                    report_reason = True
+                    last_reported_percent = percent_bucket
+                if chunks_completed - last_reported_chunk >= min_chunk_interval:
+                    report_reason = True
+                if now - last_report_time >= max_report_interval:
+                    report_reason = True
+
+                inversion_completed = False
+                inv_total = inv_chunk_totals.get(inv_key, 0)
+                if inv_total and inv_progress[inv_key] == inv_total and inv_key not in completed_inversions:
+                    completed_inversions.add(inv_key)
+                    inversion_completed = True
+                    report_reason = True
+
+                if report_reason:
+                    last_report_time = now
+                    last_reported_chunk = chunks_completed
+                    elapsed = now - start_time
+                    if len(recent_completions) >= 2:
+                        duration = recent_completions[-1] - recent_completions[0]
+                        if duration > 0:
+                            rate = (len(recent_completions) - 1) / duration
+                        else:
+                            rate = float("inf")
+                    else:
+                        rate = float("nan")
+                    remaining_chunks = total_chunks - chunks_completed
+                    if math.isfinite(rate) and rate > 0:
+                        eta_seconds = remaining_chunks / rate
+                    elif elapsed > 0 and chunks_completed > 0:
+                        avg_rate = chunks_completed / elapsed
+                        eta_seconds = remaining_chunks / avg_rate if avg_rate > 0 else float("nan")
+                    else:
+                        eta_seconds = float("nan")
+                    eta_str = _format_duration(eta_seconds)
+                    rate_str = f"{rate:.2f}" if math.isfinite(rate) and rate > 0 else "--"
+                    log.info(
+                        "Permutation progress: %s/%s chunks (%.1f%%) - rate %s chunks/s - ETA %s - inversions %s/%s complete",
+                        chunks_completed,
+                        total_chunks,
+                        percent_complete,
+                        rate_str,
+                        eta_str,
+                        len(completed_inversions),
+                        len(inv_chunk_totals),
+                    )
+                    if inversion_completed:
+                        log.info(
+                            "Completed inversion %s (%s chunks)",
+                            inv_key,
+                            inv_total,
+                        )
+        total_elapsed = time.time() - start_time
+        overall_rate = total_chunks / total_elapsed if total_elapsed > 0 else float("nan")
+        log.info(
+            "Permutation chunks finished in %s (average rate %s chunks/s)",
+            _format_duration(total_elapsed),
+            f"{overall_rate:.2f}" if math.isfinite(overall_rate) and overall_rate > 0 else "--",
+        )
     else:
         log.info("No permutation work required (insufficient blocks or permutations set to zero)")
 
