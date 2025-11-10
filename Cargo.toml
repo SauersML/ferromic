@@ -62,6 +62,7 @@ glob = "0.3.3"
 ndarray = { version = "0.16.1", features = ["rayon"] }
 efficient_pca = { version = "0.1.8", default-features = false, features = ["backend_faer"] }
 faer = { version = "0.22.6", features = ["std", "rayon"] }
+smallvec = "1.13"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }

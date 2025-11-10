@@ -7,9 +7,13 @@ mod hudson_fst_tests {
 
     /// Helper function to create test variants
     fn create_test_variant(position: i64, genotypes: Vec<Option<Vec<u8>>>) -> Variant {
+        let packed: Vec<Option<PackedGenotype>> = genotypes
+            .into_iter()
+            .map(|gt| gt.map(PackedGenotype::from_vec))
+            .collect();
         Variant {
             position,
-            genotypes,
+            genotypes: Arc::from(packed),
         }
     }
 
@@ -1337,7 +1341,10 @@ mod hudson_fst_tests {
             .expect("Hudson FST calculation should succeed with dense summaries");
 
         // Callable sites: 2 (indices 0 and 1). Dxy contributions = 1.0 and 0.5 → average 0.75.
-        assert!(outcome.d_xy.is_some(), "Dxy should be computed for callable sites");
+        assert!(
+            outcome.d_xy.is_some(),
+            "Dxy should be computed for callable sites"
+        );
         let dxy = outcome.d_xy.unwrap();
         assert!((dxy - 0.75).abs() < 1e-12, "Unexpected Dxy value: {dxy}");
     }
@@ -1386,28 +1393,24 @@ mod hudson_fst_tests {
         let result = calculate_d_xy_hudson(&pop1_context, &pop2_context)
             .expect("Dxy calculation should succeed with dense summaries");
 
-        assert!(result.d_xy.is_some(), "Dxy should be computed for callable sites");
+        assert!(
+            result.d_xy.is_some(),
+            "Dxy should be computed for callable sites"
+        );
         let dxy = result.d_xy.unwrap();
-        assert!((dxy - 0.75).abs() < 1e-12, "Unexpected Dxy value from summaries: {dxy}");
+        assert!(
+            (dxy - 0.75).abs() < 1e-12,
+            "Unexpected Dxy value from summaries: {dxy}"
+        );
     }
 
     #[test]
     fn test_hudson_dxy_from_summaries_none_when_no_shared_callable_sites() {
-        let pop1_summary = DensePopulationSummary::from_parts_for_test(
-            vec![0_u32, 1],
-            vec![2_u32, 2],
-            1,
-            1,
-            1.0,
-        );
+        let pop1_summary =
+            DensePopulationSummary::from_parts_for_test(vec![0_u32, 1], vec![2_u32, 2], 1, 1, 1.0);
 
-        let pop2_summary = DensePopulationSummary::from_parts_for_test(
-            vec![0_u32, 0],
-            vec![0_u32, 0],
-            0,
-            0,
-            1.0,
-        );
+        let pop2_summary =
+            DensePopulationSummary::from_parts_for_test(vec![0_u32, 0], vec![0_u32, 0], 0, 0, 1.0);
 
         let sample_names = vec!["s1".to_string()];
         let variants: Vec<Variant> = Vec::new();

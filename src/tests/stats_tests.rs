@@ -10,12 +10,19 @@ mod tests {
 
     use crate::transcripts::CdsRegion;
     use crate::parse::{parse_region, validate_vcf_header, read_reference_sequence, parse_config_file, find_vcf_file, open_vcf_reader};
-    use crate::process::{MissingDataInfo, FilteringStats, process_config_entries, process_variants, process_variant, QueryRegion, ZeroBasedHalfOpen, Variant, VcfError, HaplotypeSide, Args};
+    use crate::process::{MissingDataInfo, FilteringStats, PackedGenotype, process_config_entries, process_variants, process_variant, QueryRegion, ZeroBasedHalfOpen, Variant, VcfError, HaplotypeSide, Args};
     use crate::stats::{count_segregating_sites, calculate_pairwise_differences, calculate_per_site_diversity, calculate_watterson_theta, calculate_pi, harmonic, calculate_inversion_allele_frequency};
 
     // Helper function to create a Variant for testing
     fn create_variant(position: i64, genotypes: Vec<Option<Vec<u8>>>) -> Variant {
-        Variant { position, genotypes }
+        let packed: Vec<Option<PackedGenotype>> = genotypes
+            .into_iter()
+            .map(|gt| gt.map(PackedGenotype::from_vec))
+            .collect();
+        Variant {
+            position,
+            genotypes: Arc::from(packed),
+        }
     }
 
     #[test]
@@ -736,7 +743,11 @@ mod tests {
     
         if let Some((variant, is_valid)) = result {
             assert!(is_valid);
-            assert_eq!(variant.genotypes, vec![Some(vec![0, 0]), Some(vec![0, 1])]);
+            let expected: Vec<Option<PackedGenotype>> = vec![
+                Some(PackedGenotype::from_vec(vec![0, 0])),
+                Some(PackedGenotype::from_vec(vec![0, 1])),
+            ];
+            assert_eq!(variant.genotypes.as_ref(), expected.as_slice());
         } else {
             panic!("Expected Some variant, got None");
         }
