@@ -18,10 +18,7 @@ import math
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict, Any
 from dataclasses import dataclass
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
-from contextlib import contextmanager
-import multiprocessing as mp
-
+from concurrent.futures import ProcessPoolExecutor, as_completed
 import numpy as np
 import pandas as pd
 import requests
@@ -54,8 +51,7 @@ MIN_WINDOWS_PER_INVERSION = 20
 
 N_PERMUTATIONS = 3_000
 DEFAULT_BLOCK_SIZE_WINDOWS = 5
-PERMUTATION_BATCH_SIZE = 256
-MAX_INNER_THREADS = max(1, os.cpu_count() or 1)
+PERMUTATION_CHUNK_SIZE = 256
 
 FRF_MIN_EDGE_WINDOWS = 1
 FRF_MIN_MID_WINDOWS = 1
@@ -70,9 +66,6 @@ META_PERM_CHUNK = 1000
 META_PERM_BASE_SEED = 777
 
 TOTAL_CPUS = max(1, os.cpu_count() or 1)
-_ACTIVE_COUNTER = None
-_TOTAL_CPUS_SHARED = TOTAL_CPUS
-
 EPS_DENOM = 1e-12
 
 _RE_HUD = re.compile(
@@ -85,31 +78,6 @@ _RE_HUD = re.compile(
 def stable_seed_from_key(key: str) -> int:
     h = hashlib.md5(key.encode("utf-8")).hexdigest()
     return int(h[:8], 16)
-
-def init_worker(active_counter, total_cpus):
-    global _ACTIVE_COUNTER, _TOTAL_CPUS_SHARED
-    _ACTIVE_COUNTER = active_counter
-    _TOTAL_CPUS_SHARED = total_cpus
-
-@contextmanager
-def worker_activity():
-    if _ACTIVE_COUNTER is None:
-        yield
-        return
-    with _ACTIVE_COUNTER.get_lock():
-        _ACTIVE_COUNTER.value += 1
-    try:
-        yield
-    finally:
-        with _ACTIVE_COUNTER.get_lock():
-            _ACTIVE_COUNTER.value = max(0, _ACTIVE_COUNTER.value - 1)
-
-def current_inner_threads() -> int:
-    if _ACTIVE_COUNTER is None or _TOTAL_CPUS_SHARED <= 1:
-        return 1
-    with _ACTIVE_COUNTER.get_lock():
-        active = max(1, _ACTIVE_COUNTER.value)
-    return max(1, min(MAX_INNER_THREADS, _TOTAL_CPUS_SHARED // active))
 
 # ------------------------- GITHUB ARTIFACT DOWNLOAD -------------------------
 
@@ -221,6 +189,46 @@ class Inversion:
     @property
     def inv_key(self) -> str:
         return f"{self.chrom}_{self.start}_{self.end}"
+
+@dataclass
+class PermutationPlan:
+    inv_key: str
+    base_seed: int
+    n_permutations: int
+    chunk_size: int
+    n_valid: int
+    order: np.ndarray
+    fst_values: np.ndarray
+    weight_values: np.ndarray
+    x_sorted: np.ndarray
+    candidates: Dict[str, np.ndarray]
+    half_length: float
+    block_index: np.ndarray
+    has_padding: bool
+    observed_delta: float
+
+    @property
+    def n_chunks(self) -> int:
+        if self.n_permutations <= 0:
+            return 0
+        return (self.n_permutations + self.chunk_size - 1) // self.chunk_size
+
+
+@dataclass
+class PreparedInversion:
+    result: "FRFResult"
+    plan: Optional[PermutationPlan]
+
+
+@dataclass
+class PermutationChunkResult:
+    inv_key: str
+    chunk_index: int
+    n_finite: int
+    sum_delta: float
+    sum_sq_delta: float
+    count_ge_observed: int
+
 
 @dataclass
 class FRFResult:
@@ -666,174 +674,216 @@ def run_frf_search(
 
 # ------------------------- PER-INVERSION FRF + NULL -------------------------
 
-def fit_inversion_frf_and_null(
+def prepare_inversion_frf_and_permutation(
     inversion: Inversion,
     n_permutations: int,
     default_block_size: int,
-) -> FRFResult:
-    with worker_activity():
-        x_full, fst_full, w_full = compute_folded_distances(inversion)
-        n_all = len(x_full)
+) -> PreparedInversion:
+    x_full, fst_full, w_full = compute_folded_distances(inversion)
+    n_all = len(x_full)
 
-        valid = np.isfinite(x_full) & np.isfinite(fst_full) & np.isfinite(w_full)
-        n_valid = int(np.sum(valid))
-        n_sites_total = sum(w.n_sites for w in inversion.windows)
+    valid = np.isfinite(x_full) & np.isfinite(fst_full) & np.isfinite(w_full)
+    n_valid = int(np.sum(valid))
+    n_sites_total = sum(w.n_sites for w in inversion.windows)
 
-        if n_valid < 3 or inversion.length <= 0:
-            return FRFResult(
-                inv_key=inversion.inv_key, chrom=inversion.chrom, start=inversion.start, end=inversion.end,
-                length=inversion.length, n_windows=inversion.n_windows, n_sites=n_sites_total,
-                block_size_windows=1, n_blocks=0,
-                frf_mu_edge=float("nan"), frf_mu_mid=float("nan"), frf_delta=float("nan"),
-                frf_null_delta_mean=float("nan"),
-                frf_a=float("nan"), frf_b=float("nan"),
-                frf_var_delta=float("nan"), frf_se_delta=float("nan"),
-                usable_for_meta=False,
-            )
-
-        x_v = x_full[valid]
-        fst_v = fst_full[valid]
-        w_v = w_full[valid]
-        half_length = inversion.length / 2.0
-
-        block_size_inv, _, _, _ = estimate_correlation_length(
-            fst_v, w_v, max_global_block_size=default_block_size
+    if n_valid < 3 or inversion.length <= 0:
+        result = FRFResult(
+            inv_key=inversion.inv_key,
+            chrom=inversion.chrom,
+            start=inversion.start,
+            end=inversion.end,
+            length=inversion.length,
+            n_windows=inversion.n_windows,
+            n_sites=n_sites_total,
+            block_size_windows=1,
+            n_blocks=0,
+            frf_mu_edge=float("nan"),
+            frf_mu_mid=float("nan"),
+            frf_delta=float("nan"),
+            frf_null_delta_mean=float("nan"),
+            frf_a=float("nan"),
+            frf_b=float("nan"),
+            frf_var_delta=float("nan"),
+            frf_se_delta=float("nan"),
+            usable_for_meta=False,
         )
+        return PreparedInversion(result=result, plan=None)
 
-        order = np.argsort(x_v)
-        x_sorted = x_v[order]
-        fst_sorted = fst_v[order]
-        w_sorted = w_v[order]
+    x_v = x_full[valid]
+    fst_v = fst_full[valid]
+    w_v = w_full[valid]
+    half_length = inversion.length / 2.0
 
-        candidates = build_exhaustive_frf_candidates(
-            x_sorted, FRF_MIN_EDGE_WINDOWS, FRF_MIN_MID_WINDOWS
+    block_size_inv, _, _, _ = estimate_correlation_length(
+        fst_v, w_v, max_global_block_size=default_block_size
+    )
+
+    order = np.argsort(x_v)
+    x_sorted = x_v[order]
+    fst_sorted = fst_v[order]
+    w_sorted = w_v[order]
+
+    candidates = build_exhaustive_frf_candidates(
+        x_sorted, FRF_MIN_EDGE_WINDOWS, FRF_MIN_MID_WINDOWS
+    )
+    if candidates["edge_end"].size == 0:
+        result = FRFResult(
+            inv_key=inversion.inv_key,
+            chrom=inversion.chrom,
+            start=inversion.start,
+            end=inversion.end,
+            length=inversion.length,
+            n_windows=inversion.n_windows,
+            n_sites=n_sites_total,
+            block_size_windows=block_size_inv,
+            n_blocks=0,
+            frf_mu_edge=float("nan"),
+            frf_mu_mid=float("nan"),
+            frf_delta=float("nan"),
+            frf_null_delta_mean=float("nan"),
+            frf_a=float("nan"),
+            frf_b=float("nan"),
+            frf_var_delta=float("nan"),
+            frf_se_delta=float("nan"),
+            usable_for_meta=False,
         )
-        if candidates["edge_end"].size == 0:
-            return FRFResult(
-                inv_key=inversion.inv_key, chrom=inversion.chrom, start=inversion.start, end=inversion.end,
-                length=inversion.length, n_windows=inversion.n_windows, n_sites=n_sites_total,
-                block_size_windows=block_size_inv, n_blocks=0,
-                frf_mu_edge=float("nan"), frf_mu_mid=float("nan"), frf_delta=float("nan"),
-                frf_null_delta_mean=float("nan"),
-                frf_a=float("nan"), frf_b=float("nan"),
-                frf_var_delta=float("nan"), frf_se_delta=float("nan"),
-                usable_for_meta=False,
-            )
+        return PreparedInversion(result=result, plan=None)
 
-        mu_edge_arr, mu_mid_arr, delta_arr, a_bp_arr, b_bp_arr = run_frf_search(
-            fst_sorted[np.newaxis, :],
-            w_sorted[np.newaxis, :],
-            x_sorted,
-            candidates,
-            half_length,
-        )
-        frf_mu_edge = float(mu_edge_arr[0])
-        frf_mu_mid = float(mu_mid_arr[0])
-        frf_delta = float(delta_arr[0])
-        frf_a = float(a_bp_arr[0])
-        frf_b = float(b_bp_arr[0])
+    mu_edge_arr, mu_mid_arr, delta_arr, a_bp_arr, b_bp_arr = run_frf_search(
+        fst_sorted[np.newaxis, :],
+        w_sorted[np.newaxis, :],
+        x_sorted,
+        candidates,
+        half_length,
+    )
+    frf_mu_edge = float(mu_edge_arr[0])
+    frf_mu_mid = float(mu_mid_arr[0])
+    frf_delta = float(delta_arr[0])
+    frf_a = float(a_bp_arr[0])
+    frf_b = float(b_bp_arr[0])
 
-        blocks = precompute_block_structure(n_all, block_size_inv)
-        n_blocks = len(blocks)
-        can_permute = n_permutations > 0 and n_blocks >= MIN_BLOCKS_FOR_PERMUTATION
+    blocks = precompute_block_structure(n_all, block_size_inv)
+    n_blocks = len(blocks)
+    can_permute = n_permutations > 0 and n_blocks >= MIN_BLOCKS_FOR_PERMUTATION
 
-        frf_var_delta = float("nan")
-        frf_se_delta = float("nan")
-        frf_null_delta_mean = float("nan")
+    result = FRFResult(
+        inv_key=inversion.inv_key,
+        chrom=inversion.chrom,
+        start=inversion.start,
+        end=inversion.end,
+        length=inversion.length,
+        n_windows=inversion.n_windows,
+        n_sites=n_sites_total,
+        block_size_windows=block_size_inv,
+        n_blocks=n_blocks,
+        frf_mu_edge=frf_mu_edge,
+        frf_mu_mid=frf_mu_mid,
+        frf_delta=frf_delta,
+        frf_null_delta_mean=float("nan"),
+        frf_a=frf_a,
+        frf_b=frf_b,
+        frf_var_delta=float("nan"),
+        frf_se_delta=float("nan"),
+        usable_for_meta=False,
+    )
 
-        if can_permute:
-            orig_to_comp = np.full(n_all, -1, dtype=int)
-            orig_to_comp[np.where(valid)[0]] = np.arange(n_valid, dtype=int)
-            base_seed = stable_seed_from_key(inversion.inv_key)
-            total = n_permutations
-            batch_size = PERMUTATION_BATCH_SIZE
-            n_batches = (total + batch_size - 1) // batch_size
+    if not can_permute:
+        return PreparedInversion(result=result, plan=None)
 
-            inner_threads = current_inner_threads()
-            deltas_accum: List[np.ndarray] = []
+    orig_to_comp = np.full(n_all, -1, dtype=int)
+    orig_to_comp[np.where(valid)[0]] = np.arange(n_valid, dtype=int)
+    block_comp_indices: List[np.ndarray] = []
+    for block in blocks:
+        comp = orig_to_comp[block]
+        comp = comp[comp >= 0]
+        block_comp_indices.append(comp)
 
-            block_comp_indices: List[np.ndarray] = []
-            for block in blocks:
-                comp = orig_to_comp[block]
-                comp = comp[comp >= 0]
-                block_comp_indices.append(comp)
+    block_lengths = np.array([comp.size for comp in block_comp_indices], dtype=int)
+    expected_valid = int(block_lengths.sum()) if block_lengths.size else 0
+    if expected_valid != n_valid:
+        raise RuntimeError("Mismatch between block composition and number of valid windows")
+    max_block_len = int(block_lengths.max(initial=0)) if block_lengths.size else 0
+    block_index = (
+        np.full((n_blocks, max_block_len), -1, dtype=int)
+        if max_block_len > 0
+        else np.empty((n_blocks, 0), dtype=int)
+    )
+    for i, comp in enumerate(block_comp_indices):
+        if comp.size:
+            block_index[i, : comp.size] = comp
+    has_padding = bool(np.any(block_lengths != max_block_len)) if block_lengths.size else False
 
-            block_lengths = np.array([comp.size for comp in block_comp_indices], dtype=int)
-            expected_valid = int(block_lengths.sum()) if block_lengths.size else 0
-            if expected_valid != n_valid:
-                raise RuntimeError(
-                    "Mismatch between block composition and number of valid windows"
-                )
-            max_block_len = int(block_lengths.max(initial=0)) if block_lengths.size else 0
-            block_index = (
-                np.full((n_blocks, max_block_len), -1, dtype=int)
-                if max_block_len > 0
-                else np.empty((n_blocks, 0), dtype=int)
-            )
-            for i, comp in enumerate(block_comp_indices):
-                if comp.size:
-                    block_index[i, : comp.size] = comp
-            has_padding = bool(np.any(block_lengths != max_block_len)) if block_lengths.size else False
+    plan = PermutationPlan(
+        inv_key=inversion.inv_key,
+        base_seed=stable_seed_from_key(inversion.inv_key),
+        n_permutations=n_permutations,
+        chunk_size=PERMUTATION_CHUNK_SIZE,
+        n_valid=n_valid,
+        order=order,
+        fst_values=fst_v,
+        weight_values=w_v,
+        x_sorted=x_sorted,
+        candidates=candidates,
+        half_length=half_length,
+        block_index=block_index,
+        has_padding=has_padding,
+        observed_delta=frf_delta,
+    )
+    return PreparedInversion(result=result, plan=plan)
 
-            def run_batch(batch_index: int) -> np.ndarray:
-                rng = np.random.default_rng(base_seed + 1 + batch_index)
-                size = batch_size if (batch_index + 1) * batch_size <= total else (total - batch_index * batch_size)
-                if size == 0:
-                    return np.empty((0,), dtype=float)
-                block_orders = np.argsort(rng.random((size, n_blocks)), axis=1)
-                perm_indices = block_index[block_orders].reshape(size, -1)
-                if has_padding:
-                    perm_indices = perm_indices[perm_indices >= 0].reshape(size, n_valid)
-                else:
-                    perm_indices = perm_indices.reshape(size, n_valid)
-                fst_perm_batch = fst_v[perm_indices][:, order]
-                w_perm_batch = w_v[perm_indices][:, order]
-                _, _, batch_deltas, _, _ = run_frf_search(
-                    fst_perm_batch, w_perm_batch, x_sorted, candidates, half_length
-                )
-                return batch_deltas
 
-            if inner_threads > 1 and n_batches > 1:
-                batch_indices = list(range(n_batches))
-                batch_indices.sort(
-                    key=lambda b: (
-                        batch_size if (b + 1) * batch_size <= total else (total - b * batch_size)
-                    ),
-                    reverse=True,
-                )
-                with ThreadPoolExecutor(max_workers=inner_threads) as pool:
-                    futures = [pool.submit(run_batch, b) for b in batch_indices]
-                    for fut in as_completed(futures):
-                        deltas_accum.append(fut.result())
-            else:
-                for b in range(n_batches):
-                    deltas_accum.append(run_batch(b))
-
-            null_deltas = np.concatenate(deltas_accum, axis=0)[:total]
-            finite_mask = np.isfinite(null_deltas)
-            if np.sum(finite_mask) > 1:
-                frf_null_delta_mean = float(np.mean(null_deltas[finite_mask]))
-                frf_var_delta = float(np.var(null_deltas[finite_mask], ddof=1))
-                if frf_var_delta > 0.0:
-                    frf_se_delta = float(math.sqrt(frf_var_delta))
-
-        usable_for_meta = (
-            np.isfinite(frf_delta) and np.isfinite(frf_var_delta) and frf_var_delta > 0.0
-        )
-        return FRFResult(
-            inv_key=inversion.inv_key, chrom=inversion.chrom, start=inversion.start, end=inversion.end,
-            length=inversion.length, n_windows=inversion.n_windows, n_sites=n_sites_total,
-            block_size_windows=block_size_inv, n_blocks=n_blocks,
-            frf_mu_edge=frf_mu_edge, frf_mu_mid=frf_mu_mid, frf_delta=frf_delta,
-            frf_null_delta_mean=frf_null_delta_mean,
-            frf_a=frf_a, frf_b=frf_b,
-            frf_var_delta=frf_var_delta, frf_se_delta=frf_se_delta,
-            usable_for_meta=bool(usable_for_meta),
-        )
-
-def fit_inversion_worker(args) -> FRFResult:
+def fit_inversion_worker(args) -> PreparedInversion:
     inversion, n_permutations, default_block_size = args
-    return fit_inversion_frf_and_null(inversion, n_permutations, default_block_size)
+    return prepare_inversion_frf_and_permutation(inversion, n_permutations, default_block_size)
+
+
+def run_permutation_chunk(args) -> PermutationChunkResult:
+    plan, chunk_index = args
+    start = chunk_index * plan.chunk_size
+    remaining = plan.n_permutations - start
+    if remaining <= 0:
+        return PermutationChunkResult(plan.inv_key, chunk_index, 0, 0.0, 0.0, 0)
+
+    size = min(plan.chunk_size, remaining)
+    n_blocks = plan.block_index.shape[0]
+    if n_blocks == 0 or plan.n_valid <= 0:
+        return PermutationChunkResult(plan.inv_key, chunk_index, 0, 0.0, 0.0, 0)
+
+    rng = np.random.default_rng(plan.base_seed + chunk_index)
+    block_orders = np.argsort(rng.random((size, n_blocks)), axis=1)
+    perm_indices = plan.block_index[block_orders].reshape(size, -1)
+    if plan.has_padding:
+        perm_indices = perm_indices[perm_indices >= 0].reshape(size, plan.n_valid)
+    else:
+        perm_indices = perm_indices.reshape(size, plan.n_valid)
+
+    fst_perm_batch = plan.fst_values[perm_indices][:, plan.order]
+    w_perm_batch = plan.weight_values[perm_indices][:, plan.order]
+    _, _, deltas, _, _ = run_frf_search(
+        fst_perm_batch,
+        w_perm_batch,
+        plan.x_sorted,
+        plan.candidates,
+        plan.half_length,
+    )
+    deltas = np.asarray(deltas, dtype=float)
+
+    finite = np.isfinite(deltas)
+    if not np.any(finite):
+        return PermutationChunkResult(plan.inv_key, chunk_index, 0, 0.0, 0.0, 0)
+
+    valid = deltas[finite]
+    sum_delta = float(np.sum(valid))
+    sum_sq_delta = float(np.sum(valid * valid))
+    count_ge = int(np.sum(valid >= plan.observed_delta))
+    return PermutationChunkResult(
+        plan.inv_key,
+        chunk_index,
+        int(valid.size),
+        sum_delta,
+        sum_sq_delta,
+        count_ge,
+    )
 
 # ------------------------- RANDOM-EFFECTS META-REGRESSION -------------------------
 
@@ -1137,8 +1187,7 @@ def main():
     log.info("")
 
     n_workers = min(os.cpu_count() or 1, len(inversions))
-    active_counter = mp.Value('i', 0)
-    all_results: List[FRFResult] = []
+    prepared_results: List[PreparedInversion] = []
 
     prioritized_inversions = sorted(
         inversions,
@@ -1148,8 +1197,6 @@ def main():
 
     with ProcessPoolExecutor(
         max_workers=n_workers,
-        initializer=init_worker,
-        initargs=(active_counter, TOTAL_CPUS),
     ) as executor:
         futures = {}
         for inv in prioritized_inversions:
@@ -1161,18 +1208,91 @@ def main():
         completed = 0
         for future in as_completed(futures):
             inv = futures[future]
-            res = future.result()
-            all_results.append(res)
+            prepared = future.result()
+            prepared_results.append(prepared)
             completed += 1
-            meta_flag = "usable" if res.usable_for_meta else "not-usable"
+            delta = prepared.result.frf_delta
+            delta_str = f"{delta:+.4f}" if np.isfinite(delta) else "nan"
             log.info(
-                f"[{completed}/{len(inversions)}] {res.inv_key} "
-                f"Δ={res.frf_delta:+.4f} "
-                f"(var={res.frf_var_delta:.3e}) "
-                f"[blocks={res.n_blocks}, block_size={res.block_size_windows}] "
-                f"[{meta_flag}]"
+                f"[{completed}/{len(inversions)}] {inv.inv_key} "
+                f"Δ={delta_str} (permutation plan ready)"
             )
 
+    if not prepared_results:
+        log.error("No FRF results obtained. Exiting.")
+        sys.exit(1)
+
+    plans = [prep.plan for prep in prepared_results if prep.plan is not None]
+    results_by_key = {prep.result.inv_key: prep.result for prep in prepared_results}
+
+    chunk_tasks = []
+    for plan in plans:
+        for chunk_index in range(plan.n_chunks):
+            chunk_tasks.append((plan, chunk_index))
+
+    stats_by_inv = {
+        plan.inv_key: {"n": 0, "sum": 0.0, "sum_sq": 0.0, "count_ge": 0}
+        for plan in plans
+    }
+
+    if chunk_tasks:
+        log.info(
+            f"Running {len(chunk_tasks)} permutation chunks across {len(plans)} inversions"
+        )
+        perm_workers = min(TOTAL_CPUS, len(chunk_tasks))
+        perm_workers = max(1, perm_workers)
+        with ProcessPoolExecutor(max_workers=perm_workers) as executor:
+            future_map = {
+                executor.submit(run_permutation_chunk, task): task for task in chunk_tasks
+            }
+            for future in as_completed(future_map):
+                chunk_result = future.result()
+                stats = stats_by_inv.get(chunk_result.inv_key)
+                if stats is None:
+                    continue
+                stats["n"] += chunk_result.n_finite
+                stats["sum"] += chunk_result.sum_delta
+                stats["sum_sq"] += chunk_result.sum_sq_delta
+                stats["count_ge"] += chunk_result.count_ge_observed
+    else:
+        log.info("No permutation work required (insufficient blocks or permutations set to zero)")
+
+    for plan in plans:
+        res = results_by_key[plan.inv_key]
+        stats = stats_by_inv.get(plan.inv_key, {})
+        n = stats.get("n", 0)
+        if n > 1:
+            sum_delta = stats["sum"]
+            sum_sq_delta = stats["sum_sq"]
+            mean_delta = float(sum_delta / n)
+            res.frf_null_delta_mean = mean_delta
+            variance = (sum_sq_delta - (sum_delta ** 2) / n) / (n - 1)
+            variance = float(max(0.0, variance))
+            res.frf_var_delta = variance
+            res.frf_se_delta = float(math.sqrt(variance)) if variance > 0.0 else float("nan")
+        else:
+            res.frf_null_delta_mean = float("nan")
+            res.frf_var_delta = float("nan")
+            res.frf_se_delta = float("nan")
+        res.usable_for_meta = (
+            np.isfinite(res.frf_delta)
+            and np.isfinite(res.frf_var_delta)
+            and res.frf_var_delta > 0.0
+        )
+
+    all_results: List[FRFResult] = [prep.result for prep in prepared_results]
+
+    for idx, res in enumerate(all_results, start=1):
+        delta_str = f"{res.frf_delta:+.4f}" if np.isfinite(res.frf_delta) else "nan"
+        var_str = f"{res.frf_var_delta:.3e}" if np.isfinite(res.frf_var_delta) else "nan"
+        meta_flag = "usable" if res.usable_for_meta else "not-usable"
+        log.info(
+            f"[{idx}/{len(all_results)}] {res.inv_key} "
+            f"Δ={delta_str} "
+            f"(var={var_str}) "
+            f"[blocks={res.n_blocks}, block_size={res.block_size_windows}] "
+            f"[{meta_flag}]"
+        )
     if not all_results:
         log.error("No FRF results obtained. Exiting.")
         sys.exit(1)
