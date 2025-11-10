@@ -960,15 +960,6 @@ def meta_permutation_pvalue(
     else:
         T_obs = obs_z
 
-    def run_perm_chunk(start_idx: int, size: int, seed: int) -> np.ndarray:
-        rng = np.random.default_rng(seed)
-        stats = np.empty(size, dtype=float)
-        for i in range(size):
-            perm_labels = rng.permutation(is_single)
-            _, b, se, z = compute_meta_group_effect(y, s2, perm_labels)
-            stats[i] = b if use_stat == "beta" else z
-        return stats
-
     tasks = []
     with ProcessPoolExecutor(max_workers=n_workers) as pool:
         idx = 0
