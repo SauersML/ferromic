@@ -52,7 +52,7 @@ MIN_INVERSION_LENGTH = 0
 MIN_WINDOWS_PER_INVERSION = 20
 
 N_PERMUTATIONS = 3_000
-DEFAULT_BLOCK_SIZE_WINDOWS = 5
+DEFAULT_BLOCK_SIZE_WINDOWS = 10
 PERMUTATION_CHUNK_SIZE = 256
 
 FRF_MIN_EDGE_WINDOWS = 1
@@ -60,12 +60,12 @@ FRF_MIN_MID_WINDOWS = 1
 MIN_BLOCKS_FOR_PERMUTATION = 5
 
 AUTOCORR_MIN_PAIRS = 5
-AUTOCORR_TARGET = 0.3
+AUTOCORR_TARGET = 0.4
 FRF_CANDIDATE_CHUNK_SIZE = 8192
 
 META_PERMUTATIONS = 10000
 META_PERM_CHUNK = 1000
-META_PERM_BASE_SEED = 777
+META_PERM_BASE_SEED = 2025
 
 TOTAL_CPUS = max(1, os.cpu_count() or 1)
 EPS_DENOM = 1e-12
@@ -1237,24 +1237,13 @@ def main():
         log.error("No FRF results obtained. Exiting.")
         sys.exit(1)
 
-    def plan_cost(plan: PermutationPlan) -> int:
-        # Prioritize plans that have more valid windows and require more chunks,
-        # which is a cheap surrogate for overall permutation workload.
-        return max(1, int(plan.n_valid)) * max(1, plan.n_chunks)
-
-    plans = sorted(
-        (prep.plan for prep in prepared_results if prep.plan is not None),
-        key=plan_cost,
-        reverse=True,
-    )
+    plans = [prep.plan for prep in prepared_results if prep.plan is not None]
     results_by_key = {prep.result.inv_key: prep.result for prep in prepared_results}
 
-    max_chunks = max((plan.n_chunks for plan in plans), default=0)
-    chunk_tasks: List[Tuple[PermutationPlan, int]] = []
-    for chunk_index in range(max_chunks):
-        for plan in plans:
-            if chunk_index < plan.n_chunks:
-                chunk_tasks.append((plan, chunk_index))
+    chunk_tasks = []
+    for plan in plans:
+        for chunk_index in range(plan.n_chunks):
+            chunk_tasks.append((plan, chunk_index))
 
     stats_by_inv = {
         plan.inv_key: {"n": 0, "sum": 0.0, "sum_sq": 0.0, "count_ge": 0}
