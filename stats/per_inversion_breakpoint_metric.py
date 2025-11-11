@@ -1075,10 +1075,10 @@ def precision_weighted_median(values: np.ndarray, weights: np.ndarray) -> float:
 def weighted_median_difference(
     y: np.ndarray,
     weights: np.ndarray,
-    is_single: np.ndarray,
+    group: np.ndarray,
 ) -> Tuple[float, float, float]:
-    mask_single = is_single == 0
-    mask_recurrent = is_single == 1
+    mask_single = group == 0
+    mask_recurrent = group == 1
     if not (np.any(mask_single) and np.any(mask_recurrent)):
         return float("nan"), float("nan"), float("nan")
     median_single = precision_weighted_median(y[mask_single], weights[mask_single])
@@ -1088,7 +1088,10 @@ def weighted_median_difference(
     delta = median_single - median_recurrent
     return float(delta), float(median_single), float(median_recurrent)
 
-def run_precision_weighted_median_analysis(df: pd.DataFrame) -> Optional[Dict[str, float]]:
+
+def prepare_meta_analysis_inputs(
+    df: pd.DataFrame,
+) -> Optional[Tuple[pd.DataFrame, np.ndarray, np.ndarray, np.ndarray]]:
     mask = (
         df["STATUS"].isin([0, 1])
         & df["usable_for_meta"]
@@ -1105,14 +1108,20 @@ def run_precision_weighted_median_analysis(df: pd.DataFrame) -> Optional[Dict[st
     else:
         y = sub["frf_delta"].to_numpy(dtype=float)
     s2 = sub["frf_var_delta"].to_numpy(dtype=float)
-    is_single = (sub["STATUS"] == 0).to_numpy(dtype=int)
-    if np.all(is_single == 0) or np.all(is_single == 1):
+    group = sub["STATUS"].to_numpy(dtype=int)
+    if np.all(group == group[0]):
         log.warning("Only one group present among usable inversions")
         return None
-    X = np.column_stack([np.ones_like(is_single, dtype=float), is_single.astype(float)])
+    return sub, y, s2, group
+
+
+def run_precision_weighted_median_analysis(
+    sub: pd.DataFrame, y: np.ndarray, s2: np.ndarray, group: np.ndarray
+) -> Dict[str, float]:
+    X = np.column_stack([np.ones_like(group, dtype=float), group.astype(float)])
     tau2 = estimate_tau2_reml(y, s2, X)
     weights = 1.0 / (s2 + tau2)
-    delta, median_single, median_recurrent = weighted_median_difference(y, weights, is_single)
+    delta, median_single, median_recurrent = weighted_median_difference(y, weights, group)
 
     return {
         "tau2": float(tau2),
@@ -1120,19 +1129,19 @@ def run_precision_weighted_median_analysis(df: pd.DataFrame) -> Optional[Dict[st
         "median_single": float(median_single),
         "delta_median": float(delta),
         "n_total": float(sub.shape[0]),
-        "n_single": float(int(np.sum(sub["STATUS"] == 0))),
-        "n_recurrent": float(int(np.sum(sub["STATUS"] == 1))),
+        "n_single": float(int(np.sum(group == 0))),
+        "n_recurrent": float(int(np.sum(group == 1))),
     }
 
 # ------------------------- META-LEVEL PERMUTATION -------------------------
 
 def _meta_perm_chunk_worker(args) -> np.ndarray:
     """Worker function for meta-level permutation - must be module-level for pickling."""
-    size, seed, y, weights, is_single = args
+    size, seed, y, weights, group = args
     rng = np.random.default_rng(seed)
     stats = np.empty(size, dtype=float)
     for i in range(size):
-        perm_labels = rng.permutation(is_single)
+        perm_labels = rng.permutation(group)
         delta, _, _ = weighted_median_difference(y, weights, perm_labels)
         stats[i] = delta
     return stats
@@ -1140,7 +1149,7 @@ def _meta_perm_chunk_worker(args) -> np.ndarray:
 def meta_permutation_pvalue(
     y: np.ndarray,
     s2: np.ndarray,
-    is_single: np.ndarray,
+    group: np.ndarray,
     n_perm: int,
     chunk: int,
     base_seed: int,
@@ -1150,7 +1159,7 @@ def meta_permutation_pvalue(
     n = y.size
     n_workers = max(1, min(n_workers, (n_perm + chunk - 1) // chunk))
     weights = 1.0 / (s2 + tau2)
-    T_obs, _, _ = weighted_median_difference(y, weights, is_single)
+    T_obs, _, _ = weighted_median_difference(y, weights, group)
 
     with ProcessPoolExecutor(max_workers=n_workers) as pool:
         tasks = []
@@ -1158,7 +1167,7 @@ def meta_permutation_pvalue(
         while idx < n_perm:
             take = min(chunk, n_perm - idx)
             seed = base_seed + 1 + (idx // chunk)
-            args = (take, seed, y, weights, is_single)
+            args = (take, seed, y, weights, group)
             tasks.append(pool.submit(_meta_perm_chunk_worker, args))
             idx += take
         perm_stats: List[np.ndarray] = []
@@ -1460,16 +1469,18 @@ def main():
     merged.to_csv(per_inv_out, sep="\t", index=False)
     log.info(f"Per-inversion FRF results (with group labels) written to: {per_inv_out}")
 
-    meta_results = run_precision_weighted_median_analysis(merged)
+    meta_inputs = prepare_meta_analysis_inputs(merged)
+    if meta_inputs is None:
+        log.warning("Meta-analysis could not be performed with available data.")
+        return
+    sub_meta, y_meta, s2_meta, group_meta = meta_inputs
+
+    meta_results = run_precision_weighted_median_analysis(sub_meta, y_meta, s2_meta, group_meta)
 
     log.info("")
     log.info("=" * 80)
     log.info("PRECISION-WEIGHTED MEDIAN ANALYSIS: group 0 (single) vs group 1 (recurrent)")
     log.info("=" * 80)
-
-    if meta_results is None:
-        log.warning("Meta-analysis could not be performed with available data.")
-        return
 
     tau2 = meta_results["tau2"]
     median_recurrent = meta_results["median_recurrent"]
@@ -1485,29 +1496,17 @@ def main():
     log.info(f"  group 1 (recurrent):    {n_recurrent}")
     log.info(f"Estimated between-inversion variance tau^2: {tau2:.4e}")
     log.info("")
-    log.info(f"Weighted median frf_delta (recurrent, group 1): {median_recurrent:+.4f}")
     log.info(f"Weighted median frf_delta (single,   group 0): {median_single:+.4f}")
+    log.info(f"Weighted median frf_delta (recurrent, group 1): {median_recurrent:+.4f}")
     log.info(f"Median difference (single - recurrent):   {delta_median:+.4f}")
     log.info("")
 
     # Meta-level permutation p-values
-    mask = (
-        merged["STATUS"].isin([0, 1])
-        & merged["usable_for_meta"]
-        & np.isfinite(merged["frf_delta_centered"])
-        & np.isfinite(merged["frf_var_delta"])
-        & (merged["frf_var_delta"] > 0.0)
-    )
-    sub = merged.loc[mask].copy()
-    y = sub["frf_delta_centered"].to_numpy(dtype=float)
-    s2 = sub["frf_var_delta"].to_numpy(dtype=float)
-    is_single = (sub["STATUS"] == 0).to_numpy(dtype=int)
-
     n_meta_workers = min(TOTAL_CPUS, max(1, (META_PERMUTATIONS + META_PERM_CHUNK - 1) // META_PERM_CHUNK))
     perm_out = meta_permutation_pvalue(
-        y=y,
-        s2=s2,
-        is_single=is_single,
+        y=y_meta,
+        s2=s2_meta,
+        group=group_meta,
         n_perm=META_PERMUTATIONS,
         chunk=META_PERM_CHUNK,
         base_seed=stable_seed_from_key("meta-permutation") + META_PERM_BASE_SEED,
