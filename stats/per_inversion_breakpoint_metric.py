@@ -1091,7 +1091,7 @@ def weighted_median_difference(
 
 def prepare_meta_analysis_inputs(
     df: pd.DataFrame,
-) -> Optional[Tuple[pd.DataFrame, np.ndarray, np.ndarray, np.ndarray]]:
+) -> Optional[Tuple[pd.DataFrame, np.ndarray, np.ndarray, np.ndarray, str]]:
     mask = (
         df["STATUS"].isin([0, 1])
         & df["usable_for_meta"]
@@ -1105,21 +1105,29 @@ def prepare_meta_analysis_inputs(
         return None
     if "frf_delta_centered" in sub.columns:
         y = sub["frf_delta_centered"].to_numpy(dtype=float)
+        y_label = "frf_delta_centered"
     else:
         y = sub["frf_delta"].to_numpy(dtype=float)
+        y_label = "frf_delta"
     s2 = sub["frf_var_delta"].to_numpy(dtype=float)
     group = sub["STATUS"].to_numpy(dtype=int)
     if np.all(group == group[0]):
         log.warning("Only one group present among usable inversions")
         return None
-    return sub, y, s2, group
+    return sub, y, s2, group, y_label
 
 
 def run_precision_weighted_median_analysis(
-    sub: pd.DataFrame, y: np.ndarray, s2: np.ndarray, group: np.ndarray
+    sub: pd.DataFrame,
+    y: np.ndarray,
+    s2: np.ndarray,
+    group: np.ndarray,
+    y_label: str,
 ) -> Dict[str, float]:
-    X = np.column_stack([np.ones_like(group, dtype=float), group.astype(float)])
+    X = np.ones((group.size, 1), dtype=float)
     tau2 = estimate_tau2_reml(y, s2, X)
+    if not math.isfinite(tau2) or tau2 < 0.0:
+        tau2 = 0.0
     weights = 1.0 / (s2 + tau2)
     delta, median_single, median_recurrent = weighted_median_difference(y, weights, group)
 
@@ -1131,24 +1139,18 @@ def run_precision_weighted_median_analysis(
         "n_total": float(sub.shape[0]),
         "n_single": float(int(np.sum(group == 0))),
         "n_recurrent": float(int(np.sum(group == 1))),
+        "y_label": y_label,
     }
 
 # ------------------------- META-LEVEL PERMUTATION -------------------------
 
 def _meta_perm_chunk_worker(args) -> np.ndarray:
     """Worker function for meta-level permutation - must be module-level for pickling."""
-    size, seed, y, s2, group = args
+    size, seed, y, weights, group = args
     rng = np.random.default_rng(seed)
     stats = np.empty(size, dtype=float)
-    design = np.empty((group.size, 2), dtype=float)
-    design[:, 0] = 1.0
     for i in range(size):
         perm_labels = rng.permutation(group)
-        design[:, 1] = perm_labels.astype(float)
-        tau2 = estimate_tau2_reml(y, s2, design)
-        if not math.isfinite(tau2) or tau2 < 0.0:
-            tau2 = 0.0
-        weights = 1.0 / (s2 + tau2)
         delta, _, _ = weighted_median_difference(y, weights, perm_labels)
         stats[i] = delta
     return stats
@@ -1157,6 +1159,7 @@ def meta_permutation_pvalue(
     y: np.ndarray,
     s2: np.ndarray,
     group: np.ndarray,
+    tau2: float,
     n_perm: int,
     chunk: int,
     base_seed: int,
@@ -1164,11 +1167,10 @@ def meta_permutation_pvalue(
 ) -> Dict[str, float]:
     n = y.size
     n_workers = max(1, min(n_workers, (n_perm + chunk - 1) // chunk))
-    design_obs = np.column_stack([np.ones_like(group, dtype=float), group.astype(float)])
-    tau2_obs = estimate_tau2_reml(y, s2, design_obs)
-    if not math.isfinite(tau2_obs) or tau2_obs < 0.0:
-        tau2_obs = 0.0
-    weights_obs = 1.0 / (s2 + tau2_obs)
+    tau2 = float(tau2)
+    if not math.isfinite(tau2) or tau2 < 0.0:
+        tau2 = 0.0
+    weights_obs = 1.0 / (s2 + tau2)
     T_obs, _, _ = weighted_median_difference(y, weights_obs, group)
 
     with ProcessPoolExecutor(max_workers=n_workers) as pool:
@@ -1177,7 +1179,7 @@ def meta_permutation_pvalue(
         while idx < n_perm:
             take = min(chunk, n_perm - idx)
             seed = base_seed + 1 + (idx // chunk)
-            args = (take, seed, y, s2, group)
+            args = (take, seed, y, weights_obs, group)
             tasks.append(pool.submit(_meta_perm_chunk_worker, args))
             idx += take
         perm_stats: List[np.ndarray] = []
@@ -1483,9 +1485,15 @@ def main():
     if meta_inputs is None:
         log.warning("Meta-analysis could not be performed with available data.")
         return
-    sub_meta, y_meta, s2_meta, group_meta = meta_inputs
+    sub_meta, y_meta, s2_meta, group_meta, y_label = meta_inputs
 
-    meta_results = run_precision_weighted_median_analysis(sub_meta, y_meta, s2_meta, group_meta)
+    meta_results = run_precision_weighted_median_analysis(
+        sub_meta,
+        y_meta,
+        s2_meta,
+        group_meta,
+        y_label,
+    )
 
     log.info("")
     log.info("=" * 80)
@@ -1506,8 +1514,12 @@ def main():
     log.info(f"  group 1 (recurrent):    {n_recurrent}")
     log.info(f"Estimated between-inversion variance tau^2: {tau2:.4e}")
     log.info("")
-    log.info(f"Weighted median frf_delta (single,   group 0): {median_single:+.4f}")
-    log.info(f"Weighted median frf_delta (recurrent, group 1): {median_recurrent:+.4f}")
+    log.info(
+        f"Weighted median {y_label} (single,   group 0): {median_single:+.4f}"
+    )
+    log.info(
+        f"Weighted median {y_label} (recurrent, group 1): {median_recurrent:+.4f}"
+    )
     log.info(f"Median difference (single - recurrent):   {delta_median:+.4f}")
     log.info("")
 
@@ -1517,6 +1529,7 @@ def main():
         y=y_meta,
         s2=s2_meta,
         group=group_meta,
+        tau2=tau2,
         n_perm=META_PERMUTATIONS,
         chunk=META_PERM_CHUNK,
         base_seed=stable_seed_from_key("meta-permutation") + META_PERM_BASE_SEED,
