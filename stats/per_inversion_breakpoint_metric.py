@@ -53,7 +53,6 @@ MIN_WINDOWS_PER_INVERSION = 20
 
 N_PERMUTATIONS = 3_000
 DEFAULT_BLOCK_SIZE_WINDOWS = 10
-FIXED_PER_INVERSION_BLOCK_SIZE_WINDOWS = 3
 USE_GLOBAL_AUTOCORR_BLOCK_SIZE_OVERRIDE = True
 GLOBAL_AUTOCORR_BLOCK_SIZE_WINDOWS = 3
 PERMUTATION_CHUNK_SIZE = 256
@@ -447,8 +446,6 @@ def compute_folded_distances(inversion: Inversion) -> Tuple[np.ndarray, np.ndarr
 def _resolve_autocorr_block_size(n: int, max_global_block_size: int) -> int:
     if USE_GLOBAL_AUTOCORR_BLOCK_SIZE_OVERRIDE:
         candidate = GLOBAL_AUTOCORR_BLOCK_SIZE_WINDOWS
-    else:
-        candidate = FIXED_PER_INVERSION_BLOCK_SIZE_WINDOWS
 
     candidate = int(candidate)
     if candidate < 1:
