@@ -1137,11 +1137,18 @@ def run_precision_weighted_median_analysis(
 
 def _meta_perm_chunk_worker(args) -> np.ndarray:
     """Worker function for meta-level permutation - must be module-level for pickling."""
-    size, seed, y, weights, group = args
+    size, seed, y, s2, group = args
     rng = np.random.default_rng(seed)
     stats = np.empty(size, dtype=float)
+    design = np.empty((group.size, 2), dtype=float)
+    design[:, 0] = 1.0
     for i in range(size):
         perm_labels = rng.permutation(group)
+        design[:, 1] = perm_labels.astype(float)
+        tau2 = estimate_tau2_reml(y, s2, design)
+        if not math.isfinite(tau2) or tau2 < 0.0:
+            tau2 = 0.0
+        weights = 1.0 / (s2 + tau2)
         delta, _, _ = weighted_median_difference(y, weights, perm_labels)
         stats[i] = delta
     return stats
@@ -1154,12 +1161,15 @@ def meta_permutation_pvalue(
     chunk: int,
     base_seed: int,
     n_workers: int,
-    tau2: float,
 ) -> Dict[str, float]:
     n = y.size
     n_workers = max(1, min(n_workers, (n_perm + chunk - 1) // chunk))
-    weights = 1.0 / (s2 + tau2)
-    T_obs, _, _ = weighted_median_difference(y, weights, group)
+    design_obs = np.column_stack([np.ones_like(group, dtype=float), group.astype(float)])
+    tau2_obs = estimate_tau2_reml(y, s2, design_obs)
+    if not math.isfinite(tau2_obs) or tau2_obs < 0.0:
+        tau2_obs = 0.0
+    weights_obs = 1.0 / (s2 + tau2_obs)
+    T_obs, _, _ = weighted_median_difference(y, weights_obs, group)
 
     with ProcessPoolExecutor(max_workers=n_workers) as pool:
         tasks = []
@@ -1167,7 +1177,7 @@ def meta_permutation_pvalue(
         while idx < n_perm:
             take = min(chunk, n_perm - idx)
             seed = base_seed + 1 + (idx // chunk)
-            args = (take, seed, y, weights, group)
+            args = (take, seed, y, s2, group)
             tasks.append(pool.submit(_meta_perm_chunk_worker, args))
             idx += take
         perm_stats: List[np.ndarray] = []
@@ -1511,7 +1521,6 @@ def main():
         chunk=META_PERM_CHUNK,
         base_seed=stable_seed_from_key("meta-permutation") + META_PERM_BASE_SEED,
         n_workers=n_meta_workers,
-        tau2=tau2,
     )
     p_perm_one_upper = perm_out["p_perm_one_sided_upper"]
     p_perm_one_lower = perm_out["p_perm_one_sided_lower"]
