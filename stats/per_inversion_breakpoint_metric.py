@@ -71,6 +71,9 @@ META_PERM_BASE_SEED = 2025
 TOTAL_CPUS = max(1, os.cpu_count() or 1)
 EPS_DENOM = 1e-12
 
+AUTOCORR_MIN_PAIRS = 8
+AUTOCORR_TARGET = 0.1
+
 _RE_HUD = re.compile(
     r">.*?hudson_pairwise_fst.*?_chr_?([\w.\-]+)_start_(\d+)_end_(\d+)",
     re.IGNORECASE,
@@ -466,9 +469,67 @@ def estimate_correlation_length(
     max_global_block_size: int = DEFAULT_BLOCK_SIZE_WINDOWS,
 ) -> Tuple[int, float, int, int]:
     valid = np.isfinite(fst) & np.isfinite(weights)
-    n = int(np.sum(valid))
-    block_size = _resolve_autocorr_block_size(n, max_global_block_size)
-    return block_size, float("nan"), 0, 0
+    if USE_GLOBAL_AUTOCORR_BLOCK_SIZE_OVERRIDE:
+        n = int(np.sum(valid))
+        block_size = _resolve_autocorr_block_size(n, max_global_block_size)
+        return block_size, float("nan"), 0, 0
+
+    values = fst[valid]
+    w = weights[valid]
+    n = len(values)
+    if n <= 1:
+        block_size = max(1, min(max_global_block_size, max(n, 1)))
+        return block_size, float("nan"), 0, 0
+
+    if np.sum(w > 0) > 0:
+        mean = float(np.average(values, weights=w))
+    else:
+        mean = float(np.mean(values))
+
+    fluct = values - mean
+    max_lag_candidate = n - 1
+    if max_lag_candidate < 1:
+        block_size = max(1, min(max_global_block_size, n))
+        return block_size, float("nan"), 0, 0
+
+    autocorr_vals: List[float] = []
+    lags: List[int] = []
+    for lag in range(1, max_lag_candidate + 1):
+        v1 = fluct[:-lag]
+        v2 = fluct[lag:]
+        if len(v1) < AUTOCORR_MIN_PAIRS:
+            break
+
+        num = float(np.dot(v1, v2)) / len(v1)
+        denom = math.sqrt((np.dot(v1, v1) / len(v1)) * (np.dot(v2, v2) / len(v2)))
+        if denom <= 1e-12:
+            corr = 0.0
+        else:
+            corr = num / denom
+
+        if not np.isfinite(corr):
+            corr = 0.0
+
+        corr = float(np.clip(corr, -1.0, 1.0))
+        autocorr_vals.append(corr)
+        lags.append(lag)
+
+    if not autocorr_vals:
+        block_size = max(1, min(max_global_block_size, n))
+        last_lag = lags[-1] if lags else 0
+        return block_size, float("nan"), last_lag, 0
+
+    autocorr_array = np.array(autocorr_vals)
+    monotone = np.minimum.accumulate(autocorr_array)
+    target_idx = np.where(monotone <= AUTOCORR_TARGET)[0]
+    if len(target_idx) > 0:
+        corr_length = float(lags[target_idx[0]])
+    else:
+        corr_length = float(lags[-1])
+
+    block_size = int(round(max(1.0, corr_length)))
+    block_size = max(1, min(block_size, n))
+    return block_size, corr_length, lags[-1], len(lags)
 
 def precompute_block_structure(n: int, block_size: int) -> List[np.ndarray]:
     if n <= 0:
