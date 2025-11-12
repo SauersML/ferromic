@@ -164,6 +164,49 @@ def summarise_sequence(seq):
     }
 
 
+def compute_alignment_metrics(human_seq, chimp_seq):
+    """Return alignment statistics between two sequences."""
+
+    aligned_letters = 0
+    misaligned_letters = 0
+    unaligned_letters = 0
+
+    for h_raw, c_raw in zip(human_seq, chimp_seq):
+        h = h_raw.upper()
+        c = c_raw.upper()
+
+        human_valid = h in VALID_BASES
+        chimp_valid = c in VALID_BASES
+
+        if human_valid and chimp_valid:
+            aligned_letters += 1
+            if h != c:
+                misaligned_letters += 1
+        elif human_valid or chimp_valid:
+            unaligned_letters += 1
+
+    misaligned_fraction = (misaligned_letters / aligned_letters) if aligned_letters else 0.0
+    total_evaluable = aligned_letters + unaligned_letters
+    unaligned_fraction = (unaligned_letters / total_evaluable) if total_evaluable else 0.0
+
+    return {
+        "aligned_letters": aligned_letters,
+        "misaligned_letters": misaligned_letters,
+        "unaligned_letters": unaligned_letters,
+        "misaligned_fraction": misaligned_fraction,
+        "unaligned_fraction": unaligned_fraction,
+    }
+
+
+EMPTY_ALIGNMENT_METRICS = {
+    "aligned_letters": 0,
+    "misaligned_letters": 0,
+    "unaligned_letters": 0,
+    "misaligned_fraction": 0.0,
+    "unaligned_fraction": 0.0,
+}
+
+
 # =========================
 # --- Simple Debug Utils ---
 # =========================
@@ -1007,7 +1050,16 @@ def build_outgroups_and_filter(transcripts, regions):
             if seq_list is None:
                 logger.add("No Alignment Found", f"No chimp alignment found for {t_id}.")
                 print_always(f"[TX][{t_id}] ERROR: chimp scaffold missing.")
-                log_detail("CDS", t_id, "NO_SCAFFOLD", "Chimp scaffold missing after AXT processing.", expected_len=info['expected_len'])
+                log_detail(
+                    "CDS",
+                    t_id,
+                    "NO_SCAFFOLD",
+                    "Chimp scaffold missing after AXT processing.",
+                    expected_len=info['expected_len'],
+                    aligned_letters=0,
+                    misaligned_fraction=0.0,
+                    unaligned_fraction=0.0,
+                )
                 progress_bar("[TX write]", i, total_tx)
                 continue
             final_seq = "".join(seq_list)
@@ -1032,6 +1084,9 @@ def build_outgroups_and_filter(transcripts, regions):
                     "No chimp overlap detected across transcript.",
                     coverage_pct=seq_stats['coverage_pct'],
                     expected_len=seq_stats['length'],
+                    aligned_letters=0,
+                    misaligned_fraction=0.0,
+                    unaligned_fraction=0.0,
                 )
                 progress_bar("[TX write]", i, total_tx)
                 continue
@@ -1049,21 +1104,15 @@ def build_outgroups_and_filter(transcripts, regions):
                     coverage_pct=seq_stats['coverage_pct'],
                     expected_len=seq_stats['length'],
                     span=span_label,
+                    aligned_letters=0,
+                    misaligned_fraction=0.0,
+                    unaligned_fraction=0.0,
                 )
                 progress_bar("[TX write]", i, total_tx)
                 continue
             human_ref = human_seqs[0]
-
-            diff = 0
-            comp = 0
-            for h, c in zip(human_ref, final_seq):
-                if h != '-' and c != '-':
-                    if h not in VALID_BASES or c not in VALID_BASES:
-                        continue
-                    comp += 1
-                    if h != c:
-                        diff += 1
-            divergence = (diff / comp) * 100 if comp else 0.0
+            metrics = compute_alignment_metrics(human_ref, final_seq)
+            divergence = metrics["misaligned_fraction"] * 100
 
             outname = f"outgroup_{gene}_{t_id}_{chrom_label}_start{start}_end{end}.phy"
             if divergence > DIVERGENCE_THRESHOLD:
@@ -1086,6 +1135,9 @@ def build_outgroups_and_filter(transcripts, regions):
                     threshold=DIVERGENCE_THRESHOLD,
                     span=span_label,
                     filled=seq_stats['covered'],
+                    aligned_letters=metrics["aligned_letters"],
+                    misaligned_fraction=metrics["misaligned_fraction"],
+                    unaligned_fraction=metrics["unaligned_fraction"],
                 )
                 progress_bar("[TX write]", i, total_tx)
                 continue
@@ -1110,6 +1162,9 @@ def build_outgroups_and_filter(transcripts, regions):
                 longest_block=seq_stats['longest_block'],
                 longest_gap=seq_stats['longest_gap'],
                 out_file=outname,
+                aligned_letters=metrics["aligned_letters"],
+                misaligned_fraction=metrics["misaligned_fraction"],
+                unaligned_fraction=metrics["unaligned_fraction"],
             )
             progress_bar("[TX write]", i, total_tx)
         if total_tx:
@@ -1135,7 +1190,16 @@ def build_outgroups_and_filter(transcripts, regions):
             if seq_list is None:
                 logger.add("No Alignment Found (Region)", f"No chimp alignment found for {r_id}.")
                 print_always(f"[RG][{r_id}] ERROR: chimp scaffold missing.")
-                log_detail("INVERSION", r_id, "NO_SCAFFOLD", "Chimp scaffold missing after AXT processing.", expected_len=info['expected_len'])
+                log_detail(
+                    "INVERSION",
+                    r_id,
+                    "NO_SCAFFOLD",
+                    "Chimp scaffold missing after AXT processing.",
+                    expected_len=info['expected_len'],
+                    aligned_letters=0,
+                    misaligned_fraction=0.0,
+                    unaligned_fraction=0.0,
+                )
                 progress_bar("[RG write]", i, total_rg)
                 continue
             final_seq = "".join(seq_list)
@@ -1160,11 +1224,15 @@ def build_outgroups_and_filter(transcripts, regions):
                     "No chimp overlap detected across region.",
                     coverage_pct=seq_stats['coverage_pct'],
                     expected_len=seq_stats['length'],
+                    aligned_letters=0,
+                    misaligned_fraction=0.0,
+                    unaligned_fraction=0.0,
                 )
                 progress_bar("[RG write]", i, total_rg)
                 continue
 
             # Divergence QC vs human reference (group0 preferred)
+            metrics = EMPTY_ALIGNMENT_METRICS.copy()
             if not g0_fname:
                 logger.add("Region File Missing for QC", f"{r_id}: no group file for divergence check; skipping QC.")
                 divergence = 0.0
@@ -1176,6 +1244,9 @@ def build_outgroups_and_filter(transcripts, regions):
                     coverage_pct=seq_stats['coverage_pct'],
                     expected_len=seq_stats['length'],
                     span=span_label,
+                    aligned_letters=metrics["aligned_letters"],
+                    misaligned_fraction=metrics["misaligned_fraction"],
+                    unaligned_fraction=metrics["unaligned_fraction"],
                 )
             else:
                 human_seqs = read_phy_sequences(g0_fname)
@@ -1190,19 +1261,14 @@ def build_outgroups_and_filter(transcripts, regions):
                         coverage_pct=seq_stats['coverage_pct'],
                         expected_len=seq_stats['length'],
                         span=span_label,
+                        aligned_letters=metrics["aligned_letters"],
+                        misaligned_fraction=metrics["misaligned_fraction"],
+                        unaligned_fraction=metrics["unaligned_fraction"],
                     )
                 else:
                     human_ref = human_seqs[0]
-                    diff = 0
-                    comp = 0
-                    for h, c in zip(human_ref, final_seq):
-                        if h != '-' and c != '-':
-                            if h not in VALID_BASES or c not in VALID_BASES:
-                                continue
-                            comp += 1
-                            if h != c:
-                                diff += 1
-                    divergence = (diff / comp) * 100 if comp else 0.0
+                    metrics = compute_alignment_metrics(human_ref, final_seq)
+                    divergence = metrics["misaligned_fraction"] * 100
 
             outname = f"outgroup_inversion_{chrom_label}_start{start}_end{end}.phy"
             if divergence > DIVERGENCE_THRESHOLD:
@@ -1225,6 +1291,9 @@ def build_outgroups_and_filter(transcripts, regions):
                     threshold=DIVERGENCE_THRESHOLD,
                     span=span_label,
                     filled=seq_stats['covered'],
+                    aligned_letters=metrics["aligned_letters"],
+                    misaligned_fraction=metrics["misaligned_fraction"],
+                    unaligned_fraction=metrics["unaligned_fraction"],
                 )
                 progress_bar("[RG write]", i, total_rg)
                 continue
@@ -1249,6 +1318,9 @@ def build_outgroups_and_filter(transcripts, regions):
                 longest_block=seq_stats['longest_block'],
                 longest_gap=seq_stats['longest_gap'],
                 out_file=outname,
+                aligned_letters=metrics["aligned_letters"],
+                misaligned_fraction=metrics["misaligned_fraction"],
+                unaligned_fraction=metrics["unaligned_fraction"],
             )
             progress_bar("[RG write]", i, total_rg)
         if total_rg:
