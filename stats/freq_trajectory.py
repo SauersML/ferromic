@@ -244,7 +244,7 @@ def plot_trajectory(
             max(start_year, end_year),
             color="#fdd49e",
             alpha=0.35,
-            label="Largest 1,000-year change",
+            label="Largest 1,000-year change in allele frequency",
         )
     
     ax.invert_xaxis()
