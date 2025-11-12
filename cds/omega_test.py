@@ -31,7 +31,12 @@ runtime_dir = f"/tmp/runtime-{user}"
 os.makedirs(runtime_dir, exist_ok=True, mode=0o700)
 os.environ['XDG_RUNTIME_DIR'] = runtime_dir
 from ete3 import Tree
-from ete3.treeview import TreeStyle, NodeStyle, TextFace, CircleFace, RectFace
+try:
+    from ete3.treeview import TreeStyle, NodeStyle, TextFace, CircleFace, RectFace
+    TREEVIEW_IMPORT_ERROR = None
+except Exception as exc:  # pragma: no cover - depends on optional ete3 extras
+    TREEVIEW_IMPORT_ERROR = exc
+    TreeStyle = NodeStyle = TextFace = CircleFace = RectFace = None
 
 # --- Configuration Toggles ---
 # Set to False to disable the PAML timeout for debugging or long runs.
@@ -232,7 +237,15 @@ if CPU_COUNT >= 4:
 PAML_WORKERS = int(os.environ.get("PAML_WORKERS", default_paml))
 
 # Optional: gate figure generation (tree render can be surprisingly expensive)
-MAKE_FIGURES = bool(int(os.environ.get("MAKE_FIGURES", "1")))
+_REQUESTED_FIGURES = bool(int(os.environ.get("MAKE_FIGURES", "1")))
+MAKE_FIGURES = _REQUESTED_FIGURES and TREEVIEW_IMPORT_ERROR is None
+if _REQUESTED_FIGURES and TREEVIEW_IMPORT_ERROR is not None:
+    FIGURE_INIT_WARNING = (
+        "Tree figure rendering disabled: ete3.treeview import failed "
+        f"({TREEVIEW_IMPORT_ERROR!s}). Set MAKE_FIGURES=0 to silence this message."
+    )
+else:
+    FIGURE_INIT_WARNING = None
 
 # Subprocess timeouts (seconds). Tweak as appropriate for your datasets/cluster.
 IQTREE_TIMEOUT = int(os.environ.get("IQTREE_TIMEOUT", "7200"))   # 2h default
@@ -1943,6 +1956,11 @@ def main():
 
     try:
         logging.info("--- Starting Region→Gene Differential Selection Pipeline ---")
+
+        if FIGURE_INIT_WARNING:
+            logging.warning(FIGURE_INIT_WARNING)
+        elif not _REQUESTED_FIGURES:
+            logging.info("Tree figure generation disabled via MAKE_FIGURES=0.")
 
         if not (os.path.exists(IQTREE_PATH) and os.access(IQTREE_PATH, os.X_OK)):
             logging.critical(f"FATAL: IQ-TREE not found or not executable at '{IQTREE_PATH}'")
