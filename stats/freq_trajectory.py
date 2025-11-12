@@ -173,8 +173,21 @@ def plot_trajectory(
 
     dates = columns["date_center"]
 
+    # SET GLOBAL FONT SIZES
+    plt.rcParams.update({
+        'font.size': 16,           # Base font size
+        'axes.labelsize': 20,      # X and Y axis labels
+        'axes.titlesize': 22,      # Title (if you add one)
+        'xtick.labelsize': 16,     # X-axis tick labels
+        'ytick.labelsize': 16,     # Y-axis tick labels
+        'legend.fontsize': 15,     # Legend text
+        'figure.titlesize': 24     # Figure title
+    })
+
     plt.style.use("seaborn-v0_8-whitegrid")
     fig, ax = plt.subplots(figsize=(11, 6.5))
+
+    dates = columns["date_center"]
 
     # Empirical allele frequencies with confidence interval shading.
     ax.fill_between(
@@ -257,7 +270,6 @@ def plot_trajectory(
     ax.invert_xaxis()
     ax.legend(frameon=True, framealpha=0.9, edgecolor="none")
     ax.grid(True, linestyle="--", linewidth=0.6, alpha=0.35)
-    ax.tick_params(axis="both", labelsize=11)
 
     fig.tight_layout()
     fig.savefig(output, dpi=300)
