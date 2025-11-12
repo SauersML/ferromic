@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Optional, Tuple, List, Dict, Any, Iterable, Sequence
 from dataclasses import dataclass
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from queue import Empty
 import multiprocessing as mp
 from multiprocessing import shared_memory
 import numpy as np
@@ -889,61 +890,92 @@ def run_frf_search(
     total_wf = prefix_wf[:, -1]
     total_wf2 = prefix_wf2[:, -1]
 
-    edge_sum_w = static_terms.edge_sum_w[np.newaxis, :]
-    edge_sum_wf = np.take(prefix_wf, static_terms.edge_idx, axis=1)
-    mu_edge = edge_sum_wf / np.maximum(edge_sum_w, eps)
+    n_candidates = static_terms.edge_idx.size
+    if n_candidates == 0:
+        nan = np.full(n_samples, np.nan)
+        return nan, nan, nan, nan, nan
 
-    mid_prefix_wf = np.take(prefix_wf, static_terms.mid_idx, axis=1)
-    mid_prefix_wf2 = np.take(prefix_wf2, static_terms.mid_idx, axis=1)
-    mid_sum_w = static_terms.mid_sum_w[np.newaxis, :]
-    mid_sum_wf = total_wf[:, None] - mid_prefix_wf
-    mid_sum_wf2 = total_wf2[:, None] - mid_prefix_wf2
-    mu_mid = mid_sum_wf / np.maximum(mid_sum_w, eps)
+    target_cells = 2_000_000
+    chunk_size = max(1, min(n_candidates, target_cells // max(1, n_samples)))
 
-    edge_sum_wf2 = np.take(prefix_wf2, static_terms.edge_idx, axis=1)
-    edge_sse = edge_sum_wf2 - np.where(
-        edge_sum_w > eps,
-        (edge_sum_wf ** 2) / np.maximum(edge_sum_w, eps),
-        0.0,
-    )
+    best_sse = np.full(n_samples, np.inf)
+    best_mu_edge = np.full(n_samples, np.nan)
+    best_mu_mid = np.full(n_samples, np.nan)
+    best_delta = np.full(n_samples, np.nan)
+    best_a_bp = np.full(n_samples, np.nan)
+    best_b_bp = np.full(n_samples, np.nan)
 
-    mid_sse = mid_sum_wf2 - np.where(
-        mid_sum_w > eps,
-        (mid_sum_wf ** 2) / np.maximum(mid_sum_w, eps),
-        0.0,
-    )
+    for start in range(0, n_candidates, chunk_size):
+        end = min(start + chunk_size, n_candidates)
 
-    ramp_sum_wf = np.take(prefix_wf, static_terms.ramp_end_idx, axis=1) - np.take(
-        prefix_wf, static_terms.ramp_start_idx, axis=1
-    )
-    ramp_sum_wf2 = np.take(prefix_wf2, static_terms.ramp_end_idx, axis=1) - np.take(
-        prefix_wf2, static_terms.ramp_start_idx, axis=1
-    )
-    ramp_sum_wfx = np.take(prefix_wfx, static_terms.ramp_end_idx, axis=1) - np.take(
-        prefix_wfx, static_terms.ramp_start_idx, axis=1
-    )
+        edge_idx = static_terms.edge_idx[start:end]
+        mid_idx = static_terms.mid_idx[start:end]
 
-    slope = (mu_mid - mu_edge) / np.maximum(
-        static_terms.b_rel - static_terms.a_rel, 1e-6
-    )[np.newaxis, :]
-    intercept = mu_edge - slope * static_terms.a_rel[np.newaxis, :]
+        edge_sum_w = static_terms.edge_sum_w[np.newaxis, start:end]
+        mid_sum_w = static_terms.mid_sum_w[np.newaxis, start:end]
 
-    ramp_sse = (
-        ramp_sum_wf2
-        - 2.0 * intercept * ramp_sum_wf
-        - 2.0 * slope * ramp_sum_wfx
-        + (intercept ** 2) * static_terms.ramp_sum_w[np.newaxis, :]
-        + 2.0 * intercept * slope * static_terms.ramp_sum_wx[np.newaxis, :]
-        + (slope ** 2) * static_terms.ramp_sum_wx2[np.newaxis, :]
-    )
+        edge_sum_wf = np.take(prefix_wf, edge_idx, axis=1)
+        edge_sum_wf2 = np.take(prefix_wf2, edge_idx, axis=1)
+        mu_edge = edge_sum_wf / np.maximum(edge_sum_w, eps)
 
-    total_sse = edge_sse + mid_sse + ramp_sse
-    best_idx = np.argmin(total_sse, axis=1)
-    best_mu_edge = mu_edge[row_idx, best_idx]
-    best_mu_mid = mu_mid[row_idx, best_idx]
-    best_delta = (best_mu_edge - best_mu_mid).astype(float)
-    best_a_bp = static_terms.a_rel[best_idx] * half_length_bp
-    best_b_bp = static_terms.b_rel[best_idx] * half_length_bp
+        mid_prefix_wf = np.take(prefix_wf, mid_idx, axis=1)
+        mid_prefix_wf2 = np.take(prefix_wf2, mid_idx, axis=1)
+        mid_sum_wf = total_wf[:, None] - mid_prefix_wf
+        mid_sum_wf2 = total_wf2[:, None] - mid_prefix_wf2
+        mu_mid = mid_sum_wf / np.maximum(mid_sum_w, eps)
+
+        edge_sse = edge_sum_wf2 - np.where(
+            edge_sum_w > eps,
+            (edge_sum_wf ** 2) / np.maximum(edge_sum_w, eps),
+            0.0,
+        )
+        mid_sse = mid_sum_wf2 - np.where(
+            mid_sum_w > eps,
+            (mid_sum_wf ** 2) / np.maximum(mid_sum_w, eps),
+            0.0,
+        )
+
+        rs = static_terms.ramp_start_idx[start:end]
+        re = static_terms.ramp_end_idx[start:end]
+        ramp_sum_w = static_terms.ramp_sum_w[np.newaxis, start:end]
+        ramp_sum_wx = static_terms.ramp_sum_wx[np.newaxis, start:end]
+        ramp_sum_wx2 = static_terms.ramp_sum_wx2[np.newaxis, start:end]
+
+        ramp_sum_wf = np.take(prefix_wf, re, axis=1) - np.take(prefix_wf, rs, axis=1)
+        ramp_sum_wf2 = np.take(prefix_wf2, re, axis=1) - np.take(prefix_wf2, rs, axis=1)
+        ramp_sum_wfx = np.take(prefix_wfx, re, axis=1) - np.take(prefix_wfx, rs, axis=1)
+
+        a_rel = static_terms.a_rel[start:end]
+        b_rel = static_terms.b_rel[start:end]
+        denom = np.maximum(b_rel - a_rel, 1e-6)[np.newaxis, :]
+        slope = (mu_mid - mu_edge) / denom
+        intercept = mu_edge - slope * a_rel[np.newaxis, :]
+
+        ramp_sse = (
+            ramp_sum_wf2
+            - 2.0 * intercept * ramp_sum_wf
+            - 2.0 * slope * ramp_sum_wfx
+            + (intercept ** 2) * ramp_sum_w
+            + 2.0 * intercept * slope * ramp_sum_wx
+            + (slope ** 2) * ramp_sum_wx2
+        )
+
+        total_sse = edge_sse + mid_sse + ramp_sse
+        local_idx = np.argmin(total_sse, axis=1)
+        local_best = total_sse[row_idx, local_idx]
+        update_mask = local_best < best_sse
+        if np.any(update_mask):
+            best_sse[update_mask] = local_best[update_mask]
+            sel_mu_edge = mu_edge[row_idx, local_idx]
+            sel_mu_mid = mu_mid[row_idx, local_idx]
+            best_mu_edge[update_mask] = sel_mu_edge[update_mask]
+            best_mu_mid[update_mask] = sel_mu_mid[update_mask]
+            delta_vals = sel_mu_edge - sel_mu_mid
+            best_delta[update_mask] = delta_vals[update_mask]
+            sel_a = a_rel[local_idx] * half_length_bp
+            sel_b = b_rel[local_idx] * half_length_bp
+            best_a_bp[update_mask] = sel_a[update_mask]
+            best_b_bp[update_mask] = sel_b[update_mask]
 
     return best_mu_edge, best_mu_mid, best_delta, best_a_bp, best_b_bp
 
@@ -1735,6 +1767,7 @@ def _meta_perm_worker_setup(
     n_group0: int,
     total_weight: float,
     T_obs: float,
+    progress_queue: Optional[Any],
 ) -> None:
     """Initializer that maps shared arrays into the worker process."""
 
@@ -1751,6 +1784,10 @@ def _meta_perm_worker_setup(
     _META_SHARED_STATE["total_weight"] = float(total_weight)
     _META_SHARED_STATE["T_obs"] = float(T_obs)
     _META_SHARED_STATE["abs_T_obs"] = abs(float(T_obs))
+    if progress_queue is not None:
+        _META_SHARED_STATE["progress_queue"] = progress_queue
+    else:
+        _META_SHARED_STATE.pop("progress_queue", None)
 
 
 def _resolve_weighted_median_tie(
@@ -1877,6 +1914,7 @@ def _meta_perm_worker_run(
     T_obs = _META_SHARED_STATE["T_obs"]
     abs_T_obs = _META_SHARED_STATE["abs_T_obs"]
     w_sorted = _META_SHARED_STATE["w"]
+    progress_queue = _META_SHARED_STATE.get("progress_queue")
 
     _maybe_set_affinity(cpu_affinity)
 
@@ -1892,6 +1930,7 @@ def _meta_perm_worker_run(
     sumsq_T = 0.0
 
     report_every = max(1, int(report_every))
+    reported_since_flush = 0
     while draws_done < draws_target:
         if gen >= gen_max:
             stamps.fill(0)
@@ -1915,6 +1954,11 @@ def _meta_perm_worker_run(
         sum_T += delta
         sumsq_T += delta * delta
         draws_done += 1
+        reported_since_flush += 1
+
+        if progress_queue is not None and reported_since_flush >= report_every:
+            progress_queue.put(int(reported_since_flush))
+            reported_since_flush = 0
 
         if draws_done < draws_target:
             delta_flip = -delta
@@ -1927,8 +1971,16 @@ def _meta_perm_worker_run(
             sum_T += delta_flip
             sumsq_T += delta_flip * delta_flip
             draws_done += 1
+            reported_since_flush += 1
+
+            if progress_queue is not None and reported_since_flush >= report_every:
+                progress_queue.put(int(reported_since_flush))
+                reported_since_flush = 0
 
         gen += 1
+
+    if progress_queue is not None and reported_since_flush > 0:
+        progress_queue.put(int(reported_since_flush))
 
     return {
         "draws": draws_done,
@@ -2039,6 +2091,10 @@ def meta_permutation_pvalue(
 
         seeds = [base_seed + 1 + i for i in range(n_workers)]
 
+        progress_queue = ctx.Queue()
+        disable_bar = not sys.stdout.isatty()
+        results: List[Dict[str, Any]] = []
+
         with ProcessPoolExecutor(
             max_workers=n_workers,
             mp_context=ctx,
@@ -2051,6 +2107,7 @@ def meta_permutation_pvalue(
                 n_group0,
                 total_weight,
                 T_obs,
+                progress_queue,
             ),
         ) as pool:
             futures = []
@@ -2067,7 +2124,56 @@ def meta_permutation_pvalue(
                     )
                 )
 
-            results = [f.result() for f in futures]
+            consumer_stop = threading.Event()
+            consumer_thread: Optional[threading.Thread] = None
+
+            with tqdm(
+                total=n_perm,
+                unit="draw",
+                dynamic_ncols=True,
+                smoothing=0.0,
+                mininterval=0.5,
+                ascii=True,
+                disable=disable_bar,
+            ) as pbar:
+
+                if futures:
+                    def _drain_progress() -> None:
+                        while not consumer_stop.is_set():
+                            try:
+                                delta = progress_queue.get(timeout=0.5)
+                            except Empty:
+                                continue
+                            if delta is None:
+                                break
+                            if delta:
+                                pbar.update(int(delta))
+                        while True:
+                            try:
+                                delta = progress_queue.get_nowait()
+                            except Empty:
+                                break
+                            if not delta:
+                                continue
+                            pbar.update(int(delta))
+
+                    consumer_thread = threading.Thread(
+                        target=_drain_progress,
+                        name="meta-perm-progress",
+                        daemon=True,
+                    )
+                    consumer_thread.start()
+
+                try:
+                    results = [f.result() for f in futures]
+                finally:
+                    consumer_stop.set()
+                    progress_queue.put(None)
+                    if consumer_thread is not None:
+                        consumer_thread.join()
+
+        progress_queue.close()
+        progress_queue.join_thread()
 
         total_draws = sum(res["draws"] for res in results)
         if total_draws == 0:
