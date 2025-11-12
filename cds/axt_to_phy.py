@@ -1364,55 +1364,77 @@ def calculate_and_print_differences_transcripts():
     per_tx_g0 = {}
     per_tx_g1 = {}
     comparable_sets = 0
+    skip_details = defaultdict(list)
 
     keys = list(cds_groups.items())
     total_keys = len(keys)
     print_dbg(f"Comparable TX groups detected (pre-filter): {total_keys}")
+    if total_keys == 0:
+        skip_details["No transcript PHYLIP groups detected after scanning *.phy files"].append(
+            "No group0/group1/outgroup combinations were discovered in the working directory."
+        )
 
     print_always("Analyzing each comparable transcript set (passed QC)...")
     for idx, (identifier, files) in enumerate(keys, 1):
-        if {'group0', 'group1', 'outgroup'}.issubset(files.keys()):
-            g0_seqs = read_phy_sequences(files['group0'])
-            g1_seqs = read_phy_sequences(files['group1'])
-            out_seq_list = read_phy_sequences(files['outgroup'])
-            if not out_seq_list:
-                progress_bar("[TX stats]", idx, total_keys if total_keys else 1)
-                continue
-            out_seq = out_seq_list[0]
+        required_roles = {'group0', 'group1', 'outgroup'}
+        missing_roles = required_roles.difference(files.keys())
+        if missing_roles:
+            skip_details["Missing required PHYLIP roles"].append(
+                f"{identifier[0]} missing roles: {', '.join(sorted(missing_roles))}"
+            )
+            progress_bar("[TX stats]", idx, total_keys if total_keys else 1)
+            continue
 
-            g0_len = set(len(s) for s in g0_seqs)
-            g1_len = set(len(s) for s in g1_seqs)
-            if not (len(g0_len) == 1 and len(g1_len) == 1):
-                logger.add("Intra-file Length Mismatch", f"Not all sequences in a .phy have same length for {identifier[0]}.")
-                progress_bar("[TX stats]", idx, total_keys if total_keys else 1)
-                continue
+        g0_seqs = read_phy_sequences(files['group0'])
+        g1_seqs = read_phy_sequences(files['group1'])
+        out_seq_list = read_phy_sequences(files['outgroup'])
+        if not out_seq_list:
+            skip_details["Outgroup PHYLIP file contained no sequences"].append(
+                f"{identifier[0]} ({files['outgroup']})"
+            )
+            progress_bar("[TX stats]", idx, total_keys if total_keys else 1)
+            continue
+        out_seq = out_seq_list[0]
 
-            L0 = g0_len.pop()
-            L1 = g1_len.pop()
-            if L0 != L1 or L0 != len(out_seq):
-                logger.add("Final Comparison Error", f"Length mismatch between groups for {identifier[0]}.")
-                progress_bar("[TX stats]", idx, total_keys if total_keys else 1)
-                continue
+        g0_len = set(len(s) for s in g0_seqs)
+        g1_len = set(len(s) for s in g1_seqs)
+        if not (len(g0_len) == 1 and len(g1_len) == 1):
+            logger.add("Intra-file Length Mismatch", f"Not all sequences in a .phy have same length for {identifier[0]}.")
+            skip_details["Sequences within PHYLIP file have inconsistent lengths"].append(
+                f"{identifier[0]} (group0 lens={sorted(g0_len)}, group1 lens={sorted(g1_len)})"
+            )
+            progress_bar("[TX stats]", idx, total_keys if total_keys else 1)
+            continue
 
-            comparable_sets += 1
-            n = L0
-            t_id = identifier[0]
-            # Extract gene name from filename of group0 (2nd token)
-            gene_name = os.path.basename(files['group0']).split('_')[1]
+        L0 = g0_len.pop()
+        L1 = g1_len.pop()
+        if L0 != L1 or L0 != len(out_seq):
+            logger.add("Final Comparison Error", f"Length mismatch between groups for {identifier[0]}.")
+            skip_details["Length mismatch between group PHYLIPs and outgroup"].append(
+                f"{identifier[0]} (group0={L0}, group1={L1}, outgroup={len(out_seq)})"
+            )
+            progress_bar("[TX stats]", idx, total_keys if total_keys else 1)
+            continue
 
-            local_fd = 0
-            local_g0 = 0
-            local_g1 = 0
+        comparable_sets += 1
+        n = L0
+        t_id = identifier[0]
+        # Extract gene name from filename of group0 (2nd token)
+        gene_name = os.path.basename(files['group0']).split('_')[1]
 
-            for i in range(n):
-                g0_alleles = {s[i] for s in g0_seqs if s[i] != '-'}
-                g1_alleles = {s[i] for s in g1_seqs if s[i] != '-'}
-                if len(g0_alleles) == 1 and len(g1_alleles) == 1 and g0_alleles != g1_alleles:
-                    local_fd += 1
-                    total_fixed_diffs += 1
-                    g0_a = next(iter(g0_alleles))
-                    g1_a = next(iter(g1_alleles))
-                    chimp_a = out_seq[i]
+        local_fd = 0
+        local_g0 = 0
+        local_g1 = 0
+
+        for i in range(n):
+            g0_alleles = {s[i] for s in g0_seqs if s[i] != '-'}
+            g1_alleles = {s[i] for s in g1_seqs if s[i] != '-'}
+            if len(g0_alleles) == 1 and len(g1_alleles) == 1 and g0_alleles != g1_alleles:
+                local_fd += 1
+                total_fixed_diffs += 1
+                g0_a = next(iter(g0_alleles))
+                g1_a = next(iter(g1_alleles))
+                chimp_a = out_seq[i]
                     if chimp_a == g0_a:
                         g0_matches += 1
                         local_g0 += 1
@@ -1433,6 +1455,16 @@ def calculate_and_print_differences_transcripts():
 
     if comparable_sets == 0:
         print_always("CRITICAL: No complete transcript sets found to compare after filtering.")
+        if skip_details:
+            print_always("Reasons:")
+            for reason, details in skip_details.items():
+                print_always(f"  - {reason}: {len(details)} occurrence(s)")
+                for detail in details[:5]:
+                    print_always(f"      * {detail}")
+                if len(details) > 5:
+                    print_always(f"      ... {len(details) - 5} more occurrence(s) suppressed.")
+        else:
+            print_always("  - No specific skip reasons captured; check input dataset.")
         return
 
     print_always(f"Successfully analyzed {comparable_sets} complete transcript CDS sets.")
