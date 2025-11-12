@@ -59,7 +59,22 @@ PERMUTATION_CHUNK_SIZE = 256
 
 FRF_MIN_EDGE_WINDOWS = 1
 FRF_MIN_MID_WINDOWS = 1
-MIN_BLOCKS_FOR_PERMUTATION = 5
+
+# ------------------------- ROTATION NULL CONFIG -------------------------
+
+# Rotate by a random offset k in {1,...,n-1}; optionally also flip orientation.
+ROTATION_ALLOW_FLIP = False
+
+# Disallow seams too close to the ends of the ordered series (in windows).
+# 0 means allow all k. Small integers like 1–2 are a cautious choice.
+ROTATION_SEAM_EXCLUDE_WINDOWS = 0
+
+# If True and n-1 is small, sample each valid offset without replacement per chunk until exhausted.
+ROTATION_ENUMERATE_OFFSETS = True
+
+# If True, rotate residuals around the fitted FRF trend and then add the trend back.
+# This guards against broad nonstationarity but is optional; default off.
+ROTATION_USE_RESIDUALS = False
 
 FRF_CANDIDATE_CHUNK_SIZE = 8192
 
@@ -221,12 +236,16 @@ class PermutationPlan:
     order: np.ndarray
     fst_values: np.ndarray
     weight_values: np.ndarray
+    weight_sorted: np.ndarray
     x_sorted: np.ndarray
     candidates: Dict[str, np.ndarray]
     half_length: float
-    block_index: np.ndarray
-    has_padding: bool
     observed_delta: float
+    valid_offsets: np.ndarray
+    allow_flip: bool
+    use_residuals: bool
+    rotation_basis: np.ndarray
+    trend_physical: Optional[np.ndarray]
 
     @property
     def n_chunks(self) -> int:
@@ -722,6 +741,46 @@ def run_frf_search(
 
     return best_mu_edge, best_mu_mid, best_delta, best_a_bp, best_b_bp
 
+# ------------------------- ROTATION HELPERS -------------------------
+
+def _frf_predict_series(
+    x_sorted: np.ndarray,
+    mu_edge: float,
+    mu_mid: float,
+    a_bp: float,
+    b_bp: float,
+    half_length_bp: float,
+) -> np.ndarray:
+    if not (
+        np.isfinite(mu_edge)
+        and np.isfinite(mu_mid)
+        and np.isfinite(a_bp)
+        and np.isfinite(b_bp)
+        and half_length_bp > 0
+    ):
+        return np.full_like(x_sorted, np.nan, dtype=float)
+    a_rel = float(a_bp) / float(half_length_bp)
+    b_rel = float(b_bp) / float(half_length_bp)
+    a_rel, b_rel = float(min(a_rel, b_rel)), float(max(a_rel, b_rel))
+    out = np.empty_like(x_sorted, dtype=float)
+    left = x_sorted <= a_rel
+    right = x_sorted >= b_rel
+    mid = ~(left | right)
+    out[left] = mu_edge
+    out[right] = mu_mid
+    if np.any(mid):
+        denom = max(1e-12, b_rel - a_rel)
+        out[mid] = mu_edge + (mu_mid - mu_edge) * (x_sorted[mid] - a_rel) / denom
+    return out
+
+
+def _mad_standardize(v: np.ndarray) -> np.ndarray:
+    v = np.asarray(v, dtype=float)
+    med = np.nanmedian(v)
+    mad = np.nanmedian(np.abs(v - med))
+    scale = mad if mad > 1e-12 else np.nanstd(v) or 1.0
+    return (v - med) / max(scale, 1e-12)
+
 # ------------------------- PER-INVERSION FRF + NULL -------------------------
 
 def prepare_inversion_frf_and_permutation(
@@ -745,7 +804,7 @@ def prepare_inversion_frf_and_permutation(
             length=inversion.length,
             n_windows=inversion.n_windows,
             n_sites=n_sites_total,
-            block_size_windows=1,
+            block_size_windows=0,
             n_blocks=0,
             frf_mu_edge=float("nan"),
             frf_mu_mid=float("nan"),
@@ -763,11 +822,6 @@ def prepare_inversion_frf_and_permutation(
     fst_v = fst_full[valid]
     w_v = w_full[valid]
     half_length = inversion.length / 2.0
-
-    block_size_inv, _, _, _ = estimate_correlation_length(
-        fst_v, w_v, default_block_size=default_block_size
-    )
-
     order = np.argsort(x_v)
     x_sorted = x_v[order]
     fst_sorted = fst_v[order]
@@ -785,7 +839,7 @@ def prepare_inversion_frf_and_permutation(
             length=inversion.length,
             n_windows=inversion.n_windows,
             n_sites=n_sites_total,
-            block_size_windows=block_size_inv,
+            block_size_windows=0,
             n_blocks=0,
             frf_mu_edge=float("nan"),
             frf_mu_mid=float("nan"),
@@ -812,10 +866,6 @@ def prepare_inversion_frf_and_permutation(
     frf_a = float(a_bp_arr[0])
     frf_b = float(b_bp_arr[0])
 
-    blocks = precompute_block_structure(n_all, block_size_inv)
-    n_blocks = len(blocks)
-    can_permute = n_permutations > 0 and n_blocks >= MIN_BLOCKS_FOR_PERMUTATION
-
     result = FRFResult(
         inv_key=inversion.inv_key,
         chrom=inversion.chrom,
@@ -824,8 +874,8 @@ def prepare_inversion_frf_and_permutation(
         length=inversion.length,
         n_windows=inversion.n_windows,
         n_sites=n_sites_total,
-        block_size_windows=block_size_inv,
-        n_blocks=n_blocks,
+        block_size_windows=0,
+        n_blocks=0,
         frf_mu_edge=frf_mu_edge,
         frf_mu_mid=frf_mu_mid,
         frf_delta=frf_delta,
@@ -837,47 +887,59 @@ def prepare_inversion_frf_and_permutation(
         usable_for_meta=False,
     )
 
-    if not can_permute:
+    if n_permutations <= 0:
         return PreparedInversion(result=result, plan=None)
 
-    orig_to_comp = np.full(n_all, -1, dtype=int)
-    orig_to_comp[np.where(valid)[0]] = np.arange(n_valid, dtype=int)
-    block_comp_indices: List[np.ndarray] = []
-    for block in blocks:
-        comp = orig_to_comp[block]
-        comp = comp[comp >= 0]
-        block_comp_indices.append(comp)
+    n = int(x_sorted.size)
+    if n < 2:
+        return PreparedInversion(result=result, plan=None)
 
-    block_lengths = np.array([comp.size for comp in block_comp_indices], dtype=int)
-    expected_valid = int(block_lengths.sum()) if block_lengths.size else 0
-    if expected_valid != n_valid:
-        raise RuntimeError("Mismatch between block composition and number of valid windows")
-    max_block_len = int(block_lengths.max(initial=0)) if block_lengths.size else 0
-    block_index = (
-        np.full((n_blocks, max_block_len), -1, dtype=int)
-        if max_block_len > 0
-        else np.empty((n_blocks, 0), dtype=int)
-    )
-    for i, comp in enumerate(block_comp_indices):
-        if comp.size:
-            block_index[i, : comp.size] = comp
-    has_padding = bool(np.any(block_lengths != max_block_len)) if block_lengths.size else False
+    valid_offsets = np.arange(1, n, dtype=int)
+    if ROTATION_SEAM_EXCLUDE_WINDOWS > 0:
+        ex = int(ROTATION_SEAM_EXCLUDE_WINDOWS)
+        valid_offsets = valid_offsets[(valid_offsets >= ex) & (valid_offsets <= n - ex)]
+    if valid_offsets.size == 0:
+        return PreparedInversion(result=result, plan=None)
+
+    inverse_order = np.empty_like(order)
+    inverse_order[order] = np.arange(order.size)
+
+    if ROTATION_USE_RESIDUALS:
+        trend_sorted = _frf_predict_series(
+            x_sorted, frf_mu_edge, frf_mu_mid, frf_a, frf_b, half_length
+        )
+        residual_sorted = fst_sorted - trend_sorted
+        rotation_basis_physical = _mad_standardize(residual_sorted)[inverse_order]
+        trend_physical = trend_sorted[inverse_order]
+        use_residuals = True
+    else:
+        rotation_basis_physical = fst_v.astype(float, copy=False)
+        trend_physical = None
+        use_residuals = False
+
+    rotation_basis_physical = np.asarray(rotation_basis_physical, dtype=float)
+    if trend_physical is not None:
+        trend_physical = np.asarray(trend_physical, dtype=float)
 
     plan = PermutationPlan(
         inv_key=inversion.inv_key,
         base_seed=stable_seed_from_key(inversion.inv_key),
         n_permutations=n_permutations,
         chunk_size=PERMUTATION_CHUNK_SIZE,
-        n_valid=n_valid,
+        n_valid=n,
         order=order,
         fst_values=fst_v,
         weight_values=w_v,
+        weight_sorted=w_sorted,
         x_sorted=x_sorted,
         candidates=candidates,
         half_length=half_length,
-        block_index=block_index,
-        has_padding=has_padding,
         observed_delta=frf_delta,
+        valid_offsets=valid_offsets,
+        allow_flip=bool(ROTATION_ALLOW_FLIP),
+        use_residuals=use_residuals,
+        rotation_basis=rotation_basis_physical,
+        trend_physical=trend_physical,
     )
     return PreparedInversion(result=result, plan=plan)
 
@@ -895,39 +957,35 @@ def run_permutation_chunk(args) -> PermutationChunkResult:
         return PermutationChunkResult(plan.inv_key, chunk_index, 0, 0.0, 0.0, 0)
 
     size = min(plan.chunk_size, remaining)
-    n_blocks = plan.block_index.shape[0]
-    if n_blocks == 0 or plan.n_valid <= 0:
+
+    n = int(plan.n_valid)
+    if n <= 1 or plan.valid_offsets.size == 0:
         return PermutationChunkResult(plan.inv_key, chunk_index, 0, 0.0, 0.0, 0)
 
     rng = np.random.default_rng(plan.base_seed + chunk_index)
-    block_orders = np.argsort(rng.random((size, n_blocks)), axis=1)
-    perm_raw = plan.block_index[block_orders]
 
-    if plan.has_padding:
-        rows: List[np.ndarray] = []
-        for idx, row in enumerate(perm_raw):
-            flat = row.ravel()
-            flat = flat[flat >= 0]
-            if flat.size != plan.n_valid:
-                raise RuntimeError(
-                    "Permutation index shape mismatch in padded case: "
-                    f"row {idx} has {flat.size} valid indices, expected {plan.n_valid}"
-                )
-            rows.append(flat)
-        perm_indices = np.stack(rows, axis=0)
+    if ROTATION_ENUMERATE_OFFSETS and size <= plan.valid_offsets.size:
+        offsets = np.array(rng.choice(plan.valid_offsets, size=size, replace=False), dtype=int)
     else:
-        perm_indices = perm_raw.reshape(size, plan.n_valid)
+        offsets = np.array(rng.choice(plan.valid_offsets, size=size, replace=True), dtype=int)
 
-    # Defensive check: ensure permutation indices have correct shape
-    if perm_indices.shape != (size, plan.n_valid):
-        raise RuntimeError(
-            "Permutation index shape mismatch: expected "
-            f"{(size, plan.n_valid)}, got {perm_indices.shape}"
-        )
+    base = np.arange(n, dtype=int)
+    orient = np.broadcast_to(base, (size, n))
+    if plan.allow_flip:
+        flips = rng.integers(0, 2, size=size, dtype=int)
+        flipped = np.broadcast_to(base[::-1], (size, n))
+        orient = np.where(flips[:, None] == 1, flipped, orient)
 
-    fst_perm_batch = plan.fst_values[perm_indices][:, plan.order]
+    idx = (orient + offsets[:, None]) % n
 
-    w_perm_batch = plan.weight_values[perm_indices][:, plan.order]
+    rotated = plan.rotation_basis[idx]
+    if plan.use_residuals and plan.trend_physical is not None:
+        fst_perm_physical = rotated + plan.trend_physical[None, :]
+    else:
+        fst_perm_physical = rotated
+
+    fst_perm_batch = fst_perm_physical[:, plan.order]
+    w_perm_batch = np.broadcast_to(plan.weight_sorted, (size, n))
     _, _, deltas, _, _ = run_frf_search(
         fst_perm_batch,
         w_perm_batch,
@@ -936,22 +994,17 @@ def run_permutation_chunk(args) -> PermutationChunkResult:
         plan.half_length,
     )
     deltas = np.asarray(deltas, dtype=float)
-
     finite = np.isfinite(deltas)
     if not np.any(finite):
         return PermutationChunkResult(plan.inv_key, chunk_index, 0, 0.0, 0.0, 0)
-
     valid = deltas[finite]
-    sum_delta = float(np.sum(valid))
-    sum_sq_delta = float(np.sum(valid * valid))
-    count_ge = int(np.sum(valid >= plan.observed_delta))
     return PermutationChunkResult(
         plan.inv_key,
         chunk_index,
         int(valid.size),
-        sum_delta,
-        sum_sq_delta,
-        count_ge,
+        float(np.sum(valid)),
+        float(np.sum(valid * valid)),
+        int(np.sum(valid >= plan.observed_delta)),
     )
 
 # ------------------------- PRECISION-WEIGHTED MEDIAN ANALYSIS -------------------------
@@ -1305,9 +1358,10 @@ def main():
             completed += 1
             delta = prepared.result.frf_delta
             delta_str = f"{delta:+.4f}" if np.isfinite(delta) else "nan"
+            plan_msg = "(rotation plan ready)" if prepared.plan is not None else "(no permutation plan)"
             log.info(
                 f"[{completed}/{len(inversions)}] {inv.inv_key} "
-                f"Δ={delta_str} (permutation plan ready)"
+                f"Δ={delta_str} {plan_msg}"
             )
 
     if not prepared_results:
@@ -1427,7 +1481,7 @@ def main():
             f"{overall_rate:.2f}" if math.isfinite(overall_rate) and overall_rate > 0 else "--",
         )
     else:
-        log.info("No permutation work required (insufficient blocks or permutations set to zero)")
+        log.info("No permutation work required (insufficient valid windows or permutations set to zero)")
 
     for plan in plans:
         res = results_by_key[plan.inv_key]
@@ -1462,7 +1516,6 @@ def main():
             f"[{idx}/{len(all_results)}] {res.inv_key} "
             f"Δ={delta_str} "
             f"(var={var_str}) "
-            f"[blocks={res.n_blocks}, block_size={res.block_size_windows}] "
             f"[{meta_flag}]"
         )
     if not all_results:
