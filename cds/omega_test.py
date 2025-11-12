@@ -397,6 +397,20 @@ def generate_omega_result_figure(gene_name, region_label, status_annotated_tree,
     POSITIVE_COLOR = "#D55E00"  # Vermillion
     NEUTRAL_COLOR = "#000000"   # Black
 
+    # Utility to coerce omega values to floats when possible. Returns ``None``
+    # if the value cannot be interpreted as a finite float (e.g. ``None`` or
+    # ``nan``), allowing the caller to substitute a sensible default.
+    def _normalize_omega(value):
+        try:
+            if value is None:
+                return None
+            coerced = float(value)
+            if np.isnan(coerced):
+                return None
+            return coerced
+        except (TypeError, ValueError):
+            return None
+
     # This layout function determines the color of each branch based on its
     # group's estimated omega value.
     def _omega_color_layout(node):
@@ -408,11 +422,14 @@ def generate_omega_result_figure(gene_name, region_label, status_annotated_tree,
         status = getattr(node, "group_status", "both")
         omega_val = 1.0 # Default to neutral
         if status == 'direct':
-            omega_val = paml_params.get('omega_direct', 1.0)
+            omega_val = _normalize_omega(paml_params.get('omega_direct'))
         elif status == 'inverted':
-            omega_val = paml_params.get('omega_inverted', 1.0)
+            omega_val = _normalize_omega(paml_params.get('omega_inverted'))
         else: # 'both' and 'outgroup' fall into the background category
-            omega_val = paml_params.get('omega_background', 1.0)
+            omega_val = _normalize_omega(paml_params.get('omega_background'))
+
+        if omega_val is None:
+            omega_val = 1.0
 
         # Assign color based on the omega value
         if omega_val > 1.0:
@@ -454,11 +471,15 @@ def generate_omega_result_figure(gene_name, region_label, status_annotated_tree,
         'Background': paml_params.get('omega_background'),
     }
 
-    for name, omega in legend_map.items():
-        if omega is not None and not np.isnan(omega):
-            if omega > 1.0: color = POSITIVE_COLOR
-            elif omega < 1.0: color = PURIFYING_COLOR
-            else: color = NEUTRAL_COLOR
+    for name, omega_raw in legend_map.items():
+        omega = _normalize_omega(omega_raw)
+        if omega is not None:
+            if omega > 1.0:
+                color = POSITIVE_COLOR
+            elif omega < 1.0:
+                color = PURIFYING_COLOR
+            else:
+                color = NEUTRAL_COLOR
             legend_text = f" {name} (ω = {omega:.3f})"
             ts.legend.add_face(RectFace(10, 10, fgcolor=color, bgcolor=color), column=0)
             ts.legend.add_face(TextFace(legend_text, fsize=9), column=1)
