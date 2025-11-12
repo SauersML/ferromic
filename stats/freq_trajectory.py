@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import csv
 import io
+from bisect import bisect_left
 from pathlib import Path
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable, List, Optional, Tuple
 from urllib.request import urlopen
 
 try:
     import matplotlib.pyplot as plt
+    from matplotlib.ticker import FuncFormatter
 except ModuleNotFoundError as exc:  # pragma: no cover - import guard for runtime usability
     raise SystemExit(
         "matplotlib is required to plot trajectories. Install it with 'pip install matplotlib'."
@@ -89,7 +91,89 @@ def rows_to_columns(rows: Iterable[Dict[str, float]]) -> Dict[str, List[float]]:
     return columns
 
 
-def plot_trajectory(columns: Dict[str, List[float]], output: Path) -> None:
+def _prepare_interpolator(
+    dates: List[float], values: List[float]
+) -> Tuple[List[float], List[float]]:
+    """Return the date/value series sorted for interpolation."""
+
+    paired = sorted(zip(dates, values))
+    sorted_dates = [date for date, _ in paired]
+    sorted_values = [value for _, value in paired]
+    return sorted_dates, sorted_values
+
+
+def _interpolate(date: float, dates: List[float], values: List[float]) -> float:
+    """Linearly interpolate the value at ``date`` within the sorted series."""
+
+    if date <= dates[0]:
+        return values[0]
+    if date >= dates[-1]:
+        return values[-1]
+
+    idx = bisect_left(dates, date)
+    if dates[idx] == date:
+        return values[idx]
+
+    left_date = dates[idx - 1]
+    right_date = dates[idx]
+    left_value = values[idx - 1]
+    right_value = values[idx]
+
+    span = right_date - left_date
+    if span == 0:
+        return left_value
+    weight = (date - left_date) / span
+    return left_value + weight * (right_value - left_value)
+
+
+def _find_largest_window_change(
+    dates: List[float],
+    values: List[float],
+    window: float,
+) -> Optional[Tuple[float, float, float]]:
+    """Return the start, end, and magnitude of the largest change in ``window`` years."""
+
+    if not dates:
+        return None
+
+    sorted_dates, sorted_values = _prepare_interpolator(dates, values)
+    min_date = sorted_dates[0]
+    max_date = sorted_dates[-1]
+    if max_date - min_date < window:
+        return None
+
+    candidate_starts = set()
+    for date in sorted_dates:
+        if date + window <= max_date:
+            candidate_starts.add(date)
+        adjusted = date - window
+        if adjusted >= min_date:
+            candidate_starts.add(adjusted)
+
+    best_start = None
+    best_change = -1.0
+    best_end = None
+    for start in sorted(candidate_starts):
+        end = start + window
+        if end > max_date or start < min_date:
+            continue
+        start_val = _interpolate(start, sorted_dates, sorted_values)
+        end_val = _interpolate(end, sorted_dates, sorted_values)
+        change = abs(end_val - start_val)
+        if change > best_change:
+            best_change = change
+            best_start = start
+            best_end = end
+
+    if best_start is None or best_end is None:
+        return None
+
+    return best_start, best_end, best_change
+
+
+def plot_trajectory(
+    columns: Dict[str, List[float]], output: Path
+) -> Optional[Tuple[float, float, float]]:
     """Plot empirical and model allele-frequency trajectories with uncertainty."""
 
     dates = columns["date_center"]
@@ -132,8 +216,47 @@ def plot_trajectory(columns: Dict[str, List[float]], output: Path) -> None:
     )
 
     ax.set_xlabel("Years before present (window center)")
-    ax.set_ylabel("Allele frequency")
-    ax.set_ylim(0, 1)
+
+    def _format_year(value: float, _: float) -> str:
+        if abs(value) >= 100:
+            formatted = f"{value:,.0f}"
+        elif abs(value) >= 10:
+            formatted = f"{value:,.1f}"
+        else:
+            formatted = f"{value:,.2f}"
+        return formatted.rstrip("0").rstrip(".")
+
+    ax.xaxis.set_major_formatter(FuncFormatter(_format_year))
+    ax.set_ylabel('Derived allele "G" frequency (rs34666797)')
+
+    # Automatically scale the y-axis to the data that are actually plotted,
+    # including both the empirical and model confidence intervals. This keeps
+    # the plot focused on the informative range instead of always spanning 0–1.
+    series_for_ylim = [
+        columns["af_low"],
+        columns["af_up"],
+        columns["af"],
+        columns["pt_low"],
+        columns["pt_up"],
+        columns["pt"],
+    ]
+    all_values = [value for series in series_for_ylim for value in series]
+    ymin = min(all_values)
+    ymax = max(all_values)
+    padding = (ymax - ymin) * 0.05 if ymax > ymin else 0.05
+    ax.set_ylim(ymin - padding, ymax + padding)
+
+    highlight = _find_largest_window_change(dates, columns["pt"], window=1_000.0)
+    if highlight is not None:
+        start_year, end_year, change = highlight
+        ax.axvspan(
+            min(start_year, end_year),
+            max(start_year, end_year),
+            color="#fdd49e",
+            alpha=0.35,
+            label="Largest 1,000-year change",
+        )
+    ax.invert_xaxis()
     ax.legend(frameon=True, framealpha=0.9, edgecolor="none")
     ax.grid(True, linestyle="--", linewidth=0.6, alpha=0.35)
     ax.tick_params(axis="both", labelsize=11)
@@ -142,11 +265,21 @@ def plot_trajectory(columns: Dict[str, List[float]], output: Path) -> None:
     fig.savefig(output, dpi=300)
     plt.close(fig)
 
+    return highlight
+
 
 def main() -> None:
     rows = download_trajectory()
     columns = rows_to_columns(rows)
-    plot_trajectory(columns, OUTPUT_IMAGE)
+    highlight = plot_trajectory(columns, OUTPUT_IMAGE)
+    if highlight is not None:
+        start_year, end_year, change = highlight
+        print(
+            "Largest 1,000-year change window: "
+            f"start={start_year:g} BP ({start_year/1000:.3f} kya), "
+            f"end={end_year:g} BP ({end_year/1000:.3f} kya), "
+            f"|Δf|={change:.4f}"
+        )
     print(f"Saved allele frequency trajectory to {OUTPUT_IMAGE.resolve()}")
 
 
