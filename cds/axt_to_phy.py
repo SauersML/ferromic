@@ -1333,29 +1333,36 @@ def build_outgroups_and_filter(transcripts, regions):
 # --- Fixed-diff stats ----
 # =========================
 
-def calculate_and_print_differences_transcripts():
+def calculate_and_print_differences_transcripts(transcripts):
     print_always("--- Final Difference Calculation & Statistics (Transcripts) ---")
-    key_regex = re.compile(r"(ENST[0-9]+\.[0-9]+)_([^_]+)_start([0-9]+)_end([0-9]+)")
-    cds_groups = defaultdict(dict)
-    all_phys = glob.glob('*.phy')
+    cds_groups = {}
 
-    # Scan files with progress
-    total_files = len(all_phys)
-    for i, fpath in enumerate(all_phys, 1):
-        base = os.path.basename(fpath)
-        m = key_regex.search(base)
-        if m:
-            t_id, chrom_token, start_token, end_token = m.groups()
-            chrom_norm = normalize_chromosome(chrom_token)
-            if not chrom_norm:
-                logger.add("Stats Parsing Error", f"Skipped file '{base}' due to invalid chromosome '{chrom_token}'.")
-                continue
-            key = (t_id, chrom_norm, start_token, end_token)
-            cds_groups[key][base.split('_')[0]] = fpath
-        if i % 25 == 0 or i == total_files:
-            progress_bar("[TX stats: scan]", i, total_files if total_files else 1)
-    if total_files:
-        progress_bar("[TX stats: scan]", total_files, total_files)
+    # Build groups from validated transcript metadata
+    total_tx = len(transcripts)
+    for i, t in enumerate(transcripts, 1):
+        info = t['info']
+        t_id = info['transcript_id']
+        chrom = info['chromosome']
+        start = info['start']
+        end = info['end']
+        gene = info['gene_name']
+        
+        chrom_bare = chromosome_to_bare(chrom) or chrom
+        key = (t_id, chrom, start, end)
+        
+        # Build expected outgroup filename
+        outgroup_fname = f"outgroup_{gene}_{t_id}_{chrom_bare}_start{start}_end{end}.phy"
+        
+        cds_groups[key] = {
+            'group0': info['g0_fname'],
+            'group1': info['g1_fname'],
+            'outgroup': outgroup_fname if os.path.exists(outgroup_fname) else None
+        }
+        
+        if i % 25 == 0 or i == total_tx:
+            progress_bar("[TX stats: scan]", i, total_tx if total_tx else 1)
+    if total_tx:
+        progress_bar("[TX stats: scan]", total_tx, total_tx)
         print()
 
     total_fixed_diffs = 0
@@ -1662,7 +1669,7 @@ def main():
             build_outgroups_and_filter(transcripts, regions)
         # Stats for each domain
         with time_block("Compute TX stats"):
-            calculate_and_print_differences_transcripts()
+            calculate_and_print_differences_transcripts(transcripts)
         with time_block("Compute REG stats"):
             calculate_and_print_differences_regions()
 
