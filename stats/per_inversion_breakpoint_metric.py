@@ -87,6 +87,11 @@ ROTATION_ENUMERATE_OFFSETS = True
 ROTATION_USE_RESIDUALS = False
 
 FRF_CANDIDATE_CHUNK_SIZE = 8192
+# Upper bound for the number of prefix "cells" (rows * columns) we materialize
+# at once when evaluating cached FRF candidates. This caps transient allocations
+# such as prefix arrays so that very wide inversions do not request multi-GB
+# buffers inside worker processes.
+FRF_PREFIX_CHUNK_CELLS = 16_000_000
 
 META_PERMUTATIONS = 3_000_000_000
 META_PERM_CHUNK = 1000
@@ -883,21 +888,12 @@ def run_frf_search(
         return best_mu_edge, best_mu_mid, best_delta, best_a_bp, best_b_bp
 
     # Cached path
-    prefix_wf = _prefix_with_zero(weight_matrix * fst_matrix)
-    prefix_wf2 = _prefix_with_zero(weight_matrix * (fst_matrix ** 2))
-    prefix_wfx = _prefix_with_zero(weight_matrix * fst_matrix * x_sorted[np.newaxis, :])
-
-    total_wf = prefix_wf[:, -1]
-    total_wf2 = prefix_wf2[:, -1]
-
     n_candidates = static_terms.edge_idx.size
     if n_candidates == 0:
         nan = np.full(n_samples, np.nan)
         return nan, nan, nan, nan, nan
 
     target_cells = 2_000_000
-    chunk_size = max(1, min(n_candidates, target_cells // max(1, n_samples)))
-
     best_sse = np.full(n_samples, np.inf)
     best_mu_edge = np.full(n_samples, np.nan)
     best_mu_mid = np.full(n_samples, np.nan)
@@ -905,77 +901,116 @@ def run_frf_search(
     best_a_bp = np.full(n_samples, np.nan)
     best_b_bp = np.full(n_samples, np.nan)
 
-    for start in range(0, n_candidates, chunk_size):
-        end = min(start + chunk_size, n_candidates)
+    prefix_row_chunk = max(
+        1,
+        min(
+            n_samples,
+            max(1, FRF_PREFIX_CHUNK_CELLS // max(1, n_windows + 1)),
+        ),
+    )
 
-        edge_idx = static_terms.edge_idx[start:end]
-        mid_idx = static_terms.mid_idx[start:end]
+    for row_start in range(0, n_samples, prefix_row_chunk):
+        row_end = min(row_start + prefix_row_chunk, n_samples)
+        row_slice = slice(row_start, row_end)
+        sub_weights = weight_matrix[row_slice]
+        sub_fst = fst_matrix[row_slice]
+        sub_rows = row_end - row_start
+        row_idx_sub = np.arange(sub_rows)
 
-        edge_sum_w = static_terms.edge_sum_w[np.newaxis, start:end]
-        mid_sum_w = static_terms.mid_sum_w[np.newaxis, start:end]
+        prefix_wf = _prefix_with_zero(sub_weights * sub_fst)
+        prefix_wf2 = _prefix_with_zero(sub_weights * (sub_fst ** 2))
+        prefix_wfx = _prefix_with_zero(sub_weights * sub_fst * x_sorted[np.newaxis, :])
 
-        edge_sum_wf = np.take(prefix_wf, edge_idx, axis=1)
-        edge_sum_wf2 = np.take(prefix_wf2, edge_idx, axis=1)
-        mu_edge = edge_sum_wf / np.maximum(edge_sum_w, eps)
+        total_wf = prefix_wf[:, -1]
+        total_wf2 = prefix_wf2[:, -1]
 
-        mid_prefix_wf = np.take(prefix_wf, mid_idx, axis=1)
-        mid_prefix_wf2 = np.take(prefix_wf2, mid_idx, axis=1)
-        mid_sum_wf = total_wf[:, None] - mid_prefix_wf
-        mid_sum_wf2 = total_wf2[:, None] - mid_prefix_wf2
-        mu_mid = mid_sum_wf / np.maximum(mid_sum_w, eps)
+        chunk_size = max(1, min(n_candidates, target_cells // max(1, sub_rows)))
 
-        edge_sse = edge_sum_wf2 - np.where(
-            edge_sum_w > eps,
-            (edge_sum_wf ** 2) / np.maximum(edge_sum_w, eps),
-            0.0,
-        )
-        mid_sse = mid_sum_wf2 - np.where(
-            mid_sum_w > eps,
-            (mid_sum_wf ** 2) / np.maximum(mid_sum_w, eps),
-            0.0,
-        )
+        best_sse_sub = np.full(sub_rows, np.inf)
+        best_mu_edge_sub = np.full(sub_rows, np.nan)
+        best_mu_mid_sub = np.full(sub_rows, np.nan)
+        best_delta_sub = np.full(sub_rows, np.nan)
+        best_a_bp_sub = np.full(sub_rows, np.nan)
+        best_b_bp_sub = np.full(sub_rows, np.nan)
 
-        rs = static_terms.ramp_start_idx[start:end]
-        re = static_terms.ramp_end_idx[start:end]
-        ramp_sum_w = static_terms.ramp_sum_w[np.newaxis, start:end]
-        ramp_sum_wx = static_terms.ramp_sum_wx[np.newaxis, start:end]
-        ramp_sum_wx2 = static_terms.ramp_sum_wx2[np.newaxis, start:end]
+        for start in range(0, n_candidates, chunk_size):
+            end = min(start + chunk_size, n_candidates)
 
-        ramp_sum_wf = np.take(prefix_wf, re, axis=1) - np.take(prefix_wf, rs, axis=1)
-        ramp_sum_wf2 = np.take(prefix_wf2, re, axis=1) - np.take(prefix_wf2, rs, axis=1)
-        ramp_sum_wfx = np.take(prefix_wfx, re, axis=1) - np.take(prefix_wfx, rs, axis=1)
+            edge_idx = static_terms.edge_idx[start:end]
+            mid_idx = static_terms.mid_idx[start:end]
 
-        a_rel = static_terms.a_rel[start:end]
-        b_rel = static_terms.b_rel[start:end]
-        denom = np.maximum(b_rel - a_rel, 1e-6)[np.newaxis, :]
-        slope = (mu_mid - mu_edge) / denom
-        intercept = mu_edge - slope * a_rel[np.newaxis, :]
+            edge_sum_w = static_terms.edge_sum_w[np.newaxis, start:end]
+            mid_sum_w = static_terms.mid_sum_w[np.newaxis, start:end]
 
-        ramp_sse = (
-            ramp_sum_wf2
-            - 2.0 * intercept * ramp_sum_wf
-            - 2.0 * slope * ramp_sum_wfx
-            + (intercept ** 2) * ramp_sum_w
-            + 2.0 * intercept * slope * ramp_sum_wx
-            + (slope ** 2) * ramp_sum_wx2
-        )
+            edge_sum_wf = np.take(prefix_wf, edge_idx, axis=1)
+            edge_sum_wf2 = np.take(prefix_wf2, edge_idx, axis=1)
+            mu_edge = edge_sum_wf / np.maximum(edge_sum_w, eps)
 
-        total_sse = edge_sse + mid_sse + ramp_sse
-        local_idx = np.argmin(total_sse, axis=1)
-        local_best = total_sse[row_idx, local_idx]
-        update_mask = local_best < best_sse
-        if np.any(update_mask):
-            best_sse[update_mask] = local_best[update_mask]
-            sel_mu_edge = mu_edge[row_idx, local_idx]
-            sel_mu_mid = mu_mid[row_idx, local_idx]
-            best_mu_edge[update_mask] = sel_mu_edge[update_mask]
-            best_mu_mid[update_mask] = sel_mu_mid[update_mask]
-            delta_vals = sel_mu_edge - sel_mu_mid
-            best_delta[update_mask] = delta_vals[update_mask]
-            sel_a = a_rel[local_idx] * half_length_bp
-            sel_b = b_rel[local_idx] * half_length_bp
-            best_a_bp[update_mask] = sel_a[update_mask]
-            best_b_bp[update_mask] = sel_b[update_mask]
+            mid_prefix_wf = np.take(prefix_wf, mid_idx, axis=1)
+            mid_prefix_wf2 = np.take(prefix_wf2, mid_idx, axis=1)
+            mid_sum_wf = total_wf[:, None] - mid_prefix_wf
+            mid_sum_wf2 = total_wf2[:, None] - mid_prefix_wf2
+            mu_mid = mid_sum_wf / np.maximum(mid_sum_w, eps)
+
+            edge_sse = edge_sum_wf2 - np.where(
+                edge_sum_w > eps,
+                (edge_sum_wf ** 2) / np.maximum(edge_sum_w, eps),
+                0.0,
+            )
+            mid_sse = mid_sum_wf2 - np.where(
+                mid_sum_w > eps,
+                (mid_sum_wf ** 2) / np.maximum(mid_sum_w, eps),
+                0.0,
+            )
+
+            rs = static_terms.ramp_start_idx[start:end]
+            re = static_terms.ramp_end_idx[start:end]
+            ramp_sum_w = static_terms.ramp_sum_w[np.newaxis, start:end]
+            ramp_sum_wx = static_terms.ramp_sum_wx[np.newaxis, start:end]
+            ramp_sum_wx2 = static_terms.ramp_sum_wx2[np.newaxis, start:end]
+
+            ramp_sum_wf = np.take(prefix_wf, re, axis=1) - np.take(prefix_wf, rs, axis=1)
+            ramp_sum_wf2 = np.take(prefix_wf2, re, axis=1) - np.take(prefix_wf2, rs, axis=1)
+            ramp_sum_wfx = np.take(prefix_wfx, re, axis=1) - np.take(prefix_wfx, rs, axis=1)
+
+            a_rel = static_terms.a_rel[start:end]
+            b_rel = static_terms.b_rel[start:end]
+            denom = np.maximum(b_rel - a_rel, 1e-6)[np.newaxis, :]
+            slope = (mu_mid - mu_edge) / denom
+            intercept = mu_edge - slope * a_rel[np.newaxis, :]
+
+            ramp_sse = (
+                ramp_sum_wf2
+                - 2.0 * intercept * ramp_sum_wf
+                - 2.0 * slope * ramp_sum_wfx
+                + (intercept ** 2) * ramp_sum_w
+                + 2.0 * intercept * slope * ramp_sum_wx
+                + (slope ** 2) * ramp_sum_wx2
+            )
+
+            total_sse = edge_sse + mid_sse + ramp_sse
+            local_idx = np.argmin(total_sse, axis=1)
+            local_best = total_sse[row_idx_sub, local_idx]
+            update_mask = local_best < best_sse_sub
+            if np.any(update_mask):
+                best_sse_sub[update_mask] = local_best[update_mask]
+                sel_mu_edge = mu_edge[row_idx_sub, local_idx]
+                sel_mu_mid = mu_mid[row_idx_sub, local_idx]
+                best_mu_edge_sub[update_mask] = sel_mu_edge[update_mask]
+                best_mu_mid_sub[update_mask] = sel_mu_mid[update_mask]
+                delta_vals = sel_mu_edge - sel_mu_mid
+                best_delta_sub[update_mask] = delta_vals[update_mask]
+                sel_a = a_rel[local_idx] * half_length_bp
+                sel_b = b_rel[local_idx] * half_length_bp
+                best_a_bp_sub[update_mask] = sel_a[update_mask]
+                best_b_bp_sub[update_mask] = sel_b[update_mask]
+
+        best_sse[row_slice] = best_sse_sub
+        best_mu_edge[row_slice] = best_mu_edge_sub
+        best_mu_mid[row_slice] = best_mu_mid_sub
+        best_delta[row_slice] = best_delta_sub
+        best_a_bp[row_slice] = best_a_bp_sub
+        best_b_bp[row_slice] = best_b_bp_sub
 
     return best_mu_edge, best_mu_mid, best_delta, best_a_bp, best_b_bp
 
