@@ -66,7 +66,6 @@ FRF_CANDIDATE_CHUNK_SIZE = 8192
 META_PERMUTATIONS = 10000
 META_PERM_CHUNK = 1000
 META_PERM_BASE_SEED = 2025
-META_MAX_WEIGHT_RATIO = 10.0  # cap precision weights at a fixed multiple of the median
 
 TOTAL_CPUS = max(1, os.cpu_count() or 1)
 EPS_DENOM = 1e-12
@@ -1062,30 +1061,24 @@ def estimate_tau2_reml(
     return tau2_est
 
 
-def compute_precision_weights(
-    s2: np.ndarray,
-    max_ratio: float = META_MAX_WEIGHT_RATIO,
-) -> np.ndarray:
-    """Convert permutation variances into bounded precision weights."""
+def estimate_tau2_descriptive(y: np.ndarray, s2: np.ndarray) -> float:
+    X = np.ones((y.size, 1), dtype=float)
+    tau2 = estimate_tau2_reml(y, s2, X)
+    if not math.isfinite(tau2) or tau2 < 0.0:
+        tau2 = 0.0
+    return float(tau2)
 
-    base = np.asarray(s2, dtype=float)
-    finite_pos = np.isfinite(base) & (base > 0.0)
-    if not np.any(finite_pos):
-        return np.ones_like(base, dtype=float)
 
-    weights = np.zeros_like(base, dtype=float)
-    np.divide(1.0, base, out=weights, where=finite_pos)
+def compute_meta_weights_from_s2(s2: np.ndarray) -> np.ndarray:
+    """Precision weights for the robust meta statistic derived from permutation variances."""
 
-    typical = float(np.median(weights[finite_pos]))
-    if not math.isfinite(typical) or typical <= 0.0:
-        return np.ones_like(base, dtype=float)
+    s2 = np.asarray(s2, dtype=float)
+    weights = np.zeros_like(s2, dtype=float)
+    finite_pos = np.isfinite(s2) & (s2 > 0.0)
+    weights[finite_pos] = 1.0 / s2[finite_pos]
 
-    cap = max_ratio * typical if max_ratio > 0.0 else float("inf")
-    if math.isfinite(cap):
-        np.minimum(weights, cap, out=weights)
-
-    if np.all(weights <= 0.0):
-        return np.ones_like(base, dtype=float)
+    if not np.any(weights > 0.0):
+        weights[:] = 1.0
 
     return weights
 
@@ -1166,11 +1159,8 @@ def run_precision_weighted_median_analysis(
     group: np.ndarray,
     y_label: str,
 ) -> Tuple[Dict[str, float], np.ndarray]:
-    X = np.ones((group.size, 1), dtype=float)
-    tau2 = estimate_tau2_reml(y, s2, X)
-    if not math.isfinite(tau2) or tau2 < 0.0:
-        tau2 = 0.0
-    weights = compute_precision_weights(s2)
+    tau2 = estimate_tau2_descriptive(y, s2)
+    weights = compute_meta_weights_from_s2(s2)
     delta, median_single, median_recurrent = weighted_median_difference(y, weights, group)
 
     return {
@@ -1554,6 +1544,7 @@ def main():
         "Descriptive tau^2 from random-effects mean model (not used in weights): %.4e",
         tau2_desc,
     )
+    log.info("Precision weights = 1 / s_i^2 with s_i^2 from inversion-level permutations")
     log.info("")
     log.info(
         f"Weighted median {y_label} (single,   group 0): {median_single:+.4f}"
