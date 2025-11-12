@@ -1435,12 +1435,12 @@ def calculate_and_print_differences_transcripts():
                 g0_a = next(iter(g0_alleles))
                 g1_a = next(iter(g1_alleles))
                 chimp_a = out_seq[i]
-                    if chimp_a == g0_a:
-                        g0_matches += 1
-                        local_g0 += 1
-                    elif chimp_a == g1_a:
-                        g1_matches += 1
-                        local_g1 += 1
+                if chimp_a == g0_a:
+                    g0_matches += 1
+                    local_g0 += 1
+                elif chimp_a == g1_a:
+                    g1_matches += 1
+                    local_g1 += 1
 
             if local_fd > 0:
                 key = f"{gene_name} ({t_id})"
