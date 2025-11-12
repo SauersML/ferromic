@@ -909,15 +909,29 @@ def run_permutation_chunk(args) -> PermutationChunkResult:
 
     rng = np.random.default_rng(plan.base_seed + chunk_index)
     block_orders = np.argsort(rng.random((size, n_blocks)), axis=1)
-    perm_indices = plan.block_index[block_orders].reshape(size, -1)
+    perm_raw = plan.block_index[block_orders]
+
     if plan.has_padding:
-        perm_indices = perm_indices[perm_indices >= 0].reshape(size, plan.n_valid)
+        rows: List[np.ndarray] = []
+        for idx, row in enumerate(perm_raw):
+            flat = row.ravel()
+            flat = flat[flat >= 0]
+            if flat.size != plan.n_valid:
+                raise RuntimeError(
+                    "Permutation index shape mismatch in padded case: "
+                    f"row {idx} has {flat.size} valid indices, expected {plan.n_valid}"
+                )
+            rows.append(flat)
+        perm_indices = np.stack(rows, axis=0)
     else:
-        perm_indices = perm_indices.reshape(size, plan.n_valid)
-    
+        perm_indices = perm_raw.reshape(size, plan.n_valid)
+
     # Defensive check: ensure permutation indices have correct shape
     if perm_indices.shape != (size, plan.n_valid):
-        raise RuntimeError(f"Permutation index shape mismatch: expected {(size, plan.n_valid)}, got {perm_indices.shape}")
+        raise RuntimeError(
+            "Permutation index shape mismatch: expected "
+            f"{(size, plan.n_valid)}, got {perm_indices.shape}"
+        )
 
     fst_perm_batch = plan.fst_values[perm_indices][:, plan.order]
 
@@ -1057,13 +1071,12 @@ def estimate_tau2_reml(
 
 def compute_precision_weights(
     s2: np.ndarray,
-    tau2: float,
     floor_quantile: float = META_WEIGHT_VARIANCE_FLOOR_QUANTILE,
 ) -> Tuple[np.ndarray, float]:
-    base = np.asarray(s2, dtype=float) + float(tau2)
+    base = np.asarray(s2, dtype=float)
     positive = base[np.isfinite(base) & (base > 0.0)]
     if positive.size == 0:
-        floor = max(float(np.finfo(float).tiny), float(np.nan_to_num(np.max(base), nan=0.0)))
+        floor = float(np.finfo(float).tiny)
     else:
         if 0.0 < floor_quantile < 1.0:
             candidate_floor = float(np.quantile(positive, floor_quantile))
@@ -1075,7 +1088,7 @@ def compute_precision_weights(
             floor = candidate_floor
         floor = max(floor, float(np.finfo(float).tiny))
     adjusted = np.maximum(base, floor)
-    weights = np.zeros_like(adjusted, dtype=float)
+    weights = np.empty_like(adjusted, dtype=float)
     np.divide(1.0, adjusted, out=weights, where=adjusted > 0.0)
     return weights, float(floor)
 
@@ -1160,7 +1173,7 @@ def run_precision_weighted_median_analysis(
     tau2 = estimate_tau2_reml(y, s2, X)
     if not math.isfinite(tau2) or tau2 < 0.0:
         tau2 = 0.0
-    weights, variance_floor = compute_precision_weights(s2, tau2)
+    weights, variance_floor = compute_precision_weights(s2)
     delta, median_single, median_recurrent = weighted_median_difference(y, weights, group)
 
     return {
