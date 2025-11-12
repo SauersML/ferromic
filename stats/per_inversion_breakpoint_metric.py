@@ -66,6 +66,7 @@ FRF_CANDIDATE_CHUNK_SIZE = 8192
 META_PERMUTATIONS = 10000
 META_PERM_CHUNK = 1000
 META_PERM_BASE_SEED = 2025
+META_MAX_WEIGHT_RATIO = 10.0  # cap precision weights at a fixed multiple of the median
 
 TOTAL_CPUS = max(1, os.cpu_count() or 1)
 EPS_DENOM = 1e-12
@@ -443,44 +444,37 @@ def compute_folded_distances(inversion: Inversion) -> Tuple[np.ndarray, np.ndarr
         x_normalized = dist_from_nearest / max_dist
     return x_normalized, fst_values, weights
 
-def _resolve_autocorr_block_size(n: int, max_global_block_size: int) -> int:
+def _resolve_autocorr_block_size(n: int, default_block_size: int) -> int:
     if USE_GLOBAL_AUTOCORR_BLOCK_SIZE_OVERRIDE:
         candidate = GLOBAL_AUTOCORR_BLOCK_SIZE_WINDOWS
     else:
-        candidate = max_global_block_size if max_global_block_size > 0 else DEFAULT_BLOCK_SIZE_WINDOWS
+        candidate = default_block_size
 
-    if not math.isfinite(candidate):
+    if not math.isfinite(candidate) or candidate < 1:
         candidate = DEFAULT_BLOCK_SIZE_WINDOWS
 
-    candidate = int(candidate)
-    if candidate < 1:
-        candidate = 1
-
-    if max_global_block_size > 0:
-        candidate = min(candidate, max_global_block_size)
-
     if n > 0:
-        candidate = min(candidate, n)
+        candidate = min(int(candidate), n)
 
-    return max(1, candidate)
+    return max(1, int(candidate))
 
 
 def estimate_correlation_length(
     fst: np.ndarray,
     weights: np.ndarray,
-    max_global_block_size: int = DEFAULT_BLOCK_SIZE_WINDOWS,
+    default_block_size: int = DEFAULT_BLOCK_SIZE_WINDOWS,
 ) -> Tuple[int, float, int, int]:
     valid = np.isfinite(fst) & np.isfinite(weights)
     if USE_GLOBAL_AUTOCORR_BLOCK_SIZE_OVERRIDE:
         n = int(np.sum(valid))
-        block_size = _resolve_autocorr_block_size(n, max_global_block_size)
+        block_size = _resolve_autocorr_block_size(n, default_block_size)
         return block_size, float("nan"), 0, 0
 
     values = fst[valid]
     w = weights[valid]
     n = len(values)
     if n <= 1:
-        block_size = max(1, min(max_global_block_size, max(n, 1)))
+        block_size = _resolve_autocorr_block_size(n, default_block_size)
         return block_size, float("nan"), 0, 0
 
     if np.sum(w > 0) > 0:
@@ -491,7 +485,7 @@ def estimate_correlation_length(
     fluct = values - mean
     max_lag_candidate = n - 1
     if max_lag_candidate < 1:
-        block_size = max(1, min(max_global_block_size, n))
+        block_size = _resolve_autocorr_block_size(n, default_block_size)
         return block_size, float("nan"), 0, 0
 
     autocorr_vals: List[float] = []
@@ -517,7 +511,7 @@ def estimate_correlation_length(
         lags.append(lag)
 
     if not autocorr_vals:
-        block_size = max(1, min(max_global_block_size, n))
+        block_size = _resolve_autocorr_block_size(n, default_block_size)
         last_lag = lags[-1] if lags else 0
         return block_size, float("nan"), last_lag, 0
 
@@ -772,7 +766,7 @@ def prepare_inversion_frf_and_permutation(
     half_length = inversion.length / 2.0
 
     block_size_inv, _, _, _ = estimate_correlation_length(
-        fst_v, w_v, max_global_block_size=default_block_size
+        fst_v, w_v, default_block_size=default_block_size
     )
 
     order = np.argsort(x_v)
@@ -1070,7 +1064,7 @@ def estimate_tau2_reml(
 
 def compute_precision_weights(
     s2: np.ndarray,
-    max_ratio: float = 10.0,
+    max_ratio: float = META_MAX_WEIGHT_RATIO,
 ) -> np.ndarray:
     """Convert permutation variances into bounded precision weights."""
 
