@@ -246,7 +246,7 @@ def plot_trajectory(
     padding = (ymax - ymin) * 0.05 if ymax > ymin else 0.05
     ax.set_ylim(ymin - padding, ymax + padding)
 
-    highlight = _find_largest_window_change(dates, columns["pt"], window=1_000.0)
+    highlight = _find_largest_window_change(dates, columns["af"], window=1_000.0)
     if highlight is not None:
         start_year, end_year, change = highlight
         ax.axvspan(
