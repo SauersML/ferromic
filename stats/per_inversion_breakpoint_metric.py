@@ -66,7 +66,6 @@ FRF_CANDIDATE_CHUNK_SIZE = 8192
 META_PERMUTATIONS = 10000
 META_PERM_CHUNK = 1000
 META_PERM_BASE_SEED = 2025
-META_WEIGHT_VARIANCE_FLOOR_QUANTILE = 0.05
 
 TOTAL_CPUS = max(1, os.cpu_count() or 1)
 EPS_DENOM = 1e-12
@@ -1071,26 +1070,30 @@ def estimate_tau2_reml(
 
 def compute_precision_weights(
     s2: np.ndarray,
-    floor_quantile: float = META_WEIGHT_VARIANCE_FLOOR_QUANTILE,
-) -> Tuple[np.ndarray, float]:
+    max_ratio: float = 10.0,
+) -> np.ndarray:
+    """Convert permutation variances into bounded precision weights."""
+
     base = np.asarray(s2, dtype=float)
-    positive = base[np.isfinite(base) & (base > 0.0)]
-    if positive.size == 0:
-        floor = float(np.finfo(float).tiny)
-    else:
-        if 0.0 < floor_quantile < 1.0:
-            candidate_floor = float(np.quantile(positive, floor_quantile))
-        else:
-            candidate_floor = float(np.min(positive))
-        if not math.isfinite(candidate_floor) or candidate_floor <= 0.0:
-            floor = float(np.min(positive))
-        else:
-            floor = candidate_floor
-        floor = max(floor, float(np.finfo(float).tiny))
-    adjusted = np.maximum(base, floor)
-    weights = np.empty_like(adjusted, dtype=float)
-    np.divide(1.0, adjusted, out=weights, where=adjusted > 0.0)
-    return weights, float(floor)
+    finite_pos = np.isfinite(base) & (base > 0.0)
+    if not np.any(finite_pos):
+        return np.ones_like(base, dtype=float)
+
+    weights = np.zeros_like(base, dtype=float)
+    np.divide(1.0, base, out=weights, where=finite_pos)
+
+    typical = float(np.median(weights[finite_pos]))
+    if not math.isfinite(typical) or typical <= 0.0:
+        return np.ones_like(base, dtype=float)
+
+    cap = max_ratio * typical if max_ratio > 0.0 else float("inf")
+    if math.isfinite(cap):
+        np.minimum(weights, cap, out=weights)
+
+    if np.all(weights <= 0.0):
+        return np.ones_like(base, dtype=float)
+
+    return weights
 
 
 def precision_weighted_median(values: np.ndarray, weights: np.ndarray) -> float:
@@ -1168,16 +1171,16 @@ def run_precision_weighted_median_analysis(
     s2: np.ndarray,
     group: np.ndarray,
     y_label: str,
-) -> Tuple[Dict[str, float], np.ndarray, float]:
+) -> Tuple[Dict[str, float], np.ndarray]:
     X = np.ones((group.size, 1), dtype=float)
     tau2 = estimate_tau2_reml(y, s2, X)
     if not math.isfinite(tau2) or tau2 < 0.0:
         tau2 = 0.0
-    weights, variance_floor = compute_precision_weights(s2)
+    weights = compute_precision_weights(s2)
     delta, median_single, median_recurrent = weighted_median_difference(y, weights, group)
 
     return {
-        "tau2": float(tau2),
+        "tau2_descriptive": float(tau2),
         "median_recurrent": float(median_recurrent),
         "median_single": float(median_single),
         "delta_median": float(delta),
@@ -1185,8 +1188,7 @@ def run_precision_weighted_median_analysis(
         "n_single": float(int(np.sum(group == 0))),
         "n_recurrent": float(int(np.sum(group == 1))),
         "y_label": y_label,
-        "variance_floor": float(variance_floor),
-    }, weights, float(variance_floor)
+    }, weights
 
 # ------------------------- META-LEVEL PERMUTATION -------------------------
 
@@ -1529,7 +1531,7 @@ def main():
         return
     sub_meta, y_meta, s2_meta, group_meta, y_label = meta_inputs
 
-    meta_results, meta_weights, meta_variance_floor = run_precision_weighted_median_analysis(
+    meta_results, meta_weights = run_precision_weighted_median_analysis(
         sub_meta,
         y_meta,
         s2_meta,
@@ -1542,7 +1544,7 @@ def main():
     log.info("PRECISION-WEIGHTED MEDIAN ANALYSIS: group 0 (single) vs group 1 (recurrent)")
     log.info("=" * 80)
 
-    tau2 = meta_results["tau2"]
+    tau2_desc = meta_results["tau2_descriptive"]
     median_recurrent = meta_results["median_recurrent"]
     median_single = meta_results["median_single"]
     delta_median = meta_results["delta_median"]
@@ -1554,8 +1556,10 @@ def main():
     log.info(f"Usable inversions for meta-analysis: {n_total}")
     log.info(f"  group 0 (single-event): {n_single}")
     log.info(f"  group 1 (recurrent):    {n_recurrent}")
-    log.info(f"Estimated between-inversion variance tau^2: {tau2:.4e}")
-    log.info(f"Variance floor applied to meta weights: {meta_variance_floor:.4e}")
+    log.info(
+        "Descriptive tau^2 from random-effects mean model (not used in weights): %.4e",
+        tau2_desc,
+    )
     log.info("")
     log.info(
         f"Weighted median {y_label} (single,   group 0): {median_single:+.4f}"
