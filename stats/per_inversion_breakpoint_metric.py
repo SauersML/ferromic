@@ -62,9 +62,6 @@ MIN_INVERSION_LENGTH = 0
 MIN_WINDOWS_PER_INVERSION = 25
 
 N_PERMUTATIONS = 3_000
-DEFAULT_BLOCK_SIZE_WINDOWS = 10
-USE_GLOBAL_AUTOCORR_BLOCK_SIZE_OVERRIDE = False
-GLOBAL_AUTOCORR_BLOCK_SIZE_WINDOWS = 3
 PERMUTATION_CHUNK_SIZE = 8192
 
 FRF_MIN_EDGE_WINDOWS = 1
@@ -99,9 +96,6 @@ META_PERM_BASE_SEED = 2025
 
 TOTAL_CPUS = max(1, os.cpu_count() or 1)
 EPS_DENOM = 1e-12
-
-AUTOCORR_MIN_PAIRS = 3
-AUTOCORR_TARGET = 0.4
 
 _RE_HUD = re.compile(
     r">.*?hudson_pairwise_fst.*?_chr_?([\w.\-]+)_start_(\d+)_end_(\d+)",
@@ -533,89 +527,6 @@ def compute_folded_distances(inversion: Inversion) -> Tuple[np.ndarray, np.ndarr
     else:
         x_normalized = dist_from_nearest / max_dist
     return x_normalized, fst_values, weights
-
-def _resolve_autocorr_block_size(n: int, default_block_size: int) -> int:
-    if USE_GLOBAL_AUTOCORR_BLOCK_SIZE_OVERRIDE:
-        candidate = GLOBAL_AUTOCORR_BLOCK_SIZE_WINDOWS
-    else:
-        candidate = default_block_size
-
-    if not math.isfinite(candidate) or candidate < 1:
-        candidate = DEFAULT_BLOCK_SIZE_WINDOWS
-
-    if n > 0:
-        candidate = min(int(candidate), n)
-
-    return max(1, int(candidate))
-
-
-def estimate_correlation_length(
-    fst: np.ndarray,
-    weights: np.ndarray,
-    default_block_size: int = DEFAULT_BLOCK_SIZE_WINDOWS,
-) -> Tuple[int, float, int, int]:
-    valid = np.isfinite(fst) & np.isfinite(weights)
-    if USE_GLOBAL_AUTOCORR_BLOCK_SIZE_OVERRIDE:
-        n = int(np.sum(valid))
-        block_size = _resolve_autocorr_block_size(n, default_block_size)
-        return block_size, float("nan"), 0, 0
-
-    values = fst[valid]
-    w = weights[valid]
-    n = len(values)
-    if n <= 1:
-        block_size = _resolve_autocorr_block_size(n, default_block_size)
-        return block_size, float("nan"), 0, 0
-
-    if np.sum(w > 0) > 0:
-        mean = float(np.average(values, weights=w))
-    else:
-        mean = float(np.mean(values))
-
-    fluct = values - mean
-    max_lag_candidate = n - 1
-    if max_lag_candidate < 1:
-        block_size = _resolve_autocorr_block_size(n, default_block_size)
-        return block_size, float("nan"), 0, 0
-
-    autocorr_vals: List[float] = []
-    lags: List[int] = []
-    for lag in range(1, max_lag_candidate + 1):
-        v1 = fluct[:-lag]
-        v2 = fluct[lag:]
-        if len(v1) < AUTOCORR_MIN_PAIRS:
-            break
-
-        num = float(np.dot(v1, v2)) / len(v1)
-        denom = math.sqrt((np.dot(v1, v1) / len(v1)) * (np.dot(v2, v2) / len(v2)))
-        if denom <= 1e-12:
-            corr = 0.0
-        else:
-            corr = num / denom
-
-        if not np.isfinite(corr):
-            corr = 0.0
-
-        corr = float(np.clip(corr, -1.0, 1.0))
-        autocorr_vals.append(corr)
-        lags.append(lag)
-
-    if not autocorr_vals:
-        block_size = _resolve_autocorr_block_size(n, default_block_size)
-        last_lag = lags[-1] if lags else 0
-        return block_size, float("nan"), last_lag, 0
-
-    autocorr_array = np.array(autocorr_vals)
-    monotone = np.minimum.accumulate(autocorr_array)
-    target_idx = np.where(monotone <= AUTOCORR_TARGET)[0]
-    if len(target_idx) > 0:
-        corr_length = float(lags[target_idx[0]])
-    else:
-        corr_length = float(lags[-1])
-
-    block_size = int(round(max(1.0, corr_length)))
-    block_size = max(1, min(block_size, n))
-    return block_size, corr_length, lags[-1], len(lags)
 
 def precompute_block_structure(n: int, block_size: int) -> List[np.ndarray]:
     if n <= 0:
@@ -1059,7 +970,6 @@ def _mad_standardize(v: np.ndarray) -> np.ndarray:
 def prepare_inversion_frf_and_permutation(
     inversion: Inversion,
     n_permutations: int,
-    default_block_size: int,
 ) -> PreparedInversion:
     x_full, fst_full, w_full = compute_folded_distances(inversion)
     n_all = len(x_full)
@@ -1223,8 +1133,8 @@ def prepare_inversion_frf_and_permutation(
 
 
 def fit_inversion_worker(args) -> PreparedInversion:
-    inversion, n_permutations, default_block_size = args
-    return prepare_inversion_frf_and_permutation(inversion, n_permutations, default_block_size)
+    inversion, n_permutations = args
+    return prepare_inversion_frf_and_permutation(inversion, n_permutations)
 
 
 def _build_permutation_plan_payload(
@@ -2685,7 +2595,7 @@ def main():
         for inv in prioritized_inversions:
             future = executor.submit(
                 fit_inversion_worker,
-                (inv, N_PERMUTATIONS, DEFAULT_BLOCK_SIZE_WINDOWS),
+                (inv, N_PERMUTATIONS),
             )
             futures[future] = inv
         completed = 0
