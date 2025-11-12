@@ -1260,73 +1260,93 @@ def _meta_perm_worker_setup(
     _META_SHARED_STATE["abs_T_obs"] = abs(float(T_obs))
 
 
-def _weighted_median_from_mask_sorted(
-    y_sorted: np.ndarray,
-    w_sorted: np.ndarray,
-    mask: np.ndarray,
+def _resolve_weighted_median_tie(
+    idx: int,
     *,
-    invert: bool = False,
-    total_hint: Optional[float] = None,
-) -> Tuple[float, float]:
-    """Return (median, total weight) for a subset defined by mask over sorted inputs."""
+    is_group0: bool,
+    gen: int,
+    stamps: np.ndarray,
+    y_sorted: np.ndarray,
+) -> float:
+    """Resolve a tie by averaging with the next value from the same group."""
 
+    current = float(y_sorted[idx])
     n = y_sorted.size
-    total = 0.0
-    last_value = float("nan")
-    for idx in range(n):
-        if bool(mask[idx]) != invert:
-            wt = float(w_sorted[idx])
-            total += wt
-            last_value = float(y_sorted[idx])
-
-    if total_hint is not None:
-        total = float(total_hint)
-
-    if not math.isfinite(total) or total <= 0.0 or not math.isfinite(last_value):
-        return float("nan"), float(total)
-
-    target = 0.5 * total
-    cumulative = 0.0
-    for idx in range(n):
-        if bool(mask[idx]) != invert:
-            wt = float(w_sorted[idx])
-            cumulative += wt
-            if cumulative > target:
-                return float(y_sorted[idx]), float(total)
-            if cumulative == target:
-                next_value = float(y_sorted[idx])
-                j = idx + 1
-                while j < n:
-                    if bool(mask[j]) != invert:
-                        next_value = float(0.5 * (y_sorted[idx] + y_sorted[j]))
-                        break
-                    j += 1
-                return float(next_value), float(total)
-    return float(last_value), float(total)
+    for j in range(idx + 1, n):
+        in_group0 = stamps[j] == gen
+        if in_group0 is is_group0:
+            return float(0.5 * (current + float(y_sorted[j])))
+    return current
 
 
-def _meta_perm_single_stat(mask: np.ndarray) -> Tuple[float, float, float]:
+def _meta_perm_single_stat(
+    stamps: np.ndarray,
+    gen: int,
+    total_group0_weight: float,
+) -> Tuple[float, float, float]:
     y_sorted = _META_SHARED_STATE["y"]
     w_sorted = _META_SHARED_STATE["w"]
     total_weight = _META_SHARED_STATE["total_weight"]
 
-    median0, total0 = _weighted_median_from_mask_sorted(
-        y_sorted,
-        w_sorted,
-        mask,
-        invert=False,
-    )
-    if not math.isfinite(median0):
+    if not math.isfinite(total_group0_weight) or total_group0_weight <= 0.0:
         return float("nan"), float("nan"), float("nan")
 
-    median1, _ = _weighted_median_from_mask_sorted(
-        y_sorted,
-        w_sorted,
-        mask,
-        invert=True,
-        total_hint=total_weight - total0,
-    )
+    total_group1_weight = float(total_weight - total_group0_weight)
+    if not math.isfinite(total_group1_weight) or total_group1_weight <= 0.0:
+        return float("nan"), float("nan"), float("nan")
+
+    target0 = 0.5 * total_group0_weight
+    target1 = 0.5 * total_group1_weight
+
+    median0 = float("nan")
+    median1 = float("nan")
+    last0 = float("nan")
+    last1 = float("nan")
+    cum0 = 0.0
+    cum1 = 0.0
+
+    n = y_sorted.size
+    for idx in range(n):
+        wt = float(w_sorted[idx])
+        val = float(y_sorted[idx])
+        if stamps[idx] == gen:
+            cum0 += wt
+            last0 = val
+            if not math.isfinite(median0):
+                if cum0 > target0:
+                    median0 = val
+                elif cum0 == target0:
+                    median0 = _resolve_weighted_median_tie(
+                        idx,
+                        is_group0=True,
+                        gen=gen,
+                        stamps=stamps,
+                        y_sorted=y_sorted,
+                    )
+        else:
+            cum1 += wt
+            last1 = val
+            if not math.isfinite(median1):
+                if cum1 > target1:
+                    median1 = val
+                elif cum1 == target1:
+                    median1 = _resolve_weighted_median_tie(
+                        idx,
+                        is_group0=False,
+                        gen=gen,
+                        stamps=stamps,
+                        y_sorted=y_sorted,
+                    )
+
+        if math.isfinite(median0) and math.isfinite(median1):
+            break
+
+    if not math.isfinite(median0):
+        median0 = last0
     if not math.isfinite(median1):
+        median1 = last1
+
+    if not math.isfinite(median0) or not math.isfinite(median1):
         return float("nan"), float("nan"), float("nan")
 
     return float(median0 - median1), float(median0), float(median1)
@@ -1352,10 +1372,13 @@ def _meta_perm_worker_run(
     n_group0 = _META_SHARED_STATE["n_group0"]
     T_obs = _META_SHARED_STATE["T_obs"]
     abs_T_obs = _META_SHARED_STATE["abs_T_obs"]
+    w_sorted = _META_SHARED_STATE["w"]
 
     _maybe_set_affinity(cpu_affinity)
 
-    mask = np.zeros(n, dtype=bool)
+    stamps = np.zeros(n, dtype=np.int32)
+    gen = 1
+    gen_max = np.iinfo(np.int32).max
     draws_done = 0
     invalid = 0
     count_upper = 0
@@ -1366,13 +1389,17 @@ def _meta_perm_worker_run(
 
     report_every = max(1, int(report_every))
     while draws_done < draws_target:
-        sample = rng.choice(n, size=n_group0, replace=False)
-        mask.fill(False)
-        mask[sample] = True
+        if gen >= gen_max:
+            stamps.fill(0)
+            gen = 1
+        sample = rng.choice(n, size=n_group0, replace=False, shuffle=False)
+        stamps[sample] = gen
+        total0 = float(np.add.reduce(w_sorted[sample], dtype=np.float64))
 
-        delta, _, _ = _meta_perm_single_stat(mask)
+        delta, _, _ = _meta_perm_single_stat(stamps, gen, total0)
         if not math.isfinite(delta):
             invalid += 1
+            gen += 1
             continue
 
         if delta >= T_obs:
@@ -1396,6 +1423,8 @@ def _meta_perm_worker_run(
             sum_T += delta_flip
             sumsq_T += delta_flip * delta_flip
             draws_done += 1
+
+        gen += 1
 
     return {
         "draws": draws_done,
