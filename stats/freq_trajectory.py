@@ -182,7 +182,7 @@ def plot_trajectory(
         columns["af_up"],
         color="#b3cde3",
         alpha=0.45,
-        label="Empirical frequency interval",
+        label="",
     )
     ax.plot(
         dates,
@@ -198,7 +198,7 @@ def plot_trajectory(
         columns["pt_up"],
         color="#ccebc5",
         alpha=0.45,
-        label="Model trajectory interval",
+        label="",
     )
     ax.plot(
         dates,
