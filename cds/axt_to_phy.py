@@ -9,6 +9,7 @@ import math
 import shutil
 import resource
 import traceback
+import logging
 import requests
 import multiprocessing
 from collections import defaultdict
@@ -47,6 +48,121 @@ _AXT_HEADER_RE = re.compile(
 # Verbosity knobs
 DEBUG_VERBOSE = os.environ.get("DEBUG_VERBOSE", "0") == "1"
 DEBUG_CHUNK_SAMPLE = int(os.environ.get("DEBUG_CHUNK_SAMPLE", "0"))  # e.g., 1000
+
+# =========================
+# --- Logging Helpers ------
+# =========================
+
+LOG_DIR = os.environ.get("AXT_LOG_DIR", ".")
+LOG_FILE_BASENAME = None
+LOG_FILE_PATH = None
+DETAIL_LOGGER = None
+
+
+def setup_detail_logger():
+    """Initialise the detailed run logger that writes to a .log file."""
+    global LOG_FILE_BASENAME, LOG_FILE_PATH, DETAIL_LOGGER
+
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    LOG_FILE_BASENAME = f"axt_to_phy_{timestamp}.log"
+    LOG_FILE_PATH = os.path.join(LOG_DIR, LOG_FILE_BASENAME)
+
+    os.makedirs(os.path.dirname(LOG_FILE_PATH) or ".", exist_ok=True)
+
+    DETAIL_LOGGER = logging.getLogger("axt_to_phy.detail")
+    DETAIL_LOGGER.setLevel(logging.INFO)
+    DETAIL_LOGGER.handlers = []
+
+    handler = logging.FileHandler(LOG_FILE_PATH, mode="w", encoding="utf-8")
+    formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+    handler.setFormatter(formatter)
+    DETAIL_LOGGER.addHandler(handler)
+    DETAIL_LOGGER.propagate = False
+
+    return LOG_FILE_PATH
+
+
+def log_detail(entity_type, identifier, status, message, **metrics):
+    """Write a structured line to the detailed log."""
+    if DETAIL_LOGGER is None:
+        return
+
+    identifier = identifier or "<unknown>"
+    metric_parts = []
+    for key, value in metrics.items():
+        if value is None:
+            continue
+        if isinstance(value, float):
+            metric_parts.append(f"{key}={value:.4f}")
+        else:
+            metric_parts.append(f"{key}={value}")
+
+    suffix = f" | {' '.join(metric_parts)}" if metric_parts else ""
+    DETAIL_LOGGER.info("[%s] %s | %s | %s%s", entity_type, identifier, status, message, suffix)
+
+
+def summarise_sequence(seq):
+    """Return coverage statistics for a reconstructed sequence."""
+    length = len(seq)
+    if length == 0:
+        return {
+            "length": 0,
+            "covered": 0,
+            "coverage_pct": 0.0,
+            "block_count": 0,
+            "longest_block": 0,
+            "longest_gap": 0,
+            "first_covered": None,
+            "last_covered": None,
+        }
+
+    covered = 0
+    block_count = 0
+    longest_block = 0
+    longest_gap = 0
+    current_block = 0
+    current_gap = 0
+    first_covered = None
+    last_covered = None
+
+    for idx, base in enumerate(seq):
+        if base != '-':
+            covered += 1
+            last_covered = idx + 1  # 1-based for readability
+            if first_covered is None:
+                first_covered = idx + 1
+            current_block += 1
+            if current_gap:
+                if current_gap > longest_gap:
+                    longest_gap = current_gap
+                current_gap = 0
+            if current_block == 1:
+                block_count += 1
+        else:
+            current_gap += 1
+            if current_block:
+                if current_block > longest_block:
+                    longest_block = current_block
+                current_block = 0
+
+    if current_block and current_block > longest_block:
+        longest_block = current_block
+    if current_gap and current_gap > longest_gap:
+        longest_gap = current_gap
+
+    coverage_pct = (covered / length * 100.0) if length else 0.0
+
+    return {
+        "length": length,
+        "covered": covered,
+        "coverage_pct": coverage_pct,
+        "block_count": block_count,
+        "longest_block": longest_block,
+        "longest_gap": longest_gap,
+        "first_covered": first_covered,
+        "last_covered": last_covered,
+    }
+
 
 # =========================
 # --- Simple Debug Utils ---
@@ -307,17 +423,21 @@ def parse_transcript_metadata():
                 progress_bar("[Metadata]", processed, total_lines if total_lines else 1)
             parts = [p.strip() for p in line.strip().split('\t')]
             if len(parts) < 9:
+                log_detail("CDS", f"line_{line_num}", "SKIP_INCOMPLETE", "Metadata line missing required columns.", raw=line.strip())
                 continue
 
             phy_fname, t_id, gene, chrom, _, start, end, _, coords_str = parts[:9]
             cds_key = (t_id, coords_str)
             if cds_key in seen:
+                log_detail("CDS", t_id, "SKIP_DUPLICATE", "Duplicate transcript/coordinate entry encountered; keeping first instance.",
+                           coords=coords_str, line=line_num)
                 continue
             seen.add(cds_key)
 
             chrom_norm = normalize_chromosome(chrom)
             if not chrom_norm:
                 logger.add("Metadata Parsing Error", f"L{line_num}: Invalid chromosome '{chrom}' for {t_id}.")
+                log_detail("CDS", t_id, "SKIP_INVALID_CHROM", f"Invalid chromosome '{chrom}'.", line=line_num)
                 continue
 
             # Parse exon segments and expected length
@@ -325,9 +445,11 @@ def parse_transcript_metadata():
                 segments = [(int(s), int(e)) for s, e in (p.split('-') for p in coords_str.split(';'))]
                 expected_len = sum(e - s + 1 for s, e in segments)
                 if expected_len <= 0:
+                    log_detail("CDS", t_id, "SKIP_ZERO_LENGTH", "Calculated expected length was <= 0.", coords=coords_str, line=line_num)
                     continue
             except (ValueError, IndexError):
                 logger.add("Metadata Parsing Error", f"L{line_num}: Could not parse coordinate chunks for {t_id}.")
+                log_detail("CDS", t_id, "SKIP_PARSE_COORDS", "Failed to parse coordinate chunks.", raw_coords=coords_str, line=line_num)
                 continue
 
             # Find group0 and group1 filenames
@@ -340,6 +462,7 @@ def parse_transcript_metadata():
             else:
                 base = os.path.basename(phy_fname)
                 logger.add("Missing Input File", f"L{line_num}: Cannot infer group0/group1 for {t_id} from '{base}'.")
+                log_detail("CDS", t_id, "SKIP_MISSING_GROUP_PAIR", f"Unable to infer group0/group1 partner from '{base}'.", line=line_num)
                 continue
 
             g0_seqs = read_phy_sequences(g0_fname)
@@ -347,16 +470,22 @@ def parse_transcript_metadata():
 
             if not g0_seqs or not g1_seqs:
                 logger.add("Missing Input File", f"{t_id}: group0 or group1 .phy not found or empty.")
+                log_detail("CDS", t_id, "SKIP_MISSING_PHY", "Either group0 or group1 .phy file missing/empty.",
+                           group0=g0_fname, group1=g1_fname)
                 continue
 
             if not all(len(s) == expected_len for s in g0_seqs):
                 g0_lengths = set(len(s) for s in g0_seqs)
                 logger.add("Input Length Mismatch", f"{t_id} (group0): lengths {g0_lengths} != expected ({expected_len}).")
+                log_detail("CDS", t_id, "SKIP_LENGTH_MISMATCH", "Group0 lengths do not match expected length.",
+                           observed=list(g0_lengths), expected=expected_len)
                 continue
 
             if not all(len(s) == expected_len for s in g1_seqs):
                 g1_lengths = set(len(s) for s in g1_seqs)
                 logger.add("Input Length Mismatch", f"{t_id} (group1): lengths {g1_lengths} != expected ({expected_len}).")
+                log_detail("CDS", t_id, "SKIP_LENGTH_MISMATCH", "Group1 lengths do not match expected length.",
+                           observed=list(g1_lengths), expected=expected_len)
                 continue
 
             cds_info = {
@@ -370,10 +499,21 @@ def parse_transcript_metadata():
                 'g1_fname': g1_fname
             }
             validated.append({'info': cds_info, 'segments': segments})
+            log_detail(
+                "CDS",
+                t_id,
+                "VALIDATED",
+                "Transcript metadata validated.",
+                chromosome=chrom_norm,
+                expected_len=expected_len,
+                exons=len(segments),
+                coords=coords_str,
+            )
 
     progress_bar("[Metadata]", total_lines if total_lines else 1, total_lines if total_lines else 1)
     print()
     print_dbg(f"Parsed metadata entries: {len(validated)}")
+    log_detail("SUMMARY", "transcripts_metadata", "DONE", "Transcript metadata parsed.", validated=len(validated), processed=processed)
     return validated
 
 # =========================
@@ -401,6 +541,7 @@ def find_region_sets():
         chrom = normalize_chromosome(m.group('chrom'))
         if not chrom:
             logger.add("Region Parsing Error", f"Invalid chromosome '{m.group('chrom')}' in {name}; skipping group.")
+            log_detail("INVERSION", name, "SKIP_INVALID_CHROM", f"Invalid chromosome '{m.group('chrom')}' in filename.")
             continue
         start = int(m.group('start'))
         end = int(m.group('end'))
@@ -428,9 +569,21 @@ def find_region_sets():
             'g1_fname': d.get('group1'),
         }
 
+        log_detail(
+            "INVERSION",
+            region_id,
+            "VALIDATED",
+            "Region metadata parsed.",
+            chromosome=chrom,
+            expected_len=expected_len,
+            group0=bool(info['g0_fname']),
+            group1=bool(info['g1_fname']),
+        )
+
         qc_fname = info['g0_fname'] or info['g1_fname']
         if not qc_fname:
             logger.add("Region Missing File", f"{region_id}: neither group0 nor group1 file present; skipping QC.")
+            log_detail("INVERSION", region_id, "QC_WARNING", "Neither group0 nor group1 file present for QC header check.")
         else:
             try:
                 with open(qc_fname, 'r') as f:
@@ -438,12 +591,29 @@ def find_region_sets():
                 mlen = re.match(r'\s*\d+\s+(\d+)\s*$', first)
                 if not mlen:
                     logger.add("Region QC Warning", f"{region_id}: could not parse header length in {os.path.basename(qc_fname)}.")
+                    log_detail("INVERSION", region_id, "QC_WARNING", "Unable to parse PHYLIP header length.", file=os.path.basename(qc_fname))
                 else:
                     header_len = int(mlen.group(1))
                     if header_len != expected_len:
                         logger.add("Region Input Length Mismatch", f"{region_id}: header length {header_len} != expected ({expected_len}).")
+                        log_detail(
+                            "INVERSION",
+                            region_id,
+                            "QC_LENGTH_MISMATCH",
+                            "Header length did not match expected region length.",
+                            header_len=header_len,
+                            expected_len=expected_len,
+                            file=os.path.basename(qc_fname),
+                        )
             except Exception:
                 logger.add("Region QC Warning", f"{region_id}: failed to read header from {os.path.basename(qc_fname)}.")
+                log_detail(
+                    "INVERSION",
+                    region_id,
+                    "QC_WARNING",
+                    "Failed to read header for QC.",
+                    file=os.path.basename(qc_fname) if qc_fname else None,
+                )
 
         validated.append({'info': info, 'segments': [(start, end)]})
 
@@ -454,6 +624,7 @@ def find_region_sets():
         progress_bar("[Region QC]", total, total)
     print()
     print_always(f"Found {len(validated)} candidate regions.")
+    log_detail("SUMMARY", "regions_metadata", "DONE", "Region metadata parsed.", validated=len(validated), scanned=len(files))
     return validated
 
 # =========================
@@ -751,6 +922,7 @@ def build_outgroups_and_filter(transcripts, regions):
     """
     if not transcripts and not regions:
         print_always("No transcript or region entries to process.")
+        log_detail("SYSTEM", "build_outgroups", "SKIP", "No transcripts or regions available after validation.")
         return
 
     # Build bin index
@@ -832,14 +1004,35 @@ def build_outgroups_and_filter(transcripts, regions):
             g0_fname = info['g0_fname']
 
             seq_list = tx_scaffolds.get(t_id)
-            if not seq_list:
+            if seq_list is None:
                 logger.add("No Alignment Found", f"No chimp alignment found for {t_id}.")
+                print_always(f"[TX][{t_id}] ERROR: chimp scaffold missing.")
+                log_detail("CDS", t_id, "NO_SCAFFOLD", "Chimp scaffold missing after AXT processing.", expected_len=info['expected_len'])
                 progress_bar("[TX write]", i, total_tx)
                 continue
             final_seq = "".join(seq_list)
+            seq_stats = summarise_sequence(final_seq)
+            span_label = (
+                f"{seq_stats['first_covered']}-{seq_stats['last_covered']}"
+                if seq_stats['first_covered'] is not None
+                else "none"
+            )
+            print_always(
+                f"[TX][{t_id}] coverage={seq_stats['coverage_pct']:.2f}% "
+                f"({seq_stats['covered']}/{seq_stats['length']} bp) blocks={seq_stats['block_count']} "
+                f"longest_block={seq_stats['longest_block']} longest_gap={seq_stats['longest_gap']} span={span_label}"
+            )
 
-            if final_seq.count('-') == len(final_seq):
+            if seq_stats['covered'] == 0:
                 logger.add("No Alignment Found", f"No chimp alignment found for {t_id}.")
+                log_detail(
+                    "CDS",
+                    t_id,
+                    "NO_ALIGNMENT",
+                    "No chimp overlap detected across transcript.",
+                    coverage_pct=seq_stats['coverage_pct'],
+                    expected_len=seq_stats['length'],
+                )
                 progress_bar("[TX write]", i, total_tx)
                 continue
 
@@ -847,6 +1040,16 @@ def build_outgroups_and_filter(transcripts, regions):
             human_seqs = read_phy_sequences(g0_fname)
             if not human_seqs:
                 logger.add("Human File Missing for QC", f"Could not read human seqs from {g0_fname} for divergence check on {t_id}.")
+                print_always(f"[TX][{t_id}] QC SKIP: missing human reference ({g0_fname}).")
+                log_detail(
+                    "CDS",
+                    t_id,
+                    "QC_HUMAN_MISSING",
+                    "Human reference sequence missing for divergence QC.",
+                    coverage_pct=seq_stats['coverage_pct'],
+                    expected_len=seq_stats['length'],
+                    span=span_label,
+                )
                 progress_bar("[TX write]", i, total_tx)
                 continue
             human_ref = human_seqs[0]
@@ -870,6 +1073,20 @@ def build_outgroups_and_filter(transcripts, regions):
                         os.remove(outname)
                     except Exception:
                         pass
+                print_always(
+                    f"[TX][{t_id}] FAIL divergence {divergence:.2f}% (threshold {DIVERGENCE_THRESHOLD:.2f}%) — file removed."
+                )
+                log_detail(
+                    "CDS",
+                    t_id,
+                    "FILTER_HIGH_DIVERGENCE",
+                    "Failed divergence QC; output removed.",
+                    coverage_pct=seq_stats['coverage_pct'],
+                    divergence=divergence,
+                    threshold=DIVERGENCE_THRESHOLD,
+                    span=span_label,
+                    filled=seq_stats['covered'],
+                )
                 progress_bar("[TX write]", i, total_tx)
                 continue
 
@@ -880,11 +1097,26 @@ def build_outgroups_and_filter(transcripts, regions):
                 f_out.write(f" 1 {len(final_seq)}\n")
                 f_out.write(f"{'PanTro6':<10}{final_seq}\n")
             tx_written += 1
+            print_always(f"[TX][{t_id}] PASS divergence {divergence:.2f}% — wrote {outname}.")
+            log_detail(
+                "CDS",
+                t_id,
+                "PASS",
+                "Outgroup written after passing divergence QC.",
+                coverage_pct=seq_stats['coverage_pct'],
+                divergence=divergence,
+                span=span_label,
+                filled=seq_stats['covered'],
+                longest_block=seq_stats['longest_block'],
+                longest_gap=seq_stats['longest_gap'],
+                out_file=outname,
+            )
             progress_bar("[TX write]", i, total_tx)
         if total_tx:
             progress_bar("[TX write]", total_tx, total_tx)
             print()
         print_always(f"Wrote {tx_written} transcript outgroup PHYLIPs (passed QC).")
+        log_detail("SUMMARY", "transcripts", "DONE", "Transcript processing finished.", passed=tx_written, total=total_tx)
 
     # --- Write regions ---
     print_always("Writing region outgroups (after divergence QC)...")
@@ -900,14 +1132,35 @@ def build_outgroups_and_filter(transcripts, regions):
             g0_fname = info['g0_fname'] or info['g1_fname']
 
             seq_list = rg_scaffolds.get(r_id)
-            if not seq_list:
+            if seq_list is None:
                 logger.add("No Alignment Found (Region)", f"No chimp alignment found for {r_id}.")
+                print_always(f"[RG][{r_id}] ERROR: chimp scaffold missing.")
+                log_detail("INVERSION", r_id, "NO_SCAFFOLD", "Chimp scaffold missing after AXT processing.", expected_len=info['expected_len'])
                 progress_bar("[RG write]", i, total_rg)
                 continue
             final_seq = "".join(seq_list)
+            seq_stats = summarise_sequence(final_seq)
+            span_label = (
+                f"{seq_stats['first_covered']}-{seq_stats['last_covered']}"
+                if seq_stats['first_covered'] is not None
+                else "none"
+            )
+            print_always(
+                f"[RG][{r_id}] coverage={seq_stats['coverage_pct']:.2f}% "
+                f"({seq_stats['covered']}/{seq_stats['length']} bp) blocks={seq_stats['block_count']} "
+                f"longest_block={seq_stats['longest_block']} longest_gap={seq_stats['longest_gap']} span={span_label}"
+            )
 
-            if final_seq.count('-') == len(final_seq):
+            if seq_stats['covered'] == 0:
                 logger.add("No Alignment Found (Region)", f"No chimp alignment found for {r_id}.")
+                log_detail(
+                    "INVERSION",
+                    r_id,
+                    "NO_ALIGNMENT",
+                    "No chimp overlap detected across region.",
+                    coverage_pct=seq_stats['coverage_pct'],
+                    expected_len=seq_stats['length'],
+                )
                 progress_bar("[RG write]", i, total_rg)
                 continue
 
@@ -915,11 +1168,29 @@ def build_outgroups_and_filter(transcripts, regions):
             if not g0_fname:
                 logger.add("Region File Missing for QC", f"{r_id}: no group file for divergence check; skipping QC.")
                 divergence = 0.0
+                log_detail(
+                    "INVERSION",
+                    r_id,
+                    "QC_HUMAN_MISSING",
+                    "No human reference file available for divergence QC.",
+                    coverage_pct=seq_stats['coverage_pct'],
+                    expected_len=seq_stats['length'],
+                    span=span_label,
+                )
             else:
                 human_seqs = read_phy_sequences(g0_fname)
                 if not human_seqs:
                     logger.add("Region File Missing for QC", f"{r_id}: cannot read {os.path.basename(g0_fname)}; skipping QC.")
                     divergence = 0.0
+                    log_detail(
+                        "INVERSION",
+                        r_id,
+                        "QC_HUMAN_MISSING",
+                        "Human reference sequence missing for divergence QC.",
+                        coverage_pct=seq_stats['coverage_pct'],
+                        expected_len=seq_stats['length'],
+                        span=span_label,
+                    )
                 else:
                     human_ref = human_seqs[0]
                     diff = 0
@@ -941,6 +1212,20 @@ def build_outgroups_and_filter(transcripts, regions):
                         os.remove(outname)
                     except Exception:
                         pass
+                print_always(
+                    f"[RG][{r_id}] FAIL divergence {divergence:.2f}% (threshold {DIVERGENCE_THRESHOLD:.2f}%) — file removed."
+                )
+                log_detail(
+                    "INVERSION",
+                    r_id,
+                    "FILTER_HIGH_DIVERGENCE",
+                    "Failed divergence QC; output removed.",
+                    coverage_pct=seq_stats['coverage_pct'],
+                    divergence=divergence,
+                    threshold=DIVERGENCE_THRESHOLD,
+                    span=span_label,
+                    filled=seq_stats['covered'],
+                )
                 progress_bar("[RG write]", i, total_rg)
                 continue
 
@@ -951,11 +1236,26 @@ def build_outgroups_and_filter(transcripts, regions):
                 f_out.write(f" 1 {len(final_seq)}\n")
                 f_out.write(f"{'PanTro6':<10}{final_seq}\n")
             rg_written += 1
+            print_always(f"[RG][{r_id}] PASS divergence {divergence:.2f}% — wrote {outname}.")
+            log_detail(
+                "INVERSION",
+                r_id,
+                "PASS",
+                "Outgroup written after passing divergence QC.",
+                coverage_pct=seq_stats['coverage_pct'],
+                divergence=divergence,
+                span=span_label,
+                filled=seq_stats['covered'],
+                longest_block=seq_stats['longest_block'],
+                longest_gap=seq_stats['longest_gap'],
+                out_file=outname,
+            )
             progress_bar("[RG write]", i, total_rg)
         if total_rg:
             progress_bar("[RG write]", total_rg, total_rg)
             print()
         print_always(f"Wrote {rg_written} region outgroup PHYLIPs (passed QC).")
+        log_detail("SUMMARY", "regions", "DONE", "Region processing finished.", passed=rg_written, total=total_rg)
 
 # =========================
 # --- Fixed-diff stats ----
@@ -1236,6 +1536,10 @@ def main():
     print_always("--- Starting Chimp Outgroup Generation for Transcripts + Regions ---")
     print_dbg(f"Using BIN_SIZE={BIN_SIZE}, DEBUG_VERBOSE={DEBUG_VERBOSE}, DEBUG_CHUNK_SAMPLE={DEBUG_CHUNK_SAMPLE}")
 
+    log_path = setup_detail_logger()
+    print_always(f"Detailed log will be written to: {log_path}")
+    log_detail("SYSTEM", "startup", "BEGIN", "Run initialised.", bin_size=BIN_SIZE, divergence_threshold=DIVERGENCE_THRESHOLD)
+
     with time_block("Download + prepare AXT"):
         download_axt_file()
         ungzip_file()
@@ -1259,6 +1563,7 @@ def main():
             calculate_and_print_differences_regions()
 
     logger.report()
+    log_detail("SYSTEM", "shutdown", "END", "Run completed.")
     print_always("--- Script finished. ---")
 
 if __name__ == '__main__':
