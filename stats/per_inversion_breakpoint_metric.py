@@ -66,6 +66,7 @@ FRF_CANDIDATE_CHUNK_SIZE = 8192
 META_PERMUTATIONS = 10000
 META_PERM_CHUNK = 1000
 META_PERM_BASE_SEED = 2025
+META_WEIGHT_VARIANCE_FLOOR_QUANTILE = 0.05
 
 TOTAL_CPUS = max(1, os.cpu_count() or 1)
 EPS_DENOM = 1e-12
@@ -356,7 +357,7 @@ def load_hudson_data(falsta_path: Path) -> List[Inversion]:
                 if current_header and current_data_lines:
                     parsed = parse_hudson_header(current_header)
                     if parsed:
-                        data = parse_data_line("".join(current_data_lines))
+                        data = parse_data_line(",".join(current_data_lines))
                         key = (parsed["chrom"], parsed["start"], parsed["end"])
                         if key not in pairs_by_coords:
                             pairs_by_coords[key] = {}
@@ -368,7 +369,7 @@ def load_hudson_data(falsta_path: Path) -> List[Inversion]:
         if current_header and current_data_lines:
             parsed = parse_hudson_header(current_header)
             if parsed:
-                data = parse_data_line("".join(current_data_lines))
+                data = parse_data_line(",".join(current_data_lines))
                 key = (parsed["chrom"], parsed["start"], parsed["end"])
                 if key not in pairs_by_coords:
                     pairs_by_coords[key] = {}
@@ -446,6 +447,11 @@ def compute_folded_distances(inversion: Inversion) -> Tuple[np.ndarray, np.ndarr
 def _resolve_autocorr_block_size(n: int, max_global_block_size: int) -> int:
     if USE_GLOBAL_AUTOCORR_BLOCK_SIZE_OVERRIDE:
         candidate = GLOBAL_AUTOCORR_BLOCK_SIZE_WINDOWS
+    else:
+        candidate = max_global_block_size if max_global_block_size > 0 else DEFAULT_BLOCK_SIZE_WINDOWS
+
+    if not math.isfinite(candidate):
+        candidate = DEFAULT_BLOCK_SIZE_WINDOWS
 
     candidate = int(candidate)
     if candidate < 1:
@@ -1048,6 +1054,32 @@ def estimate_tau2_reml(
         upper *= 4.0
     return tau2_est
 
+
+def compute_precision_weights(
+    s2: np.ndarray,
+    tau2: float,
+    floor_quantile: float = META_WEIGHT_VARIANCE_FLOOR_QUANTILE,
+) -> Tuple[np.ndarray, float]:
+    base = np.asarray(s2, dtype=float) + float(tau2)
+    positive = base[np.isfinite(base) & (base > 0.0)]
+    if positive.size == 0:
+        floor = max(float(np.finfo(float).tiny), float(np.nan_to_num(np.max(base), nan=0.0)))
+    else:
+        if 0.0 < floor_quantile < 1.0:
+            candidate_floor = float(np.quantile(positive, floor_quantile))
+        else:
+            candidate_floor = float(np.min(positive))
+        if not math.isfinite(candidate_floor) or candidate_floor <= 0.0:
+            floor = float(np.min(positive))
+        else:
+            floor = candidate_floor
+        floor = max(floor, float(np.finfo(float).tiny))
+    adjusted = np.maximum(base, floor)
+    weights = np.zeros_like(adjusted, dtype=float)
+    np.divide(1.0, adjusted, out=weights, where=adjusted > 0.0)
+    return weights, float(floor)
+
+
 def precision_weighted_median(values: np.ndarray, weights: np.ndarray) -> float:
     values = np.asarray(values, dtype=float)
     weights = np.asarray(weights, dtype=float)
@@ -1123,12 +1155,12 @@ def run_precision_weighted_median_analysis(
     s2: np.ndarray,
     group: np.ndarray,
     y_label: str,
-) -> Dict[str, float]:
+) -> Tuple[Dict[str, float], np.ndarray, float]:
     X = np.ones((group.size, 1), dtype=float)
     tau2 = estimate_tau2_reml(y, s2, X)
     if not math.isfinite(tau2) or tau2 < 0.0:
         tau2 = 0.0
-    weights = 1.0 / (s2 + tau2)
+    weights, variance_floor = compute_precision_weights(s2, tau2)
     delta, median_single, median_recurrent = weighted_median_difference(y, weights, group)
 
     return {
@@ -1140,7 +1172,8 @@ def run_precision_weighted_median_analysis(
         "n_single": float(int(np.sum(group == 0))),
         "n_recurrent": float(int(np.sum(group == 1))),
         "y_label": y_label,
-    }
+        "variance_floor": float(variance_floor),
+    }, weights, float(variance_floor)
 
 # ------------------------- META-LEVEL PERMUTATION -------------------------
 
@@ -1157,9 +1190,8 @@ def _meta_perm_chunk_worker(args) -> np.ndarray:
 
 def meta_permutation_pvalue(
     y: np.ndarray,
-    s2: np.ndarray,
+    weights: np.ndarray,
     group: np.ndarray,
-    tau2: float,
     n_perm: int,
     chunk: int,
     base_seed: int,
@@ -1167,10 +1199,7 @@ def meta_permutation_pvalue(
 ) -> Dict[str, float]:
     n = y.size
     n_workers = max(1, min(n_workers, (n_perm + chunk - 1) // chunk))
-    tau2 = float(tau2)
-    if not math.isfinite(tau2) or tau2 < 0.0:
-        tau2 = 0.0
-    weights_obs = 1.0 / (s2 + tau2)
+    weights_obs = np.asarray(weights, dtype=float)
     T_obs, _, _ = weighted_median_difference(y, weights_obs, group)
 
     with ProcessPoolExecutor(max_workers=n_workers) as pool:
@@ -1487,7 +1516,7 @@ def main():
         return
     sub_meta, y_meta, s2_meta, group_meta, y_label = meta_inputs
 
-    meta_results = run_precision_weighted_median_analysis(
+    meta_results, meta_weights, meta_variance_floor = run_precision_weighted_median_analysis(
         sub_meta,
         y_meta,
         s2_meta,
@@ -1513,6 +1542,7 @@ def main():
     log.info(f"  group 0 (single-event): {n_single}")
     log.info(f"  group 1 (recurrent):    {n_recurrent}")
     log.info(f"Estimated between-inversion variance tau^2: {tau2:.4e}")
+    log.info(f"Variance floor applied to meta weights: {meta_variance_floor:.4e}")
     log.info("")
     log.info(
         f"Weighted median {y_label} (single,   group 0): {median_single:+.4f}"
@@ -1527,9 +1557,8 @@ def main():
     n_meta_workers = min(TOTAL_CPUS, max(1, (META_PERMUTATIONS + META_PERM_CHUNK - 1) // META_PERM_CHUNK))
     perm_out = meta_permutation_pvalue(
         y=y_meta,
-        s2=s2_meta,
+        weights=meta_weights,
         group=group_meta,
-        tau2=tau2,
         n_perm=META_PERMUTATIONS,
         chunk=META_PERM_CHUNK,
         base_seed=stable_seed_from_key("meta-permutation") + META_PERM_BASE_SEED,
