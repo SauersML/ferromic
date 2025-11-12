@@ -139,31 +139,30 @@ def _find_largest_window_change(
     sorted_dates, sorted_values = _prepare_interpolator(dates, values)
     min_date = sorted_dates[0]
     max_date = sorted_dates[-1]
-    
     if max_date - min_date < window:
         return None
 
     best_start = None
-    best_end = None
     best_change = -1.0
+    best_end = None
     
-    # Check every year (1-year sliding window with 1000-year length)
-    current = min_date
-    while current <= max_date - window:
-        start_val = _interpolate(current, sorted_dates, sorted_values)
-        end_val = _interpolate(current + window, sorted_dates, sorted_values)
+    start = min_date
+    while start <= max_date - window:
+        end = start + window
+        start_val = _interpolate(start, sorted_dates, sorted_values)
+        end_val = _interpolate(end, sorted_dates, sorted_values)
         change = abs(end_val - start_val)
         
         if change > best_change:
             best_change = change
-            best_start = current
-            best_end = current + window
+            best_start = start
+            best_end = end
         
-        current += 1.0
-    
-    if best_start is None:
+        start += 1.0  # Check every year
+
+    if best_start is None or best_end is None:
         return None
-    
+
     return best_start, best_end, best_change
 
 
