@@ -20,14 +20,14 @@ import hashlib
 import math
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict, Any, Iterable, Sequence
-from collections import deque
 from dataclasses import dataclass
-from concurrent.futures import ProcessPoolExecutor, as_completed, wait, FIRST_COMPLETED
+from concurrent.futures import ProcessPoolExecutor, as_completed
 import multiprocessing as mp
 from multiprocessing import shared_memory
 import numpy as np
 import pandas as pd
 import requests
+from tqdm import tqdm
 
 try:
     from numba import njit
@@ -1948,7 +1948,7 @@ def meta_permutation_pvalue(
     chunk: int,
     base_seed: int,
     n_workers: int,
-) -> Dict[str, float]:
+) -> Dict[str, float | int]:
     n = y.size
     weights_obs = np.asarray(weights, dtype=float)
     group_obs = np.asarray(group, dtype=int)
@@ -1960,6 +1960,10 @@ def meta_permutation_pvalue(
             "p_perm_one_sided_lower": float("nan"),
             "p_perm_two_sided": float("nan"),
             "T_obs": float(T_obs),
+            "total_draws": int(0),
+            "count_upper": int(0),
+            "count_lower": int(0),
+            "count_two": int(0),
         }
 
     mask_group0 = group_obs == 0
@@ -1971,6 +1975,10 @@ def meta_permutation_pvalue(
             "p_perm_one_sided_lower": float("nan"),
             "p_perm_two_sided": float("nan"),
             "T_obs": float(T_obs),
+            "total_draws": int(0),
+            "count_upper": int(0),
+            "count_lower": int(0),
+            "count_two": int(0),
         }
 
     order = np.argsort(y)
@@ -1983,6 +1991,10 @@ def meta_permutation_pvalue(
             "p_perm_one_sided_lower": float("nan"),
             "p_perm_two_sided": float("nan"),
             "T_obs": float(T_obs),
+            "total_draws": int(0),
+            "count_upper": int(0),
+            "count_lower": int(0),
+            "count_two": int(0),
         }
 
     ctx = mp.get_context("fork") if "fork" in mp.get_all_start_methods() else mp.get_context()
@@ -2064,6 +2076,10 @@ def meta_permutation_pvalue(
                 "p_perm_one_sided_lower": float("nan"),
                 "p_perm_two_sided": float("nan"),
                 "T_obs": float(T_obs),
+                "total_draws": int(0),
+                "count_upper": int(0),
+                "count_lower": int(0),
+                "count_two": int(0),
             }
 
         total_upper = sum(res["count_upper"] for res in results)
@@ -2084,6 +2100,10 @@ def meta_permutation_pvalue(
         "p_perm_one_sided_lower": float(p_one_lower),
         "p_perm_two_sided": float(p_two),
         "T_obs": float(T_obs),
+        "total_draws": int(total_draws),
+        "count_upper": int(total_upper),
+        "count_lower": int(total_lower),
+        "count_two": int(total_two),
     }
 
 # ------------------------- MAIN -------------------------
@@ -2194,13 +2214,6 @@ def main():
         inv_progress = {key: 0 for key in inv_chunk_totals}
         completed_inversions: set[str] = set()
         start_time = time.time()
-        recent_completions: deque[float] = deque(maxlen=min(50, total_chunks))
-        chunks_completed = 0
-        last_reported_percent = -1
-        last_report_time = start_time
-        last_reported_chunk = 0
-        min_chunk_interval = max(1, total_chunks // 200)
-        max_report_interval = 30.0
         plan_payload = _build_permutation_plan_payload(plans)
         try:
             with ProcessPoolExecutor(
@@ -2208,32 +2221,27 @@ def main():
                 initializer=_permutation_worker_setup,
                 initargs=(plan_payload,),
             ) as executor:
-                task_iter = iter(chunk_tasks)
-                pending: Dict[Any, Tuple[int, int]] = {}
+                future_map = {
+                    executor.submit(run_permutation_chunk, task): task
+                    for task in chunk_tasks
+                }
 
-                def submit_next() -> bool:
-                    try:
-                        task = next(task_iter)
-                    except StopIteration:
-                        return False
-                    future = executor.submit(run_permutation_chunk, task)
-                    pending[future] = task
-                    return True
-
-                initial = min(len(chunk_tasks), perm_workers * 2)
-                for _ in range(initial):
-                    submit_next()
-
-                while pending:
-                    done, _ = wait(list(pending.keys()), return_when=FIRST_COMPLETED)
-                    for future in done:
-                        pending.pop(future, None)
+                disable_bar = not sys.stdout.isatty()
+                with tqdm(
+                    total=len(chunk_tasks),
+                    unit="chunk",
+                    dynamic_ncols=True,
+                    smoothing=0.0,
+                    mininterval=0.5,
+                    ascii=True,
+                    disable=disable_bar,
+                ) as pbar:
+                    for future in as_completed(future_map):
                         chunk_result = future.result()
-                        now = time.time()
-                        recent_completions.append(now)
-                        chunks_completed += 1
+
                         inv_key = chunk_result.inv_key
                         inv_progress[inv_key] = inv_progress.get(inv_key, 0) + 1
+
                         stats = stats_by_inv.get(inv_key)
                         if stats is not None:
                             stats["n"] += chunk_result.n_finite
@@ -2241,58 +2249,18 @@ def main():
                             stats["sum_sq"] += chunk_result.sum_sq_delta
                             stats["count_ge"] += chunk_result.count_ge_observed
 
-                        report_reason = False
-                        percent_complete = (chunks_completed / total_chunks) * 100.0
-                        percent_bucket = int(percent_complete)
-                        if percent_bucket > last_reported_percent:
-                            report_reason = True
-                            last_reported_percent = percent_bucket
-                        if chunks_completed - last_reported_chunk >= min_chunk_interval:
-                            report_reason = True
-                            last_reported_chunk = chunks_completed
-                        if now - last_report_time >= max_report_interval:
-                            report_reason = True
+                        pbar.update(1)
 
-                        if report_reason:
-                            last_report_time = now
-                            elapsed = now - start_time
-                            rate = chunks_completed / max(elapsed, 1e-6)
-                            remaining_chunks = total_chunks - chunks_completed
-                            eta = remaining_chunks / max(rate, 1e-6)
-                            rate_str = f"{rate:.2f} chunks/s"
-                            eta_str = _format_duration(eta)
-                            if len(recent_completions) > 1:
-                                recent_rate = len(recent_completions) / max(
-                                    recent_completions[-1] - recent_completions[0],
-                                    1e-6,
-                                )
-                            else:
-                                recent_rate = rate
-
-                            completed_inv = {
-                                key
-                                for key, progress in inv_progress.items()
-                                if progress >= inv_chunk_totals.get(key, 0)
-                            }
-                            new_completions = completed_inv - completed_inversions
-                            if new_completions:
-                                completed_inversions.update(new_completions)
-                                log.info(
-                                    "Completed inversions: %s",
-                                    ", ".join(sorted(new_completions)),
-                                )
-
-                            log.info(
-                                "Perm chunk progress: %.1f%% (%d/%d), rate=%s (recent %.2f), ETA=%s",
-                                percent_complete,
-                                chunks_completed,
-                                total_chunks,
-                                rate_str,
-                                recent_rate,
-                                eta_str,
+                        inv_total = inv_chunk_totals.get(inv_key, 0)
+                        if (
+                            inv_total
+                            and inv_progress[inv_key] == inv_total
+                            and inv_key not in completed_inversions
+                        ):
+                            completed_inversions.add(inv_key)
+                            pbar.set_postfix_str(
+                                f"inversions {len(completed_inversions)}/{len(inv_chunk_totals)}"
                             )
-
-                        submit_next()
             total_elapsed = time.time() - start_time
             overall_rate = total_chunks / total_elapsed if total_elapsed > 0 else float("nan")
             log.info(
@@ -2444,9 +2412,33 @@ def main():
     p_perm_one_upper = perm_out["p_perm_one_sided_upper"]
     p_perm_one_lower = perm_out["p_perm_one_sided_lower"]
     p_perm_two = perm_out["p_perm_two_sided"]
-    log.info(f"Permutation p (one-sided, single > recurrent): {p_perm_one_upper:.4g}")
-    log.info(f"Permutation p (one-sided, recurrent > single): {p_perm_one_lower:.4g}")
-    log.info(f"Permutation p (two-sided): {p_perm_two:.4g}")
+    log.info(
+        "Exceedances (>=T_obs, <=T_obs, two-sided): %d/%d, %d/%d, %d/%d",
+        int(perm_out["count_upper"]),
+        int(perm_out["total_draws"]),
+        int(perm_out["count_lower"]),
+        int(perm_out["total_draws"]),
+        int(perm_out["count_two"]),
+        int(perm_out["total_draws"]),
+    )
+    log.info(
+        "Permutation p (one-sided, single > recurrent): %r  [ (1+%d)/(1+%d) ]",
+        p_perm_one_upper,
+        int(perm_out["count_upper"]),
+        int(perm_out["total_draws"]),
+    )
+    log.info(
+        "Permutation p (one-sided, recurrent > single): %r  [ (1+%d)/(1+%d) ]",
+        p_perm_one_lower,
+        int(perm_out["count_lower"]),
+        int(perm_out["total_draws"]),
+    )
+    log.info(
+        "Permutation p (two-sided): %r  [ (1+%d)/(1+%d) ]",
+        p_perm_two,
+        int(perm_out["count_two"]),
+        int(perm_out["total_draws"]),
+    )
     log.info("")
 
 if __name__ == "__main__":
