@@ -1658,6 +1658,46 @@ def weighted_median_difference(
     return float(delta), float(median_single), float(median_recurrent)
 
 
+def weighted_mean_difference(
+    y: np.ndarray,
+    weights: np.ndarray,
+    group: np.ndarray,
+) -> Tuple[float, float, float]:
+    y = np.asarray(y, dtype=float)
+    weights = np.asarray(weights, dtype=float)
+    group = np.asarray(group, dtype=int)
+
+    mask_valid = np.isfinite(y) & np.isfinite(weights) & (weights > 0.0)
+    if not np.any(mask_valid):
+        return float("nan"), float("nan"), float("nan")
+
+    y = y[mask_valid]
+    weights = weights[mask_valid]
+    group = group[mask_valid]
+
+    mask_single = group == 0
+    mask_recurrent = group == 1
+
+    if not (np.any(mask_single) and np.any(mask_recurrent)):
+        return float("nan"), float("nan"), float("nan")
+
+    w_single = float(np.add.reduce(weights[mask_single], dtype=np.float64))
+    w_recurrent = float(np.add.reduce(weights[mask_recurrent], dtype=np.float64))
+
+    if w_single <= 0.0 or w_recurrent <= 0.0:
+        return float("nan"), float("nan"), float("nan")
+
+    mean_single = float(
+        np.add.reduce(weights[mask_single] * y[mask_single], dtype=np.float64) / w_single
+    )
+    mean_recurrent = float(
+        np.add.reduce(weights[mask_recurrent] * y[mask_recurrent], dtype=np.float64) / w_recurrent
+    )
+
+    delta = mean_single - mean_recurrent
+    return float(delta), float(mean_single), float(mean_recurrent)
+
+
 def prepare_meta_analysis_inputs(
     df: pd.DataFrame,
 ) -> Optional[Tuple[pd.DataFrame, np.ndarray, np.ndarray, np.ndarray, str]]:
@@ -1803,6 +1843,7 @@ def _meta_perm_worker_setup(
     total_weight: float,
     T_obs: float,
     progress_queue: Optional[Any],
+    total_weighted_y: Optional[float] = None,
 ) -> None:
     """Initializer that maps shared arrays into the worker process."""
 
@@ -1823,6 +1864,10 @@ def _meta_perm_worker_setup(
         _META_SHARED_STATE["progress_queue"] = progress_queue
     else:
         _META_SHARED_STATE.pop("progress_queue", None)
+    if total_weighted_y is not None and math.isfinite(total_weighted_y):
+        _META_SHARED_STATE["total_weighted_y"] = float(total_weighted_y)
+    else:
+        _META_SHARED_STATE.pop("total_weighted_y", None)
 
 
 def _resolve_weighted_median_tie(
@@ -2027,6 +2072,112 @@ def _meta_perm_worker_run(
         "sumsq_T": sumsq_T,
     }
 
+
+def _meta_perm_worker_run_mean(
+    draws_target: int,
+    seed: int,
+    report_every: int,
+    cpu_affinity: Optional[List[int]],
+) -> Dict[str, Any]:
+    rng = np.random.default_rng(seed)
+    n = _META_SHARED_STATE["n"]
+    n_group0 = _META_SHARED_STATE["n_group0"]
+    T_obs = _META_SHARED_STATE["T_obs"]
+    abs_T_obs = _META_SHARED_STATE["abs_T_obs"]
+    y_sorted = _META_SHARED_STATE["y"]
+    w_sorted = _META_SHARED_STATE["w"]
+    total_weight = float(_META_SHARED_STATE["total_weight"])
+    progress_queue = _META_SHARED_STATE.get("progress_queue")
+    total_weighted_y = float(
+        _META_SHARED_STATE.get(
+            "total_weighted_y",
+            float(np.add.reduce(w_sorted * y_sorted, dtype=np.float64)),
+        )
+    )
+    _META_SHARED_STATE["total_weighted_y"] = total_weighted_y
+
+    _maybe_set_affinity(cpu_affinity)
+
+    draws_done = 0
+    invalid = 0
+    count_upper = 0
+    count_lower = 0
+    count_two = 0
+    sum_T = 0.0
+    sumsq_T = 0.0
+
+    report_every = max(1, int(report_every))
+    reported_since_flush = 0
+
+    while draws_done < draws_target:
+        sample = rng.choice(n, size=n_group0, replace=False, shuffle=False)
+        w0 = float(np.add.reduce(w_sorted[sample], dtype=np.float64))
+        if not math.isfinite(w0) or w0 <= 0.0:
+            invalid += 1
+            continue
+        w1 = total_weight - w0
+        if not math.isfinite(w1) or w1 <= 0.0:
+            invalid += 1
+            continue
+
+        wy0 = float(np.add.reduce(w_sorted[sample] * y_sorted[sample], dtype=np.float64))
+        wy1 = total_weighted_y - wy0
+
+        if not (math.isfinite(wy0) and math.isfinite(wy1)):
+            invalid += 1
+            continue
+
+        delta = float(wy0 / w0 - wy1 / w1)
+
+        if not math.isfinite(delta):
+            invalid += 1
+            continue
+
+        if delta >= T_obs:
+            count_upper += 1
+        if delta <= T_obs:
+            count_lower += 1
+        if abs(delta) >= abs_T_obs:
+            count_two += 1
+        sum_T += delta
+        sumsq_T += delta * delta
+        draws_done += 1
+        reported_since_flush += 1
+
+        if progress_queue is not None and reported_since_flush >= report_every:
+            progress_queue.put(int(reported_since_flush))
+            reported_since_flush = 0
+
+        if draws_done < draws_target:
+            delta_flip = -delta
+            if delta_flip >= T_obs:
+                count_upper += 1
+            if delta_flip <= T_obs:
+                count_lower += 1
+            if abs(delta_flip) >= abs_T_obs:
+                count_two += 1
+            sum_T += delta_flip
+            sumsq_T += delta_flip * delta_flip
+            draws_done += 1
+            reported_since_flush += 1
+
+            if progress_queue is not None and reported_since_flush >= report_every:
+                progress_queue.put(int(reported_since_flush))
+                reported_since_flush = 0
+
+    if progress_queue is not None and reported_since_flush > 0:
+        progress_queue.put(int(reported_since_flush))
+
+    return {
+        "draws": draws_done,
+        "invalid": invalid,
+        "count_upper": count_upper,
+        "count_lower": count_lower,
+        "count_two": count_two,
+        "sum_T": sum_T,
+        "sumsq_T": sumsq_T,
+    }
+
 def meta_permutation_pvalue(
     y: np.ndarray,
     weights: np.ndarray,
@@ -2143,6 +2294,7 @@ def meta_permutation_pvalue(
                 total_weight,
                 T_obs,
                 progress_queue,
+                float(np.add.reduce(w_sorted * y_sorted, dtype=np.float64)),
             ),
         ) as pool:
             futures = []
@@ -2195,6 +2347,232 @@ def meta_permutation_pvalue(
                     consumer_thread = threading.Thread(
                         target=_drain_progress,
                         name="meta-perm-progress",
+                        daemon=True,
+                    )
+                    consumer_thread.start()
+
+                try:
+                    results = [f.result() for f in futures]
+                finally:
+                    consumer_stop.set()
+                    progress_queue.put(None)
+                    if consumer_thread is not None:
+                        consumer_thread.join()
+
+        progress_queue.close()
+        progress_queue.join_thread()
+
+        total_draws = sum(res["draws"] for res in results)
+        if total_draws == 0:
+            return {
+                "p_perm_one_sided_upper": float("nan"),
+                "p_perm_one_sided_lower": float("nan"),
+                "p_perm_two_sided": float("nan"),
+                "T_obs": float(T_obs),
+                "total_draws": int(0),
+                "count_upper": int(0),
+                "count_lower": int(0),
+                "count_two": int(0),
+            }
+
+        total_upper = sum(res["count_upper"] for res in results)
+        total_lower = sum(res["count_lower"] for res in results)
+        total_two = sum(res["count_two"] for res in results)
+
+        p_one_upper = (1.0 + float(total_upper)) / (1.0 + float(total_draws))
+        p_one_lower = (1.0 + float(total_lower)) / (1.0 + float(total_draws))
+        p_two = (1.0 + float(total_two)) / (1.0 + float(total_draws))
+    finally:
+        shm_y.close()
+        shm_w.close()
+        shm_y.unlink()
+        shm_w.unlink()
+
+    return {
+        "p_perm_one_sided_upper": float(p_one_upper),
+        "p_perm_one_sided_lower": float(p_one_lower),
+        "p_perm_two_sided": float(p_two),
+        "T_obs": float(T_obs),
+        "total_draws": int(total_draws),
+        "count_upper": int(total_upper),
+        "count_lower": int(total_lower),
+        "count_two": int(total_two),
+    }
+
+
+def meta_permutation_pvalue_mean(
+    y: np.ndarray,
+    weights: np.ndarray,
+    group: np.ndarray,
+    n_perm: int,
+    chunk: int,
+    base_seed: int,
+    n_workers: int,
+) -> Dict[str, float | int]:
+    n = y.size
+    weights_obs = np.asarray(weights, dtype=float)
+    group_obs = np.asarray(group, dtype=int)
+    T_obs, _, _ = weighted_mean_difference(y, weights_obs, group_obs)
+
+    if not math.isfinite(T_obs):
+        return {
+            "p_perm_one_sided_upper": float("nan"),
+            "p_perm_one_sided_lower": float("nan"),
+            "p_perm_two_sided": float("nan"),
+            "T_obs": float(T_obs),
+            "total_draws": int(0),
+            "count_upper": int(0),
+            "count_lower": int(0),
+            "count_two": int(0),
+        }
+
+    mask_group0 = group_obs == 0
+    n_group0 = int(np.sum(mask_group0))
+    n_group1 = n - n_group0
+    if n_group0 == 0 or n_group1 == 0 or n_perm <= 0:
+        return {
+            "p_perm_one_sided_upper": float("nan"),
+            "p_perm_one_sided_lower": float("nan"),
+            "p_perm_two_sided": float("nan"),
+            "T_obs": float(T_obs),
+            "total_draws": int(0),
+            "count_upper": int(0),
+            "count_lower": int(0),
+            "count_two": int(0),
+        }
+
+    order = np.argsort(y)
+    y_sorted = np.ascontiguousarray(y[order], dtype=np.float64)
+    w_sorted = np.ascontiguousarray(weights_obs[order], dtype=np.float64)
+    total_weight = float(np.sum(w_sorted))
+    if not math.isfinite(total_weight) or total_weight <= 0.0:
+        return {
+            "p_perm_one_sided_upper": float("nan"),
+            "p_perm_one_sided_lower": float("nan"),
+            "p_perm_two_sided": float("nan"),
+            "T_obs": float(T_obs),
+            "total_draws": int(0),
+            "count_upper": int(0),
+            "count_lower": int(0),
+            "count_two": int(0),
+        }
+
+    total_weighted_y = float(np.add.reduce(w_sorted * y_sorted, dtype=np.float64))
+
+    ctx = mp.get_context("fork") if "fork" in mp.get_all_start_methods() else mp.get_context()
+
+    shm_y = shared_memory.SharedMemory(create=True, size=y_sorted.nbytes)
+    shm_w = shared_memory.SharedMemory(create=True, size=w_sorted.nbytes)
+    try:
+        np.ndarray(y_sorted.shape, dtype=y_sorted.dtype, buffer=shm_y.buf)[:] = y_sorted
+        np.ndarray(w_sorted.shape, dtype=w_sorted.dtype, buffer=shm_w.buf)[:] = w_sorted
+
+        try:
+            import psutil  # type: ignore
+
+            physical_cores = psutil.cpu_count(logical=False) or 1
+        except Exception:
+            physical_cores = (
+                len(os.sched_getaffinity(0))
+                if hasattr(os, "sched_getaffinity")
+                else (os.cpu_count() or 1)
+            )
+
+        n_workers = max(1, min(n_workers, physical_cores))
+        n_workers = min(n_workers, n_perm)
+        if n_workers <= 0:
+            n_workers = 1
+
+        if hasattr(os, "sched_getaffinity"):
+            available_cpus = sorted(os.sched_getaffinity(0))  # type: ignore[arg-type]
+        else:
+            available_cpus = list(range(os.cpu_count() or 1))
+        if not available_cpus:
+            available_cpus = list(range(n_workers))
+
+        cpu_plan: List[List[int]] = [
+            [available_cpus[idx % len(available_cpus)]] for idx in range(n_workers)
+        ]
+
+        draws_per_worker = [n_perm // n_workers] * n_workers
+        remainder = n_perm % n_workers
+        for i in range(remainder):
+            draws_per_worker[i] += 1
+
+        seeds = [base_seed + 1 + i for i in range(n_workers)]
+
+        progress_queue = ctx.Queue()
+        disable_bar = not sys.stdout.isatty()
+        results: List[Dict[str, Any]] = []
+
+        with ProcessPoolExecutor(
+            max_workers=n_workers,
+            mp_context=ctx,
+            initializer=_meta_perm_worker_setup,
+            initargs=(
+                shm_y.name,
+                shm_w.name,
+                y_sorted.size,
+                y_sorted.dtype.str,
+                n_group0,
+                total_weight,
+                T_obs,
+                progress_queue,
+                total_weighted_y,
+            ),
+        ) as pool:
+            futures = []
+            for worker_idx, draws in enumerate(draws_per_worker):
+                if draws <= 0:
+                    continue
+                futures.append(
+                    pool.submit(
+                        _meta_perm_worker_run_mean,
+                        int(draws),
+                        int(seeds[worker_idx]),
+                        int(max(1, chunk)),
+                        cpu_plan[worker_idx],
+                    )
+                )
+
+            consumer_stop = threading.Event()
+            consumer_thread: Optional[threading.Thread] = None
+
+            with tqdm(
+                total=n_perm,
+                desc="Meta permutations (mean)",
+                unit="draw",
+                dynamic_ncols=True,
+                smoothing=0.0,
+                mininterval=0.5,
+                ascii=True,
+                disable=disable_bar,
+            ) as pbar:
+
+                if futures:
+
+                    def _drain_progress() -> None:
+                        while not consumer_stop.is_set():
+                            try:
+                                delta = progress_queue.get(timeout=0.5)
+                            except Empty:
+                                continue
+                            if delta is None:
+                                break
+                            if delta:
+                                pbar.update(int(delta))
+                        while True:
+                            try:
+                                delta = progress_queue.get_nowait()
+                            except Empty:
+                                break
+                            if not delta:
+                                continue
+                            pbar.update(int(delta))
+
+                    consumer_thread = threading.Thread(
+                        target=_drain_progress,
+                        name="meta-perm-progress-mean",
                         daemon=True,
                     )
                     consumer_thread.start()
@@ -2579,6 +2957,54 @@ def main():
         p_perm_two,
         int(perm_out["count_two"]),
         int(perm_out["total_draws"]),
+    )
+    log.info("")
+
+    delta_mean, mean_single, mean_recurrent = weighted_mean_difference(
+        y_meta, meta_weights, group_meta
+    )
+    if math.isfinite(mean_single) and math.isfinite(mean_recurrent) and math.isfinite(delta_mean):
+        log.info("[MEAN] Weighted mean %s (single,   group 0): %+.4f", y_label, mean_single)
+        log.info("[MEAN] Weighted mean %s (recurrent, group 1): %+.4f", y_label, mean_recurrent)
+        log.info("[MEAN] Mean difference (single - recurrent):   %+.4f", delta_mean)
+    else:
+        log.warning("[MEAN] Unable to compute finite weighted means for both groups")
+
+    perm_out_mean = meta_permutation_pvalue_mean(
+        y=y_meta,
+        weights=meta_weights,
+        group=group_meta,
+        n_perm=META_PERMUTATIONS,
+        chunk=META_PERM_CHUNK,
+        base_seed=stable_seed_from_key("meta-permutation-mean") + META_PERM_BASE_SEED,
+        n_workers=n_meta_workers,
+    )
+    log.info(
+        "[MEAN] Exceedances (>=T_obs, <=T_obs, two-sided): %d/%d, %d/%d, %d/%d",
+        int(perm_out_mean["count_upper"]),
+        int(perm_out_mean["total_draws"]),
+        int(perm_out_mean["count_lower"]),
+        int(perm_out_mean["total_draws"]),
+        int(perm_out_mean["count_two"]),
+        int(perm_out_mean["total_draws"]),
+    )
+    log.info(
+        "[MEAN] Permutation p (one-sided, single > recurrent): %r  [ (1+%d)/(1+%d) ]",
+        perm_out_mean["p_perm_one_sided_upper"],
+        int(perm_out_mean["count_upper"]),
+        int(perm_out_mean["total_draws"]),
+    )
+    log.info(
+        "[MEAN] Permutation p (one-sided, recurrent > single): %r  [ (1+%d)/(1+%d) ]",
+        perm_out_mean["p_perm_one_sided_lower"],
+        int(perm_out_mean["count_lower"]),
+        int(perm_out_mean["total_draws"]),
+    )
+    log.info(
+        "[MEAN] Permutation p (two-sided): %r  [ (1+%d)/(1+%d) ]",
+        perm_out_mean["p_perm_two_sided"],
+        int(perm_out_mean["count_two"]),
+        int(perm_out_mean["total_draws"]),
     )
     log.info("")
 
