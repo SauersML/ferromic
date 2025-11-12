@@ -397,9 +397,9 @@ def load_hudson_data(falsta_path: Path) -> List[Inversion]:
         finite_num = np.isfinite(numerator)
         finite_den = np.isfinite(denominator)
         valid_mask = finite_num & finite_den
-
-        num_clean = np.where(finite_num, numerator, 0.0)
-        den_clean = np.where(finite_den, denominator, 0.0)
+        
+        num_clean = np.where(valid_mask, numerator, 0.0)
+        den_clean = np.where(valid_mask, denominator, 0.0)
 
         num_sums = np.bincount(window_idx, weights=num_clean, minlength=n_windows)
         den_sums = np.bincount(window_idx, weights=den_clean, minlength=n_windows)
