@@ -21,6 +21,8 @@ from typing import Optional, Tuple, List, Dict, Any
 from collections import deque
 from dataclasses import dataclass
 from concurrent.futures import ProcessPoolExecutor, as_completed
+import multiprocessing as mp
+from multiprocessing import shared_memory
 import numpy as np
 import pandas as pd
 import requests
@@ -1229,16 +1231,181 @@ def run_precision_weighted_median_analysis(
 
 # ------------------------- META-LEVEL PERMUTATION -------------------------
 
-def _meta_perm_chunk_worker(args) -> np.ndarray:
-    """Worker function for meta-level permutation - must be module-level for pickling."""
-    size, seed, y, weights, group = args
+_META_SHARED_STATE: Dict[str, Any] = {}
+
+
+def _meta_perm_worker_setup(
+    shm_name_y: str,
+    shm_name_w: str,
+    length: int,
+    dtype_str: str,
+    n_group0: int,
+    total_weight: float,
+    T_obs: float,
+) -> None:
+    """Initializer that maps shared arrays into the worker process."""
+
+    dtype = np.dtype(dtype_str)
+    shm_y = shared_memory.SharedMemory(name=shm_name_y)
+    shm_w = shared_memory.SharedMemory(name=shm_name_w)
+
+    _META_SHARED_STATE["y_shm"] = shm_y
+    _META_SHARED_STATE["w_shm"] = shm_w
+    _META_SHARED_STATE["y"] = np.ndarray((length,), dtype=dtype, buffer=shm_y.buf)
+    _META_SHARED_STATE["w"] = np.ndarray((length,), dtype=dtype, buffer=shm_w.buf)
+    _META_SHARED_STATE["n"] = int(length)
+    _META_SHARED_STATE["n_group0"] = int(n_group0)
+    _META_SHARED_STATE["total_weight"] = float(total_weight)
+    _META_SHARED_STATE["T_obs"] = float(T_obs)
+    _META_SHARED_STATE["abs_T_obs"] = abs(float(T_obs))
+
+
+def _weighted_median_from_mask_sorted(
+    y_sorted: np.ndarray,
+    w_sorted: np.ndarray,
+    mask: np.ndarray,
+    *,
+    invert: bool = False,
+    total_hint: Optional[float] = None,
+) -> Tuple[float, float]:
+    """Return (median, total weight) for a subset defined by mask over sorted inputs."""
+
+    n = y_sorted.size
+    total = 0.0
+    last_value = float("nan")
+    for idx in range(n):
+        if bool(mask[idx]) != invert:
+            wt = float(w_sorted[idx])
+            total += wt
+            last_value = float(y_sorted[idx])
+
+    if total_hint is not None:
+        total = float(total_hint)
+
+    if not math.isfinite(total) or total <= 0.0 or not math.isfinite(last_value):
+        return float("nan"), float(total)
+
+    target = 0.5 * total
+    cumulative = 0.0
+    for idx in range(n):
+        if bool(mask[idx]) != invert:
+            wt = float(w_sorted[idx])
+            cumulative += wt
+            if cumulative > target:
+                return float(y_sorted[idx]), float(total)
+            if cumulative == target:
+                next_value = float(y_sorted[idx])
+                j = idx + 1
+                while j < n:
+                    if bool(mask[j]) != invert:
+                        next_value = float(0.5 * (y_sorted[idx] + y_sorted[j]))
+                        break
+                    j += 1
+                return float(next_value), float(total)
+    return float(last_value), float(total)
+
+
+def _meta_perm_single_stat(mask: np.ndarray) -> Tuple[float, float, float]:
+    y_sorted = _META_SHARED_STATE["y"]
+    w_sorted = _META_SHARED_STATE["w"]
+    total_weight = _META_SHARED_STATE["total_weight"]
+
+    median0, total0 = _weighted_median_from_mask_sorted(
+        y_sorted,
+        w_sorted,
+        mask,
+        invert=False,
+    )
+    if not math.isfinite(median0):
+        return float("nan"), float("nan"), float("nan")
+
+    median1, _ = _weighted_median_from_mask_sorted(
+        y_sorted,
+        w_sorted,
+        mask,
+        invert=True,
+        total_hint=total_weight - total0,
+    )
+    if not math.isfinite(median1):
+        return float("nan"), float("nan"), float("nan")
+
+    return float(median0 - median1), float(median0), float(median1)
+
+
+def _maybe_set_affinity(cpu_affinity: Optional[List[int]]) -> None:
+    if not cpu_affinity:
+        return
+    try:
+        os.sched_setaffinity(0, set(cpu_affinity))
+    except (AttributeError, PermissionError, OSError):
+        pass
+
+
+def _meta_perm_worker_run(
+    draws_target: int,
+    seed: int,
+    report_every: int,
+    cpu_affinity: Optional[List[int]],
+) -> Dict[str, Any]:
     rng = np.random.default_rng(seed)
-    stats = np.empty(size, dtype=float)
-    for i in range(size):
-        perm_labels = rng.permutation(group)
-        delta, _, _ = weighted_median_difference(y, weights, perm_labels)
-        stats[i] = delta
-    return stats
+    n = _META_SHARED_STATE["n"]
+    n_group0 = _META_SHARED_STATE["n_group0"]
+    T_obs = _META_SHARED_STATE["T_obs"]
+    abs_T_obs = _META_SHARED_STATE["abs_T_obs"]
+
+    _maybe_set_affinity(cpu_affinity)
+
+    mask = np.zeros(n, dtype=bool)
+    draws_done = 0
+    invalid = 0
+    count_upper = 0
+    count_lower = 0
+    count_two = 0
+    sum_T = 0.0
+    sumsq_T = 0.0
+
+    report_every = max(1, int(report_every))
+    while draws_done < draws_target:
+        sample = rng.choice(n, size=n_group0, replace=False)
+        mask.fill(False)
+        mask[sample] = True
+
+        delta, _, _ = _meta_perm_single_stat(mask)
+        if not math.isfinite(delta):
+            invalid += 1
+            continue
+
+        if delta >= T_obs:
+            count_upper += 1
+        if delta <= T_obs:
+            count_lower += 1
+        if abs(delta) >= abs_T_obs:
+            count_two += 1
+        sum_T += delta
+        sumsq_T += delta * delta
+        draws_done += 1
+
+        if draws_done < draws_target:
+            delta_flip = -delta
+            if delta_flip >= T_obs:
+                count_upper += 1
+            if delta_flip <= T_obs:
+                count_lower += 1
+            if abs(delta_flip) >= abs_T_obs:
+                count_two += 1
+            sum_T += delta_flip
+            sumsq_T += delta_flip * delta_flip
+            draws_done += 1
+
+    return {
+        "draws": draws_done,
+        "invalid": invalid,
+        "count_upper": count_upper,
+        "count_lower": count_lower,
+        "count_two": count_two,
+        "sum_T": sum_T,
+        "sumsq_T": sumsq_T,
+    }
 
 def meta_permutation_pvalue(
     y: np.ndarray,
@@ -1250,36 +1417,135 @@ def meta_permutation_pvalue(
     n_workers: int,
 ) -> Dict[str, float]:
     n = y.size
-    n_workers = max(1, min(n_workers, (n_perm + chunk - 1) // chunk))
     weights_obs = np.asarray(weights, dtype=float)
-    T_obs, _, _ = weighted_median_difference(y, weights_obs, group)
+    group_obs = np.asarray(group, dtype=int)
+    T_obs, _, _ = weighted_median_difference(y, weights_obs, group_obs)
 
-    with ProcessPoolExecutor(max_workers=n_workers) as pool:
-        tasks = []
-        idx = 0
-        while idx < n_perm:
-            take = min(chunk, n_perm - idx)
-            seed = base_seed + 1 + (idx // chunk)
-            args = (take, seed, y, weights_obs, group)
-            tasks.append(pool.submit(_meta_perm_chunk_worker, args))
-            idx += take
-        perm_stats: List[np.ndarray] = []
-        for fut in as_completed(tasks):
-            perm_stats.append(fut.result())
-
-    T = np.concatenate(perm_stats, axis=0)[:n_perm]
-    finite = np.isfinite(T)
-    T = T[finite]
-    if T.size == 0 or not math.isfinite(T_obs):
+    if not math.isfinite(T_obs):
         return {
             "p_perm_one_sided_upper": float("nan"),
             "p_perm_one_sided_lower": float("nan"),
             "p_perm_two_sided": float("nan"),
             "T_obs": float(T_obs),
         }
-    p_one_upper = (1.0 + float(np.sum(T >= T_obs))) / (1.0 + float(T.size))
-    p_one_lower = (1.0 + float(np.sum(T <= T_obs))) / (1.0 + float(T.size))
-    p_two = (1.0 + float(np.sum(np.abs(T) >= abs(T_obs)))) / (1.0 + float(T.size))
+
+    mask_group0 = group_obs == 0
+    n_group0 = int(np.sum(mask_group0))
+    n_group1 = n - n_group0
+    if n_group0 == 0 or n_group1 == 0 or n_perm <= 0:
+        return {
+            "p_perm_one_sided_upper": float("nan"),
+            "p_perm_one_sided_lower": float("nan"),
+            "p_perm_two_sided": float("nan"),
+            "T_obs": float(T_obs),
+        }
+
+    order = np.argsort(y)
+    y_sorted = np.ascontiguousarray(y[order], dtype=np.float64)
+    w_sorted = np.ascontiguousarray(weights_obs[order], dtype=np.float64)
+    total_weight = float(np.sum(w_sorted))
+    if not math.isfinite(total_weight) or total_weight <= 0.0:
+        return {
+            "p_perm_one_sided_upper": float("nan"),
+            "p_perm_one_sided_lower": float("nan"),
+            "p_perm_two_sided": float("nan"),
+            "T_obs": float(T_obs),
+        }
+
+    ctx = mp.get_context("fork") if "fork" in mp.get_all_start_methods() else mp.get_context()
+
+    shm_y = shared_memory.SharedMemory(create=True, size=y_sorted.nbytes)
+    shm_w = shared_memory.SharedMemory(create=True, size=w_sorted.nbytes)
+    try:
+        np.ndarray(y_sorted.shape, dtype=y_sorted.dtype, buffer=shm_y.buf)[:] = y_sorted
+        np.ndarray(w_sorted.shape, dtype=w_sorted.dtype, buffer=shm_w.buf)[:] = w_sorted
+
+        try:
+            import psutil  # type: ignore
+
+            physical_cores = psutil.cpu_count(logical=False) or 1
+        except Exception:
+            physical_cores = (
+                len(os.sched_getaffinity(0))
+                if hasattr(os, "sched_getaffinity")
+                else (os.cpu_count() or 1)
+            )
+
+        n_workers = max(1, min(n_workers, physical_cores))
+        n_workers = min(n_workers, n_perm)
+        if n_workers <= 0:
+            n_workers = 1
+
+        if hasattr(os, "sched_getaffinity"):
+            available_cpus = sorted(os.sched_getaffinity(0))  # type: ignore[arg-type]
+        else:
+            available_cpus = list(range(os.cpu_count() or 1))
+        if not available_cpus:
+            available_cpus = list(range(n_workers))
+
+        cpu_plan: List[List[int]] = [
+            [available_cpus[idx % len(available_cpus)]] for idx in range(n_workers)
+        ]
+
+        draws_per_worker = [n_perm // n_workers] * n_workers
+        remainder = n_perm % n_workers
+        for i in range(remainder):
+            draws_per_worker[i] += 1
+
+        seeds = [base_seed + 1 + i for i in range(n_workers)]
+
+        with ProcessPoolExecutor(
+            max_workers=n_workers,
+            mp_context=ctx,
+            initializer=_meta_perm_worker_setup,
+            initargs=(
+                shm_y.name,
+                shm_w.name,
+                y_sorted.size,
+                y_sorted.dtype.str,
+                n_group0,
+                total_weight,
+                T_obs,
+            ),
+        ) as pool:
+            futures = []
+            for worker_idx, draws in enumerate(draws_per_worker):
+                if draws <= 0:
+                    continue
+                futures.append(
+                    pool.submit(
+                        _meta_perm_worker_run,
+                        int(draws),
+                        int(seeds[worker_idx]),
+                        int(max(1, chunk)),
+                        cpu_plan[worker_idx],
+                    )
+                )
+
+            results = [f.result() for f in futures]
+
+        total_draws = sum(res["draws"] for res in results)
+        if total_draws == 0:
+            return {
+                "p_perm_one_sided_upper": float("nan"),
+                "p_perm_one_sided_lower": float("nan"),
+                "p_perm_two_sided": float("nan"),
+                "T_obs": float(T_obs),
+            }
+
+        total_upper = sum(res["count_upper"] for res in results)
+        total_lower = sum(res["count_lower"] for res in results)
+        total_two = sum(res["count_two"] for res in results)
+
+        p_one_upper = (1.0 + float(total_upper)) / (1.0 + float(total_draws))
+        p_one_lower = (1.0 + float(total_lower)) / (1.0 + float(total_draws))
+        p_two = (1.0 + float(total_two)) / (1.0 + float(total_draws))
+    finally:
+        shm_y.close()
+        shm_w.close()
+        shm_y.unlink()
+        shm_w.unlink()
+
     return {
         "p_perm_one_sided_upper": float(p_one_upper),
         "p_perm_one_sided_lower": float(p_one_lower),
