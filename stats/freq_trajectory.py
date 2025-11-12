@@ -173,23 +173,9 @@ def plot_trajectory(
 
     dates = columns["date_center"]
 
-    # SET GLOBAL FONT SIZES
-    plt.rcParams.update({
-        'font.size': 16,           # Base font size
-        'axes.labelsize': 20,      # X and Y axis labels
-        'axes.titlesize': 22,      # Title (if you add one)
-        'xtick.labelsize': 16,     # X-axis tick labels
-        'ytick.labelsize': 16,     # Y-axis tick labels
-        'legend.fontsize': 15,     # Legend text
-        'figure.titlesize': 24     # Figure title
-    })
-
     plt.style.use("seaborn-v0_8-whitegrid")
     fig, ax = plt.subplots(figsize=(11, 6.5))
 
-    dates = columns["date_center"]
-
-    # Empirical allele frequencies with confidence interval shading.
     ax.fill_between(
         dates,
         columns["af_low"],
@@ -206,7 +192,6 @@ def plot_trajectory(
         label="Empirical allele frequency",
     )
 
-    # Model-predicted trajectory with its interval.
     ax.fill_between(
         dates,
         columns["pt_low"],
@@ -220,29 +205,23 @@ def plot_trajectory(
         columns["pt"],
         color="#238b45",
         linewidth=2.5,
-        label="Modelled allele frequency",
+        label="Model allele frequency",
     )
 
-    ax.set_xlabel("Years before present (window center)")
+    ax.set_xlabel("Years before present (window center)", fontsize=20, fontweight='bold')
 
     def _format_year(value: float, _: float) -> str:
         if abs(value) >= 100:
-            # No decimals, so no need to strip
             formatted = f"{value:,.0f}"
         elif abs(value) >= 10:
-            # Has 1 decimal place, strip if it's .0
             formatted = f"{value:,.1f}".rstrip("0").rstrip(".")
         else:
-            # Has 2 decimal places, strip trailing zeros
             formatted = f"{value:,.2f}".rstrip("0").rstrip(".")
         return formatted
 
     ax.xaxis.set_major_formatter(FuncFormatter(_format_year))
-    ax.set_ylabel('Derived allele "G" frequency (rs34666797)')
+    ax.set_ylabel('Derived allele "G" frequency (rs34666797)', fontsize=20, fontweight='bold')
 
-    # Automatically scale the y-axis to the data that are actually plotted,
-    # including both the empirical and model confidence intervals. This keeps
-    # the plot focused on the informative range instead of always spanning 0–1.
     series_for_ylim = [
         columns["af_low"],
         columns["af_up"],
@@ -267,9 +246,11 @@ def plot_trajectory(
             alpha=0.35,
             label="Largest 1,000-year change",
         )
+    
     ax.invert_xaxis()
-    ax.legend(frameon=True, framealpha=0.9, edgecolor="none")
+    ax.legend(frameon=True, framealpha=0.9, edgecolor="none", fontsize=16)
     ax.grid(True, linestyle="--", linewidth=0.6, alpha=0.35)
+    ax.tick_params(axis="both", labelsize=18)
 
     fig.tight_layout()
     fig.savefig(output, dpi=300)
