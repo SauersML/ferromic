@@ -12,6 +12,7 @@ import traceback
 from datetime import datetime
 import shutil
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from concurrent.futures.process import BrokenProcessPool
 from collections import deque
 import threading
 import time
@@ -397,6 +398,31 @@ def generate_omega_result_figure(gene_name, region_label, status_annotated_tree,
     POSITIVE_COLOR = "#D55E00"  # Vermillion
     NEUTRAL_COLOR = "#000000"   # Black
 
+    # Utility to coerce omega values to floats when possible. Returns ``None``
+    # if the value cannot be interpreted as a finite float (e.g. ``None`` or
+    # ``nan``), allowing the caller to substitute a sensible default.
+    def _normalize_omega(value):
+        try:
+            if value is None:
+                return None
+            coerced = float(value)
+        except (TypeError, ValueError):
+            return None
+
+        if not np.isfinite(coerced):
+            return None
+        return coerced
+
+    def _omega_to_color(omega_value):
+        omega = _normalize_omega(omega_value)
+        if omega is None:
+            return NEUTRAL_COLOR, None
+        if omega > 1.0:
+            return POSITIVE_COLOR, omega
+        if omega < 1.0:
+            return PURIFYING_COLOR, omega
+        return NEUTRAL_COLOR, omega
+
     # This layout function determines the color of each branch based on its
     # group's estimated omega value.
     def _omega_color_layout(node):
@@ -406,21 +432,12 @@ def generate_omega_result_figure(gene_name, region_label, status_annotated_tree,
 
         # Determine which omega value applies to this branch
         status = getattr(node, "group_status", "both")
-        omega_val = 1.0 # Default to neutral
-        if status == 'direct':
-            omega_val = paml_params.get('omega_direct', 1.0)
-        elif status == 'inverted':
-            omega_val = paml_params.get('omega_inverted', 1.0)
-        else: # 'both' and 'outgroup' fall into the background category
-            omega_val = paml_params.get('omega_background', 1.0)
+        omega_source = {
+            'direct': paml_params.get('omega_direct'),
+            'inverted': paml_params.get('omega_inverted'),
+        }.get(status, paml_params.get('omega_background'))
 
-        # Assign color based on the omega value
-        if omega_val > 1.0:
-            color = POSITIVE_COLOR
-        elif omega_val < 1.0:
-            color = PURIFYING_COLOR
-        else:
-            color = NEUTRAL_COLOR
+        color, _ = _omega_to_color(omega_source)
         
         nstyle["hz_line_color"] = color
         nstyle["vt_line_color"] = color
@@ -454,12 +471,10 @@ def generate_omega_result_figure(gene_name, region_label, status_annotated_tree,
         'Background': paml_params.get('omega_background'),
     }
 
-    for name, omega in legend_map.items():
-        if omega is not None and not np.isnan(omega):
-            if omega > 1.0: color = POSITIVE_COLOR
-            elif omega < 1.0: color = PURIFYING_COLOR
-            else: color = NEUTRAL_COLOR
-            legend_text = f" {name} (ω = {omega:.3f})"
+    for name, omega_raw in legend_map.items():
+        color, normalized = _omega_to_color(omega_raw)
+        if normalized is not None:
+            legend_text = f" {name} (ω = {normalized:.3f})"
             ts.legend.add_face(RectFace(10, 10, fgcolor=color, bgcolor=color), column=0)
             ts.legend.add_face(TextFace(legend_text, fsize=9), column=1)
 
@@ -1818,13 +1833,14 @@ def submit_with_cap(exec, fn, args, inflight, cap):
     """Submits a task to the executor and manages the inflight queue to enforce a cap."""
     fut = exec.submit(fn, *args)
     inflight.append(fut)
-    
+
+    flushed = []
     # If the queue is full, wait for the next future to complete
     if len(inflight) >= cap:
         done = next(as_completed(inflight))
         inflight.remove(done)
-        return [done]
-    return []
+        flushed.append(done)
+    return fut, flushed
 
 def run_overlapped(region_infos, region_gene_map, log_q, status_dict):
     """
@@ -1833,7 +1849,8 @@ def run_overlapped(region_infos, region_gene_map, log_q, status_dict):
     """
     all_results = []
     inflight = deque()
-    cap = PAML_WORKERS * 4
+    future_args = {}
+    cap = PAML_WORKERS * 4 if PAML_WORKERS > 0 else 1
     completed_count = 0
 
     status_dict['regions_total'] = len(region_infos)
@@ -1846,10 +1863,36 @@ def run_overlapped(region_infos, region_gene_map, log_q, status_dict):
     # Ensure workers use the 'spawn' context and our queue logger
     mpctx = multiprocessing.get_context("spawn")
 
-    with ProcessPoolExecutor(max_workers=PAML_WORKERS, mp_context=mpctx) as paml_exec, \
-         ProcessPoolExecutor(max_workers=REGION_WORKERS, mp_context=mpctx) as region_exec:
+    def record_result(res):
+        nonlocal completed_count, paml_start_time
+        all_results.append(res)
+        completed_count += 1
+        status_dict['paml_done'] = completed_count
 
-        iqtree_threads = max(1, CPU_COUNT // REGION_WORKERS)
+        if paml_start_time and completed_count > 2:
+            elapsed = time.time() - paml_start_time
+            rate = completed_count / elapsed if elapsed > 0 else 0
+            if rate > 0:
+                remaining = max(total_paml_jobs - completed_count, 0)
+                eta_s = remaining / rate if rate else 0
+                status_dict['eta_str'] = f"{int(eta_s // 60)}m{int(eta_s % 60)}s"
+
+        if (completed_count % 25 == 0) or (res.get('status') != 'success'):
+            logging.info(
+                f"Completed {completed_count}/{total_paml_jobs}: "
+                f"{res.get('gene')} in {res.get('region')} -> {res.get('status')}"
+            )
+
+        if CHECKPOINT_EVERY and completed_count % CHECKPOINT_EVERY == 0:
+            logging.info(f"--- Checkpointing {len(all_results)} results to {CHECKPOINT_FILE} ---")
+            pd.DataFrame(all_results).to_csv(CHECKPOINT_FILE, sep="\t", index=False, float_format='%.6g')
+
+    with ProcessPoolExecutor(max_workers=PAML_WORKERS or 1, mp_context=mpctx) as paml_exec, \
+         ProcessPoolExecutor(max_workers=REGION_WORKERS or 1, mp_context=mpctx) as region_exec:
+
+        paml_pool_alive = PAML_WORKERS > 0
+
+        iqtree_threads = max(1, CPU_COUNT // (REGION_WORKERS or 1))
         logging.info(f"Submitting {len(region_infos)} region tasks to pool (using {iqtree_threads} threads per job)...")
         region_futs = {region_exec.submit(region_worker, r, iqtree_threads) for r in region_infos}
 
@@ -1880,57 +1923,77 @@ def run_overlapped(region_infos, region_gene_map, log_q, status_dict):
 
             logging.info(f"Region {label} complete. Submitting {len(genes_for_region)} PAML jobs.")
             for gene_info in genes_for_region:
-                flushed = submit_with_cap(paml_exec, codeml_worker, (gene_info, tree, label), inflight, cap)
-                status_dict['paml_running'] = len(inflight)
-                for paml_future in flushed:
+                if paml_pool_alive:
                     try:
-                        res = paml_future.result()
-                        all_results.append(res)
-                        completed_count += 1
-                        status_dict['paml_done'] = completed_count
-                        if paml_start_time and completed_count > 2:
-                            elapsed = time.time() - paml_start_time
-                            rate = completed_count / elapsed
-                            if rate > 0:
-                                remaining = total_paml_jobs - completed_count
-                                eta_s = remaining / rate
-                                status_dict['eta_str'] = f"{int(eta_s // 60)}m{int(eta_s % 60)}s"
+                        future, flushed = submit_with_cap(paml_exec, codeml_worker, (gene_info, tree, label), inflight, cap)
+                        future_args[future] = (gene_info, tree, label)
+                        status_dict['paml_running'] = len(inflight)
+                    except BrokenProcessPool as pool_exc:
+                        logging.critical(
+                            f"PAML worker pool crashed ({pool_exc}); switching to in-process execution for remaining jobs."
+                        )
+                        paml_pool_alive = False
+                        status_dict['paml_running'] = 0
+                        # Attempt to harvest any already completed futures before abandoning the pool
+                        while inflight:
+                            fut = inflight.popleft()
+                            args = future_args.pop(fut, None)
+                            try:
+                                res = fut.result()
+                                record_result(res)
+                            except Exception as inflight_exc:
+                                logging.error(f"A PAML job failed with an exception: {inflight_exc}")
+                                if args is not None:
+                                    fallback_res = codeml_worker(*args)
+                                    record_result(fallback_res)
+                        # Fall through to run the current job synchronously
+                        flushed = []
+                        res = codeml_worker(gene_info, tree, label)
+                        record_result(res)
+                        continue
 
-                        if (completed_count % 25 == 0) or (res.get('status') != 'success'):
-                            logging.info(f"Completed {completed_count}/{total_paml_jobs}: {res.get('gene')} in {res.get('region')} -> {res.get('status')}")
-                        if completed_count % CHECKPOINT_EVERY == 0:
-                            logging.info(f"--- Checkpointing {len(all_results)} results to {CHECKPOINT_FILE} ---")
-                            pd.DataFrame(all_results).to_csv(CHECKPOINT_FILE, sep="\t", index=False, float_format='%.6g')
-                    except Exception as e:
-                        logging.error(f"A PAML job failed with an exception: {e}")
+                    for paml_future in flushed:
+                        args = future_args.pop(paml_future, None)
+                        try:
+                            res = paml_future.result()
+                            record_result(res)
+                        except Exception as e:
+                            logging.error(f"A PAML job failed with an exception: {e}")
+                            if isinstance(e, BrokenProcessPool):
+                                paml_pool_alive = False
+                                status_dict['paml_running'] = 0
+                            if args is not None:
+                                res = codeml_worker(*args)
+                                record_result(res)
+                    status_dict['paml_running'] = len(inflight)
+                else:
+                    res = codeml_worker(gene_info, tree, label)
+                    record_result(res)
+                    status_dict['paml_running'] = 0
+
+        # Drain any remaining PAML jobs from the pool when it is still healthy
+        if paml_pool_alive:
+            logging.info(f"All regions processed. Draining {len(inflight)} remaining PAML jobs...")
+            pending = list(inflight)
+            paml_pbar = tqdm(as_completed(pending), total=len(pending), desc="Finalizing PAML jobs")
+            for paml_future in paml_pbar:
+                if paml_future in inflight:
+                    inflight.remove(paml_future)
                 status_dict['paml_running'] = len(inflight)
-
-        # Drain any remaining PAML jobs
-        logging.info(f"All regions processed. Draining {len(inflight)} remaining PAML jobs...")
-        paml_pbar = tqdm(as_completed(list(inflight)), total=len(inflight), desc="Finalizing PAML jobs")
-        for paml_future in paml_pbar:
-            status_dict['paml_running'] = len(inflight) - paml_pbar.n - 1
-            try:
-                res = paml_future.result()
-                all_results.append(res)
-                completed_count += 1
-                status_dict['paml_done'] = completed_count
-                if paml_start_time and completed_count > 2:
-                    elapsed = time.time() - paml_start_time
-                    rate = completed_count / elapsed
-                    if rate > 0:
-                        remaining = total_paml_jobs - completed_count
-                        eta_s = remaining / rate
-                        status_dict['eta_str'] = f"{int(eta_s // 60)}m{int(eta_s % 60)}s"
-
-                if (completed_count % 25 == 0) or (res.get('status') != 'success'):
-                    logging.info(f"Completed {completed_count}/{total_paml_jobs}: {res.get('gene')} in {res.get('region')} -> {res.get('status')}")
-                if completed_count % CHECKPOINT_EVERY == 0:
-                    logging.info(f"--- Checkpointing {len(all_results)} results to {CHECKPOINT_FILE} ---")
-                    pd.DataFrame(all_results).to_csv(CHECKPOINT_FILE, sep="\t", index=False, float_format='%.6g')
-            except Exception as e:
-                logging.error(f"A PAML job failed with an exception during drain: {e}")
-        status_dict['paml_running'] = 0
+                args = future_args.pop(paml_future, None)
+                try:
+                    res = paml_future.result()
+                    record_result(res)
+                except Exception as e:
+                    logging.error(f"A PAML job failed with an exception during drain: {e}")
+                    if isinstance(e, BrokenProcessPool):
+                        paml_pool_alive = False
+                    if args is not None:
+                        res = codeml_worker(*args)
+                        record_result(res)
+            inflight.clear()
+            future_args.clear()
+            status_dict['paml_running'] = 0
 
     # Final checkpoint save
     if all_results:
