@@ -4,6 +4,8 @@ import logging
 import sys
 import os
 import time
+import threading
+import atexit
 
 # Ensure BLAS-style math libraries do not oversubscribe threads when this module
 # is imported. Environment variables are respected only if they are unset so
@@ -17,13 +19,21 @@ import zipfile
 import hashlib
 import math
 from pathlib import Path
-from typing import Optional, Tuple, List, Dict, Any
-from collections import deque
+from typing import Optional, Tuple, List, Dict, Any, Iterable, Sequence
 from dataclasses import dataclass
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from queue import Empty
+import multiprocessing as mp
+from multiprocessing import shared_memory
 import numpy as np
 import pandas as pd
 import requests
+from tqdm import tqdm
+
+try:
+    from numba import njit
+except Exception:  # pragma: no cover - numba is optional but recommended
+    njit = None
 
 logging.basicConfig(
     level=logging.INFO,
@@ -55,7 +65,7 @@ N_PERMUTATIONS = 3_000
 DEFAULT_BLOCK_SIZE_WINDOWS = 10
 USE_GLOBAL_AUTOCORR_BLOCK_SIZE_OVERRIDE = False
 GLOBAL_AUTOCORR_BLOCK_SIZE_WINDOWS = 3
-PERMUTATION_CHUNK_SIZE = 256
+PERMUTATION_CHUNK_SIZE = 8192
 
 FRF_MIN_EDGE_WINDOWS = 1
 FRF_MIN_MID_WINDOWS = 1
@@ -77,6 +87,11 @@ ROTATION_ENUMERATE_OFFSETS = True
 ROTATION_USE_RESIDUALS = False
 
 FRF_CANDIDATE_CHUNK_SIZE = 8192
+# Upper bound for the number of prefix "cells" (rows * columns) we materialize
+# at once when evaluating cached FRF candidates. This caps transient allocations
+# such as prefix arrays so that very wide inversions do not request multi-GB
+# buffers inside worker processes.
+FRF_PREFIX_CHUNK_CELLS = 16_000_000
 
 META_PERMUTATIONS = 3_000_000_000
 META_PERM_CHUNK = 1000
@@ -122,11 +137,13 @@ def download_latest_artifact(
     })
 
     runs_url = f"https://api.github.com/repos/{repo}/actions/workflows/{workflow_name}/runs"
-    response = session.get(runs_url, params={
-        "status": "success",
-        "exclude_pull_requests": "true",
-        "per_page": 1,
-    })
+    response = session.get(
+        runs_url,
+        params={
+            "status": "success",
+            "per_page": 1,
+        },
+    )
     if not response.ok:
         log.error("Failed to fetch workflow runs")
         return None
@@ -246,6 +263,9 @@ class PermutationPlan:
     use_residuals: bool
     rotation_basis: np.ndarray
     trend_physical: Optional[np.ndarray]
+    plan_id: int = -1
+    offset_step: int = 1
+    offset_seed: int = 0
 
     @property
     def n_chunks(self) -> int:
@@ -268,6 +288,30 @@ class PermutationChunkResult:
     sum_delta: float
     sum_sq_delta: float
     count_ge_observed: int
+
+
+@dataclass(frozen=True)
+class SharedArrayDescriptor:
+    name: str
+    shape: Tuple[int, ...]
+    dtype_str: str
+
+
+def _create_shared_descriptor(
+    array: Optional[np.ndarray],
+) -> Tuple[Optional[SharedArrayDescriptor], Optional[shared_memory.SharedMemory]]:
+    if array is None:
+        return None, None
+    arr = np.ascontiguousarray(array)
+    shm = shared_memory.SharedMemory(create=True, size=arr.nbytes)
+    np.ndarray(arr.shape, dtype=arr.dtype, buffer=shm.buf)[:] = arr
+    return SharedArrayDescriptor(shm.name, arr.shape, arr.dtype.str), shm
+
+
+def _attach_shared_descriptor(descriptor: SharedArrayDescriptor) -> Tuple[np.ndarray, shared_memory.SharedMemory]:
+    shm = shared_memory.SharedMemory(name=descriptor.name)
+    array = np.ndarray(descriptor.shape, dtype=np.dtype(descriptor.dtype_str), buffer=shm.buf)
+    return array, shm
 
 
 @dataclass
@@ -312,6 +356,34 @@ def estimate_inversion_workload(inv: Inversion) -> Tuple[int, int, int, int]:
         inv.n_windows,
         inv.length,
     )
+
+
+def _choose_coprime_step(length: int, rng: np.random.Generator) -> int:
+    if length <= 1:
+        return 1
+    max_attempts = min(32, length)
+    for _ in range(max_attempts):
+        candidate = int(rng.integers(1, length))
+        if math.gcd(candidate, length) == 1:
+            return candidate
+    # Fallback to 1 if we somehow fail to sample a coprime step.
+    return 1
+
+
+def _offset_positions(
+    cycle_size: int,
+    chunk_start: int,
+    size: int,
+    *,
+    offset_seed: int,
+    offset_step: int,
+) -> np.ndarray:
+    if cycle_size <= 0 or size <= 0:
+        return np.array([], dtype=np.int64)
+    start = int(offset_seed % cycle_size)
+    step = int(offset_step % cycle_size) or 1
+    draws = np.arange(chunk_start, chunk_start + size, dtype=np.int64)
+    return (start + step * draws) % cycle_size
 
 # ------------------------- DATA LOADING -------------------------
 
@@ -612,12 +684,69 @@ def _prefix_with_zero(arr: np.ndarray) -> np.ndarray:
     np.cumsum(arr, axis=1, out=out[:, 1:])
     return out
 
+@dataclass
+class FRFStaticTerms:
+    edge_idx: np.ndarray
+    mid_idx: np.ndarray
+    ramp_start_idx: np.ndarray
+    ramp_end_idx: np.ndarray
+    edge_sum_w: np.ndarray
+    mid_sum_w: np.ndarray
+    ramp_sum_w: np.ndarray
+    ramp_sum_wx: np.ndarray
+    ramp_sum_wx2: np.ndarray
+    total_w: float
+    a_rel: np.ndarray
+    b_rel: np.ndarray
+
+
+def _prepare_frf_static_terms(
+    weight_sorted: np.ndarray,
+    x_sorted: np.ndarray,
+    candidates: Dict[str, np.ndarray],
+) -> FRFStaticTerms:
+    weight_sorted = np.asarray(weight_sorted, dtype=float)
+    x_sorted = np.asarray(x_sorted, dtype=float)
+    prefix_w = np.concatenate(([0.0], np.cumsum(weight_sorted, dtype=float)))
+    prefix_wx = np.concatenate(([0.0], np.cumsum(weight_sorted * x_sorted, dtype=float)))
+    prefix_wx2 = np.concatenate(([0.0], np.cumsum(weight_sorted * (x_sorted ** 2), dtype=float)))
+
+    edge_idx = np.asarray(candidates["edge_end"], dtype=int) + 1
+    mid_idx = np.asarray(candidates["mid_start"], dtype=int)
+    ramp_start_idx = np.asarray(candidates["ramp_start"], dtype=int)
+    ramp_end_idx = np.asarray(candidates["ramp_end"], dtype=int)
+
+    total_w = float(prefix_w[-1])
+    edge_sum_w = prefix_w[edge_idx]
+    mid_sum_w = total_w - prefix_w[mid_idx]
+    ramp_sum_w = prefix_w[ramp_end_idx] - prefix_w[ramp_start_idx]
+    ramp_sum_wx = prefix_wx[ramp_end_idx] - prefix_wx[ramp_start_idx]
+    ramp_sum_wx2 = prefix_wx2[ramp_end_idx] - prefix_wx2[ramp_start_idx]
+
+    return FRFStaticTerms(
+        edge_idx=edge_idx,
+        mid_idx=mid_idx,
+        ramp_start_idx=ramp_start_idx,
+        ramp_end_idx=ramp_end_idx,
+        edge_sum_w=edge_sum_w,
+        mid_sum_w=mid_sum_w,
+        ramp_sum_w=ramp_sum_w,
+        ramp_sum_wx=ramp_sum_wx,
+        ramp_sum_wx2=ramp_sum_wx2,
+        total_w=total_w,
+        a_rel=np.asarray(candidates["a_rel"], dtype=float),
+        b_rel=np.asarray(candidates["b_rel"], dtype=float),
+    )
+
+
 def run_frf_search(
     fst_matrix: np.ndarray,
     weight_matrix: np.ndarray,
     x_sorted: np.ndarray,
     candidates: Dict[str, np.ndarray],
     half_length_bp: float,
+    *,
+    static_terms: Optional[FRFStaticTerms] = None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     fst_matrix = np.asarray(fst_matrix, dtype=float)
     weight_matrix = np.asarray(weight_matrix, dtype=float)
@@ -630,39 +759,141 @@ def run_frf_search(
         nan = np.full(n_samples, np.nan)
         return nan, nan, nan, nan, nan
 
-    x_row = x_sorted[np.newaxis, :]
-    wf = weight_matrix * fst_matrix
-    wf2 = weight_matrix * (fst_matrix ** 2)
-    wx = weight_matrix * x_row
-    wx2 = weight_matrix * (x_row ** 2)
-    wfx = weight_matrix * fst_matrix * x_row
+    eps = 1e-12
+    row_idx = np.arange(n_samples)
 
-    prefix_w = _prefix_with_zero(weight_matrix)
-    prefix_wf = _prefix_with_zero(wf)
-    prefix_wf2 = _prefix_with_zero(wf2)
-    prefix_wx = _prefix_with_zero(wx)
-    prefix_wx2 = _prefix_with_zero(wx2)
-    prefix_wfx = _prefix_with_zero(wfx)
+    if static_terms is None:
+        x_row = x_sorted[np.newaxis, :]
+        wf = weight_matrix * fst_matrix
+        wf2 = weight_matrix * (fst_matrix ** 2)
+        wx = weight_matrix * x_row
+        wx2 = weight_matrix * (x_row ** 2)
+        wfx = weight_matrix * fst_matrix * x_row
 
-    total_w = prefix_w[:, -1]
-    total_wf = prefix_wf[:, -1]
-    total_wf2 = prefix_wf2[:, -1]
+        prefix_w = _prefix_with_zero(weight_matrix)
+        prefix_wf = _prefix_with_zero(wf)
+        prefix_wf2 = _prefix_with_zero(wf2)
+        prefix_wx = _prefix_with_zero(wx)
+        prefix_wx2 = _prefix_with_zero(wx2)
+        prefix_wfx = _prefix_with_zero(wfx)
 
-    edge_end = candidates["edge_end"]
-    mid_start = candidates["mid_start"]
-    ramp_start = candidates["ramp_start"]
-    ramp_end = candidates["ramp_end"]
-    a_rel = candidates["a_rel"]
-    b_rel = candidates["b_rel"]
+        total_w = prefix_w[:, -1]
+        total_wf = prefix_wf[:, -1]
+        total_wf2 = prefix_wf2[:, -1]
 
-    n_candidates = edge_end.size
+        edge_end = candidates["edge_end"]
+        mid_start = candidates["mid_start"]
+        ramp_start = candidates["ramp_start"]
+        ramp_end = candidates["ramp_end"]
+        a_rel = candidates["a_rel"]
+        b_rel = candidates["b_rel"]
+
+        n_candidates = edge_end.size
+        if n_candidates == 0:
+            nan = np.full(n_samples, np.nan)
+            return nan, nan, nan, nan, nan
+
+        best_sse = np.full(n_samples, np.inf)
+        best_mu_edge = np.full(n_samples, np.nan)
+        best_mu_mid = np.full(n_samples, np.nan)
+        best_delta = np.full(n_samples, np.nan)
+        best_a_bp = np.full(n_samples, np.nan)
+        best_b_bp = np.full(n_samples, np.nan)
+
+        chunk_size = max(1, min(FRF_CANDIDATE_CHUNK_SIZE, n_candidates))
+        for start_idx in range(0, n_candidates, chunk_size):
+            end_idx = min(start_idx + chunk_size, n_candidates)
+            edge_chunk = edge_end[start_idx:end_idx]
+            mid_chunk = mid_start[start_idx:end_idx]
+            ramp_start_chunk = ramp_start[start_idx:end_idx]
+            ramp_end_chunk = ramp_end[start_idx:end_idx]
+            a_chunk = a_rel[start_idx:end_idx]
+            b_chunk = b_rel[start_idx:end_idx]
+
+            edge_idx = edge_chunk + 1
+            mid_idx = mid_chunk
+
+            edge_sum_w = np.take(prefix_w, edge_idx, axis=1)
+            edge_sum_wf = np.take(prefix_wf, edge_idx, axis=1)
+            edge_sum_wf2 = np.take(prefix_wf2, edge_idx, axis=1)
+
+            mid_prefix_w = np.take(prefix_w, mid_idx, axis=1)
+            mid_prefix_wf = np.take(prefix_wf, mid_idx, axis=1)
+            mid_prefix_wf2 = np.take(prefix_wf2, mid_idx, axis=1)
+
+            mid_sum_w = total_w[:, None] - mid_prefix_w
+            mid_sum_wf = total_wf[:, None] - mid_prefix_wf
+            mid_sum_wf2 = total_wf2[:, None] - mid_prefix_wf2
+
+            mu_edge = edge_sum_wf / np.maximum(edge_sum_w, eps)
+            mu_mid = mid_sum_wf / np.maximum(mid_sum_w, eps)
+
+            edge_sse = edge_sum_wf2 - np.where(
+                edge_sum_w > eps, (edge_sum_wf ** 2) / np.maximum(edge_sum_w, eps), 0.0
+            )
+            mid_sse = mid_sum_wf2 - np.where(
+                mid_sum_w > eps, (mid_sum_wf ** 2) / np.maximum(mid_sum_w, eps), 0.0
+            )
+
+            ramp_sum_w = np.take(prefix_w, ramp_end_chunk, axis=1) - np.take(
+                prefix_w, ramp_start_chunk, axis=1
+            )
+            ramp_sum_wf = np.take(prefix_wf, ramp_end_chunk, axis=1) - np.take(
+                prefix_wf, ramp_start_chunk, axis=1
+            )
+            ramp_sum_wf2 = np.take(prefix_wf2, ramp_end_chunk, axis=1) - np.take(
+                prefix_wf2, ramp_start_chunk, axis=1
+            )
+            ramp_sum_wx = np.take(prefix_wx, ramp_end_chunk, axis=1) - np.take(
+                prefix_wx, ramp_start_chunk, axis=1
+            )
+            ramp_sum_wx2 = np.take(prefix_wx2, ramp_end_chunk, axis=1) - np.take(
+                prefix_wx2, ramp_start_chunk, axis=1
+            )
+            ramp_sum_wfx = np.take(prefix_wfx, ramp_end_chunk, axis=1) - np.take(
+                prefix_wfx, ramp_start_chunk, axis=1
+            )
+
+            delta_rel = np.maximum(b_chunk - a_chunk, 1e-6)
+            slope = (mu_mid - mu_edge) / delta_rel[np.newaxis, :]
+            intercept = mu_edge - slope * a_chunk[np.newaxis, :]
+
+            ramp_sse = (
+                ramp_sum_wf2
+                - 2.0 * intercept * ramp_sum_wf
+                - 2.0 * slope * ramp_sum_wfx
+                + (intercept ** 2) * ramp_sum_w
+                + 2.0 * intercept * slope * ramp_sum_wx
+                + (slope ** 2) * ramp_sum_wx2
+            )
+
+            total_sse = edge_sse + mid_sse + ramp_sse
+
+            chunk_best_idx = np.argmin(total_sse, axis=1)
+            chunk_best_sse = total_sse[row_idx, chunk_best_idx]
+            update_mask = chunk_best_sse < best_sse
+
+            if np.any(update_mask):
+                best_sse[update_mask] = chunk_best_sse[update_mask]
+                selected_mu_edge = mu_edge[row_idx, chunk_best_idx]
+                selected_mu_mid = mu_mid[row_idx, chunk_best_idx]
+                best_mu_edge[update_mask] = selected_mu_edge[update_mask]
+                best_mu_mid[update_mask] = selected_mu_mid[update_mask]
+                best_delta[update_mask] = (selected_mu_edge - selected_mu_mid)[update_mask]
+                a_bp_vals = a_chunk[chunk_best_idx] * half_length_bp
+                b_bp_vals = b_chunk[chunk_best_idx] * half_length_bp
+                best_a_bp[update_mask] = a_bp_vals[update_mask]
+                best_b_bp[update_mask] = b_bp_vals[update_mask]
+
+        return best_mu_edge, best_mu_mid, best_delta, best_a_bp, best_b_bp
+
+    # Cached path
+    n_candidates = static_terms.edge_idx.size
     if n_candidates == 0:
         nan = np.full(n_samples, np.nan)
         return nan, nan, nan, nan, nan
 
-    eps = 1e-12
-    row_idx = np.arange(n_samples)
-
+    target_cells = 2_000_000
     best_sse = np.full(n_samples, np.inf)
     best_mu_edge = np.full(n_samples, np.nan)
     best_mu_mid = np.full(n_samples, np.nan)
@@ -670,74 +901,116 @@ def run_frf_search(
     best_a_bp = np.full(n_samples, np.nan)
     best_b_bp = np.full(n_samples, np.nan)
 
-    chunk_size = max(1, min(FRF_CANDIDATE_CHUNK_SIZE, n_candidates))
-    for start_idx in range(0, n_candidates, chunk_size):
-        end_idx = min(start_idx + chunk_size, n_candidates)
-        edge_chunk = edge_end[start_idx:end_idx]
-        mid_chunk = mid_start[start_idx:end_idx]
-        ramp_start_chunk = ramp_start[start_idx:end_idx]
-        ramp_end_chunk = ramp_end[start_idx:end_idx]
-        a_chunk = a_rel[start_idx:end_idx]
-        b_chunk = b_rel[start_idx:end_idx]
+    prefix_row_chunk = max(
+        1,
+        min(
+            n_samples,
+            max(1, FRF_PREFIX_CHUNK_CELLS // max(1, n_windows + 1)),
+        ),
+    )
 
-        edge_idx = edge_chunk + 1
-        mid_idx = mid_chunk
+    for row_start in range(0, n_samples, prefix_row_chunk):
+        row_end = min(row_start + prefix_row_chunk, n_samples)
+        row_slice = slice(row_start, row_end)
+        sub_weights = weight_matrix[row_slice]
+        sub_fst = fst_matrix[row_slice]
+        sub_rows = row_end - row_start
+        row_idx_sub = np.arange(sub_rows)
 
-        edge_sum_w = np.take(prefix_w, edge_idx, axis=1)
-        edge_sum_wf = np.take(prefix_wf, edge_idx, axis=1)
-        edge_sum_wf2 = np.take(prefix_wf2, edge_idx, axis=1)
+        prefix_wf = _prefix_with_zero(sub_weights * sub_fst)
+        prefix_wf2 = _prefix_with_zero(sub_weights * (sub_fst ** 2))
+        prefix_wfx = _prefix_with_zero(sub_weights * sub_fst * x_sorted[np.newaxis, :])
 
-        mid_prefix_w = np.take(prefix_w, mid_idx, axis=1)
-        mid_prefix_wf = np.take(prefix_wf, mid_idx, axis=1)
-        mid_prefix_wf2 = np.take(prefix_wf2, mid_idx, axis=1)
+        total_wf = prefix_wf[:, -1]
+        total_wf2 = prefix_wf2[:, -1]
 
-        mid_sum_w = total_w[:, None] - mid_prefix_w
-        mid_sum_wf = total_wf[:, None] - mid_prefix_wf
-        mid_sum_wf2 = total_wf2[:, None] - mid_prefix_wf2
+        chunk_size = max(1, min(n_candidates, target_cells // max(1, sub_rows)))
 
-        mu_edge = edge_sum_wf / np.maximum(edge_sum_w, eps)
-        mu_mid = mid_sum_wf / np.maximum(mid_sum_w, eps)
+        best_sse_sub = np.full(sub_rows, np.inf)
+        best_mu_edge_sub = np.full(sub_rows, np.nan)
+        best_mu_mid_sub = np.full(sub_rows, np.nan)
+        best_delta_sub = np.full(sub_rows, np.nan)
+        best_a_bp_sub = np.full(sub_rows, np.nan)
+        best_b_bp_sub = np.full(sub_rows, np.nan)
 
-        edge_sse = edge_sum_wf2 - np.where(edge_sum_w > eps, (edge_sum_wf ** 2) / np.maximum(edge_sum_w, eps), 0.0)
-        mid_sse = mid_sum_wf2 - np.where(mid_sum_w > eps, (mid_sum_wf ** 2) / np.maximum(mid_sum_w, eps), 0.0)
+        for start in range(0, n_candidates, chunk_size):
+            end = min(start + chunk_size, n_candidates)
 
-        ramp_sum_w = np.take(prefix_w, ramp_end_chunk, axis=1) - np.take(prefix_w, ramp_start_chunk, axis=1)
-        ramp_sum_wf = np.take(prefix_wf, ramp_end_chunk, axis=1) - np.take(prefix_wf, ramp_start_chunk, axis=1)
-        ramp_sum_wf2 = np.take(prefix_wf2, ramp_end_chunk, axis=1) - np.take(prefix_wf2, ramp_start_chunk, axis=1)
-        ramp_sum_wx = np.take(prefix_wx, ramp_end_chunk, axis=1) - np.take(prefix_wx, ramp_start_chunk, axis=1)
-        ramp_sum_wx2 = np.take(prefix_wx2, ramp_end_chunk, axis=1) - np.take(prefix_wx2, ramp_start_chunk, axis=1)
-        ramp_sum_wfx = np.take(prefix_wfx, ramp_end_chunk, axis=1) - np.take(prefix_wfx, ramp_start_chunk, axis=1)
+            edge_idx = static_terms.edge_idx[start:end]
+            mid_idx = static_terms.mid_idx[start:end]
 
-        delta_rel = np.maximum(b_chunk - a_chunk, 1e-6)
-        slope = (mu_mid - mu_edge) / delta_rel[np.newaxis, :]
-        intercept = mu_edge - slope * a_chunk[np.newaxis, :]
+            edge_sum_w = static_terms.edge_sum_w[np.newaxis, start:end]
+            mid_sum_w = static_terms.mid_sum_w[np.newaxis, start:end]
 
-        ramp_sse = (
-            ramp_sum_wf2
-            - 2.0 * intercept * ramp_sum_wf
-            - 2.0 * slope * ramp_sum_wfx
-            + (intercept ** 2) * ramp_sum_w
-            + 2.0 * intercept * slope * ramp_sum_wx
-            + (slope ** 2) * ramp_sum_wx2
-        )
+            edge_sum_wf = np.take(prefix_wf, edge_idx, axis=1)
+            edge_sum_wf2 = np.take(prefix_wf2, edge_idx, axis=1)
+            mu_edge = edge_sum_wf / np.maximum(edge_sum_w, eps)
 
-        total_sse = edge_sse + mid_sse + ramp_sse
+            mid_prefix_wf = np.take(prefix_wf, mid_idx, axis=1)
+            mid_prefix_wf2 = np.take(prefix_wf2, mid_idx, axis=1)
+            mid_sum_wf = total_wf[:, None] - mid_prefix_wf
+            mid_sum_wf2 = total_wf2[:, None] - mid_prefix_wf2
+            mu_mid = mid_sum_wf / np.maximum(mid_sum_w, eps)
 
-        chunk_best_idx = np.argmin(total_sse, axis=1)
-        chunk_best_sse = total_sse[row_idx, chunk_best_idx]
-        update_mask = chunk_best_sse < best_sse
+            edge_sse = edge_sum_wf2 - np.where(
+                edge_sum_w > eps,
+                (edge_sum_wf ** 2) / np.maximum(edge_sum_w, eps),
+                0.0,
+            )
+            mid_sse = mid_sum_wf2 - np.where(
+                mid_sum_w > eps,
+                (mid_sum_wf ** 2) / np.maximum(mid_sum_w, eps),
+                0.0,
+            )
 
-        if np.any(update_mask):
-            best_sse[update_mask] = chunk_best_sse[update_mask]
-            selected_mu_edge = mu_edge[row_idx, chunk_best_idx]
-            selected_mu_mid = mu_mid[row_idx, chunk_best_idx]
-            best_mu_edge[update_mask] = selected_mu_edge[update_mask]
-            best_mu_mid[update_mask] = selected_mu_mid[update_mask]
-            best_delta[update_mask] = (selected_mu_edge - selected_mu_mid)[update_mask]
-            a_bp_vals = a_chunk[chunk_best_idx] * half_length_bp
-            b_bp_vals = b_chunk[chunk_best_idx] * half_length_bp
-            best_a_bp[update_mask] = a_bp_vals[update_mask]
-            best_b_bp[update_mask] = b_bp_vals[update_mask]
+            rs = static_terms.ramp_start_idx[start:end]
+            re = static_terms.ramp_end_idx[start:end]
+            ramp_sum_w = static_terms.ramp_sum_w[np.newaxis, start:end]
+            ramp_sum_wx = static_terms.ramp_sum_wx[np.newaxis, start:end]
+            ramp_sum_wx2 = static_terms.ramp_sum_wx2[np.newaxis, start:end]
+
+            ramp_sum_wf = np.take(prefix_wf, re, axis=1) - np.take(prefix_wf, rs, axis=1)
+            ramp_sum_wf2 = np.take(prefix_wf2, re, axis=1) - np.take(prefix_wf2, rs, axis=1)
+            ramp_sum_wfx = np.take(prefix_wfx, re, axis=1) - np.take(prefix_wfx, rs, axis=1)
+
+            a_rel = static_terms.a_rel[start:end]
+            b_rel = static_terms.b_rel[start:end]
+            denom = np.maximum(b_rel - a_rel, 1e-6)[np.newaxis, :]
+            slope = (mu_mid - mu_edge) / denom
+            intercept = mu_edge - slope * a_rel[np.newaxis, :]
+
+            ramp_sse = (
+                ramp_sum_wf2
+                - 2.0 * intercept * ramp_sum_wf
+                - 2.0 * slope * ramp_sum_wfx
+                + (intercept ** 2) * ramp_sum_w
+                + 2.0 * intercept * slope * ramp_sum_wx
+                + (slope ** 2) * ramp_sum_wx2
+            )
+
+            total_sse = edge_sse + mid_sse + ramp_sse
+            local_idx = np.argmin(total_sse, axis=1)
+            local_best = total_sse[row_idx_sub, local_idx]
+            update_mask = local_best < best_sse_sub
+            if np.any(update_mask):
+                best_sse_sub[update_mask] = local_best[update_mask]
+                sel_mu_edge = mu_edge[row_idx_sub, local_idx]
+                sel_mu_mid = mu_mid[row_idx_sub, local_idx]
+                best_mu_edge_sub[update_mask] = sel_mu_edge[update_mask]
+                best_mu_mid_sub[update_mask] = sel_mu_mid[update_mask]
+                delta_vals = sel_mu_edge - sel_mu_mid
+                best_delta_sub[update_mask] = delta_vals[update_mask]
+                sel_a = a_rel[local_idx] * half_length_bp
+                sel_b = b_rel[local_idx] * half_length_bp
+                best_a_bp_sub[update_mask] = sel_a[update_mask]
+                best_b_bp_sub[update_mask] = sel_b[update_mask]
+
+        best_sse[row_slice] = best_sse_sub
+        best_mu_edge[row_slice] = best_mu_edge_sub
+        best_mu_mid[row_slice] = best_mu_mid_sub
+        best_delta[row_slice] = best_delta_sub
+        best_a_bp[row_slice] = best_a_bp_sub
+        best_b_bp[row_slice] = best_b_bp_sub
 
     return best_mu_edge, best_mu_mid, best_delta, best_a_bp, best_b_bp
 
@@ -853,12 +1126,14 @@ def prepare_inversion_frf_and_permutation(
         )
         return PreparedInversion(result=result, plan=None)
 
+    static_terms = _prepare_frf_static_terms(w_sorted, x_sorted, candidates)
     mu_edge_arr, mu_mid_arr, delta_arr, a_bp_arr, b_bp_arr = run_frf_search(
         fst_sorted[np.newaxis, :],
         w_sorted[np.newaxis, :],
         x_sorted,
         candidates,
         half_length,
+        static_terms=static_terms,
     )
     frf_mu_edge = float(mu_edge_arr[0])
     frf_mu_mid = float(mu_mid_arr[0])
@@ -941,6 +1216,9 @@ def prepare_inversion_frf_and_permutation(
         rotation_basis=rotation_basis_physical,
         trend_physical=trend_physical,
     )
+    rng_offsets = np.random.default_rng(plan.base_seed)
+    plan.offset_seed = int(rng_offsets.integers(0, max(1, plan.valid_offsets.size)))
+    plan.offset_step = _choose_coprime_step(plan.valid_offsets.size, rng_offsets)
     return PreparedInversion(result=result, plan=plan)
 
 
@@ -949,62 +1227,265 @@ def fit_inversion_worker(args) -> PreparedInversion:
     return prepare_inversion_frf_and_permutation(inversion, n_permutations, default_block_size)
 
 
+def _build_permutation_plan_payload(
+    plans: Sequence[PermutationPlan],
+) -> List[Dict[str, Any]]:
+    payload: List[Dict[str, Any]] = []
+    with _PERM_SHARED_LOCK:
+        if _PERM_PARENT_HANDLES:
+            for existing in list(_PERM_PARENT_HANDLES.keys()):
+                handles = _PERM_PARENT_HANDLES.pop(existing, [])
+                for shm in handles:
+                    try:
+                        shm.close()
+                    except Exception:
+                        pass
+                    try:
+                        shm.unlink()
+                    except FileNotFoundError:
+                        continue
+
+        for plan in plans:
+            arrays: Dict[str, Optional[SharedArrayDescriptor]] = {}
+            handles: List[shared_memory.SharedMemory] = []
+
+            def add_array(
+                key: str,
+                array: Optional[np.ndarray],
+                *,
+                dtype: Optional[np.dtype] = None,
+            ) -> None:
+                if array is None:
+                    arrays[key] = None
+                    return
+                arr = np.asarray(array, dtype=dtype if dtype is not None else array.dtype)
+                descriptor, shm = _create_shared_descriptor(arr)
+                arrays[key] = descriptor
+                if shm is not None:
+                    handles.append(shm)
+
+            add_array("rotation_basis", plan.rotation_basis, dtype=np.float64)
+            add_array("trend_physical", plan.trend_physical, dtype=np.float64)
+            add_array("order", plan.order, dtype=np.int32)
+            add_array("weight_sorted", plan.weight_sorted, dtype=np.float64)
+            add_array("x_sorted", plan.x_sorted, dtype=np.float64)
+            add_array("valid_offsets", plan.valid_offsets, dtype=np.int32)
+
+            cand = plan.candidates
+            add_array("candidate_edge_end", cand.get("edge_end"), dtype=np.int32)
+            add_array("candidate_mid_start", cand.get("mid_start"), dtype=np.int32)
+            add_array("candidate_ramp_start", cand.get("ramp_start"), dtype=np.int32)
+            add_array("candidate_ramp_end", cand.get("ramp_end"), dtype=np.int32)
+            add_array("candidate_a_rel", cand.get("a_rel"), dtype=np.float64)
+            add_array("candidate_b_rel", cand.get("b_rel"), dtype=np.float64)
+
+            payload.append(
+                {
+                    "plan_id": int(plan.plan_id),
+                    "inv_key": plan.inv_key,
+                    "base_seed": int(plan.base_seed),
+                    "chunk_size": int(plan.chunk_size),
+                    "n_permutations": int(plan.n_permutations),
+                    "n_valid": int(plan.n_valid),
+                    "half_length": float(plan.half_length),
+                    "observed_delta": float(plan.observed_delta),
+                    "allow_flip": bool(plan.allow_flip),
+                    "use_residuals": bool(plan.use_residuals),
+                    "offset_step": int(plan.offset_step),
+                    "offset_seed": int(plan.offset_seed),
+                    "arrays": arrays,
+                }
+            )
+
+            _PERM_PARENT_HANDLES[int(plan.plan_id)] = handles
+
+    return payload
+
+
+def _release_permutation_plan_shared_memory(plan_ids: Iterable[int]) -> None:
+    with _PERM_SHARED_LOCK:
+        for pid in plan_ids:
+            handles = _PERM_PARENT_HANDLES.pop(int(pid), [])
+            for shm in handles:
+                try:
+                    shm.close()
+                except Exception:
+                    pass
+                try:
+                    shm.unlink()
+                except FileNotFoundError:
+                    continue
+
+
+def _permutation_worker_setup(plan_payload: Sequence[Dict[str, Any]]) -> None:
+    plans_state: Dict[int, Dict[str, Any]] = {}
+    shared_handles: List[shared_memory.SharedMemory] = []
+
+    for spec in plan_payload:
+        arrays: Dict[str, Optional[np.ndarray]] = {}
+        for key, descriptor in spec["arrays"].items():
+            if descriptor is None:
+                arrays[key] = None
+                continue
+            arr, shm = _attach_shared_descriptor(descriptor)
+            arrays[key] = arr
+            shared_handles.append(shm)
+
+        candidates = {
+            "edge_end": arrays["candidate_edge_end"],
+            "mid_start": arrays["candidate_mid_start"],
+            "ramp_start": arrays["candidate_ramp_start"],
+            "ramp_end": arrays["candidate_ramp_end"],
+            "a_rel": arrays["candidate_a_rel"],
+            "b_rel": arrays["candidate_b_rel"],
+        }
+
+        static_terms = _prepare_frf_static_terms(
+            arrays["weight_sorted"], arrays["x_sorted"], candidates
+        )
+
+        plan_id = int(spec["plan_id"])
+        n_valid = int(spec["n_valid"])
+        plans_state[plan_id] = {
+            "meta": {
+                "inv_key": spec["inv_key"],
+                "base_seed": int(spec["base_seed"]),
+                "chunk_size": int(spec["chunk_size"]),
+                "n_permutations": int(spec["n_permutations"]),
+                "n_valid": n_valid,
+                "half_length": float(spec["half_length"]),
+                "observed_delta": float(spec["observed_delta"]),
+                "allow_flip": bool(spec["allow_flip"]),
+                "use_residuals": bool(spec["use_residuals"]),
+                "offset_step": int(spec["offset_step"]),
+                "offset_seed": int(spec["offset_seed"]),
+            },
+            "arrays": arrays,
+            "candidates": candidates,
+            "static_terms": static_terms,
+            "weight_template": arrays["weight_sorted"][np.newaxis, :],
+            "base_indices": np.arange(n_valid, dtype=np.int64),
+            "flipped_indices": np.arange(n_valid - 1, -1, -1, dtype=np.int64),
+        }
+
+    _PERM_SHARED_STATE["plans"] = plans_state
+    _PERM_SHARED_STATE["shared_handles"] = shared_handles
+
+    def _cleanup_shared_handles() -> None:
+        handles = _PERM_SHARED_STATE.pop("shared_handles", [])
+        for shm in handles:
+            try:
+                shm.close()
+            except Exception:
+                pass
+
+    atexit.register(_cleanup_shared_handles)
+
+
 def run_permutation_chunk(args) -> PermutationChunkResult:
-    plan, chunk_index = args
-    start = chunk_index * plan.chunk_size
-    remaining = plan.n_permutations - start
+    plan_id, chunk_index = args
+    plans = _PERM_SHARED_STATE.get("plans")
+    if not plans or plan_id not in plans:
+        raise RuntimeError("Permutation plan shared state is not initialized in worker")
+
+    state = plans[plan_id]
+    meta = state["meta"]
+    arrays = state["arrays"]
+    static_terms = state["static_terms"]
+    candidates = state["candidates"]
+
+    chunk_size = meta["chunk_size"]
+    start = chunk_index * chunk_size
+    remaining = meta["n_permutations"] - start
     if remaining <= 0:
-        return PermutationChunkResult(plan.inv_key, chunk_index, 0, 0.0, 0.0, 0)
+        return PermutationChunkResult(meta["inv_key"], chunk_index, 0, 0.0, 0.0, 0)
 
-    size = min(plan.chunk_size, remaining)
+    size = min(chunk_size, remaining)
 
-    n = int(plan.n_valid)
-    if n <= 1 or plan.valid_offsets.size == 0:
-        return PermutationChunkResult(plan.inv_key, chunk_index, 0, 0.0, 0.0, 0)
+    n = meta["n_valid"]
+    valid_offsets = arrays["valid_offsets"]
+    if n <= 1 or valid_offsets is None or valid_offsets.size == 0:
+        return PermutationChunkResult(meta["inv_key"], chunk_index, 0, 0.0, 0.0, 0)
 
-    rng = np.random.default_rng(plan.base_seed + chunk_index)
+    rng = np.random.default_rng(meta["base_seed"] + chunk_index)
 
-    if ROTATION_ENUMERATE_OFFSETS and size <= plan.valid_offsets.size:
-        offsets = np.array(rng.choice(plan.valid_offsets, size=size, replace=False), dtype=int)
-    else:
-        offsets = np.array(rng.choice(plan.valid_offsets, size=size, replace=True), dtype=int)
-
-    base = np.arange(n, dtype=int)
-    orient = np.broadcast_to(base, (size, n))
-    if plan.allow_flip:
-        flips = rng.integers(0, 2, size=size, dtype=int)
-        flipped = np.broadcast_to(base[::-1], (size, n))
-        orient = np.where(flips[:, None] == 1, flipped, orient)
-
-    idx = (orient + offsets[:, None]) % n
-
-    rotated = plan.rotation_basis[idx]
-    if plan.use_residuals and plan.trend_physical is not None:
-        fst_perm_physical = rotated + plan.trend_physical[None, :]
-    else:
-        fst_perm_physical = rotated
-
-    fst_perm_batch = fst_perm_physical[:, plan.order]
-    w_perm_batch = np.broadcast_to(plan.weight_sorted, (size, n))
-    _, _, deltas, _, _ = run_frf_search(
-        fst_perm_batch,
-        w_perm_batch,
-        plan.x_sorted,
-        plan.candidates,
-        plan.half_length,
+    offset_positions = _offset_positions(
+        valid_offsets.size,
+        start,
+        size,
+        offset_seed=meta["offset_seed"],
+        offset_step=meta["offset_step"],
     )
-    deltas = np.asarray(deltas, dtype=float)
-    finite = np.isfinite(deltas)
-    if not np.any(finite):
-        return PermutationChunkResult(plan.inv_key, chunk_index, 0, 0.0, 0.0, 0)
-    valid = deltas[finite]
+    offsets = valid_offsets[offset_positions.astype(int)]
+
+    rotation_basis = arrays["rotation_basis"]
+    trend = arrays["trend_physical"]
+    order = arrays["order"].astype(np.int64, copy=False)
+    weight_template = state["weight_template"]
+    x_sorted = arrays["x_sorted"]
+
+    base_indices = state["base_indices"]
+    flipped_indices = state["flipped_indices"]
+
+    count = 0
+    sum_delta = 0.0
+    sum_sq_delta = 0.0
+    count_ge = 0
+
+    batch_limit = max(1, min(1024, size))
+    allow_flip = meta["allow_flip"]
+    use_residuals = meta["use_residuals"] and trend is not None
+
+    for batch_start in range(0, size, batch_limit):
+        batch_end = min(batch_start + batch_limit, size)
+        batch_offsets = offsets[batch_start:batch_end]
+        batch_size = batch_offsets.size
+        if batch_size == 0:
+            continue
+
+        orient = np.empty((batch_size, n), dtype=np.int64)
+        orient[:] = base_indices
+        if allow_flip:
+            flip_flags = rng.integers(0, 2, size=batch_size, dtype=np.int8)
+            if np.any(flip_flags):
+                orient[flip_flags == 1] = flipped_indices
+
+        idx = (orient + batch_offsets[:, None]) % n
+        rotated = rotation_basis[idx]
+        if use_residuals:
+            fst_perm_physical = rotated + trend[np.newaxis, :]
+        else:
+            fst_perm_physical = rotated
+
+        fst_perm_sorted = fst_perm_physical[:, order]
+        weight_batch = np.broadcast_to(weight_template, (batch_size, n))
+
+        _, _, deltas, _, _ = run_frf_search(
+            fst_perm_sorted,
+            weight_batch,
+            x_sorted,
+            candidates,
+            meta["half_length"],
+            static_terms=static_terms,
+        )
+
+        deltas = np.asarray(deltas, dtype=float)
+        finite = np.isfinite(deltas)
+        if not np.any(finite):
+            continue
+        valid = deltas[finite]
+        count += int(valid.size)
+        sum_delta += float(np.sum(valid))
+        sum_sq_delta += float(np.sum(valid * valid))
+        count_ge += int(np.sum(valid >= meta["observed_delta"]))
+
     return PermutationChunkResult(
-        plan.inv_key,
+        meta["inv_key"],
         chunk_index,
-        int(valid.size),
-        float(np.sum(valid)),
-        float(np.sum(valid * valid)),
-        int(np.sum(valid >= plan.observed_delta)),
+        count,
+        sum_delta,
+        sum_sq_delta,
+        count_ge,
     )
 
 # ------------------------- PRECISION-WEIGHTED MEDIAN ANALYSIS -------------------------
@@ -1229,16 +1710,322 @@ def run_precision_weighted_median_analysis(
 
 # ------------------------- META-LEVEL PERMUTATION -------------------------
 
-def _meta_perm_chunk_worker(args) -> np.ndarray:
-    """Worker function for meta-level permutation - must be module-level for pickling."""
-    size, seed, y, weights, group = args
+_META_SHARED_STATE: Dict[str, Any] = {}
+
+if njit is not None:
+
+    @njit(nogil=True)
+    def _meta_perm_scan_numba(
+        y_sorted: np.ndarray,
+        w_sorted: np.ndarray,
+        stamps: np.ndarray,
+        gen: int,
+        total_group0_weight: float,
+        total_weight: float,
+    ) -> Tuple[float, float, float]:
+        if not np.isfinite(total_group0_weight) or total_group0_weight <= 0.0:
+            return np.nan, np.nan, np.nan
+        total_group1_weight = total_weight - total_group0_weight
+        if not np.isfinite(total_group1_weight) or total_group1_weight <= 0.0:
+            return np.nan, np.nan, np.nan
+
+        target0 = 0.5 * total_group0_weight
+        target1 = 0.5 * total_group1_weight
+
+        median0 = np.nan
+        median1 = np.nan
+        last0 = np.nan
+        last1 = np.nan
+        cum0 = 0.0
+        cum1 = 0.0
+        n = y_sorted.size
+
+        for idx in range(n):
+            wt = w_sorted[idx]
+            val = y_sorted[idx]
+            if stamps[idx] == gen:
+                cum0 += wt
+                last0 = val
+                if not np.isfinite(median0):
+                    if cum0 > target0:
+                        median0 = val
+                    elif cum0 == target0:
+                        next_val = np.nan
+                        for j in range(idx + 1, n):
+                            if stamps[j] == gen:
+                                next_val = y_sorted[j]
+                                break
+                        if np.isfinite(next_val):
+                            median0 = 0.5 * (val + next_val)
+                        else:
+                            median0 = val
+            else:
+                cum1 += wt
+                last1 = val
+                if not np.isfinite(median1):
+                    if cum1 > target1:
+                        median1 = val
+                    elif cum1 == target1:
+                        next_val = np.nan
+                        for j in range(idx + 1, n):
+                            if stamps[j] != gen:
+                                next_val = y_sorted[j]
+                                break
+                        if np.isfinite(next_val):
+                            median1 = 0.5 * (val + next_val)
+                        else:
+                            median1 = val
+            if np.isfinite(median0) and np.isfinite(median1):
+                break
+
+        if not np.isfinite(median0):
+            median0 = last0
+        if not np.isfinite(median1):
+            median1 = last1
+        if not np.isfinite(median0) or not np.isfinite(median1):
+            return np.nan, np.nan, np.nan
+        return median0 - median1, median0, median1
+
+else:  # pragma: no cover - numba optional
+    _meta_perm_scan_numba = None  # type: ignore
+
+_PERM_SHARED_STATE: Dict[str, Any] = {}
+_PERM_SHARED_LOCK = threading.Lock()
+_PERM_PARENT_HANDLES: Dict[int, List[shared_memory.SharedMemory]] = {}
+
+
+def _meta_perm_worker_setup(
+    shm_name_y: str,
+    shm_name_w: str,
+    length: int,
+    dtype_str: str,
+    n_group0: int,
+    total_weight: float,
+    T_obs: float,
+    progress_queue: Optional[Any],
+) -> None:
+    """Initializer that maps shared arrays into the worker process."""
+
+    dtype = np.dtype(dtype_str)
+    shm_y = shared_memory.SharedMemory(name=shm_name_y)
+    shm_w = shared_memory.SharedMemory(name=shm_name_w)
+
+    _META_SHARED_STATE["y_shm"] = shm_y
+    _META_SHARED_STATE["w_shm"] = shm_w
+    _META_SHARED_STATE["y"] = np.ndarray((length,), dtype=dtype, buffer=shm_y.buf)
+    _META_SHARED_STATE["w"] = np.ndarray((length,), dtype=dtype, buffer=shm_w.buf)
+    _META_SHARED_STATE["n"] = int(length)
+    _META_SHARED_STATE["n_group0"] = int(n_group0)
+    _META_SHARED_STATE["total_weight"] = float(total_weight)
+    _META_SHARED_STATE["T_obs"] = float(T_obs)
+    _META_SHARED_STATE["abs_T_obs"] = abs(float(T_obs))
+    if progress_queue is not None:
+        _META_SHARED_STATE["progress_queue"] = progress_queue
+    else:
+        _META_SHARED_STATE.pop("progress_queue", None)
+
+
+def _resolve_weighted_median_tie(
+    idx: int,
+    *,
+    is_group0: bool,
+    gen: int,
+    stamps: np.ndarray,
+    y_sorted: np.ndarray,
+) -> float:
+    """Resolve a tie by averaging with the next value from the same group."""
+
+    current = float(y_sorted[idx])
+    n = y_sorted.size
+    for j in range(idx + 1, n):
+        in_group0 = stamps[j] == gen
+        if in_group0 is is_group0:
+            return float(0.5 * (current + float(y_sorted[j])))
+    return current
+
+
+def _meta_perm_single_stat(
+    stamps: np.ndarray,
+    gen: int,
+    total_group0_weight: float,
+) -> Tuple[float, float, float]:
+    y_sorted = _META_SHARED_STATE["y"]
+    w_sorted = _META_SHARED_STATE["w"]
+    total_weight = _META_SHARED_STATE["total_weight"]
+
+    if _meta_perm_scan_numba is not None:
+        delta, med0, med1 = _meta_perm_scan_numba(
+            y_sorted,
+            w_sorted,
+            stamps,
+            int(gen),
+            float(total_group0_weight),
+            float(total_weight),
+        )
+        return float(delta), float(med0), float(med1)
+
+    if not math.isfinite(total_group0_weight) or total_group0_weight <= 0.0:
+        return float("nan"), float("nan"), float("nan")
+
+    total_group1_weight = float(total_weight - total_group0_weight)
+    if not math.isfinite(total_group1_weight) or total_group1_weight <= 0.0:
+        return float("nan"), float("nan"), float("nan")
+
+    target0 = 0.5 * total_group0_weight
+    target1 = 0.5 * total_group1_weight
+
+    median0 = float("nan")
+    median1 = float("nan")
+    last0 = float("nan")
+    last1 = float("nan")
+    cum0 = 0.0
+    cum1 = 0.0
+
+    n = y_sorted.size
+    for idx in range(n):
+        wt = float(w_sorted[idx])
+        val = float(y_sorted[idx])
+        if stamps[idx] == gen:
+            cum0 += wt
+            last0 = val
+            if not math.isfinite(median0):
+                if cum0 > target0:
+                    median0 = val
+                elif cum0 == target0:
+                    median0 = _resolve_weighted_median_tie(
+                        idx,
+                        is_group0=True,
+                        gen=gen,
+                        stamps=stamps,
+                        y_sorted=y_sorted,
+                    )
+        else:
+            cum1 += wt
+            last1 = val
+            if not math.isfinite(median1):
+                if cum1 > target1:
+                    median1 = val
+                elif cum1 == target1:
+                    median1 = _resolve_weighted_median_tie(
+                        idx,
+                        is_group0=False,
+                        gen=gen,
+                        stamps=stamps,
+                        y_sorted=y_sorted,
+                    )
+
+        if math.isfinite(median0) and math.isfinite(median1):
+            break
+
+    if not math.isfinite(median0):
+        median0 = last0
+    if not math.isfinite(median1):
+        median1 = last1
+
+    if not math.isfinite(median0) or not math.isfinite(median1):
+        return float("nan"), float("nan"), float("nan")
+
+    return float(median0 - median1), float(median0), float(median1)
+
+
+def _maybe_set_affinity(cpu_affinity: Optional[List[int]]) -> None:
+    if not cpu_affinity:
+        return
+    try:
+        os.sched_setaffinity(0, set(cpu_affinity))
+    except (AttributeError, PermissionError, OSError):
+        pass
+
+
+def _meta_perm_worker_run(
+    draws_target: int,
+    seed: int,
+    report_every: int,
+    cpu_affinity: Optional[List[int]],
+) -> Dict[str, Any]:
     rng = np.random.default_rng(seed)
-    stats = np.empty(size, dtype=float)
-    for i in range(size):
-        perm_labels = rng.permutation(group)
-        delta, _, _ = weighted_median_difference(y, weights, perm_labels)
-        stats[i] = delta
-    return stats
+    n = _META_SHARED_STATE["n"]
+    n_group0 = _META_SHARED_STATE["n_group0"]
+    T_obs = _META_SHARED_STATE["T_obs"]
+    abs_T_obs = _META_SHARED_STATE["abs_T_obs"]
+    w_sorted = _META_SHARED_STATE["w"]
+    progress_queue = _META_SHARED_STATE.get("progress_queue")
+
+    _maybe_set_affinity(cpu_affinity)
+
+    stamps = np.zeros(n, dtype=np.int32)
+    gen = 1
+    gen_max = np.iinfo(np.int32).max
+    draws_done = 0
+    invalid = 0
+    count_upper = 0
+    count_lower = 0
+    count_two = 0
+    sum_T = 0.0
+    sumsq_T = 0.0
+
+    report_every = max(1, int(report_every))
+    reported_since_flush = 0
+    while draws_done < draws_target:
+        if gen >= gen_max:
+            stamps.fill(0)
+            gen = 1
+        sample = rng.choice(n, size=n_group0, replace=False, shuffle=False)
+        stamps[sample] = gen
+        total0 = float(np.add.reduce(w_sorted[sample], dtype=np.float64))
+
+        delta, _, _ = _meta_perm_single_stat(stamps, gen, total0)
+        if not math.isfinite(delta):
+            invalid += 1
+            gen += 1
+            continue
+
+        if delta >= T_obs:
+            count_upper += 1
+        if delta <= T_obs:
+            count_lower += 1
+        if abs(delta) >= abs_T_obs:
+            count_two += 1
+        sum_T += delta
+        sumsq_T += delta * delta
+        draws_done += 1
+        reported_since_flush += 1
+
+        if progress_queue is not None and reported_since_flush >= report_every:
+            progress_queue.put(int(reported_since_flush))
+            reported_since_flush = 0
+
+        if draws_done < draws_target:
+            delta_flip = -delta
+            if delta_flip >= T_obs:
+                count_upper += 1
+            if delta_flip <= T_obs:
+                count_lower += 1
+            if abs(delta_flip) >= abs_T_obs:
+                count_two += 1
+            sum_T += delta_flip
+            sumsq_T += delta_flip * delta_flip
+            draws_done += 1
+            reported_since_flush += 1
+
+            if progress_queue is not None and reported_since_flush >= report_every:
+                progress_queue.put(int(reported_since_flush))
+                reported_since_flush = 0
+
+        gen += 1
+
+    if progress_queue is not None and reported_since_flush > 0:
+        progress_queue.put(int(reported_since_flush))
+
+    return {
+        "draws": draws_done,
+        "invalid": invalid,
+        "count_upper": count_upper,
+        "count_lower": count_lower,
+        "count_two": count_two,
+        "sum_T": sum_T,
+        "sumsq_T": sumsq_T,
+    }
 
 def meta_permutation_pvalue(
     y: np.ndarray,
@@ -1248,43 +2035,216 @@ def meta_permutation_pvalue(
     chunk: int,
     base_seed: int,
     n_workers: int,
-) -> Dict[str, float]:
+) -> Dict[str, float | int]:
     n = y.size
-    n_workers = max(1, min(n_workers, (n_perm + chunk - 1) // chunk))
     weights_obs = np.asarray(weights, dtype=float)
-    T_obs, _, _ = weighted_median_difference(y, weights_obs, group)
+    group_obs = np.asarray(group, dtype=int)
+    T_obs, _, _ = weighted_median_difference(y, weights_obs, group_obs)
 
-    with ProcessPoolExecutor(max_workers=n_workers) as pool:
-        tasks = []
-        idx = 0
-        while idx < n_perm:
-            take = min(chunk, n_perm - idx)
-            seed = base_seed + 1 + (idx // chunk)
-            args = (take, seed, y, weights_obs, group)
-            tasks.append(pool.submit(_meta_perm_chunk_worker, args))
-            idx += take
-        perm_stats: List[np.ndarray] = []
-        for fut in as_completed(tasks):
-            perm_stats.append(fut.result())
-
-    T = np.concatenate(perm_stats, axis=0)[:n_perm]
-    finite = np.isfinite(T)
-    T = T[finite]
-    if T.size == 0 or not math.isfinite(T_obs):
+    if not math.isfinite(T_obs):
         return {
             "p_perm_one_sided_upper": float("nan"),
             "p_perm_one_sided_lower": float("nan"),
             "p_perm_two_sided": float("nan"),
             "T_obs": float(T_obs),
+            "total_draws": int(0),
+            "count_upper": int(0),
+            "count_lower": int(0),
+            "count_two": int(0),
         }
-    p_one_upper = (1.0 + float(np.sum(T >= T_obs))) / (1.0 + float(T.size))
-    p_one_lower = (1.0 + float(np.sum(T <= T_obs))) / (1.0 + float(T.size))
-    p_two = (1.0 + float(np.sum(np.abs(T) >= abs(T_obs)))) / (1.0 + float(T.size))
+
+    mask_group0 = group_obs == 0
+    n_group0 = int(np.sum(mask_group0))
+    n_group1 = n - n_group0
+    if n_group0 == 0 or n_group1 == 0 or n_perm <= 0:
+        return {
+            "p_perm_one_sided_upper": float("nan"),
+            "p_perm_one_sided_lower": float("nan"),
+            "p_perm_two_sided": float("nan"),
+            "T_obs": float(T_obs),
+            "total_draws": int(0),
+            "count_upper": int(0),
+            "count_lower": int(0),
+            "count_two": int(0),
+        }
+
+    order = np.argsort(y)
+    y_sorted = np.ascontiguousarray(y[order], dtype=np.float64)
+    w_sorted = np.ascontiguousarray(weights_obs[order], dtype=np.float64)
+    total_weight = float(np.sum(w_sorted))
+    if not math.isfinite(total_weight) or total_weight <= 0.0:
+        return {
+            "p_perm_one_sided_upper": float("nan"),
+            "p_perm_one_sided_lower": float("nan"),
+            "p_perm_two_sided": float("nan"),
+            "T_obs": float(T_obs),
+            "total_draws": int(0),
+            "count_upper": int(0),
+            "count_lower": int(0),
+            "count_two": int(0),
+        }
+
+    ctx = mp.get_context("fork") if "fork" in mp.get_all_start_methods() else mp.get_context()
+
+    shm_y = shared_memory.SharedMemory(create=True, size=y_sorted.nbytes)
+    shm_w = shared_memory.SharedMemory(create=True, size=w_sorted.nbytes)
+    try:
+        np.ndarray(y_sorted.shape, dtype=y_sorted.dtype, buffer=shm_y.buf)[:] = y_sorted
+        np.ndarray(w_sorted.shape, dtype=w_sorted.dtype, buffer=shm_w.buf)[:] = w_sorted
+
+        try:
+            import psutil  # type: ignore
+
+            physical_cores = psutil.cpu_count(logical=False) or 1
+        except Exception:
+            physical_cores = (
+                len(os.sched_getaffinity(0))
+                if hasattr(os, "sched_getaffinity")
+                else (os.cpu_count() or 1)
+            )
+
+        n_workers = max(1, min(n_workers, physical_cores))
+        n_workers = min(n_workers, n_perm)
+        if n_workers <= 0:
+            n_workers = 1
+
+        if hasattr(os, "sched_getaffinity"):
+            available_cpus = sorted(os.sched_getaffinity(0))  # type: ignore[arg-type]
+        else:
+            available_cpus = list(range(os.cpu_count() or 1))
+        if not available_cpus:
+            available_cpus = list(range(n_workers))
+
+        cpu_plan: List[List[int]] = [
+            [available_cpus[idx % len(available_cpus)]] for idx in range(n_workers)
+        ]
+
+        draws_per_worker = [n_perm // n_workers] * n_workers
+        remainder = n_perm % n_workers
+        for i in range(remainder):
+            draws_per_worker[i] += 1
+
+        seeds = [base_seed + 1 + i for i in range(n_workers)]
+
+        progress_queue = ctx.Queue()
+        disable_bar = not sys.stdout.isatty()
+        results: List[Dict[str, Any]] = []
+
+        with ProcessPoolExecutor(
+            max_workers=n_workers,
+            mp_context=ctx,
+            initializer=_meta_perm_worker_setup,
+            initargs=(
+                shm_y.name,
+                shm_w.name,
+                y_sorted.size,
+                y_sorted.dtype.str,
+                n_group0,
+                total_weight,
+                T_obs,
+                progress_queue,
+            ),
+        ) as pool:
+            futures = []
+            for worker_idx, draws in enumerate(draws_per_worker):
+                if draws <= 0:
+                    continue
+                futures.append(
+                    pool.submit(
+                        _meta_perm_worker_run,
+                        int(draws),
+                        int(seeds[worker_idx]),
+                        int(max(1, chunk)),
+                        cpu_plan[worker_idx],
+                    )
+                )
+
+            consumer_stop = threading.Event()
+            consumer_thread: Optional[threading.Thread] = None
+
+            with tqdm(
+                total=n_perm,
+                unit="draw",
+                dynamic_ncols=True,
+                smoothing=0.0,
+                mininterval=0.5,
+                ascii=True,
+                disable=disable_bar,
+            ) as pbar:
+
+                if futures:
+                    def _drain_progress() -> None:
+                        while not consumer_stop.is_set():
+                            try:
+                                delta = progress_queue.get(timeout=0.5)
+                            except Empty:
+                                continue
+                            if delta is None:
+                                break
+                            if delta:
+                                pbar.update(int(delta))
+                        while True:
+                            try:
+                                delta = progress_queue.get_nowait()
+                            except Empty:
+                                break
+                            if not delta:
+                                continue
+                            pbar.update(int(delta))
+
+                    consumer_thread = threading.Thread(
+                        target=_drain_progress,
+                        name="meta-perm-progress",
+                        daemon=True,
+                    )
+                    consumer_thread.start()
+
+                try:
+                    results = [f.result() for f in futures]
+                finally:
+                    consumer_stop.set()
+                    progress_queue.put(None)
+                    if consumer_thread is not None:
+                        consumer_thread.join()
+
+        progress_queue.close()
+        progress_queue.join_thread()
+
+        total_draws = sum(res["draws"] for res in results)
+        if total_draws == 0:
+            return {
+                "p_perm_one_sided_upper": float("nan"),
+                "p_perm_one_sided_lower": float("nan"),
+                "p_perm_two_sided": float("nan"),
+                "T_obs": float(T_obs),
+                "total_draws": int(0),
+                "count_upper": int(0),
+                "count_lower": int(0),
+                "count_two": int(0),
+            }
+
+        total_upper = sum(res["count_upper"] for res in results)
+        total_lower = sum(res["count_lower"] for res in results)
+        total_two = sum(res["count_two"] for res in results)
+
+        p_one_upper = (1.0 + float(total_upper)) / (1.0 + float(total_draws))
+        p_one_lower = (1.0 + float(total_lower)) / (1.0 + float(total_draws))
+        p_two = (1.0 + float(total_two)) / (1.0 + float(total_draws))
+    finally:
+        shm_y.close()
+        shm_w.close()
+        shm_y.unlink()
+        shm_w.unlink()
+
     return {
         "p_perm_one_sided_upper": float(p_one_upper),
         "p_perm_one_sided_lower": float(p_one_lower),
         "p_perm_two_sided": float(p_two),
         "T_obs": float(T_obs),
+        "total_draws": int(total_draws),
+        "count_upper": int(total_upper),
+        "count_lower": int(total_lower),
+        "count_two": int(total_two),
     }
 
 # ------------------------- MAIN -------------------------
@@ -1371,10 +2331,13 @@ def main():
     plans = [prep.plan for prep in prepared_results if prep.plan is not None]
     results_by_key = {prep.result.inv_key: prep.result for prep in prepared_results}
 
-    chunk_tasks = []
+    for plan_id, plan in enumerate(plans):
+        plan.plan_id = plan_id
+
+    chunk_tasks: List[Tuple[int, int]] = []
     for plan in plans:
         for chunk_index in range(plan.n_chunks):
-            chunk_tasks.append((plan, chunk_index))
+            chunk_tasks.append((plan.plan_id, chunk_index))
 
     stats_by_inv = {
         plan.inv_key: {"n": 0, "sum": 0.0, "sum_sq": 0.0, "count_ge": 0}
@@ -1392,94 +2355,62 @@ def main():
         inv_progress = {key: 0 for key in inv_chunk_totals}
         completed_inversions: set[str] = set()
         start_time = time.time()
-        recent_completions: deque[float] = deque(maxlen=min(50, total_chunks))
-        chunks_completed = 0
-        last_reported_percent = -1
-        last_report_time = start_time
-        last_reported_chunk = 0
-        min_chunk_interval = max(1, total_chunks // 200)
-        max_report_interval = 30.0
-        with ProcessPoolExecutor(max_workers=perm_workers) as executor:
-            future_map = {
-                executor.submit(run_permutation_chunk, task): task for task in chunk_tasks
-            }
-            for future in as_completed(future_map):
-                chunk_result = future.result()
-                now = time.time()
-                recent_completions.append(now)
-                chunks_completed += 1
-                inv_key = chunk_result.inv_key
-                inv_progress[inv_key] = inv_progress.get(inv_key, 0) + 1
-                stats = stats_by_inv.get(inv_key)
-                if stats is not None:
-                    stats["n"] += chunk_result.n_finite
-                    stats["sum"] += chunk_result.sum_delta
-                    stats["sum_sq"] += chunk_result.sum_sq_delta
-                    stats["count_ge"] += chunk_result.count_ge_observed
+        plan_payload = _build_permutation_plan_payload(plans)
+        try:
+            with ProcessPoolExecutor(
+                max_workers=perm_workers,
+                initializer=_permutation_worker_setup,
+                initargs=(plan_payload,),
+            ) as executor:
+                future_map = {
+                    executor.submit(run_permutation_chunk, task): task
+                    for task in chunk_tasks
+                }
 
-                report_reason = False
-                percent_complete = (chunks_completed / total_chunks) * 100.0
-                percent_bucket = int(percent_complete)
-                if percent_bucket > last_reported_percent:
-                    report_reason = True
-                    last_reported_percent = percent_bucket
-                if chunks_completed - last_reported_chunk >= min_chunk_interval:
-                    report_reason = True
-                if now - last_report_time >= max_report_interval:
-                    report_reason = True
+                disable_bar = not sys.stdout.isatty()
+                with tqdm(
+                    total=len(chunk_tasks),
+                    unit="chunk",
+                    dynamic_ncols=True,
+                    smoothing=0.0,
+                    mininterval=0.5,
+                    ascii=True,
+                    disable=disable_bar,
+                ) as pbar:
+                    for future in as_completed(future_map):
+                        chunk_result = future.result()
 
-                inversion_completed = False
-                inv_total = inv_chunk_totals.get(inv_key, 0)
-                if inv_total and inv_progress[inv_key] == inv_total and inv_key not in completed_inversions:
-                    completed_inversions.add(inv_key)
-                    inversion_completed = True
-                    report_reason = True
+                        inv_key = chunk_result.inv_key
+                        inv_progress[inv_key] = inv_progress.get(inv_key, 0) + 1
 
-                if report_reason:
-                    last_report_time = now
-                    last_reported_chunk = chunks_completed
-                    elapsed = now - start_time
-                    if len(recent_completions) >= 2:
-                        duration = recent_completions[-1] - recent_completions[0]
-                        if duration > 0:
-                            rate = (len(recent_completions) - 1) / duration
-                        else:
-                            rate = float("inf")
-                    else:
-                        rate = float("nan")
-                    remaining_chunks = total_chunks - chunks_completed
-                    if math.isfinite(rate) and rate > 0:
-                        eta_seconds = remaining_chunks / rate
-                    elif elapsed > 0 and chunks_completed > 0:
-                        avg_rate = chunks_completed / elapsed
-                        eta_seconds = remaining_chunks / avg_rate if avg_rate > 0 else float("nan")
-                    else:
-                        eta_seconds = float("nan")
-                    eta_str = _format_duration(eta_seconds)
-                    rate_str = f"{rate:.2f}" if math.isfinite(rate) and rate > 0 else "--"
-                    log.info(
-                        "Permutation progress: %s/%s chunks (%.1f%%) - rate %s chunks/s - ETA %s - inversions %s/%s complete",
-                        chunks_completed,
-                        total_chunks,
-                        percent_complete,
-                        rate_str,
-                        eta_str,
-                        len(completed_inversions),
-                        len(inv_chunk_totals),
-                    )
-                    if inversion_completed:
-                        log.info(
-                            "Completed inversion %s (%s chunks)",
-                            inv_key,
-                            inv_total,
-                        )
-        total_elapsed = time.time() - start_time
-        overall_rate = total_chunks / total_elapsed if total_elapsed > 0 else float("nan")
-        log.info(
-            "Permutation chunks finished in %s (average rate %s chunks/s)",
-            _format_duration(total_elapsed),
-            f"{overall_rate:.2f}" if math.isfinite(overall_rate) and overall_rate > 0 else "--",
-        )
+                        stats = stats_by_inv.get(inv_key)
+                        if stats is not None:
+                            stats["n"] += chunk_result.n_finite
+                            stats["sum"] += chunk_result.sum_delta
+                            stats["sum_sq"] += chunk_result.sum_sq_delta
+                            stats["count_ge"] += chunk_result.count_ge_observed
+
+                        pbar.update(1)
+
+                        inv_total = inv_chunk_totals.get(inv_key, 0)
+                        if (
+                            inv_total
+                            and inv_progress[inv_key] == inv_total
+                            and inv_key not in completed_inversions
+                        ):
+                            completed_inversions.add(inv_key)
+                            pbar.set_postfix_str(
+                                f"inversions {len(completed_inversions)}/{len(inv_chunk_totals)}"
+                            )
+            total_elapsed = time.time() - start_time
+            overall_rate = total_chunks / total_elapsed if total_elapsed > 0 else float("nan")
+            log.info(
+                "Permutation chunks finished in %s (average rate %s chunks/s)",
+                _format_duration(total_elapsed),
+                f"{overall_rate:.2f}" if math.isfinite(overall_rate) and overall_rate > 0 else "--",
+            )
+        finally:
+            _release_permutation_plan_shared_memory(plan.plan_id for plan in plans)
     else:
         log.info("No permutation work required (insufficient valid windows or permutations set to zero)")
 
@@ -1622,9 +2553,33 @@ def main():
     p_perm_one_upper = perm_out["p_perm_one_sided_upper"]
     p_perm_one_lower = perm_out["p_perm_one_sided_lower"]
     p_perm_two = perm_out["p_perm_two_sided"]
-    log.info(f"Permutation p (one-sided, single > recurrent): {p_perm_one_upper:.4g}")
-    log.info(f"Permutation p (one-sided, recurrent > single): {p_perm_one_lower:.4g}")
-    log.info(f"Permutation p (two-sided): {p_perm_two:.4g}")
+    log.info(
+        "Exceedances (>=T_obs, <=T_obs, two-sided): %d/%d, %d/%d, %d/%d",
+        int(perm_out["count_upper"]),
+        int(perm_out["total_draws"]),
+        int(perm_out["count_lower"]),
+        int(perm_out["total_draws"]),
+        int(perm_out["count_two"]),
+        int(perm_out["total_draws"]),
+    )
+    log.info(
+        "Permutation p (one-sided, single > recurrent): %r  [ (1+%d)/(1+%d) ]",
+        p_perm_one_upper,
+        int(perm_out["count_upper"]),
+        int(perm_out["total_draws"]),
+    )
+    log.info(
+        "Permutation p (one-sided, recurrent > single): %r  [ (1+%d)/(1+%d) ]",
+        p_perm_one_lower,
+        int(perm_out["count_lower"]),
+        int(perm_out["total_draws"]),
+    )
+    log.info(
+        "Permutation p (two-sided): %r  [ (1+%d)/(1+%d) ]",
+        p_perm_two,
+        int(perm_out["count_two"]),
+        int(perm_out["total_draws"]),
+    )
     log.info("")
 
 if __name__ == "__main__":
