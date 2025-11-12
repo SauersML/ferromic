@@ -1635,9 +1635,7 @@ def precision_weighted_median(values: np.ndarray, weights: np.ndarray) -> float:
     cutoff = 0.5 * total_weight
     idx = int(np.searchsorted(cumulative, cutoff, side="left"))
     if idx >= v_sorted.size:
-        return float(v_sorted[-1])
-    if cumulative[idx] == cutoff and idx + 1 < v_sorted.size:
-        return float(0.5 * (v_sorted[idx] + v_sorted[idx + 1]))
+        idx = v_sorted.size - 1
     return float(v_sorted[idx])
 
 
@@ -1746,35 +1744,13 @@ if njit is not None:
             if stamps[idx] == gen:
                 cum0 += wt
                 last0 = val
-                if not np.isfinite(median0):
-                    if cum0 > target0:
-                        median0 = val
-                    elif cum0 == target0:
-                        next_val = np.nan
-                        for j in range(idx + 1, n):
-                            if stamps[j] == gen:
-                                next_val = y_sorted[j]
-                                break
-                        if np.isfinite(next_val):
-                            median0 = 0.5 * (val + next_val)
-                        else:
-                            median0 = val
+                if not np.isfinite(median0) and cum0 >= target0:
+                    median0 = val
             else:
                 cum1 += wt
                 last1 = val
-                if not np.isfinite(median1):
-                    if cum1 > target1:
-                        median1 = val
-                    elif cum1 == target1:
-                        next_val = np.nan
-                        for j in range(idx + 1, n):
-                            if stamps[j] != gen:
-                                next_val = y_sorted[j]
-                                break
-                        if np.isfinite(next_val):
-                            median1 = 0.5 * (val + next_val)
-                        else:
-                            median1 = val
+                if not np.isfinite(median1) and cum1 >= target1:
+                    median1 = val
             if np.isfinite(median0) and np.isfinite(median1):
                 break
 
@@ -1824,26 +1800,6 @@ def _meta_perm_worker_setup(
     else:
         _META_SHARED_STATE.pop("progress_queue", None)
 
-
-def _resolve_weighted_median_tie(
-    idx: int,
-    *,
-    is_group0: bool,
-    gen: int,
-    stamps: np.ndarray,
-    y_sorted: np.ndarray,
-) -> float:
-    """Resolve a tie by averaging with the next value from the same group."""
-
-    current = float(y_sorted[idx])
-    n = y_sorted.size
-    for j in range(idx + 1, n):
-        in_group0 = stamps[j] == gen
-        if in_group0 is is_group0:
-            return float(0.5 * (current + float(y_sorted[j])))
-    return current
-
-
 def _meta_perm_single_stat(
     stamps: np.ndarray,
     gen: int,
@@ -1888,31 +1844,13 @@ def _meta_perm_single_stat(
         if stamps[idx] == gen:
             cum0 += wt
             last0 = val
-            if not math.isfinite(median0):
-                if cum0 > target0:
-                    median0 = val
-                elif cum0 == target0:
-                    median0 = _resolve_weighted_median_tie(
-                        idx,
-                        is_group0=True,
-                        gen=gen,
-                        stamps=stamps,
-                        y_sorted=y_sorted,
-                    )
+            if not math.isfinite(median0) and cum0 >= target0:
+                median0 = val
         else:
             cum1 += wt
             last1 = val
-            if not math.isfinite(median1):
-                if cum1 > target1:
-                    median1 = val
-                elif cum1 == target1:
-                    median1 = _resolve_weighted_median_tie(
-                        idx,
-                        is_group0=False,
-                        gen=gen,
-                        stamps=stamps,
-                        y_sorted=y_sorted,
-                    )
+            if not math.isfinite(median1) and cum1 >= target1:
+                median1 = val
 
         if math.isfinite(median0) and math.isfinite(median1):
             break
