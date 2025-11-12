@@ -214,12 +214,15 @@ def plot_trajectory(
 
     def _format_year(value: float, _: float) -> str:
         if abs(value) >= 100:
+            # No decimals, so no need to strip
             formatted = f"{value:,.0f}"
         elif abs(value) >= 10:
-            formatted = f"{value:,.1f}"
+            # Has 1 decimal place, strip if it's .0
+            formatted = f"{value:,.1f}".rstrip("0").rstrip(".")
         else:
-            formatted = f"{value:,.2f}"
-        return formatted.rstrip("0").rstrip(".")
+            # Has 2 decimal places, strip trailing zeros
+            formatted = f"{value:,.2f}".rstrip("0").rstrip(".")
+        return formatted
 
     ax.xaxis.set_major_formatter(FuncFormatter(_format_year))
     ax.set_ylabel('Derived allele "G" frequency (rs34666797)')
