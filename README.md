@@ -2,30 +2,6 @@
 
 Ferromic is a Rust-accelerated population genetics toolkit built for haplotype-aware studies on large variant cohorts. It offers batteries-included CLI workflows alongside polished Python bindings so the same core algorithms can be reused in notebooks and scripted pipelines.
 
-## Table of contents
-
-- [Highlights](#highlights)
-- [Quick start](#quick-start)
-  - [Rust command-line pipeline](#rust-command-line-pipeline)
-  - [Python API](#python-api)
-- [Installation](#installation)
-  - [Use the prebuilt binaries](#use-the-prebuilt-binaries)
-  - [Build from source](#build-from-source)
-  - [Install the Python wheel](#install-the-python-wheel)
-- [Input requirements](#input-requirements)
-  - [Regional configuration file](#regional-configuration-file)
-  - [Optional masks and group definitions](#optional-masks-and-group-definitions)
-- [Running analyses with `run_vcf`](#running-analyses-with-run_vcf)
-  - [CLI options](#cli-options)
-  - [Example end-to-end run](#example-end-to-end-run)
-  - [Principal components and FST outputs](#principal-components-and-fst-outputs)
-- [Output artefacts](#output-artefacts)
-- [Additional binaries](#additional-binaries)
-- [Phenome-wide association (PheWAS) pipeline](#phenome-wide-association-phewas-pipeline)
-- [Project layout and helper scripts](#project-layout-and-helper-scripts)
-- [Development](#development)
-- [License](#license)
-
 ## Highlights
 
 - **Purpose built for haplotype-aware studies.** Separates per-haplotype diversity metrics, supports inversion-aware sample groupings, and ships with Hudson and Weir & Cockerham FST estimators.
