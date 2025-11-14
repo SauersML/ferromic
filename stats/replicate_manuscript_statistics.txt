@@ -1,0 +1,41 @@
+RECURRENCE
+Chromosome inversion recurrence summary:
+  High-quality inversions with consensus labels: 93 (single-event = 61, recurrent = 32).
+  Fraction recurrent = 34.41%.
+
+DIVERSITY
+Nucleotide diversity (π) comparisons:
+  Loci with finite π for both orientations: 67.
+  Across all loci: mean π(inverted) = 0.000273, mean π(direct) = 0.000387.
+    Paired t-test for π(inverted) vs π(direct): t = -2.870, p = 5.505e-03.
+  Single-event inversions: median π(inverted) = 6.000000e-06, median π(direct) = 0.000233.
+  Recurrent inversions: median π(inverted) = 0.000359, median π(direct) = 0.000442.
+  Within inverted haplotypes: recurrent median π = 0.000359; single-event median π = 6.000000e-06.
+
+LINEAR MODEL
+Orientation × recurrence linear model on log π ratios (Model A):
+  Detection floor applied before logs: ε = 6.325000e-06.
+  Single-event: Inverted vs Direct: fold-change = 0.279 (95% CI 0.151–0.515), p = 4.427e-05.
+  Recurrent: Inverted vs Direct: fold-change = 1.099 (95% CI 0.905–1.336), p = 0.341.
+  Interaction (difference between those two): fold-change = 3.941 (95% CI 2.072–7.497), p = 2.910e-05.
+  Overall inversion effect (pooled Δ-logπ): fold-change = 0.537 (95% CI 0.372–0.776), p = 9.424e-04.
+
+DIFFERENTIATION
+Hudson's FST between orientations:
+  Single-event: median FST = 0.325 (n = 28).
+  Recurrent: median FST = 0.070 (n = 32).
+  Mann–Whitney U test (single-event vs recurrent): U = 628.000, p = 7.680e-03.
+  Highly differentiated loci: 26 with FST > 0.2; 10 with FST > 0.5.
+
+IMPUTATION
+Imputation performance summary:
+  Models evaluated: 158; models with r² > 0.3 and BH p < 0.05: 30.
+  Models flagged for downstream PheWAS (Use == True): 30.
+
+PHEWAS SCALE
+PheWAS scale summary:
+  Unique phenotypes tested: 1089.
+  Case counts span 1002 to 137692; controls span 182133–368254.
+  Phenotype coverage per inversion (top 5): chr10-79542902-INV-674513: 1089, chr12-46897663-INV-16289: 1089, chr17-45585160-INV-706887: 1089, chr4-33098029-INV-7075: 1089, chr6-141867315-INV-29159: 1089; ...
+  Inversions with ≥1 BH-significant phenotype: 4 of 6.
+  Category-level tests with q<0.05: 28 across 5 inversions.
