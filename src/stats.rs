@@ -1072,6 +1072,11 @@ impl HapMembership {
 
         Self { left, right, total }
     }
+
+    #[inline]
+    fn total(&self) -> usize {
+        self.total
+    }
 }
 
 #[derive(Clone)]
@@ -4040,18 +4045,29 @@ pub fn calculate_pi(
         return f64::INFINITY;
     }
 
-    let spinner = create_spinner(&format!(
-        "Calculating π for {} haplotypes over {} bp using unbiased per-site aggregation",
-        haplotypes_in_group.len(),
-        seq_length
-    ));
-
     // Use unbiased per-site aggregation approach with parallel processing for large variant sets
     let sample_count = variants
         .first()
         .map(|variant| variant.genotypes.len())
         .unwrap_or(0);
     let membership = HapMembership::build(sample_count, haplotypes_in_group);
+
+    if membership.total() <= 1 {
+        log(
+            LogLevel::Warning,
+            &format!(
+                "Cannot calculate pi: insufficient callable haplotypes ({})",
+                membership.total()
+            ),
+        );
+        return f64::NAN;
+    }
+
+    let spinner = create_spinner(&format!(
+        "Calculating π for {} haplotypes over {} bp using unbiased per-site aggregation",
+        membership.total(),
+        seq_length
+    ));
 
     let (sum_pi, callable_variant_count, skipped_sites) = variants
         .par_iter()
@@ -4112,7 +4128,14 @@ fn calculate_pi_dense_biallelic(
 ) -> f64 {
     let offsets = membership.offsets();
     if offsets.len() <= 1 {
-        return 0.0;
+        log(
+            LogLevel::Warning,
+            &format!(
+                "Cannot calculate pi: insufficient haplotypes ({})",
+                offsets.len()
+            ),
+        );
+        return f64::NAN;
     }
     let stride = matrix.stride();
     let data = matrix.data();
@@ -4211,7 +4234,7 @@ fn calculate_pi_dense(
                 membership.len()
             ),
         );
-        return 0.0;
+        return f64::NAN;
     }
 
     if seq_length < 0 {
