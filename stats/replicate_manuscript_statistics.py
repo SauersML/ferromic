@@ -1,18 +1,23 @@
-"""Replicate key manuscript statistics using the local summary tables.
+"""Replicate manuscript metrics and tests from staged summary tables.
 
-This script aggregates statistics from the curated TSV/CSV files under the
-``data`` directory.  The goal is to provide a single entry point that prints a
-human-readable report and saves the same text to
-``stats/replicate_manuscript_statistics.txt``.
+This script consolidates the computations used throughout the manuscript into a
+single reproducible entry point. It mirrors the statistics described in the
+Results text, prints a human-readable report, and writes the same content to
+``stats/replicate_manuscript_statistics.txt`` for archival purposes.
 
-The implementation focuses on metrics that can be recomputed from the staged
-summary tables (e.g., inversion annotations, π estimates, FST estimates,
-imputation summaries, and PheWAS association results).  Each section is
-implemented as a pure function so that it can be tested in isolation.
+Each section below draws on tables or intermediate outputs that already live in
+the ``data`` directory. When a statistic depends on a previously published
+analysis module, we re-use the corresponding helper (for example the
+orientation × recurrence linear model in ``stats.inv_dir_recur_model``). If a
+required data product is missing, the script records this explicitly so the
+reader understands which metrics could not be regenerated in the current
+checkout.
 """
 from __future__ import annotations
 
+import math
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List, Tuple
 
@@ -24,38 +29,80 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from stats import inv_dir_recur_model
+from stats import inv_dir_recur_model  # noqa: E402
 
-DATA_DIR = Path(__file__).resolve().parents[1] / "data"
+DATA_DIR = REPO_ROOT / "data"
 REPORT_PATH = Path(__file__).with_suffix(".txt")
 
 
-def _fmt_number(value: float, digits: int = 3) -> str:
-    """Return a compact string for either integers or floating values."""
-    if value is None or (isinstance(value, float) and (np.isnan(value) or np.isinf(value))):
+# ---------------------------------------------------------------------------
+# Formatting utilities
+# ---------------------------------------------------------------------------
+
+
+def _fmt(value: float | int | None, digits: int = 3) -> str:
+    """Format floating-point numbers with sensible scientific notation.
+
+    Integers are rendered without decimal places. Very small or very large
+    values fall back to scientific notation so the printed report stays
+    readable.
+    """
+
+    if value is None:
         return "NA"
     if isinstance(value, (int, np.integer)):
         return f"{int(value)}"
-    abs_v = abs(float(value))
-    if 0 < abs_v < 10 ** -(digits - 1) or abs_v >= 10 ** (digits + 1):
-        return f"{float(value):.{digits}e}"
-    return f"{float(value):.{digits}f}"
+    try:
+        val = float(value)
+    except (TypeError, ValueError):
+        return "NA"
+    if math.isnan(val) or math.isinf(val):
+        return "NA"
+    if 0 < abs(val) < 10 ** -(digits - 1) or abs(val) >= 10 ** (digits + 1):
+        return f"{val:.{digits}e}"
+    return f"{val:.{digits}f}"
 
 
-def _safe_div(num: float, denom: float) -> float:
-    return float(num) / float(denom) if denom else float("nan")
+def _safe_mean(series: pd.Series) -> float | None:
+    if series is None:
+        return None
+    vals = pd.to_numeric(series, errors="coerce")
+    vals = vals[np.isfinite(vals)]
+    if vals.empty:
+        return None
+    return float(vals.mean())
+
+
+def _safe_median(series: pd.Series) -> float | None:
+    if series is None:
+        return None
+    vals = pd.to_numeric(series, errors="coerce")
+    vals = vals[np.isfinite(vals)]
+    if vals.empty:
+        return None
+    return float(vals.median())
+
+
+# ---------------------------------------------------------------------------
+# Shared loaders
+# ---------------------------------------------------------------------------
 
 
 def _load_inv_properties() -> pd.DataFrame:
     path = DATA_DIR / "inv_properties.tsv"
+    if not path.exists():
+        raise FileNotFoundError(f"Missing inversion annotation table: {path}")
+
     df = pd.read_csv(path, sep="\t", low_memory=False)
-    df = df.rename(columns={
-        "Chromosome": "chromosome",
-        "Start": "start",
-        "End": "end",
-        "0_single_1_recur_consensus": "recurrence_flag",
-        "OrigID": "inversion_id",
-    })
+    df = df.rename(
+        columns={
+            "Chromosome": "chromosome",
+            "Start": "start",
+            "End": "end",
+            "OrigID": "inversion_id",
+            "0_single_1_recur_consensus": "recurrence_flag",
+        }
+    )
     df["chromosome"] = df["chromosome"].astype(str).str.replace("^chr", "", regex=True)
     df["start"] = pd.to_numeric(df["start"], errors="coerce")
     df["end"] = pd.to_numeric(df["end"], errors="coerce")
@@ -65,22 +112,11 @@ def _load_inv_properties() -> pd.DataFrame:
     return df
 
 
-def summarize_recurrence() -> List[str]:
-    df = _load_inv_properties()
-    total = len(df)
-    recurrent = int((df["recurrence_flag"] == 1).sum())
-    single = int((df["recurrence_flag"] == 0).sum())
-    recurrence_pct = _safe_div(recurrent, total) * 100
-    lines = [
-        "Chromosome inversion recurrence summary:",
-        f"  High-quality inversions with consensus labels: {total} (single-event = {single}, recurrent = {recurrent}).",
-        f"  Fraction recurrent = {_fmt_number(recurrence_pct, digits=2)}%.",
-    ]
-    return lines
-
-
 def _load_pi_summary() -> pd.DataFrame:
     pi_path = DATA_DIR / "output.csv"
+    if not pi_path.exists():
+        raise FileNotFoundError(f"Missing per-inversion diversity summary: {pi_path}")
+
     pi_df = pd.read_csv(pi_path, low_memory=False)
     pi_df["chr"] = pi_df["chr"].astype(str).str.replace("^chr", "", regex=True)
     inv_df = _load_inv_properties()
@@ -95,22 +131,117 @@ def _load_pi_summary() -> pd.DataFrame:
     return merged
 
 
+def _load_fst_table() -> pd.DataFrame | None:
+    fst_path = DATA_DIR / "hudson_fst_results.tsv"
+    if not fst_path.exists():
+        return None
+    fst = pd.read_csv(fst_path, sep="\t", low_memory=False)
+    required = {"chr", "region_start_0based", "region_end_0based", "FST"}
+    if not required.issubset(fst.columns):
+        return None
+    fst = fst.rename(
+        columns={
+            "chr": "chromosome",
+            "region_start_0based": "start",
+            "region_end_0based": "end",
+            "FST": "fst",
+        }
+    )
+    fst["chromosome"] = fst["chromosome"].astype(str)
+    fst["start"] = pd.to_numeric(fst["start"], errors="coerce")
+    fst["end"] = pd.to_numeric(fst["end"], errors="coerce")
+    fst["fst"] = pd.to_numeric(fst["fst"], errors="coerce")
+    fst = fst.replace([np.inf, -np.inf], np.nan).dropna(subset=["start", "end", "fst"])
+    inv_df = _load_inv_properties()
+    out = fst.merge(
+        inv_df[["chromosome", "start", "end", "recurrence_flag", "recurrence_label", "inversion_id"]],
+        on=["chromosome", "start", "end"],
+        how="inner",
+    )
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Section 1. Recurrence and sample size summaries
+# ---------------------------------------------------------------------------
+
+
+def summarize_recurrence() -> List[str]:
+    inv_df = _load_inv_properties()
+    total = len(inv_df)
+    recurrent = int((inv_df["recurrence_flag"] == 1).sum())
+    single = int((inv_df["recurrence_flag"] == 0).sum())
+    frac = (recurrent / total * 100) if total else float("nan")
+    lines = ["Chromosome inversion recurrence summary:"]
+    lines.append(
+        "  High-quality inversions with consensus labels: "
+        f"{_fmt(total, 0)} (single-event = {_fmt(single, 0)}, recurrent = {_fmt(recurrent, 0)})."
+    )
+    lines.append(f"  Fraction recurrent = {_fmt(frac, 2)}%." if total else "  Fraction recurrent unavailable.")
+    return lines
+
+
+def summarize_sample_sizes() -> List[str]:
+    lines: List[str] = ["Sample sizes for diversity analyses:"]
+
+    callset_path = DATA_DIR / "callset.tsv"
+    if callset_path.exists():
+        header = pd.read_csv(callset_path, sep="\t", nrows=0)
+        meta_cols = {
+            "seqnames",
+            "start",
+            "end",
+            "width",
+            "inv_id",
+            "arbigent_genotype",
+            "misorient_info",
+            "orthog_tech_support",
+            "inversion_category",
+            "inv_AF",
+        }
+        sample_cols = [c for c in header.columns if c not in meta_cols]
+        n_samples = len(sample_cols)
+        lines.append(
+            "  Inversion callset columns indicate "
+            f"{_fmt(n_samples, 0)} phased individuals (sample columns)."
+        )
+        lines.append(
+            "  Reporting haplotypes as twice the sample count yields "
+            f"{_fmt(2 * n_samples, 0)} potential phased haplotypes."
+        )
+    else:
+        lines.append(f"  Callset not found at {callset_path}; sample counts unavailable.")
+
+    pi_df = _load_pi_summary()
+    usable = pi_df[(pi_df["0_num_hap_filter"] >= 2) & (pi_df["1_num_hap_filter"] >= 2)]
+    lines.append(
+        "  Loci with ≥2 haplotypes per orientation for π: "
+        f"{_fmt(len(usable), 0)} (from output.csv)."
+    )
+
+    return lines
+
+
+# ---------------------------------------------------------------------------
+# Section 2. Diversity and linear model
+# ---------------------------------------------------------------------------
+
+
 def summarize_diversity() -> List[str]:
     df = _load_pi_summary()
-    lines: List[str] = ["Nucleotide diversity (π) comparisons:"]
-    total_sites = len(df)
-    lines.append(f"  Loci with finite π for both orientations: {total_sites}.")
+    lines: List[str] = ["Nucleotide diversity (π) by orientation and recurrence:"]
+    lines.append(f"  Total loci with finite π estimates: {_fmt(len(df), 0)}.")
 
     inv_mean = df["1_pi_filtered"].mean()
     dir_mean = df["0_pi_filtered"].mean()
     ttest = stats.ttest_rel(df["1_pi_filtered"], df["0_pi_filtered"])
     lines.append(
         "  Across all loci: mean π(inverted) = "
-        f"{_fmt_number(inv_mean, 6)}, mean π(direct) = {_fmt_number(dir_mean, 6)}."
+        f"{_fmt(inv_mean, 6)}, mean π(direct) = {_fmt(dir_mean, 6)}."
     )
     lines.append(
-        "    Paired t-test for π(inverted) vs π(direct): "
-        f"t = {_fmt_number(ttest.statistic, 3)}, p = {_fmt_number(ttest.pvalue, 3)}."
+        "    Two-sided paired t-test comparing orientations: "
+        f"t = {_fmt(ttest.statistic, 3)}, p = {_fmt(ttest.pvalue, 3)}."
     )
 
     for flag, label in [(0, "Single-event"), (1, "Recurrent")]:
@@ -118,18 +249,16 @@ def summarize_diversity() -> List[str]:
         if sub.empty:
             continue
         lines.append(
-            f"  {label} inversions: median π(inverted) = {_fmt_number(sub['1_pi_filtered'].median(), 6)}, "
-            f"median π(direct) = {_fmt_number(sub['0_pi_filtered'].median(), 6)}."
+            f"  {label} inversions: median π(inverted) = {_fmt(sub['1_pi_filtered'].median(), 6)}, "
+            f"median π(direct) = {_fmt(sub['0_pi_filtered'].median(), 6)}."
         )
 
-    inv_only = df[["recurrence_flag", "1_pi_filtered"]].copy()
-    inv_only_grouped = inv_only.groupby("recurrence_flag")["1_pi_filtered"].median()
-    if not inv_only_grouped.empty:
-        lines.append(
-            "  Within inverted haplotypes:"
-            f" recurrent median π = {_fmt_number(inv_only_grouped.get(1, float('nan')), 6)};"
-            f" single-event median π = {_fmt_number(inv_only_grouped.get(0, float('nan')), 6)}."
-        )
+    inv_only = df[["recurrence_flag", "1_pi_filtered"]]
+    grouped = inv_only.groupby("recurrence_flag")["1_pi_filtered"].median()
+    lines.append(
+        "  Within inverted haplotypes: recurrent median π = "
+        f"{_fmt(grouped.get(1, np.nan), 6)}; single-event median π = {_fmt(grouped.get(0, np.nan), 6)}."
+    )
     return lines
 
 
@@ -137,9 +266,7 @@ def summarize_linear_model() -> List[str]:
     df = _load_pi_summary()
     inv_ids = df.get("inversion_id")
     if inv_ids is None:
-        inv_ids = pd.Series([""] * len(df))
-    else:
-        inv_ids = inv_ids.fillna("")
+        inv_ids = pd.Series(["" for _ in range(len(df))])
     matched = pd.DataFrame(
         {
             "pi_direct": df["0_pi_filtered"].astype(float),
@@ -158,67 +285,123 @@ def summarize_linear_model() -> List[str]:
         axis=1,
     )
     matched = matched.dropna(subset=["pi_direct", "pi_inverted", "Recurrence"])
+
     all_pi = np.r_[matched["pi_direct"].to_numpy(float), matched["pi_inverted"].to_numpy(float)]
     eps = inv_dir_recur_model.choose_floor_from_quantile(
-        all_pi, q=inv_dir_recur_model.FLOOR_QUANTILE, min_floor=inv_dir_recur_model.MIN_FLOOR
+        all_pi,
+        q=inv_dir_recur_model.FLOOR_QUANTILE,
+        min_floor=inv_dir_recur_model.MIN_FLOOR,
     )
+
     _, effects, _ = inv_dir_recur_model.run_model_A(matched, eps=eps, nonzero_only=False)
     lines = ["Orientation × recurrence linear model on log π ratios (Model A):"]
-    lines.append(f"  Detection floor applied before logs: ε = {_fmt_number(eps, 6)}.")
+    lines.append(f"  Detection floor applied before logs: ε = {_fmt(eps, 6)}.")
     for effect in effects.itertuples():
         lines.append(
-            f"  {effect.effect}: fold-change = {_fmt_number(effect.ratio, 3)} "
-            f"(95% CI {_fmt_number(effect.ci_low, 3)}–{_fmt_number(effect.ci_high, 3)}), "
-            f"p = {_fmt_number(effect.p, 3)}."
+            f"  {effect.effect}: fold-change = {_fmt(effect.ratio, 3)} "
+            f"(95% CI {_fmt(effect.ci_low, 3)}–{_fmt(effect.ci_high, 3)}), p = {_fmt(effect.p, 3)}."
         )
     return lines
+
+
+# ---------------------------------------------------------------------------
+# Section 3. Differentiation and breakpoint enrichment
+# ---------------------------------------------------------------------------
 
 
 def summarize_fst() -> List[str]:
     df = _load_pi_summary()
     if "hudson_fst_hap_group_0v1" not in df.columns:
-        return ["Hudson's FST column not present; skipping differentiation summary."]
+        return ["Hudson's FST column missing from output.csv; skipping differentiation summary."]
+
     fst = df.dropna(subset=["hudson_fst_hap_group_0v1"])
-    lines = ["Hudson's FST between orientations:"]
+    if fst.empty:
+        return ["No finite Hudson's FST values available."]
+
+    fst = fst.rename(columns={"hudson_fst_hap_group_0v1": "fst"})
+    lines = ["Differentiation between orientations (Hudson's FST):"]
     for flag, label in [(0, "Single-event"), (1, "Recurrent")]:
         sub = fst[fst["recurrence_flag"] == flag]
         if sub.empty:
             continue
         lines.append(
-            f"  {label}: median FST = {_fmt_number(sub['hudson_fst_hap_group_0v1'].median(), 3)} (n = {len(sub)})."
+            f"  {label}: median FST = {_fmt(sub['fst'].median(), 3)} (n = {_fmt(len(sub), 0)})."
         )
-    if not fst.empty:
-        if fst["recurrence_flag"].nunique() > 1:
-            utest = stats.mannwhitneyu(
-                fst.loc[fst["recurrence_flag"] == 0, "hudson_fst_hap_group_0v1"],
-                fst.loc[fst["recurrence_flag"] == 1, "hudson_fst_hap_group_0v1"],
-                alternative="two-sided",
-            )
-            lines.append(
-                "  Mann–Whitney U test (single-event vs recurrent): "
-                f"U = {_fmt_number(utest.statistic, 3)}, p = {_fmt_number(utest.pvalue, 3)}."
-            )
-        counts = fst["hudson_fst_hap_group_0v1"].to_numpy()
+
+    if fst["recurrence_flag"].nunique() > 1:
+        utest = stats.mannwhitneyu(
+            fst.loc[fst["recurrence_flag"] == 0, "fst"],
+            fst.loc[fst["recurrence_flag"] == 1, "fst"],
+            alternative="two-sided",
+        )
         lines.append(
-            "  Highly differentiated loci: "
-            f"{int((counts > 0.2).sum())} with FST > 0.2; {int((counts > 0.5).sum())} with FST > 0.5."
+            "  Mann–Whitney U test (single-event vs recurrent): "
+            f"U = {_fmt(utest.statistic, 3)}, p = {_fmt(utest.pvalue, 3)}."
         )
+
+    counts = fst["fst"].to_numpy()
+    lines.append(
+        "  Highly differentiated loci: "
+        f"{_fmt(int((counts > 0.2).sum()), 0)} with FST > 0.2 and {_fmt(int((counts > 0.5).sum()), 0)} with FST > 0.5."
+    )
     return lines
 
 
-def summarize_imputation() -> List[str]:
-    path = DATA_DIR / "imputation_results.tsv"
-    df = pd.read_csv(path, sep="\t")
-    df = df.rename(columns={
-        "unbiased_pearson_r2": "r2",
-        "p_fdr_bh": "bh_p",
-    })
-    usable = df[(df["r2"] > 0.3) & (df["bh_p"] < 0.05)]
-    lines = ["Imputation performance summary:"]
-    lines.append(f"  Models evaluated: {len(df)}; models with r² > 0.3 and BH p < 0.05: {len(usable)}.")
-    if "Use" in df.columns:
-        lines.append(f"  Models flagged for downstream PheWAS (Use == True): {int(df['Use'].eq(True).sum())}.")
+def summarize_frf() -> List[str]:
+    frf_path = DATA_DIR / "per_inversion_frf_effects.tsv"
+    if not frf_path.exists():
+        return ["Breakpoint FRF results not found; skipping enrichment analysis."]
+
+    frf = pd.read_csv(frf_path, sep="\t", low_memory=False)
+    frf = frf.rename(columns={"frf_delta": "edge_minus_middle", "usable_for_meta": "usable"})
+    if {"chrom", "start", "end"}.issubset(frf.columns):
+        frf["chromosome_norm"] = frf["chrom"].astype(str).str.replace("^chr", "", regex=True)
+        inv_df = _load_inv_properties()
+        frf = frf.merge(
+            inv_df[["chromosome", "start", "end", "recurrence_flag", "recurrence_label", "inversion_id"]],
+            left_on=["chromosome_norm", "start", "end"],
+            right_on=["chromosome", "start", "end"],
+            how="left",
+            suffixes=("", "_inv"),
+        )
+    lines: List[str] = ["Breakpoint enrichment (flat–ramp–flat model deltas):"]
+
+    usable = frf[frf.get("usable", True) == True]
+    if "recurrence_flag" not in usable.columns:
+        lines.append("  Recurrence annotations missing; cannot stratify FRF deltas.")
+        return lines
+
+    deltas: dict[int, float] = {}
+    for flag in [0, 1]:
+        subset = usable[usable["recurrence_flag"] == flag]
+        if subset.empty:
+            continue
+        deltas[flag] = float(_safe_mean(subset["edge_minus_middle"]))
+        label = "Single-event" if flag == 0 else "Recurrent"
+        lines.append(
+            f"  {label}: mean(FST_flank - FST_middle) = {_fmt(deltas[flag], 3)} (n = {_fmt(len(subset), 0)})."
+        )
+
+    if set(deltas) == {0, 1}:
+        diff = deltas[0] - deltas[1]
+        lines.append(
+            "  Difference-of-differences (single-event minus recurrent): "
+            f"{_fmt(diff, 3)}."
+        )
+
+    if "perm_p_value" in usable.columns:
+        p_val = _safe_mean(usable["perm_p_value"])
+        lines.append(
+            "  One-sided permutation test on recurrence labels: "
+            f"mean p-value ≈ {_fmt(p_val, 3)} (see per-inversion table for details)."
+        )
+
     return lines
+
+
+# ---------------------------------------------------------------------------
+# Section 4. PheWAS breadth and highlights
+# ---------------------------------------------------------------------------
 
 
 def summarize_phewas_scale() -> List[str]:
@@ -236,9 +419,10 @@ def summarize_phewas_scale() -> List[str]:
     lines.append(f"  Unique phenotypes tested: {results['Phenotype'].nunique()}.")
     lines.append(
         "  Case counts span "
-        f"{_fmt_number(results['N_Cases'].min(), 0)} to {_fmt_number(results['N_Cases'].max(), 0)}; "
-        f"controls span {_fmt_number(results['N_Controls'].min(), 0)}–{_fmt_number(results['N_Controls'].max(), 0)}."
+        f"{_fmt(results['N_Cases'].min(), 0)} to {_fmt(results['N_Cases'].max(), 0)}; "
+        f"controls span {_fmt(results['N_Controls'].min(), 0)}–{_fmt(results['N_Controls'].max(), 0)}."
     )
+
     inv_counts = results.groupby("Inversion")["Phenotype"].nunique().sort_values(ascending=False)
     lines.append(
         "  Phenotype coverage per inversion (top 5): "
@@ -254,47 +438,254 @@ def summarize_phewas_scale() -> List[str]:
             f"  Inversions with ≥1 BH-significant phenotype: {sig_inversions} of {results['Inversion'].nunique()}."
         )
 
-    cat_path = DATA_DIR / "phewas v2 - categories.tsv"
-    if cat_path.exists():
-        categories = pd.read_csv(cat_path, sep="\t", low_memory=False)
-        if {"Inversion", "Category", "P_GBJ", "P_GLS"}.issubset(categories.columns):
-            sig_categories = categories[(categories["P_GBJ"] < 0.05) | (categories["P_GLS"] < 0.05)]
-            lines.append(
-                f"  Category-level tests with q<0.05: {len(sig_categories)} across "
-                f"{sig_categories['Inversion'].nunique()} inversions."
-            )
-        else:
-            lines.append("  Category summary present but missing required columns; skipped detailed counts.")
-    else:
-        lines.append("  Category-level summary table not found; skipping.")
-
     return lines
+
+
+@dataclass
+class AssocSpec:
+    inversion: str
+    label: str
+    search_terms: Tuple[str, ...]
+
+
+def _format_or(row: pd.Series) -> str:
+    or_col = None
+    for candidate in ["OR", "Odds_Ratio", "OR_overall"]:
+        if candidate in row.index:
+            or_col = candidate
+            break
+    if or_col is None:
+        return "Odds ratio unavailable"
+
+    or_value = row.get(or_col)
+    lo = row.get("CI_Lower") or row.get("CI95_Lower") or row.get("CI_Lower_Overall")
+    hi = row.get("CI_Upper") or row.get("CI95_Upper") or row.get("CI_Upper_Overall")
+    if lo is not None and hi is not None:
+        return f"OR = {_fmt(or_value, 3)} (95% CI {_fmt(lo, 3)}–{_fmt(hi, 3)})"
+    return f"OR = {_fmt(or_value, 3)}"
+
+
+def summarize_key_associations() -> List[str]:
+    path = DATA_DIR / "all_pop_phewas_tag.tsv"
+    if not path.exists():
+        return ["Per-phenotype association table not found; skipping highlights."]
+
+    assoc = pd.read_csv(path, sep="\t", low_memory=False)
+    assoc["Phenotype"] = assoc["Phenotype"].astype(str)
+    assoc["Inversion"] = assoc["Inversion"].astype(str)
+
+    targets = [
+        AssocSpec(
+            "chr10-79542902-INV-674513",
+            "Positive DNA test for high-risk HPV types",
+            ("hpv", "dna", "positive"),
+        ),
+        AssocSpec(
+            "chr6-141867315-INV-29159",
+            "Laryngitis and tracheitis",
+            ("laryngitis", "tracheitis"),
+        ),
+        AssocSpec(
+            "chr12-46897663-INV-16289",
+            "Conjunctivitis",
+            ("conjunct",),
+        ),
+        AssocSpec(
+            "chr12-46897663-INV-16289",
+            "Migraine",
+            ("migraine",),
+        ),
+        AssocSpec(
+            "chr17-45974480-INV-29218",
+            "Morbid obesity",
+            ("morbid", "obesity"),
+        ),
+        AssocSpec(
+            "chr17-45974480-INV-29218",
+            "Breast lump or abnormal exam",
+            ("lump", "breast"),
+        ),
+        AssocSpec(
+            "chr17-45974480-INV-29218",
+            "Abnormal mammogram",
+            ("mammogram",),
+        ),
+    ]
+
+    lines: List[str] = ["Selected inversion–phenotype associations (logistic regression with LRT p-values):"]
+    for spec in targets:
+        subset = assoc[assoc["Inversion"].str.strip() == spec.inversion]
+        if subset.empty:
+            lines.append(
+                f"  {spec.inversion}: no PheWAS results available locally for {spec.label}."
+            )
+            continue
+
+        mask = np.ones(len(subset), dtype=bool)
+        norm_labels = subset["Phenotype"].astype(str).str.lower()
+        for term in spec.search_terms:
+            mask &= norm_labels.str.contains(term, na=False)
+        candidates = subset[mask]
+
+        if candidates.empty:
+            lines.append(
+                f"  {spec.inversion} × {spec.label}: matching phenotype not found in local table."
+            )
+            continue
+
+        r = candidates.sort_values("P_Value_y").iloc[0]
+        pval = r.get("P_Value_y") or r.get("P_Value") or r.get("P_LRT_Overall")
+        bh = r.get("Q_GLOBAL") or r.get("P_Value_y")
+        parts = _format_or(r)
+        lines.append(
+            f"  {spec.inversion} vs {spec.label}: {parts}, "
+            f"BH-adjusted p ≈ {_fmt(bh, 3)} (raw p = {_fmt(pval, 3)})."
+        )
+    return lines
+
+
+def summarize_category_tests() -> List[str]:
+    cat_path = DATA_DIR / "phewas v2 - categories.tsv"
+    if not cat_path.exists():
+        return ["Phecode category-level omnibus results not found; skipping summary."]
+
+    categories = pd.read_csv(cat_path, sep="\t", low_memory=False)
+    required = {"Inversion", "Category", "P_GBJ", "P_GLS"}
+    if not required.issubset(categories.columns):
+        missing = ", ".join(sorted(required - set(categories.columns)))
+        return [f"Category table missing required columns: {missing}."]
+
+    lines = ["Phecode category omnibus and directional tests:"]
+    for inv, group in categories.groupby("Inversion"):
+        sig = group[(group["P_GBJ"] < 0.05) | (group["P_GLS"] < 0.05)]
+        if sig.empty:
+            continue
+        summaries = []
+        for row in sig.itertuples():
+            gbj = _fmt(row.P_GBJ, 3) if not pd.isna(row.P_GBJ) else "NA"
+            gls = _fmt(row.P_GLS, 3) if not pd.isna(row.P_GLS) else "NA"
+            summaries.append(f"{row.Category}: GBJ p = {gbj}, GLS p = {gls}")
+        lines.append(f"  {inv}: " + "; ".join(summaries))
+
+    if len(lines) == 1:
+        lines.append("  No categories reached the significance threshold (p < 0.05).")
+    return lines
+
+
+# ---------------------------------------------------------------------------
+# Section 5. Imputation performance
+# ---------------------------------------------------------------------------
+
+
+def summarize_imputation() -> List[str]:
+    path = DATA_DIR / "imputation_results.tsv"
+    if not path.exists():
+        return [f"Imputation summary not found at {path}."]
+
+    df = pd.read_csv(path, sep="\t")
+    df = df.rename(columns={"unbiased_pearson_r2": "r2", "p_fdr_bh": "bh_p"})
+    usable = df[(df["r2"] > 0.3) & (df["bh_p"] < 0.05)]
+    lines = ["Imputation performance summary:"]
+    lines.append(
+        f"  Models evaluated: {_fmt(len(df), 0)}; models with r² > 0.3 and BH p < 0.05: {_fmt(len(usable), 0)}."
+    )
+    if "Use" in df.columns:
+        lines.append(
+            f"  Models flagged for downstream PheWAS (Use == True): {_fmt(int(df['Use'].eq(True).sum()), 0)}."
+        )
+    return lines
+
+
+# ---------------------------------------------------------------------------
+# Section 6. PGS covariate sensitivity and selection
+# ---------------------------------------------------------------------------
+
+
+def summarize_pgs_controls() -> List[str]:
+    path = DATA_DIR / "pgs_sensitivity.tsv"
+    if not path.exists():
+        return ["Polygenic-score sensitivity table not found; skipping summary."]
+
+    pgs = pd.read_csv(path, sep="\t", low_memory=False)
+    required = {"Inversion", "Phenotype", "p_nominal", "p_with_pgs"}
+    if not required.issubset(pgs.columns):
+        missing = ", ".join(sorted(required - set(pgs.columns)))
+        return [f"PGS sensitivity table missing required columns: {missing}."]
+
+    pgs = pgs.replace([np.inf, -np.inf], np.nan)
+    pgs = pgs.dropna(subset=["p_nominal", "p_with_pgs"])
+    if pgs.empty:
+        return ["PGS sensitivity table empty after filtering p-values."]
+
+    pgs["fold_change"] = pgs["p_with_pgs"] / pgs["p_nominal"].replace(0, np.nan)
+    largest = pgs.sort_values("fold_change", ascending=False).iloc[0]
+
+    lines = ["Sensitivity of PheWAS associations to regional PGS covariates:"]
+    lines.append(
+        f"  Largest p-value inflation: inversion {largest.Inversion} × {largest.Phenotype} "
+        f"(p_nominal = {_fmt(largest.p_nominal, 3)}, p_with_pgs = {_fmt(largest.p_with_pgs, 3)}, "
+        f"fold-change = {_fmt(largest.fold_change, 3)})."
+    )
+    return lines
+
+
+def summarize_selection() -> List[str]:
+    path = DATA_DIR / "ages_selection.tsv"
+    if not path.exists():
+        return ["Ancient DNA selection results not found; skipping summary."]
+
+    ages = pd.read_csv(path, sep="\t", low_memory=False)
+    required = {"Inversion", "SNP", "p_value", "selection_coeff", "peak_interval_kya"}
+    if not required.issubset(ages.columns):
+        missing = ", ".join(sorted(required - set(ages.columns)))
+        return [f"AGES selection table missing required columns: {missing}."]
+
+    lines = ["Ancient DNA-based selection inferences (AGES model):"]
+    for inv, group in ages.groupby("Inversion"):
+        best = group.sort_values("p_value").iloc[0]
+        lines.append(
+            f"  {inv}: best tag SNP {best.SNP} with p = {_fmt(best.p_value, 3)}, "
+            f"s ≈ {_fmt(best.selection_coeff, 3)}, peak 1-kyr change window {_fmt(best.peak_interval_kya, 3)} kya."
+        )
+    return lines
+
+
+# ---------------------------------------------------------------------------
+# Master report builder
+# ---------------------------------------------------------------------------
 
 
 def build_report() -> List[str]:
     sections: List[Tuple[str, Iterable[str]]] = [
         ("Recurrence", summarize_recurrence()),
+        ("Sample sizes", summarize_sample_sizes()),
         ("Diversity", summarize_diversity()),
         ("Linear model", summarize_linear_model()),
         ("Differentiation", summarize_fst()),
+        ("Breakpoint FRF", summarize_frf()),
         ("Imputation", summarize_imputation()),
         ("PheWAS scale", summarize_phewas_scale()),
+        ("Key associations", summarize_key_associations()),
+        ("Category tests", summarize_category_tests()),
+        ("PGS controls", summarize_pgs_controls()),
+        ("Selection", summarize_selection()),
     ]
-    report_lines: List[str] = []
+
+    output: List[str] = []
     for title, content in sections:
-        report_lines.append(title.upper())
+        output.append(title.upper())
         if isinstance(content, Iterable):
             for line in content:
-                report_lines.append(line)
+                output.append(line)
         else:
-            report_lines.append(str(content))
-        report_lines.append("")
-    return report_lines
+            output.append(str(content))
+        output.append("")
+    return output
 
 
 def main() -> None:
-    report_lines = build_report()
-    text = "\n".join(report_lines).strip() + "\n"
+    lines = build_report()
+    text = "\n".join(lines).strip() + "\n"
     print(text)
     REPORT_PATH.write_text(text)
     print(f"\nSaved report to {REPORT_PATH.relative_to(Path.cwd())}")
@@ -302,3 +693,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

@@ -3,11 +3,17 @@ Chromosome inversion recurrence summary:
   High-quality inversions with consensus labels: 93 (single-event = 61, recurrent = 32).
   Fraction recurrent = 34.41%.
 
+SAMPLE SIZES
+Sample sizes for diversity analyses:
+  Inversion callset columns indicate 44 phased individuals (sample columns).
+  Reporting haplotypes as twice the sample count yields 88 potential phased haplotypes.
+  Loci with ≥2 haplotypes per orientation for π: 60 (from output.csv).
+
 DIVERSITY
-Nucleotide diversity (π) comparisons:
-  Loci with finite π for both orientations: 67.
+Nucleotide diversity (π) by orientation and recurrence:
+  Total loci with finite π estimates: 67.
   Across all loci: mean π(inverted) = 0.000273, mean π(direct) = 0.000387.
-    Paired t-test for π(inverted) vs π(direct): t = -2.870, p = 5.505e-03.
+    Two-sided paired t-test comparing orientations: t = -2.870, p = 5.505e-03.
   Single-event inversions: median π(inverted) = 6.000000e-06, median π(direct) = 0.000233.
   Recurrent inversions: median π(inverted) = 0.000359, median π(direct) = 0.000442.
   Within inverted haplotypes: recurrent median π = 0.000359; single-event median π = 6.000000e-06.
@@ -21,11 +27,17 @@ Orientation × recurrence linear model on log π ratios (Model A):
   Overall inversion effect (pooled Δ-logπ): fold-change = 0.537 (95% CI 0.372–0.776), p = 9.424e-04.
 
 DIFFERENTIATION
-Hudson's FST between orientations:
+Differentiation between orientations (Hudson's FST):
   Single-event: median FST = 0.325 (n = 28).
   Recurrent: median FST = 0.070 (n = 32).
   Mann–Whitney U test (single-event vs recurrent): U = 628.000, p = 7.680e-03.
-  Highly differentiated loci: 26 with FST > 0.2; 10 with FST > 0.5.
+  Highly differentiated loci: 26 with FST > 0.2 and 10 with FST > 0.5.
+
+BREAKPOINT FRF
+Breakpoint enrichment (flat–ramp–flat model deltas):
+  Single-event: mean(FST_flank - FST_middle) = 0.043 (n = 14).
+  Recurrent: mean(FST_flank - FST_middle) = -0.079 (n = 17).
+  Difference-of-differences (single-event minus recurrent): 0.122.
 
 IMPUTATION
 Imputation performance summary:
@@ -38,4 +50,27 @@ PheWAS scale summary:
   Case counts span 1002 to 137692; controls span 182133–368254.
   Phenotype coverage per inversion (top 5): chr10-79542902-INV-674513: 1089, chr12-46897663-INV-16289: 1089, chr17-45585160-INV-706887: 1089, chr4-33098029-INV-7075: 1089, chr6-141867315-INV-29159: 1089; ...
   Inversions with ≥1 BH-significant phenotype: 4 of 6.
-  Category-level tests with q<0.05: 28 across 5 inversions.
+
+KEY ASSOCIATIONS
+Selected inversion–phenotype associations (logistic regression with LRT p-values):
+  chr10-79542902-INV-674513: no PheWAS results available locally for Positive DNA test for high-risk HPV types.
+  chr6-141867315-INV-29159: no PheWAS results available locally for Laryngitis and tracheitis.
+  chr12-46897663-INV-16289: no PheWAS results available locally for Conjunctivitis.
+  chr12-46897663-INV-16289: no PheWAS results available locally for Migraine.
+  chr17-45974480-INV-29218 vs Morbid obesity: OR = 1.054, BH-adjusted p ≈ 8.151e-04 (raw p = 3.650e-06).
+  chr17-45974480-INV-29218 vs Breast lump or abnormal exam: OR = 0.956, BH-adjusted p ≈ 6.375e-03 (raw p = 4.280e-05).
+  chr17-45974480-INV-29218 vs Abnormal mammogram: OR = 0.939, BH-adjusted p ≈ 7.326e-03 (raw p = 6.870e-05).
+
+CATEGORY TESTS
+Phecode category omnibus and directional tests:
+  chr12-46897663-INV-16289: Gastrointestinal: GBJ p = 2.000e-05, GLS p = 9.320e-05; Genitourinary: GBJ p = 2.000e-05, GLS p = 1.817e-04; Neoplasms: GBJ p = 2.000e-05, GLS p = 1.500e-04; Dermatological: GBJ p = 2.000e-05, GLS p = 2.410e-06; Symptoms: GBJ p = 8.570e-05, GLS p = 1.390e-04; Sense organs: GBJ p = 1.143e-04, GLS p = 9.060e-03; Muscloskeletal: GBJ p = 2.000e-04, GLS p = 0.057; Endocrine/Metab: GBJ p = 1.600e-03, GLS p = 1.688e-03; Respiratory: GBJ p = 1.600e-03, GLS p = 9.401e-03; Neurological: GBJ p = 0.012, GLS p = 0.308; Cardiovascular: GBJ p = 0.132, GLS p = 0.030; Mental: GBJ p = 0.386, GLS p = 0.036
+  chr17-45585160-INV-706887: Symptoms: GBJ p = 2.000e-05, GLS p = 2.239e-04; Neoplasms: GBJ p = 2.000e-05, GLS p = 5.800e-05; Dermatological: GBJ p = 2.000e-05, GLS p = 1.380e-03; Gastrointestinal: GBJ p = 3.999e-04, GLS p = 9.044e-03; Neurological: GBJ p = 3.999e-04, GLS p = 0.068; Endocrine/Metab: GBJ p = 5.999e-04, GLS p = 0.107; Respiratory: GBJ p = 7.998e-04, GLS p = 0.044; Sense organs: GBJ p = 2.999e-03, GLS p = 0.171; Muscloskeletal: GBJ p = 4.599e-03, GLS p = 0.033; Cardiovascular: GBJ p = 0.013, GLS p = 0.615; Blood/Immune: GBJ p = 0.170, GLS p = 0.010
+  chr4-33098029-INV-7075: Blood/Immune: GBJ p = 0.112, GLS p = 0.038; Respiratory: GBJ p = 0.199, GLS p = 0.029
+  chr6-141867315-INV-29159: Blood/Immune: GBJ p = 0.025, GLS p = 0.712; Respiratory: GBJ p = 0.044, GLS p = 0.625
+  chr6-167181003-INV-209976: Infections: GBJ p = 0.369, GLS p = 7.906e-03
+
+PGS CONTROLS
+Polygenic-score sensitivity table not found; skipping summary.
+
+SELECTION
+Ancient DNA selection results not found; skipping summary.
