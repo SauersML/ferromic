@@ -1,5 +1,5 @@
-#!/usr/bin/env python3
-
+import os
+import json
 import pandas as pd
 import numpy as np
 import subprocess
@@ -7,33 +7,34 @@ import subprocess
 # Still need to handle ancestry
 # Still need to loop over disease / inv pairs
 
-# Existing PLINK data
-ARRAYS_PREFIX = "arrays"              # arrays.bed / arrays.bim / arrays.fam
-
-# Inversion hard calls (already discretized to 0/1/2)
-INV_CALLS_TSV = "inv_hard_calls.tsv"  # FID IID inv_genotype
-
-# Covariates input: must have FID, IID, sex, age, and PC columns (PC1, PC2, ...)
+ARRAYS_PREFIX = "arrays"
+INV_CALLS_TSV = "inv_hard_calls.tsv"
 COVARIATES_TSV = "covariates_input.tsv"
-
-# Phenotype input: must have FID, IID, and a binary column disease_name (0/1)
 PHENOTYPE_TSV = "phenotype_input.tsv"
 DISEASE_COL_NAME = "disease_name"
 
-# Inversion pseudo-SNP definition
 INV_SNP_ID = "INV_17Q21"
 INV_CHR = "chr17"
-INV_BP = 45585160  # set to a sensible coordinate for the inversion
+INV_BP = 45585160
 
-# Intermediate and output prefixes
-KEEP_SAMPLES_FILE = "bolt_keep_samples.txt"
-INV_ONLY_PREFIX = "inv_only"
-ARRAYS_KEEP_PREFIX = "arrays_keep"
-ARRAYS_PLUS_INV_PREFIX = "arrays_plus_inv"
+BR_CACHE_DIR = "br_cache"
+CACHE_META_PATH = os.path.join(BR_CACHE_DIR, "prep_cache_state.json")
 
-BOLT_COV_PATH = "bolt.cov"
-BOLT_PHENO_PATH = "bolt.pheno"
-BOLT_MODEL_SNPS_PATH = "bolt.modelSnps"
+CACHED_KEEP_SAMPLES_FILE = os.path.join(BR_CACHE_DIR, "bolt_keep_samples.txt")
+CACHED_INV_ONLY_PREFIX = os.path.join(BR_CACHE_DIR, "inv_only")
+CACHED_ARRAYS_KEEP_PREFIX = os.path.join(BR_CACHE_DIR, "arrays_keep")
+CACHED_ARRAYS_PLUS_INV_PREFIX = os.path.join(BR_CACHE_DIR, "arrays_plus_inv")
+
+CACHED_BOLT_COV_PATH = os.path.join(BR_CACHE_DIR, "bolt.cov")
+CACHED_BOLT_PHENO_PATH = os.path.join(BR_CACHE_DIR, "bolt.pheno")
+CACHED_BOLT_MODEL_SNPS_PATH = os.path.join(BR_CACHE_DIR, "bolt.modelSnps")
+
+WORK_ARRAYS_PLUS_INV_PREFIX = "arrays_plus_inv"
+WORK_BOLT_COV_PATH = "bolt.cov"
+WORK_BOLT_PHENO_PATH = "bolt.pheno"
+WORK_BOLT_MODEL_SNPS_PATH = "bolt.modelSnps"
+
+PLINK_THREADS = max(1, (os.cpu_count() or 1) // 2)
 
 
 def load_fam(path):
@@ -59,6 +60,98 @@ def load_inv_calls(path):
     return inv[["FID", "IID", "inv_genotype"]]
 
 
+def file_fingerprint(path):
+    if not os.path.exists(path):
+        raise FileNotFoundError(path)
+    st = os.stat(path)
+    return {"size": st.st_size, "mtime": st.st_mtime}
+
+
+def load_cache_meta():
+    os.makedirs(BR_CACHE_DIR, exist_ok=True)
+    if not os.path.exists(CACHE_META_PATH):
+        return {"version": 1}
+    with open(CACHE_META_PATH, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    if data.get("version") != 1:
+        return {"version": 1}
+    return data
+
+
+def save_cache_meta(meta):
+    meta["version"] = 1
+    tmp_path = CACHE_META_PATH + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(meta, f, sort_keys=True, indent=2)
+    os.replace(tmp_path, CACHE_META_PATH)
+
+
+def compute_geno_key():
+    inputs = {
+        "arrays_bed": file_fingerprint(f"{ARRAYS_PREFIX}.bed"),
+        "arrays_bim": file_fingerprint(f"{ARRAYS_PREFIX}.bim"),
+        "arrays_fam": file_fingerprint(f"{ARRAYS_PREFIX}.fam"),
+        "inv_calls": file_fingerprint(INV_CALLS_TSV),
+        "inv_snp_id": INV_SNP_ID,
+        "inv_chr": INV_CHR,
+        "inv_bp": INV_BP,
+    }
+    return json.dumps(inputs, sort_keys=True)
+
+
+def compute_cov_key(geno_key):
+    inputs = {
+        "geno_key": geno_key,
+        "covariates": file_fingerprint(COVARIATES_TSV),
+    }
+    return json.dumps(inputs, sort_keys=True)
+
+
+def compute_pheno_key(geno_key):
+    inputs = {
+        "geno_key": geno_key,
+        "phenotype": file_fingerprint(PHENOTYPE_TSV),
+        "disease_col": DISEASE_COL_NAME,
+    }
+    return json.dumps(inputs, sort_keys=True)
+
+
+def compute_modelsnps_key(geno_key):
+    inputs = {"geno_key": geno_key}
+    return json.dumps(inputs, sort_keys=True)
+
+
+def geno_outputs_exist():
+    paths = [
+        f"{CACHED_ARRAYS_PLUS_INV_PREFIX}.bed",
+        f"{CACHED_ARRAYS_PLUS_INV_PREFIX}.bim",
+        f"{CACHED_ARRAYS_PLUS_INV_PREFIX}.fam",
+        CACHED_KEEP_SAMPLES_FILE,
+    ]
+    for p in paths:
+        if not os.path.exists(p):
+            return False
+    return True
+
+
+def cov_outputs_exist():
+    return os.path.exists(CACHED_BOLT_COV_PATH)
+
+
+def pheno_outputs_exist():
+    return os.path.exists(CACHED_BOLT_PHENO_PATH)
+
+
+def modelsnps_outputs_exist():
+    return os.path.exists(CACHED_BOLT_MODEL_SNPS_PATH)
+
+
+def ensure_symlink(src, dst):
+    if os.path.islink(dst) or os.path.exists(dst):
+        os.remove(dst)
+    os.symlink(os.path.abspath(src), dst)
+
+
 def determine_keep_samples():
     fam = load_fam(f"{ARRAYS_PREFIX}.fam")
     inv = load_inv_calls(INV_CALLS_TSV)
@@ -77,7 +170,7 @@ def determine_keep_samples():
     fam_keep = merged.loc[~missing_mask, ["FID", "IID", "father", "mother", "sex", "pheno"]].copy()
     inv_keep = merged.loc[~missing_mask, ["FID", "IID", "inv_genotype"]].copy()
 
-    fam_keep.to_csv(KEEP_SAMPLES_FILE, sep="\t", header=False, index=False)
+    fam_keep.to_csv(CACHED_KEEP_SAMPLES_FILE, sep="\t", header=False, index=False)
 
     return fam_keep, inv_keep
 
@@ -105,21 +198,22 @@ def prepare_inv_only_ped_and_map(fam_keep, inv_keep):
 
     ped_geno = pd.DataFrame(alleles, columns=[f"{INV_SNP_ID}_A1", f"{INV_SNP_ID}_A2"])
     ped_full = pd.concat([ped, ped_geno], axis=1)
-    ped_full.to_csv(f"{INV_ONLY_PREFIX}.ped", sep="\t", header=False, index=False)
+    ped_full.to_csv(f"{CACHED_INV_ONLY_PREFIX}.ped", sep="\t", header=False, index=False)
 
     map_df = pd.DataFrame(
         [[INV_CHR, INV_SNP_ID, "0", str(INV_BP)]],
         columns=["CHR", "SNP", "GENPOS", "BP"],
     )
-    map_df.to_csv(f"{INV_ONLY_PREFIX}.map", sep="\t", header=False, index=False)
+    map_df.to_csv(f"{CACHED_INV_ONLY_PREFIX}.map", sep="\t", header=False, index=False)
 
 
 def make_inv_only_bed():
     cmd = [
         "plink",
-        "--file", INV_ONLY_PREFIX,
+        "--threads", str(PLINK_THREADS),
+        "--file", CACHED_INV_ONLY_PREFIX,
         "--make-bed",
-        "--out", INV_ONLY_PREFIX,
+        "--out", CACHED_INV_ONLY_PREFIX,
     ]
     subprocess.run(cmd, check=True)
 
@@ -127,10 +221,11 @@ def make_inv_only_bed():
 def make_arrays_keep():
     cmd = [
         "plink",
+        "--threads", str(PLINK_THREADS),
         "--bfile", ARRAYS_PREFIX,
-        "--keep", KEEP_SAMPLES_FILE,
+        "--keep", CACHED_KEEP_SAMPLES_FILE,
         "--make-bed",
-        "--out", ARRAYS_KEEP_PREFIX,
+        "--out", CACHED_ARRAYS_KEEP_PREFIX,
     ]
     subprocess.run(cmd, check=True)
 
@@ -138,16 +233,20 @@ def make_arrays_keep():
 def merge_arrays_with_inv():
     cmd = [
         "plink",
-        "--bfile", ARRAYS_KEEP_PREFIX,
-        "--bmerge", f"{INV_ONLY_PREFIX}.bed", f"{INV_ONLY_PREFIX}.bim", f"{INV_ONLY_PREFIX}.fam",
+        "--threads", str(PLINK_THREADS),
+        "--bfile", CACHED_ARRAYS_KEEP_PREFIX,
+        "--bmerge",
+        f"{CACHED_INV_ONLY_PREFIX}.bed",
+        f"{CACHED_INV_ONLY_PREFIX}.bim",
+        f"{CACHED_INV_ONLY_PREFIX}.fam",
         "--make-bed",
-        "--out", ARRAYS_PLUS_INV_PREFIX,
+        "--out", CACHED_ARRAYS_PLUS_INV_PREFIX,
     ]
     subprocess.run(cmd, check=True)
 
 
 def write_bolt_cov():
-    fam = load_fam(f"{ARRAYS_PLUS_INV_PREFIX}.fam")
+    fam = load_fam(f"{CACHED_ARRAYS_PLUS_INV_PREFIX}.fam")
     cov = pd.read_csv(COVARIATES_TSV, sep="\t", dtype=str)
     cov = cov.rename(columns={"fid": "FID", "iid": "IID"})
 
@@ -170,12 +269,12 @@ def write_bolt_cov():
             f"Example rows:\n{bad.head()}"
         )
 
-    merged.to_csv(BOLT_COV_PATH, sep="\t", header=True, index=False)
-    print(f"Wrote covariate file: {BOLT_COV_PATH}")
+    merged.to_csv(CACHED_BOLT_COV_PATH, sep="\t", header=True, index=False)
+    print(f"Wrote covariate file: {CACHED_BOLT_COV_PATH}")
 
 
 def write_bolt_pheno():
-    fam = load_fam(f"{ARRAYS_PLUS_INV_PREFIX}.fam")
+    fam = load_fam(f"{CACHED_ARRAYS_PLUS_INV_PREFIX}.fam")
     pheno = pd.read_csv(PHENOTYPE_TSV, sep="\t", dtype=str)
     pheno = pheno.rename(columns={"fid": "FID", "iid": "IID"})
 
@@ -196,12 +295,12 @@ def write_bolt_pheno():
     if not set(vals.unique()) <= {0, 1}:
         raise ValueError("Phenotype column must be strictly binary 0/1 with no other values.")
 
-    merged.to_csv(BOLT_PHENO_PATH, sep="\t", header=True, index=False)
-    print(f"Wrote phenotype file: {BOLT_PHENO_PATH}")
+    merged.to_csv(CACHED_BOLT_PHENO_PATH, sep="\t", header=True, index=False)
+    print(f"Wrote phenotype file: {CACHED_BOLT_PHENO_PATH}")
 
 
 def write_model_snps():
-    bim = load_bim(f"{ARRAYS_PLUS_INV_PREFIX}.bim")
+    bim = load_bim(f"{CACHED_ARRAYS_PLUS_INV_PREFIX}.bim")
     rows = []
     for snp in bim["SNP"]:
         if snp == INV_SNP_ID:
@@ -209,19 +308,64 @@ def write_model_snps():
         else:
             rows.append((snp, "background"))
     out = pd.DataFrame(rows, columns=["SNP_ID", "component_name"])
-    out.to_csv(BOLT_MODEL_SNPS_PATH, sep="\t", header=False, index=False)
-    print(f"Wrote model SNPs file: {BOLT_MODEL_SNPS_PATH}")
+    out.to_csv(CACHED_BOLT_MODEL_SNPS_PATH, sep="\t", header=False, index=False)
+    print(f"Wrote model SNPs file: {CACHED_BOLT_MODEL_SNPS_PATH}")
+
+
+def materialize_geno_outputs():
+    for ext in (".bed", ".bim", ".fam"):
+        src = f"{CACHED_ARRAYS_PLUS_INV_PREFIX}{ext}"
+        dst = f"{WORK_ARRAYS_PLUS_INV_PREFIX}{ext}"
+        ensure_symlink(src, dst)
 
 
 def main():
-    fam_keep, inv_keep = determine_keep_samples()
-    prepare_inv_only_ped_and_map(fam_keep, inv_keep)
-    make_inv_only_bed()
-    make_arrays_keep()
-    merge_arrays_with_inv()
-    write_bolt_cov()
-    write_bolt_pheno()
-    write_model_snps()
+    meta = load_cache_meta()
+
+    geno_key = compute_geno_key()
+    geno_cached = meta.get("geno_key") == geno_key and geno_outputs_exist()
+
+    if not geno_cached:
+        fam_keep, inv_keep = determine_keep_samples()
+        prepare_inv_only_ped_and_map(fam_keep, inv_keep)
+        make_inv_only_bed()
+        make_arrays_keep()
+        merge_arrays_with_inv()
+        meta["geno_key"] = geno_key
+        save_cache_meta(meta)
+    else:
+        print("Using cached genotype layer from br_cache.")
+    materialize_geno_outputs()
+
+    cov_key = compute_cov_key(geno_key)
+    cov_cached = meta.get("cov_key") == cov_key and cov_outputs_exist()
+    if not cov_cached:
+        write_bolt_cov()
+        meta["cov_key"] = cov_key
+        save_cache_meta(meta)
+    else:
+        print("Using cached covariate file from br_cache.")
+    ensure_symlink(CACHED_BOLT_COV_PATH, WORK_BOLT_COV_PATH)
+
+    pheno_key = compute_pheno_key(geno_key)
+    pheno_cached = meta.get("pheno_key") == pheno_key and pheno_outputs_exist()
+    if not pheno_cached:
+        write_bolt_pheno()
+        meta["pheno_key"] = pheno_key
+        save_cache_meta(meta)
+    else:
+        print("Using cached phenotype file from br_cache.")
+    ensure_symlink(CACHED_BOLT_PHENO_PATH, WORK_BOLT_PHENO_PATH)
+
+    modelsnps_key = compute_modelsnps_key(geno_key)
+    modelsnps_cached = meta.get("modelsnps_key") == modelsnps_key and modelsnps_outputs_exist()
+    if not modelsnps_cached:
+        write_model_snps()
+        meta["modelsnps_key"] = modelsnps_key
+        save_cache_meta(meta)
+    else:
+        print("Using cached modelSnps file from br_cache.")
+    ensure_symlink(CACHED_BOLT_MODEL_SNPS_PATH, WORK_BOLT_MODEL_SNPS_PATH)
 
 
 if __name__ == "__main__":
