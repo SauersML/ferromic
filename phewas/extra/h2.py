@@ -26,3 +26,6 @@ We can do the normal SNP IDs.
 For inv calls, it cannot stay as an arbitrary float dosage for BOLT-REML. so we have to compute hard-calls. 
 
 this must be one ancestry per BOLT-REML run
+
+
+liability-scale heritability
