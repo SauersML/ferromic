@@ -4,7 +4,7 @@ Remaining columns: all covariates
 - PCs
 -age
 - age^2
--ancestry categories
+- NOT ancestry categories since it is one ancestry at a time
 - sex
 
 
@@ -24,3 +24,5 @@ SNP_ID    component_name
 We can do the normal SNP IDs.
 
 For inv calls, it cannot stay as an arbitrary float dosage for BOLT-REML. so we have to compute hard-calls. 
+
+this must be one ancestry per BOLT-REML run
