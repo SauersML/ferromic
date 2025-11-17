@@ -800,23 +800,24 @@ def summarize_selection() -> List[str]:
         if col in traj.columns:
             traj[col] = pd.to_numeric(traj[col], errors="coerce")
 
-    traj = traj.dropna(subset=["date_center", "pt"])
+    value_col = "af" if "af" in traj.columns else "pt"
+    traj = traj.dropna(subset=["date_center", value_col])
     if traj.empty:
         return ["AGES trajectory table is empty after filtering numeric values."]
 
     traj = traj.sort_values("date_center")
     present = traj.iloc[0]
     ancient = traj.iloc[-1]
-    change = present.pt - ancient.pt
-    pt_min = traj["pt"].min()
-    pt_max = traj["pt"].max()
+    change = present[value_col] - ancient[value_col]
+    value_min = traj[value_col].min()
+    value_max = traj[value_col].max()
     sample_median = _safe_median(traj.get("num_allele"))
-    window_summary = _largest_window_change(traj["date_center"], traj["pt"], window=1000.0)
+    window_summary = _largest_window_change(traj["date_center"], traj[value_col], window=1000.0)
 
     lines = [
         "Ancient DNA-based selection inferences (AGES trajectory 12_47296118_A_G):",
         f"  Windows analyzed: {_fmt(len(traj), 0)} spanning {_fmt(traj['date_center'].min(), 0)}–{_fmt(traj['date_center'].max(), 0)} years before present.",
-        f"  Model frequency pₜ ranges {_fmt(pt_min, 3)}–{_fmt(pt_max, 3)}; net change from {_fmt(ancient.date_center, 0)} to {_fmt(present.date_center, 0)} years BP is {_fmt(change, 3)}.",
+        f"  Observed allele-frequency ranges {_fmt(value_min, 3)}–{_fmt(value_max, 3)}; net change from {_fmt(ancient.date_center, 0)} to {_fmt(present.date_center, 0)} years BP is {_fmt(change, 3)}.",
     ]
     if sample_median is not None:
         lines.append(
@@ -825,7 +826,7 @@ def summarize_selection() -> List[str]:
     if window_summary is not None:
         start, end, delta = window_summary
         lines.append(
-            f"  Largest ~1,000-year change: Δpₜ ≈ {_fmt(delta, 3)} between {_fmt(start, 0)} and {_fmt(end, 0)} years BP."
+            f"  Largest ~1,000-year change: Δf ≈ {_fmt(delta, 3)} between {_fmt(start, 0)} and {_fmt(end, 0)} years BP."
         )
     return lines
 

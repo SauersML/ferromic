@@ -78,6 +78,6 @@ Sensitivity of PheWAS associations to regional PGS covariates:
 SELECTION
 Ancient DNA-based selection inferences (AGES trajectory 12_47296118_A_G):
   Windows analyzed: 101 spanning 0–1e+04 years before present.
-  Model frequency pₜ ranges 0.025–0.084; net change from 1e+04 to 0 years BP is 0.059.
+  Observed allele-frequency ranges 0.019–0.090; net change from 1e+04 to 0 years BP is 0.071.
   Median haploid sample size per window ≈ 1e+03 alleles.
-  Largest ~1,000-year change: Δpₜ ≈ 6.710e-03 between 0 and 1e+03 years BP.
+  Largest ~1,000-year change: Δf ≈ 0.039 between 4e+03 and 6e+03 years BP.
