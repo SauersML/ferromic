@@ -458,8 +458,28 @@ def _format_or(row: pd.Series) -> str:
         return "Odds ratio unavailable"
 
     or_value = row.get(or_col)
-    lo = row.get("CI_Lower") or row.get("CI95_Lower") or row.get("CI_Lower_Overall")
-    hi = row.get("CI_Upper") or row.get("CI95_Upper") or row.get("CI_Upper_Overall")
+    lo = None
+    hi = None
+    for lo_candidate in [
+        "CI_Lower",
+        "CI95_Lower",
+        "CI_Lower_Overall",
+        "CI_LO_OR",
+        "CI_Lower_DISPLAY",
+    ]:
+        if lo_candidate in row.index and not pd.isna(row.get(lo_candidate)):
+            lo = row.get(lo_candidate)
+            break
+    for hi_candidate in [
+        "CI_Upper",
+        "CI95_Upper",
+        "CI_Upper_Overall",
+        "CI_HI_OR",
+        "CI_Upper_DISPLAY",
+    ]:
+        if hi_candidate in row.index and not pd.isna(row.get(hi_candidate)):
+            hi = row.get(hi_candidate)
+            break
     if lo is not None and hi is not None:
         return f"OR = {_fmt(or_value, 3)} (95% CI {_fmt(lo, 3)}–{_fmt(hi, 3)})"
     return f"OR = {_fmt(or_value, 3)}"
@@ -470,17 +490,21 @@ def summarize_key_associations() -> List[str]:
         DATA_DIR / "phewas_results.tsv",
         DATA_DIR / "all_pop_phewas_tag.tsv",
     ]
-    assoc: pd.DataFrame | None = None
-    source = None
-    for candidate in table_candidates:
-        if candidate.exists():
-            assoc = pd.read_csv(candidate, sep="\t", low_memory=False)
-            source = candidate.name
-            break
+    frames: List[pd.DataFrame] = []
+    source_tables: List[str] = []
+    for priority, candidate in enumerate(table_candidates):
+        if not candidate.exists():
+            continue
+        df = pd.read_csv(candidate, sep="\t", low_memory=False)
+        df["__priority"] = priority
+        df["__source_table"] = candidate.name
+        frames.append(df)
+        source_tables.append(candidate.name)
 
-    if assoc is None:
+    if not frames:
         return ["Per-phenotype association table not found; skipping highlights."]
 
+    assoc = pd.concat(frames, ignore_index=True, sort=False)
     assoc["Phenotype"] = assoc["Phenotype"].astype(str)
     assoc["Inversion"] = assoc["Inversion"].astype(str)
 
@@ -522,9 +546,10 @@ def summarize_key_associations() -> List[str]:
         ),
     ]
 
+    unique_sources = list(dict.fromkeys(source_tables))
     lines: List[str] = [
         "Selected inversion–phenotype associations (logistic regression with LRT p-values):",
-        f"  Source table: {source}.",
+        "  Source tables: " + ", ".join(unique_sources) + ".",
     ]
     for spec in targets:
         subset = assoc[assoc["Inversion"].str.strip() == spec.inversion]
@@ -547,10 +572,8 @@ def summarize_key_associations() -> List[str]:
             continue
 
         sort_columns = [col for col in ["P_Value", "P_Value_y", "P_Value_x", "P_LRT_Overall"] if col in candidates.columns]
-        if sort_columns:
-            r = candidates.sort_values(sort_columns).iloc[0]
-        else:
-            r = candidates.iloc[0]
+        sort_order = ["__priority"] + sort_columns if sort_columns else ["__priority"]
+        r = candidates.sort_values(sort_order).iloc[0]
         pval = None
         for col in ["P_Value", "P_Value_y", "P_Value_x", "P_LRT_Overall", "P_Value_LRT_Bootstrap"]:
             value = r.get(col)
