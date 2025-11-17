@@ -446,6 +446,7 @@ class AssocSpec:
     inversion: str
     label: str
     search_terms: Tuple[str, ...]
+    table_name: str = "phewas_results.tsv"
 
 
 def _format_or(row: pd.Series) -> str:
@@ -486,28 +487,6 @@ def _format_or(row: pd.Series) -> str:
 
 
 def summarize_key_associations() -> List[str]:
-    table_candidates = [
-        DATA_DIR / "phewas_results.tsv",
-        DATA_DIR / "all_pop_phewas_tag.tsv",
-    ]
-    frames: List[pd.DataFrame] = []
-    source_tables: List[str] = []
-    for priority, candidate in enumerate(table_candidates):
-        if not candidate.exists():
-            continue
-        df = pd.read_csv(candidate, sep="\t", low_memory=False)
-        df["__priority"] = priority
-        df["__source_table"] = candidate.name
-        frames.append(df)
-        source_tables.append(candidate.name)
-
-    if not frames:
-        return ["Per-phenotype association table not found; skipping highlights."]
-
-    assoc = pd.concat(frames, ignore_index=True, sort=False)
-    assoc["Phenotype"] = assoc["Phenotype"].astype(str)
-    assoc["Inversion"] = assoc["Inversion"].astype(str)
-
     targets = [
         AssocSpec(
             "chr10-79542902-INV-674513",
@@ -533,26 +512,62 @@ def summarize_key_associations() -> List[str]:
             "chr17-45974480-INV-29218",
             "Morbid obesity",
             ("morbid", "obesity"),
+            table_name="all_pop_phewas_tag.tsv",
         ),
         AssocSpec(
             "chr17-45974480-INV-29218",
             "Breast lump or abnormal exam",
             ("lump", "breast"),
+            table_name="all_pop_phewas_tag.tsv",
         ),
         AssocSpec(
             "chr17-45974480-INV-29218",
             "Abnormal mammogram",
             ("mammogram",),
+            table_name="all_pop_phewas_tag.tsv",
         ),
     ]
 
-    unique_sources = list(dict.fromkeys(source_tables))
+    table_names = sorted({spec.table_name for spec in targets})
+    tables: dict[str, pd.DataFrame] = {}
+    missing_tables: List[str] = []
+    for name in table_names:
+        path = DATA_DIR / name
+        if not path.exists():
+            missing_tables.append(name)
+            continue
+        df = pd.read_csv(path, sep="\t", low_memory=False)
+        if "Phenotype" not in df.columns or "Inversion" not in df.columns:
+            missing_tables.append(name)
+            continue
+        df["Phenotype"] = df["Phenotype"].astype(str)
+        df["Inversion"] = df["Inversion"].astype(str)
+        tables[name] = df
+
+    if not tables:
+        missing_desc = f" ({', '.join(sorted(set(missing_tables)))})" if missing_tables else ""
+        return [
+            "Per-phenotype association tables not found; skipping highlights" + missing_desc + "."
+        ]
+
+    available_sources = list(tables.keys())
     lines: List[str] = [
         "Selected inversion–phenotype associations (logistic regression with LRT p-values):",
-        "  Source tables: " + ", ".join(unique_sources) + ".",
+        "  Available source tables: " + ", ".join(available_sources) + ".",
     ]
+    if missing_tables:
+        lines.append("  Missing source tables: " + ", ".join(sorted(set(missing_tables))) + ".")
+
     for spec in targets:
-        subset = assoc[assoc["Inversion"].str.strip() == spec.inversion]
+        table = tables.get(spec.table_name)
+        if table is None:
+            lines.append(
+                f"  {spec.inversion}: source table {spec.table_name} not available locally; "
+                f"cannot summarize {spec.label}."
+            )
+            continue
+
+        subset = table[table["Inversion"].str.strip() == spec.inversion]
         if subset.empty:
             lines.append(
                 f"  {spec.inversion}: no PheWAS results available locally for {spec.label}."
@@ -567,15 +582,28 @@ def summarize_key_associations() -> List[str]:
 
         if candidates.empty:
             lines.append(
-                f"  {spec.inversion} × {spec.label}: matching phenotype not found in local table."
+                f"  {spec.inversion} × {spec.label}: matching phenotype not found in {spec.table_name}."
             )
             continue
 
-        sort_columns = [col for col in ["P_Value", "P_Value_y", "P_Value_x", "P_LRT_Overall"] if col in candidates.columns]
-        sort_order = ["__priority"] + sort_columns if sort_columns else ["__priority"]
-        r = candidates.sort_values(sort_order).iloc[0]
+        sort_columns = [
+            col
+            for col in ["P_Value", "P_Value_y", "P_Value_x", "P_LRT_Overall"]
+            if col in candidates.columns
+        ]
+        if sort_columns:
+            r = candidates.sort_values(sort_columns).iloc[0]
+        else:
+            r = candidates.iloc[0]
+
         pval = None
-        for col in ["P_Value", "P_Value_y", "P_Value_x", "P_LRT_Overall", "P_Value_LRT_Bootstrap"]:
+        for col in [
+            "P_Value",
+            "P_Value_y",
+            "P_Value_x",
+            "P_LRT_Overall",
+            "P_Value_LRT_Bootstrap",
+        ]:
             value = r.get(col)
             if value is not None and not pd.isna(value):
                 pval = value

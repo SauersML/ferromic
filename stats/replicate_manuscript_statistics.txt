@@ -53,7 +53,7 @@ PheWAS scale summary:
 
 KEY ASSOCIATIONS
 Selected inversion–phenotype associations (logistic regression with LRT p-values):
-  Source tables: phewas_results.tsv, all_pop_phewas_tag.tsv.
+  Available source tables: all_pop_phewas_tag.tsv, phewas_results.tsv.
   chr10-79542902-INV-674513 vs Positive DNA test for high-risk HPV types: OR = 1.241 (95% CI 1.114–1.382), BH-adjusted p ≈ 0.032 (raw p = 1.144e-04).
   chr6-141867315-INV-29159 vs Laryngitis and tracheitis: OR = 0.572 (95% CI 0.491–0.751), BH-adjusted p ≈ 0.041 (raw p = 2.193e-04).
   chr12-46897663-INV-16289 vs Conjunctivitis: OR = 1.147 (95% CI 1.091–1.205), BH-adjusted p ≈ 1.970e-04 (raw p = 9.630e-08).
