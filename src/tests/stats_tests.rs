@@ -333,6 +333,17 @@ mod tests {
     }
 
     #[test]
+    fn test_calculate_pi_no_variants_returns_zero() {
+        let variants = vec![];
+        let haplotypes = vec![
+            (0, HaplotypeSide::Left),
+            (0, HaplotypeSide::Right),
+        ];
+        let pi = calculate_pi(&variants, &haplotypes, 1000);
+        assert_eq!(pi, 0.0);
+    }
+
+    #[test]
     fn test_calculate_watterson_theta_pi_min_sample_size() {
         let variants = vec![create_variant(100, vec![Some(vec![0, 1])])];
         let haplotypes = vec![(0, HaplotypeSide::Left), (0, HaplotypeSide::Right)];

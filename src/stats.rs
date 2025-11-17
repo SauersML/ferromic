@@ -4046,10 +4046,16 @@ pub fn calculate_pi(
     }
 
     // Use unbiased per-site aggregation approach with parallel processing for large variant sets
-    let sample_count = variants
+    let variant_sample_count = variants
         .first()
         .map(|variant| variant.genotypes.len())
         .unwrap_or(0);
+    let haplotype_sample_count = haplotypes_in_group
+        .iter()
+        .map(|(sample_idx, _)| sample_idx.saturating_add(1))
+        .max()
+        .unwrap_or(0);
+    let sample_count = variant_sample_count.max(haplotype_sample_count);
     let membership = HapMembership::build(sample_count, haplotypes_in_group);
 
     if membership.total() <= 1 {
