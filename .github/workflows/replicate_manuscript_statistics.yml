@@ -1,0 +1,42 @@
+name: Replicate Manuscript Statistics
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/replicate_manuscript_statistics.yml'
+      - 'stats/**'
+      - 'data/**'
+  pull_request:
+    paths:
+      - '.github/workflows/replicate_manuscript_statistics.yml'
+      - 'stats/**'
+      - 'data/**'
+
+jobs:
+  run-report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy pandas scipy statsmodels
+
+      - name: Generate manuscript statistics
+        run: python stats/replicate_manuscript_statistics.py
+
+      - name: Upload manuscript statistics artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: replicate-manuscript-statistics
+          path: stats/replicate_manuscript_statistics.txt
+          if-no-files-found: error
