@@ -760,6 +760,24 @@ def _largest_window_change(dates: pd.Series, values: pd.Series, window: float = 
     return float(start_points[idx]), float(end_points[idx]), float(deltas[idx])
 
 
+def _plain_number(value: float | int | None) -> str:
+    """Render numbers without scientific notation or rounding."""
+
+    if value is None:
+        return "NA"
+    try:
+        val = float(value)
+    except (TypeError, ValueError):
+        return "NA"
+    if math.isnan(val) or math.isinf(val):
+        return "NA"
+    rounded = round(val)
+    if abs(val - rounded) < 1e-9:
+        return str(int(rounded))
+    text = f"{val:.15f}".rstrip("0").rstrip(".")
+    return text if text else "0"
+
+
 def summarize_selection() -> List[str]:
     path = DATA_DIR / "ages_selection.tsv"
     if path.exists():
@@ -826,7 +844,8 @@ def summarize_selection() -> List[str]:
     if window_summary is not None:
         start, end, delta = window_summary
         lines.append(
-            f"  Largest ~1,000-year change: Δf ≈ {_fmt(delta, 3)} between {_fmt(start, 0)} and {_fmt(end, 0)} years BP."
+            "  Largest ~1,000-year change: "
+            f"Δf = {_plain_number(delta)} between {_plain_number(start)} and {_plain_number(end)} years BP."
         )
     return lines
 
