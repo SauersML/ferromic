@@ -116,110 +116,142 @@ def choose_floor_from_quantile(pi_all: np.ndarray, q: float, min_floor: float) -
 
 def load_and_match(output_csv: str, invinfo_tsv: str) -> pd.DataFrame:
     """
-    STRICT loader:
-      - Requires inv_info.tsv has columns: Chromosome, Start, End, 0_single_1_recur_consensus
-      - Crashes if inv_info has duplicate keys (chr_std, Start, End)
-      - Builds 9 candidate (Start,End) per region with ±1 bp tolerance
-      - Keeps only true matches; for each region, picks the minimal match_priority
-        and requires exactly ONE inv row at that best priority.
-      - Returns matched table with both π values present and finite.
+    STRICT loader with Forensic Logging:
+      - Loads inv_info.tsv and identifies ALL target inversions (Consensus 0 or 1).
+      - Loads output.csv and attempts strict ±1bp matching.
+      - PRINTS a detailed report of exactly which inversions were dropped and why.
     """
+    print(f"\n--- LOADING & DIAGNOSING: {output_csv} + {invinfo_tsv} ---")
     df  = pd.read_csv(output_csv)
     inv = pd.read_csv(invinfo_tsv, sep='\t')
 
-    # enforce required columns
-    need_df = ["chr", "region_start", "region_end", "0_pi_filtered", "1_pi_filtered"]
-    miss_df = [c for c in need_df if c not in df.columns]
-    if miss_df:
-        raise KeyError(f"{output_csv} missing columns: {miss_df}")
-
-    need_inv = ["Chromosome", "Start", "End", "0_single_1_recur_consensus"]
-    miss_inv = [c for c in need_inv if c not in inv.columns]
-    if miss_inv:
-        raise KeyError(f"{invinfo_tsv} missing columns: {miss_inv}")
-
-    # standardize chromosomes
+    # 1. Standardize Chromosomes
     df["chr_std"]  = df["chr"].apply(_standardize_chr)
     inv["chr_std"] = inv["Chromosome"].apply(_standardize_chr)
 
-    # check duplicates in inv_info keys → CRASH if any
-    dup_keys = inv.duplicated(subset=["chr_std", "Start", "End"], keep=False)
-    if dup_keys.any():
-        bad = inv.loc[dup_keys, ["chr_std", "Start", "End"]].drop_duplicates()
-        raise ValueError(f"inv_info.tsv contains duplicate (chr,Start,End) keys. Offending keys:\n{bad.to_string(index=False)}")
+    # 2. Identify "Target" Inversions (The ones we expect to find)
+    #    (Consensus = 0 or 1)
+    inv["cons_int"] = pd.to_numeric(inv["0_single_1_recur_consensus"], errors="coerce")
+    target_mask = inv["cons_int"].isin([0, 1])
+    target_invs = inv[target_mask].copy()
+    
+    # Create a unique ID for tracking: "chr:Start-End"
+    target_invs["trace_id"] = target_invs["chr_std"] + ":" + target_invs["Start"].astype(str) + "-" + target_invs["End"].astype(str)
+    expected_ids = set(target_invs["trace_id"])
+    print(f"DEBUG: Found {len(expected_ids)} target inversions in inv_info (Consensus 0/1).")
 
-    # compact df
+    # 3. Prepare Output Data (Expand ±1 bp)
     df_small = df[["chr_std", "region_start", "region_end", "0_pi_filtered", "1_pi_filtered"]].rename(
         columns={"0_pi_filtered": "pi_direct", "1_pi_filtered": "pi_inverted"}
     ).copy()
-    df_small["region_start"] = df_small["region_start"].astype(int)
-    df_small["region_end"]   = df_small["region_end"].astype(int)
+    
+    # Ensure coords are ints
+    df_small["region_start"] = pd.to_numeric(df_small["region_start"], errors="coerce").fillna(-1).astype(int)
+    df_small["region_end"]   = pd.to_numeric(df_small["region_end"], errors="coerce").fillna(-1).astype(int)
 
-    # build ±1 bp candidate keys (9 per region)
     cands = []
     for ds in (-1, 0, 1):
         for de in (-1, 0, 1):
             tmp = df_small.copy()
             tmp["Start"] = tmp["region_start"] + ds
             tmp["End"]   = tmp["region_end"]   + de
-            tmp["match_priority"] = abs(ds) + abs(de)  # 0 (exact), 1, or 2
+            tmp["match_priority"] = abs(ds) + abs(de)
             cands.append(tmp)
     df_cand = pd.concat(cands, ignore_index=True)
 
-    inv_small = inv[["chr_std", "Start", "End", "0_single_1_recur_consensus"]].copy()
-    merged = df_cand.merge(inv_small, on=["chr_std", "Start", "End"], how="inner")  # keep only true matches
+    # 4. Merge (Inner Join finds the matches)
+    #    We select only the columns we need from targets
+    inv_small = target_invs[["chr_std", "Start", "End", "cons_int", "trace_id"]].copy()
+    
+    # Check duplicates in inv_info keys → CRASH if any (as per original strict logic)
+    if inv_small.duplicated(subset=["chr_std", "Start", "End"]).any():
+        raise ValueError("inv_info.tsv contains duplicate keys.")
 
-    if merged.empty:
-        raise RuntimeError("No regions matched inv_info under ±1 bp tolerance.")
+    merged = df_cand.merge(inv_small, on=["chr_std", "Start", "End"], how="inner")
 
-    # For each region (chr_std, region_start, region_end) select ONE row:
-    # - minimal match_priority present
-    # - after deduplicating inv targets (Start,End), require exactly one → else CRASH
+    # 5. Pick Best Match (Deduplicate)
+    #    If a region matches multiple candidates, pick the one with lowest priority (closest coordinates)
     key = ["chr_std", "region_start", "region_end"]
-
-    def pick_one(g: pd.DataFrame) -> pd.DataFrame:
+    
+    def pick_one(g):
         mp = int(g["match_priority"].min())
-        gg = g[g["match_priority"] == mp].drop_duplicates(subset=["Start","End"]).copy()
+        gg = g[g["match_priority"] == mp].drop_duplicates(subset=["Start","End"])
         if gg.shape[0] != 1:
-            # Real ambiguity at best priority → CRASH
-            raise ValueError(
-                "Ambiguous inv mapping at best priority for region "
-                f"{g.name[0]}:{int(g.name[1])}-{int(g.name[2])} ; "
-                f"candidates={gg[['Start','End','0_single_1_recur_consensus']].to_dict(orient='records')}"
-            )
+            raise ValueError(f"Ambiguous match: {gg}")
         return gg.iloc[[0]]
 
-    best = (merged.groupby(key, group_keys=True)
-                  .apply(pick_one, include_groups=False)
-                  .droplevel(-1)
-                  .reset_index())
+    if merged.empty:
+        best = pd.DataFrame(columns=list(merged.columns))
+    else:
+        best = (merged.groupby(key, group_keys=True)
+                      .apply(pick_one, include_groups=False)
+                      .droplevel(-1)
+                      .reset_index())
 
-    if best.empty:
-        raise RuntimeError("After strict selection, no regions remained. (This should not happen.)")
-
-    # Map recurrence
-    best["Recurrence"] = pd.to_numeric(best["0_single_1_recur_consensus"], errors="coerce").map({0:"Single-event", 1:"Recurrent"})
-    best = best[~best["Recurrence"].isna()].copy()
-
-    # numeric cleanup and π requirements
-    best["pi_direct"]   = pd.to_numeric(best["pi_direct"],   errors="coerce")
+    # 6. Apply Data Quality Filters (The "Drop" Steps)
+    best["pi_direct"]   = pd.to_numeric(best["pi_direct"], errors="coerce")
     best["pi_inverted"] = pd.to_numeric(best["pi_inverted"], errors="coerce")
-    best = best.dropna(subset=["pi_direct","pi_inverted"])
-    best = best[np.isfinite(best["pi_direct"]) & np.isfinite(best["pi_inverted"])].copy()
+    
+    # Filter: Finite PI in BOTH columns
+    valid_pi_mask = np.isfinite(best["pi_direct"]) & np.isfinite(best["pi_inverted"])
+    
+    final_df = best[valid_pi_mask].copy()
+    final_df["Recurrence"] = final_df["cons_int"].map({0: "Single-event", 1: "Recurrent"})
+    
+    # 7. FORENSIC ANALYSIS
+    final_ids = set(final_df["trace_id"])
+    missing_ids = expected_ids - final_ids
+    
+    print(f"DEBUG: Final Matched & Valid Rows: {len(final_df)}")
+    print(f"DEBUG: Dropped Inversions: {len(missing_ids)}")
+    
+    if len(missing_ids) > 0:
+        print("\n" + "="*80)
+        print(f"{'INVERSION ID':<40} | {'REASON FOR REMOVAL'}")
+        print("="*80)
+        
+        # Pre-calculate sets for speed
+        matched_ids = set(merged["trace_id"]) # IDs that had coordinate matches
+        
+        # IDs that survived coordinate match but failed PI check
+        # We look at 'best' dataframe (post-merge, pre-pi-filter)
+        failed_pi_df = best[~valid_pi_mask]
+        failed_pi_map = {}
+        for _, row in failed_pi_df.iterrows():
+            # Check specifics
+            pd_val = row['pi_direct']
+            pi_val = row['pi_inverted']
+            reason = "Unknown Bad PI"
+            if pd.isna(pd_val) or pd.isna(pi_val):
+                reason = f"NaN PI Data (Dir={pd_val}, Inv={pi_val})"
+            elif np.isinf(pd_val) or np.isinf(pi_val):
+                reason = f"Infinite PI Data (Dir={pd_val}, Inv={pi_val})"
+            failed_pi_map[row['trace_id']] = reason
 
-    if best.empty:
-        raise RuntimeError("No region retained both finite π values after matching.")
+        for mid in sorted(list(missing_ids)):
+            reason = "Unknown"
+            
+            if mid not in matched_ids:
+                reason = "No coordinate match in output.csv (±1bp)"
+            elif mid in failed_pi_map:
+                reason = failed_pi_map[mid]
+            else:
+                # If it matched coords, and isn't in the failed_pi rows, 
+                # it might have been lost in the groupby/dedup (rare/impossible if 1:1)
+                reason = "Lost during deduplication (Ambiguous Map?)"
 
-    # attach region_id
-    best["region_id"] = (
-        best["chr_std"].astype(str) + ":" +
-        best["region_start"].astype(int).astype(str) + "-" +
-        best["region_end"].astype(int).astype(str)
+            print(f"{mid:<40} | {reason}")
+        print("="*80 + "\n")
+
+    # 8. Final Formatting (Match original return format)
+    final_df["region_id"] = (
+        final_df["chr_std"].astype(str) + ":" +
+        final_df["region_start"].astype(str) + "-" +
+        final_df["region_end"].astype(str)
     )
-
-    # final columns
+    
     cols = ["region_id","Recurrence","chr_std","region_start","region_end","Start","End","pi_direct","pi_inverted"]
-    return best[cols].copy()
+    return final_df[cols].copy()
 
 # ------------------------- MODEL A (PRIMARY) -----------------
 
