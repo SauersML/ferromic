@@ -9,6 +9,8 @@ use crate::progress::{
 };
 
 use csv::Writer;
+use flate2::write::GzEncoder;
+use flate2::Compression;
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use std::collections::HashMap;
@@ -751,6 +753,7 @@ pub fn prepare_to_write_cds(
             inv_start_1based,
             inv_end_1based
         );
+        let gz_filename = format!("{}.gz", filename);
 
         // --- NEW METADATA LOGIC ---
         let segment_coords_str = cds
@@ -769,7 +772,7 @@ pub fn prepare_to_write_cds(
         let spliced_length = filtered_map.values().next().map_or(0, |seq| seq.len());
 
         let metadata = PhyMetadata {
-            phy_filename: filename.clone(),
+            phy_filename: gz_filename.clone(),
             transcript_id: cds.transcript_id.clone(),
             gene_name: cds.gene_name.clone(),
             chromosome: chromosome.to_string(),
@@ -1256,6 +1259,7 @@ pub fn write_phylip_file(
     hap_sequences: &HashMap<String, Vec<char>>,
     transcript_id: &str,
 ) -> Result<(), VcfError> {
+    let output_file_gz = format!("{}.gz", output_file);
     // Acquire or create the TempDir in a single scope.
     let temp_output_file = {
         let mut locked_opt = TEMP_DIR.lock();
@@ -1263,7 +1267,7 @@ pub fn write_phylip_file(
             *locked_opt = Some(create_temp_dir().expect("Failed to create temporary directory"));
         }
         if let Some(dir) = locked_opt.as_ref() {
-            dir.path().join(output_file)
+            dir.path().join(&output_file_gz)
         } else {
             return Err(VcfError::Parse(
                 "Failed to access temporary directory".to_string(),
@@ -1284,7 +1288,8 @@ pub fn write_phylip_file(
         ))
     })?;
 
-    let mut writer = BufWriter::new(file);
+    let encoder = GzEncoder::new(file, Compression::default());
+    let mut writer = BufWriter::new(encoder);
 
     let mut length = None;
     for (sample_name, seq_chars) in hap_sequences {
@@ -1307,7 +1312,7 @@ pub fn write_phylip_file(
             io::ErrorKind::Other,
             format!(
                 "Failed to write PHYLIP header to '{}': {:?}",
-                output_file, e
+                output_file_gz, e
             ),
         ))
     })?;
@@ -1318,7 +1323,10 @@ pub fn write_phylip_file(
         writeln!(writer, "{}{}", padded_name, sequence).map_err(|e| {
             VcfError::Io(io::Error::new(
                 io::ErrorKind::Other,
-                format!("Failed to write to PHYLIP file '{}': {:?}", output_file, e),
+                format!(
+                    "Failed to write to PHYLIP file '{}': {:?}",
+                    output_file_gz, e
+                ),
             ))
         })?;
     }
@@ -1326,11 +1334,14 @@ pub fn write_phylip_file(
     writer.flush().map_err(|e| {
         VcfError::Io(io::Error::new(
             io::ErrorKind::Other,
-            format!("Failed to flush PHYLIP file '{}': {:?}", output_file, e),
+            format!(
+                "Failed to flush PHYLIP file '{}': {:?}",
+                output_file_gz, e
+            ),
         ))
     })?;
 
-    spinner.set_message(format!("Wrote {} sequences to {}", n, output_file));
+    spinner.set_message(format!("Wrote {} sequences to {}", n, output_file_gz));
     spinner.finish_and_clear();
     log(
         LogLevel::Info,

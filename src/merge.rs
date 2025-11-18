@@ -4,7 +4,7 @@ use env_logger::Builder;
 use flate2::read::MultiGzDecoder;
 use human_bytes::human_bytes;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use log::{debug, error, info, LevelFilter};
+use log::{debug, info, LevelFilter};
 use memmap2::MmapOptions;
 use num_cpus;
 use rayon::prelude::*;
