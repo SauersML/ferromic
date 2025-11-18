@@ -3,10 +3,11 @@ mod tests {
     use tempfile::NamedTempFile;
     use std::fs::File;
     use std::collections::HashMap;
-    use std::io::Write;
+    use std::io::{Read, Write};
     use parking_lot::Mutex;
     use std::path::PathBuf;
     use std::sync::Arc;
+    use flate2::read::GzDecoder;
 
     use crate::transcripts::CdsRegion;
     use crate::parse::{parse_region, validate_vcf_header, read_reference_sequence, parse_config_file, find_vcf_file, open_vcf_reader};
@@ -1713,9 +1714,14 @@ mod tests {
 
         let falsta_path = temp_dir
             .path()
-            .join("per_site_fst_output.falsta");
+            .join("per_site_fst_output.falsta.gz");
         assert!(falsta_path.exists(), "per-site falsta was not created");
-        let contents = std::fs::read_to_string(&falsta_path)
+
+        let file = std::fs::File::open(&falsta_path).expect("failed to open falsta file");
+        let mut decoder = GzDecoder::new(file);
+        let mut contents = String::new();
+        decoder
+            .read_to_string(&mut contents)
             .expect("failed to read per-site falsta");
         let lines: Vec<&str> = contents.lines().collect();
 
