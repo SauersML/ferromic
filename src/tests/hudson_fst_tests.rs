@@ -1,9 +1,8 @@
 #[cfg(test)]
 mod hudson_fst_tests {
-    use std::sync::Arc;
-
     use crate::process::*;
     use crate::stats::*;
+    use std::sync::Arc;
 
     /// Helper function to create test variants
     fn create_test_variant(position: i64, genotypes: Vec<Option<Vec<u8>>>) -> Variant {
@@ -13,7 +12,7 @@ mod hudson_fst_tests {
             .collect();
         Variant {
             position,
-            genotypes: Arc::from(packed),
+            genotypes: CompressedGenotypes::new(packed),
         }
     }
 

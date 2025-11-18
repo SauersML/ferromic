@@ -4,13 +4,17 @@ mod tests {
     use std::fs::File;
     use std::collections::HashMap;
     use std::io::Write;
-    use std::sync::Arc;
     use parking_lot::Mutex;
     use std::path::PathBuf;
+    use std::sync::Arc;
 
     use crate::transcripts::CdsRegion;
     use crate::parse::{parse_region, validate_vcf_header, read_reference_sequence, parse_config_file, find_vcf_file, open_vcf_reader};
-    use crate::process::{MissingDataInfo, FilteringStats, PackedGenotype, process_config_entries, process_variants, process_variant, QueryRegion, ZeroBasedHalfOpen, Variant, VcfError, HaplotypeSide, Args};
+    use crate::process::{
+        CompressedGenotypes, MissingDataInfo, FilteringStats, PackedGenotype, QueryRegion,
+        Variant, VcfError, HaplotypeSide, Args, process_config_entries, process_variant,
+        process_variants, ZeroBasedHalfOpen,
+    };
     use crate::stats::{count_segregating_sites, calculate_pairwise_differences, calculate_per_site_diversity, calculate_watterson_theta, calculate_pi, harmonic, calculate_inversion_allele_frequency};
 
     // Helper function to create a Variant for testing
@@ -21,7 +25,7 @@ mod tests {
             .collect();
         Variant {
             position,
-            genotypes: Arc::from(packed),
+            genotypes: CompressedGenotypes::new(packed),
         }
     }
 
@@ -758,7 +762,9 @@ mod tests {
                 Some(PackedGenotype::from_vec(vec![0, 0])),
                 Some(PackedGenotype::from_vec(vec![0, 1])),
             ];
-            assert_eq!(variant.genotypes.as_ref(), expected.as_slice());
+            let actual: Vec<Option<PackedGenotype>> =
+                (0..variant.genotypes.len()).map(|idx| variant.genotypes.get(idx)).collect();
+            assert_eq!(actual, expected);
         } else {
             panic!("Expected Some variant, got None");
         }

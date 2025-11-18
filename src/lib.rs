@@ -31,7 +31,9 @@ use crate::pca::{
     PcaResult, compute_chromosome_pca, compute_chromosome_pca_from_dense,
     run_chromosome_pca_analysis, run_global_pca_analysis, write_chromosome_pca_to_file,
 };
-use crate::process::{HaplotypeSide, PackedGenotype, QueryRegion, Variant, VcfError};
+use crate::process::{
+    CompressedGenotypes, HaplotypeSide, PackedGenotype, QueryRegion, Variant, VcfError,
+};
 use crate::stats::{
     DenseGenotypeMatrix, DensePopulationSummary, DxyHudsonResult, FstEstimate, FstWcResults,
     HudsonFSTOutcome, PopulationContext, PopulationId, SiteDiversity, SiteFstHudson, SiteFstWc,
@@ -1183,7 +1185,7 @@ where
 
         variants.push(Variant {
             position: positions[variant_idx],
-            genotypes: Arc::from(genotypes),
+            genotypes: CompressedGenotypes::new(genotypes),
         });
     }
 
@@ -1280,7 +1282,7 @@ fn extract_positions(positions_obj: &PyAny, expected_len: usize) -> PyResult<Vec
     ))
 }
 
-fn parse_genotypes(genotypes_obj: &PyAny) -> PyResult<Arc<[Option<PackedGenotype>]>> {
+fn parse_genotypes(genotypes_obj: &PyAny) -> PyResult<CompressedGenotypes> {
     let mut genotypes = Vec::new();
     let iterator = PyIterator::from_object(genotypes_obj.py(), genotypes_obj)?;
     for entry in iterator {
@@ -1310,7 +1312,7 @@ fn parse_genotypes(genotypes_obj: &PyAny) -> PyResult<Arc<[Option<PackedGenotype
             "genotypes must be sequences of allele integers or None",
         ));
     }
-    Ok(Arc::from(genotypes))
+    Ok(CompressedGenotypes::new(genotypes))
 }
 
 fn parse_side(obj: &PyAny) -> PyResult<HaplotypeSide> {
