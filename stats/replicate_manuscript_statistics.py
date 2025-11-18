@@ -679,6 +679,12 @@ def summarize_key_associations() -> List[str]:
             ("mammogram",),
             table_name="all_pop_phewas_tag.tsv",
         ),
+        AssocSpec(
+            "chr17-45974480-INV-29218",
+            "Mild cognitive impairment",
+            ("mild", "cognitive"),
+            table_name="all_pop_phewas_tag.tsv",
+        ),
     ]
 
     table_names = sorted({spec.table_name for spec in targets})
