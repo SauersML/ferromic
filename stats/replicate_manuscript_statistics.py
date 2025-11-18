@@ -30,6 +30,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from stats import inv_dir_recur_model  # noqa: E402
+from stats._inv_common import map_inversion_series, map_inversion_value
 
 DATA_DIR = REPO_ROOT / "data"
 REPORT_PATH = Path(__file__).with_suffix(".txt")
@@ -531,6 +532,7 @@ def summarize_key_associations() -> List[str]:
     table_names = sorted({spec.table_name for spec in targets})
     tables: dict[str, pd.DataFrame] = {}
     missing_tables: List[str] = []
+    inv_meta_path = DATA_DIR / "inv_properties.tsv"
     for name in table_names:
         path = DATA_DIR / name
         if not path.exists():
@@ -542,6 +544,7 @@ def summarize_key_associations() -> List[str]:
             continue
         df["Phenotype"] = df["Phenotype"].astype(str)
         df["Inversion"] = df["Inversion"].astype(str)
+        df["Inversion"] = map_inversion_series(df["Inversion"], inv_info_path=str(inv_meta_path))
         tables[name] = df
 
     if not tables:
@@ -567,7 +570,8 @@ def summarize_key_associations() -> List[str]:
             )
             continue
 
-        subset = table[table["Inversion"].str.strip() == spec.inversion]
+        target_inv_id = map_inversion_value(spec.inversion, inv_info_path=str(inv_meta_path))
+        subset = table[table["Inversion"].str.strip() == target_inv_id]
         if subset.empty:
             lines.append(
                 f"  {spec.inversion}: no PheWAS results available locally for {spec.label}."
