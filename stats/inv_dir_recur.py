@@ -16,6 +16,8 @@ import matplotlib.colors as mcolors
 import matplotlib.cm as cm
 from scipy.stats import wilcoxon, mannwhitneyu
 
+# Depreciated file
+
 # =====================================================================
 # Configuration
 # =====================================================================
