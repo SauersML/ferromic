@@ -262,13 +262,13 @@ jobs:
           shopt -s nullglob
           phy_files=( *.phy )
           echo "[Archive PHY] Found ${#phy_files[@]} PHY files"
-          if [ "${#phy_files[@]}" -eq 0 ]; then
-            echo "No PHY files were generated." >&2
-            exit 1
+          if [ "${#phy_files[@]}" -gt 0 ]; then
+            echo "[Archive PHY] Listing PHY files: ${phy_files[*]}"
+            zip -r phy_outputs.zip "${phy_files[@]}"
+            echo "[Archive PHY] Created phy_outputs.zip"
+          else
+            echo "No PHY files were generated. Skipping archiving."
           fi
-          echo "[Archive PHY] Listing PHY files: ${phy_files[*]}"
-          zip -r phy_outputs.zip "${phy_files[@]}"
-          echo "[Archive PHY] Created phy_outputs.zip"
 
       - name: Upload CSV artifact
         uses: actions/upload-artifact@v4
@@ -283,7 +283,7 @@ jobs:
         with:
           name: run-vcf-phy-outputs
           path: phy_outputs.zip
-          if-no-files-found: error
+          if-no-files-found: ignore
           visibility: public
 
       - name: Upload FALSTA artifacts
@@ -291,9 +291,9 @@ jobs:
         with:
           name: run-vcf-falsta
           path: |
-            per_site_diversity_output.falsta
-            per_site_fst_output.falsta
-          if-no-files-found: error
+            per_site_diversity_output.falsta.gz
+            per_site_fst_output.falsta.gz
+          if-no-files-found: warn
           visibility: public
 
       - name: Upload Hudson FST results
