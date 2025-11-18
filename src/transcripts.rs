@@ -1,11 +1,11 @@
 use crate::process::{
-    create_temp_dir, get_haplotype_indices_for_group, map_sample_names_to_indices, HaplotypeSide,
-    QueryRegion, Variant, VcfError, ZeroBasedHalfOpen, ZeroBasedPosition, TEMP_DIR,
+    HaplotypeSide, QueryRegion, TEMP_DIR, Variant, VcfError, ZeroBasedHalfOpen, ZeroBasedPosition,
+    create_temp_dir, get_haplotype_indices_for_group, map_sample_names_to_indices,
 };
 
 use crate::progress::{
-    create_spinner, display_status_box, finish_step_progress, init_step_progress, log, set_stage,
-    update_step_progress, LogLevel, ProcessingStage, StatusBox,
+    LogLevel, ProcessingStage, StatusBox, create_spinner, display_status_box, finish_step_progress,
+    init_step_progress, log, set_stage, update_step_progress,
 };
 
 use csv::Writer;
@@ -394,8 +394,8 @@ pub fn apply_variants_to_transcripts(
                     if let Some(&(ref_allele, alt_allele)) = map.get(&variant.position) {
                         // Determine the allele to use based on the genotype
                         let allele_to_use =
-                            if let Some(genotype) = variant.genotypes[sample_idx].as_ref() {
-                                if genotype[hap_idx as usize] == 0 {
+                            if let Some(genotype) = variant.genotypes.get(sample_idx) {
+                                if genotype.get(hap_idx as usize).copied().unwrap_or(0) == 0 {
                                     // If the genotype is 0 (reference allele), use the reference allele
                                     ref_allele as u8
                                 } else {
@@ -1038,17 +1038,10 @@ pub fn filter_and_log_transcripts(
 
             log(
                 LogLevel::Info,
-                &format!(
-                    "    Remainder when divided by 3: {}",
-                    remainder
-                ),
+                &format!("    Remainder when divided by 3: {}", remainder),
             );
-            writeln!(
-                log_file,
-                "    Remainder when divided by 3: {}",
-                remainder
-            )
-            .expect("Failed to write to transcript_overlap.log");
+            writeln!(log_file, "    Remainder when divided by 3: {}", remainder)
+                .expect("Failed to write to transcript_overlap.log");
 
             log(
                 LogLevel::Info,
