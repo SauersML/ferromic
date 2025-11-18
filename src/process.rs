@@ -412,10 +412,112 @@ impl FilteringStats {
 
 pub type PackedGenotype = SmallVec<[u8; 2]>;
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct CompressedGenotypes {
+    data: Arc<[u8]>,
+    stride: usize,
+    num_samples: usize,
+}
+
+impl CompressedGenotypes {
+    const MISSING: u8 = 0xFF;
+
+    pub fn new(raw: Vec<Option<PackedGenotype>>) -> Self {
+        let num_samples = raw.len();
+        let mut max_ploidy = raw
+            .iter()
+            .filter_map(|gt| gt.as_ref().map(|g| g.len()))
+            .max()
+            .unwrap_or(0);
+        if num_samples > 0 {
+            max_ploidy = max_ploidy.max(1);
+        }
+
+        if num_samples == 0 || max_ploidy == 0 {
+            return Self {
+                data: Arc::from([]),
+                stride: max_ploidy,
+                num_samples,
+            };
+        }
+
+        let mut flat = vec![Self::MISSING; num_samples * max_ploidy];
+        for (sample_idx, genotype_opt) in raw.into_iter().enumerate() {
+            let start = sample_idx * max_ploidy;
+            if let Some(genotype) = genotype_opt {
+                for (offset, allele) in genotype.into_iter().enumerate() {
+                    if offset >= max_ploidy {
+                        break;
+                    }
+                    flat[start + offset] = allele;
+                }
+            }
+        }
+
+        Self {
+            data: Arc::from(flat),
+            stride: max_ploidy,
+            num_samples,
+        }
+    }
+
+    pub fn get(&self, index: usize) -> Option<PackedGenotype> {
+        if index >= self.num_samples || self.stride == 0 {
+            return None;
+        }
+        let start = index * self.stride;
+        if self.data.get(start).copied().unwrap_or(Self::MISSING) == Self::MISSING {
+            return None;
+        }
+        let mut genotype = PackedGenotype::new();
+        for offset in 0..self.stride {
+            let byte = self.data[start + offset];
+            if byte == Self::MISSING {
+                break;
+            }
+            genotype.push(byte);
+        }
+        Some(genotype)
+    }
+
+    pub fn iter(&self) -> CompressedGenotypeIter<'_> {
+        CompressedGenotypeIter {
+            genotypes: self,
+            index: 0,
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.num_samples
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.num_samples == 0
+    }
+}
+
+pub struct CompressedGenotypeIter<'a> {
+    genotypes: &'a CompressedGenotypes,
+    index: usize,
+}
+
+impl<'a> Iterator for CompressedGenotypeIter<'a> {
+    type Item = Option<PackedGenotype>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index >= self.genotypes.num_samples {
+            return None;
+        }
+        let idx = self.index;
+        self.index += 1;
+        Some(self.genotypes.get(idx))
+    }
+}
+
 #[derive(PartialEq, Debug, Clone)]
 pub struct Variant {
     pub position: i64,
-    pub genotypes: Arc<[Option<PackedGenotype>]>,
+    pub genotypes: CompressedGenotypes,
 }
 
 #[derive(Debug, Clone)]
@@ -799,12 +901,9 @@ pub fn process_variants(
         for (mapped_index, _) in &group_haps {
             // We don't need side in this outer loop
             // Access genotypes using the dereferenced index
-            if let Some(some_genotypes) = current_variant.genotypes.get(*mapped_index) {
-                for (side, genotype_vec) in some_genotypes.iter().enumerate() {
-                    // Retrieve genotype and quality values for current allele
-                    if let Some(&val) = genotype_vec.get(side as usize) {
-                        allele_values.push(val);
-                    }
+            if let Some(genotype) = current_variant.genotypes.get(*mapped_index) {
+                if let Some(&val) = genotype.get(0) {
+                    allele_values.push(val);
                 }
             }
         }
@@ -1918,18 +2017,16 @@ fn generate_full_region_alignment(
     for (sample_idx, side) in group_haps {
         let mut seq = reference_slice.to_vec();
         for variant in region_variants {
-            if let Some(genotype_opt) = variant.genotypes.get(sample_idx) {
-                if let Some(genotype_vec) = genotype_opt {
-                    let allele_opt = match side {
-                        HaplotypeSide::Left => genotype_vec.get(0),
-                        HaplotypeSide::Right => genotype_vec.get(1),
-                    };
-                    if let Some(&1) = allele_opt {
-                        if let Some((_ref_allele, alt_allele)) = pos_map.get(&variant.position) {
-                            let rel = (variant.position - entry.interval.start as i64) as usize;
-                            if rel < seq.len() {
-                                seq[rel] = *alt_allele as u8;
-                            }
+            if let Some(genotype_vec) = variant.genotypes.get(sample_idx) {
+                let allele_opt = match side {
+                    HaplotypeSide::Left => genotype_vec.get(0),
+                    HaplotypeSide::Right => genotype_vec.get(1),
+                };
+                if let Some(&1) = allele_opt {
+                    if let Some((_ref_allele, alt_allele)) = pos_map.get(&variant.position) {
+                        let rel = (variant.position - entry.interval.start as i64) as usize;
+                        if rel < seq.len() {
+                            seq[rel] = *alt_allele as u8;
                         }
                     }
                 }
@@ -3814,7 +3911,7 @@ pub fn process_variant(
             .collect();
         let variant = Variant {
             position: zero_based_position,
-            genotypes: Arc::from(packed_genotypes),
+            genotypes: CompressedGenotypes::new(packed_genotypes),
         };
         return Ok(Some((variant, passes_filters)));
     }
@@ -3850,7 +3947,7 @@ pub fn process_variant(
         .collect();
     let variant = Variant {
         position: zero_based_position,
-        genotypes: Arc::from(packed_genotypes),
+        genotypes: CompressedGenotypes::new(packed_genotypes),
     };
 
     // Return the parsed variant and whether it passes filters
