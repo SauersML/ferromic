@@ -1,5 +1,5 @@
 Chromosome	Start	End		Number_recurrent_events	num_toggling_indicating_SNPs	proportion_toggling_indicating_SNPs	OrigID	Size_.kbp.		Inverted_AF	CHM13_T2T_synteny	Flanking_inverted_repeat_size.kbp.	Flanking_Inverted_repeat_identity	Disease_genes	Morbid_CNVs	Toggling_indicating_SNPs	Formation_rate_per_generation_.95..C.I..	Number_recurrent_events_.95..C.I..	verdictRecurrence_hufsah	verdictRecurrence_benson	0_single_1_recur_consensus
-chr1	13104252	13122521		13	4	0.0247	chr1-13084312-INV-62181	18.27	-0.03398499167	0.69	NA	60	95%	NA	NA	4 (2.47%)	1.02e-04 [2.72e-05 ,1.21e-04]	13 [7.00 ,13.75]	TRUE	TRUE	1
+chr1	13104252	13122521		13	4	0.0247	chr1-13084312-INV-62181	18.27		0.69	NA	60	95%	NA	NA	4 (2.47%)	1.02e-04 [2.72e-05 ,1.21e-04]	13 [7.00 ,13.75]	TRUE	TRUE	1
 chr1	145160434	146154520		2	0	0	chr1-145160435-INV-994087	994.087		0.02	NA	0.678	64%	NA	NA	0 (0%)	1.55e-05 [9.81e-06 ,2.17e-05]	2 [2.00 ,2.00]	FALSE	TRUE	NA
 chr1	146298109	148672872		NA	0	0	chr1-146298110-INV-2374764	2374.764		0.98	NA	0.29	82%	NA	NA	0 (0%)	NA	NA	FALSE	NA	NA
 chr1	248128773	248428856		1	0	0	chr1-248128774-INV-300084	300.084		0.01	NA	0.113	64%	NA	NA	0 (0%)	6.29e-06 [2.85e-06 ,1.01e-05]	1 [1.00 ,1.00]	FALSE	FALSE	0
@@ -290,4 +290,5 @@ chrY	6243097	6340647		NA	NA	NA	chrY-6243098-INV-97551	97.55		0.47	NA	0.395	72%	N
 chrY	10367644	10419983		NA	NA	NA	chrY-10367645-INV-52339	52.339		0.13	NA	0.1	58%	NA	NA	NA			NA	NA	NA
 chrY	15883580	15896218		NA	NA	NA	chrY-15874908-INV-30002	12.638		0.23	NA	8.226	98%	NA	NA	NA			NA	NA	NA
 chrY	21053790	21063744		NA	NA	NA	chrY-21052503-INV-12528	9.954		0.53	NA	6.063	92%	NA	NA	NA			NA	NA	NA
+
 chrY	22207318	22325285		NA	NA	NA	chrY-22207319-INV-117968	117.967		0.17	NA	0.279	63%	NA	NA	NA			NA	NA	NA
