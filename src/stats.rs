@@ -3586,7 +3586,7 @@ fn variant_is_segregating(variant: &Variant) -> bool {
     let mut first = None;
     for genotype_opt in variant.genotypes.iter() {
         if let Some(genotype) = genotype_opt {
-            for &allele in genotype {
+            for allele in genotype.iter().copied() {
                 match first {
                     None => first = Some(allele),
                     Some(value) if value != allele => return true,
@@ -3866,8 +3866,8 @@ pub fn calculate_pairwise_differences(
                     // Iterate over all variants to compare this pair's haplotypes
                     for variant in variants_local.iter() {
                         if let (Some(genotype_i), Some(genotype_j)) = (
-                            &variant.genotypes[sample_idx_i],
-                            &variant.genotypes[sample_idx_j],
+                            variant.genotypes.get(sample_idx_i),
+                            variant.genotypes.get(sample_idx_j),
                         ) {
                             // Compare all haplotype pairs (truly per-haplotype analysis)
                             // Each haplotype is treated as completely independent
