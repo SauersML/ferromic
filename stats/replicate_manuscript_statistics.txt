@@ -53,13 +53,14 @@ PheWAS scale summary:
 
 KEY ASSOCIATIONS
 Selected inversion–phenotype associations (logistic regression with LRT p-values):
-  chr10-79542902-INV-674513: no PheWAS results available locally for Positive DNA test for high-risk HPV types.
-  chr6-141867315-INV-29159: no PheWAS results available locally for Laryngitis and tracheitis.
-  chr12-46897663-INV-16289: no PheWAS results available locally for Conjunctivitis.
-  chr12-46897663-INV-16289: no PheWAS results available locally for Migraine.
-  chr17-45974480-INV-29218 vs Morbid obesity: OR = 1.054, BH-adjusted p ≈ 8.151e-04 (raw p = 3.650e-06).
-  chr17-45974480-INV-29218 vs Breast lump or abnormal exam: OR = 0.956, BH-adjusted p ≈ 6.375e-03 (raw p = 4.280e-05).
-  chr17-45974480-INV-29218 vs Abnormal mammogram: OR = 0.939, BH-adjusted p ≈ 7.326e-03 (raw p = 6.870e-05).
+  Available source tables: all_pop_phewas_tag.tsv, phewas_results.tsv.
+  chr10-79542902-INV-674513 vs Positive DNA test for high-risk HPV types: OR = 1.241 (95% CI 1.114–1.382), BH-adjusted p ≈ 0.032 (raw p = 1.144e-04).
+  chr6-141867315-INV-29159 vs Laryngitis and tracheitis: OR = 0.572 (95% CI 0.491–0.751), BH-adjusted p ≈ 0.041 (raw p = 2.193e-04).
+  chr12-46897663-INV-16289 vs Conjunctivitis: OR = 1.147 (95% CI 1.091–1.205), BH-adjusted p ≈ 1.970e-04 (raw p = 9.630e-08).
+  chr12-46897663-INV-16289 vs Migraine: OR = 1.086 (95% CI 1.044–1.103), BH-adjusted p ≈ 0.040 (raw p = 1.717e-04).
+  chr17-45974480-INV-29218 vs Morbid obesity: OR = 1.054 (95% CI 1.031–1.078), BH-adjusted p ≈ 8.151e-04 (raw p = 3.650e-06).
+  chr17-45974480-INV-29218 vs Breast lump or abnormal exam: OR = 0.956 (95% CI 0.936–0.977), BH-adjusted p ≈ 6.375e-03 (raw p = 4.280e-05).
+  chr17-45974480-INV-29218 vs Abnormal mammogram: OR = 0.939 (95% CI 0.910–0.969), BH-adjusted p ≈ 7.326e-03 (raw p = 6.870e-05).
 
 CATEGORY TESTS
 Phecode category omnibus and directional tests:
@@ -70,7 +71,13 @@ Phecode category omnibus and directional tests:
   chr6-167181003-INV-209976: Infections: GBJ p = 0.369, GLS p = 7.906e-03
 
 PGS CONTROLS
-Polygenic-score sensitivity table not found; skipping summary.
+Sensitivity of PheWAS associations to regional PGS covariates:
+  Source table: PGS_controls.tsv.
+  Largest p-value inflation: inversion chr17-45585160-INV-706887 × Morbid_obesity (p_nominal = 7.940e-09, p_with_pgs = 8.476e-03, fold-change = 1.068e+06).
 
 SELECTION
-Ancient DNA selection results not found; skipping summary.
+Ancient DNA-based selection inferences (AGES trajectory 12_47296118_A_G):
+  Windows analyzed: 101 spanning 0–1e+04 years before present.
+  Observed allele-frequency ranges 0.019–0.090; net change from 1e+04 to 0 years BP is 0.071.
+  Median haploid sample size per window ≈ 1e+03 alleles.
+  Largest ~1,000-year change: Δf = 0.038934894346088 between 4500 and 5500 years BP.

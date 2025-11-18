@@ -446,6 +446,7 @@ class AssocSpec:
     inversion: str
     label: str
     search_terms: Tuple[str, ...]
+    table_name: str = "phewas_results.tsv"
 
 
 def _format_or(row: pd.Series) -> str:
@@ -458,22 +459,34 @@ def _format_or(row: pd.Series) -> str:
         return "Odds ratio unavailable"
 
     or_value = row.get(or_col)
-    lo = row.get("CI_Lower") or row.get("CI95_Lower") or row.get("CI_Lower_Overall")
-    hi = row.get("CI_Upper") or row.get("CI95_Upper") or row.get("CI_Upper_Overall")
+    lo = None
+    hi = None
+    for lo_candidate in [
+        "CI_Lower",
+        "CI95_Lower",
+        "CI_Lower_Overall",
+        "CI_LO_OR",
+        "CI_Lower_DISPLAY",
+    ]:
+        if lo_candidate in row.index and not pd.isna(row.get(lo_candidate)):
+            lo = row.get(lo_candidate)
+            break
+    for hi_candidate in [
+        "CI_Upper",
+        "CI95_Upper",
+        "CI_Upper_Overall",
+        "CI_HI_OR",
+        "CI_Upper_DISPLAY",
+    ]:
+        if hi_candidate in row.index and not pd.isna(row.get(hi_candidate)):
+            hi = row.get(hi_candidate)
+            break
     if lo is not None and hi is not None:
         return f"OR = {_fmt(or_value, 3)} (95% CI {_fmt(lo, 3)}–{_fmt(hi, 3)})"
     return f"OR = {_fmt(or_value, 3)}"
 
 
 def summarize_key_associations() -> List[str]:
-    path = DATA_DIR / "all_pop_phewas_tag.tsv"
-    if not path.exists():
-        return ["Per-phenotype association table not found; skipping highlights."]
-
-    assoc = pd.read_csv(path, sep="\t", low_memory=False)
-    assoc["Phenotype"] = assoc["Phenotype"].astype(str)
-    assoc["Inversion"] = assoc["Inversion"].astype(str)
-
     targets = [
         AssocSpec(
             "chr10-79542902-INV-674513",
@@ -499,22 +512,62 @@ def summarize_key_associations() -> List[str]:
             "chr17-45974480-INV-29218",
             "Morbid obesity",
             ("morbid", "obesity"),
+            table_name="all_pop_phewas_tag.tsv",
         ),
         AssocSpec(
             "chr17-45974480-INV-29218",
             "Breast lump or abnormal exam",
             ("lump", "breast"),
+            table_name="all_pop_phewas_tag.tsv",
         ),
         AssocSpec(
             "chr17-45974480-INV-29218",
             "Abnormal mammogram",
             ("mammogram",),
+            table_name="all_pop_phewas_tag.tsv",
         ),
     ]
 
-    lines: List[str] = ["Selected inversion–phenotype associations (logistic regression with LRT p-values):"]
+    table_names = sorted({spec.table_name for spec in targets})
+    tables: dict[str, pd.DataFrame] = {}
+    missing_tables: List[str] = []
+    for name in table_names:
+        path = DATA_DIR / name
+        if not path.exists():
+            missing_tables.append(name)
+            continue
+        df = pd.read_csv(path, sep="\t", low_memory=False)
+        if "Phenotype" not in df.columns or "Inversion" not in df.columns:
+            missing_tables.append(name)
+            continue
+        df["Phenotype"] = df["Phenotype"].astype(str)
+        df["Inversion"] = df["Inversion"].astype(str)
+        tables[name] = df
+
+    if not tables:
+        missing_desc = f" ({', '.join(sorted(set(missing_tables)))})" if missing_tables else ""
+        return [
+            "Per-phenotype association tables not found; skipping highlights" + missing_desc + "."
+        ]
+
+    available_sources = list(tables.keys())
+    lines: List[str] = [
+        "Selected inversion–phenotype associations (logistic regression with LRT p-values):",
+        "  Available source tables: " + ", ".join(available_sources) + ".",
+    ]
+    if missing_tables:
+        lines.append("  Missing source tables: " + ", ".join(sorted(set(missing_tables))) + ".")
+
     for spec in targets:
-        subset = assoc[assoc["Inversion"].str.strip() == spec.inversion]
+        table = tables.get(spec.table_name)
+        if table is None:
+            lines.append(
+                f"  {spec.inversion}: source table {spec.table_name} not available locally; "
+                f"cannot summarize {spec.label}."
+            )
+            continue
+
+        subset = table[table["Inversion"].str.strip() == spec.inversion]
         if subset.empty:
             lines.append(
                 f"  {spec.inversion}: no PheWAS results available locally for {spec.label}."
@@ -529,13 +582,41 @@ def summarize_key_associations() -> List[str]:
 
         if candidates.empty:
             lines.append(
-                f"  {spec.inversion} × {spec.label}: matching phenotype not found in local table."
+                f"  {spec.inversion} × {spec.label}: matching phenotype not found in {spec.table_name}."
             )
             continue
 
-        r = candidates.sort_values("P_Value_y").iloc[0]
-        pval = r.get("P_Value_y") or r.get("P_Value") or r.get("P_LRT_Overall")
-        bh = r.get("Q_GLOBAL") or r.get("P_Value_y")
+        sort_columns = [
+            col
+            for col in ["P_Value", "P_Value_y", "P_Value_x", "P_LRT_Overall"]
+            if col in candidates.columns
+        ]
+        if sort_columns:
+            r = candidates.sort_values(sort_columns).iloc[0]
+        else:
+            r = candidates.iloc[0]
+
+        pval = None
+        for col in [
+            "P_Value",
+            "P_Value_y",
+            "P_Value_x",
+            "P_LRT_Overall",
+            "P_Value_LRT_Bootstrap",
+        ]:
+            value = r.get(col)
+            if value is not None and not pd.isna(value):
+                pval = value
+                break
+
+        bh = None
+        for col in ["Q_GLOBAL", "BH_FDR_Q"]:
+            value = r.get(col)
+            if value is not None and not pd.isna(value):
+                bh = value
+                break
+        if bh is None:
+            bh = pval
         parts = _format_or(r)
         lines.append(
             f"  {spec.inversion} vs {spec.label}: {parts}, "
@@ -602,15 +683,34 @@ def summarize_imputation() -> List[str]:
 
 
 def summarize_pgs_controls() -> List[str]:
-    path = DATA_DIR / "pgs_sensitivity.tsv"
-    if not path.exists():
-        return ["Polygenic-score sensitivity table not found; skipping summary."]
+    candidates = [
+        (DATA_DIR / "pgs_sensitivity.tsv", {}),
+        (
+            DATA_DIR / "PGS_controls.tsv",
+            {
+                "P_Value_NoCustomControls": "p_nominal",
+                "P_Value": "p_with_pgs",
+            },
+        ),
+    ]
 
-    pgs = pd.read_csv(path, sep="\t", low_memory=False)
-    required = {"Inversion", "Phenotype", "p_nominal", "p_with_pgs"}
-    if not required.issubset(pgs.columns):
-        missing = ", ".join(sorted(required - set(pgs.columns)))
-        return [f"PGS sensitivity table missing required columns: {missing}."]
+    pgs: pd.DataFrame | None = None
+    source = None
+    for path, rename_map in candidates:
+        if not path.exists():
+            continue
+        df = pd.read_csv(path, sep="\t", low_memory=False)
+        if rename_map:
+            df = df.rename(columns=rename_map)
+        required = {"Inversion", "Phenotype", "p_nominal", "p_with_pgs"}
+        if not required.issubset(df.columns):
+            continue
+        pgs = df
+        source = path.name
+        break
+
+    if pgs is None:
+        return ["Polygenic-score sensitivity table not found; skipping summary."]
 
     pgs = pgs.replace([np.inf, -np.inf], np.nan)
     pgs = pgs.dropna(subset=["p_nominal", "p_with_pgs"])
@@ -620,7 +720,10 @@ def summarize_pgs_controls() -> List[str]:
     pgs["fold_change"] = pgs["p_with_pgs"] / pgs["p_nominal"].replace(0, np.nan)
     largest = pgs.sort_values("fold_change", ascending=False).iloc[0]
 
-    lines = ["Sensitivity of PheWAS associations to regional PGS covariates:"]
+    lines = [
+        "Sensitivity of PheWAS associations to regional PGS covariates:",
+        f"  Source table: {source}.",
+    ]
     lines.append(
         f"  Largest p-value inflation: inversion {largest.Inversion} × {largest.Phenotype} "
         f"(p_nominal = {_fmt(largest.p_nominal, 3)}, p_with_pgs = {_fmt(largest.p_with_pgs, 3)}, "
@@ -629,23 +732,120 @@ def summarize_pgs_controls() -> List[str]:
     return lines
 
 
+def _largest_window_change(dates: pd.Series, values: pd.Series, window: float = 1000.0) -> Tuple[float, float, float] | None:
+    mask = dates.notna() & values.notna()
+    if mask.sum() < 2:
+        return None
+
+    filtered_dates = dates[mask].to_numpy()
+    filtered_values = values[mask].to_numpy()
+    sorted_idx = np.argsort(filtered_dates)
+    sorted_dates = filtered_dates[sorted_idx]
+    sorted_values = filtered_values[sorted_idx]
+
+    min_date = float(sorted_dates[0])
+    max_date = float(sorted_dates[-1])
+    if max_date - min_date < window:
+        return None
+
+    start_points = np.arange(min_date, max_date - window + 1, 1.0)
+    if start_points.size == 0:
+        return None
+    end_points = start_points + window
+
+    start_vals = np.interp(start_points, sorted_dates, sorted_values)
+    end_vals = np.interp(end_points, sorted_dates, sorted_values)
+    deltas = np.abs(end_vals - start_vals)
+    idx = int(np.argmax(deltas))
+    return float(start_points[idx]), float(end_points[idx]), float(deltas[idx])
+
+
+def _plain_number(value: float | int | None) -> str:
+    """Render numbers without scientific notation or rounding."""
+
+    if value is None:
+        return "NA"
+    try:
+        val = float(value)
+    except (TypeError, ValueError):
+        return "NA"
+    if math.isnan(val) or math.isinf(val):
+        return "NA"
+    rounded = round(val)
+    if abs(val - rounded) < 1e-9:
+        return str(int(rounded))
+    text = f"{val:.15f}".rstrip("0").rstrip(".")
+    return text if text else "0"
+
+
 def summarize_selection() -> List[str]:
     path = DATA_DIR / "ages_selection.tsv"
-    if not path.exists():
+    if path.exists():
+        ages = pd.read_csv(path, sep="\t", low_memory=False)
+        required = {"Inversion", "SNP", "p_value", "selection_coeff", "peak_interval_kya"}
+        if not required.issubset(ages.columns):
+            missing = ", ".join(sorted(required - set(ages.columns)))
+            return [f"AGES selection table missing required columns: {missing}."]
+
+        lines = ["Ancient DNA-based selection inferences (AGES model):"]
+        for inv, group in ages.groupby("Inversion"):
+            best = group.sort_values("p_value").iloc[0]
+            lines.append(
+                f"  {inv}: best tag SNP {best.SNP} with p = {_fmt(best.p_value, 3)}, "
+                f"s ≈ {_fmt(best.selection_coeff, 3)}, peak 1-kyr change window {_fmt(best.peak_interval_kya, 3)} kya."
+            )
+        return lines
+
+    trajectory_path = DATA_DIR / "Trajectory-12_47296118_A_G.tsv"
+    if not trajectory_path.exists():
         return ["Ancient DNA selection results not found; skipping summary."]
 
-    ages = pd.read_csv(path, sep="\t", low_memory=False)
-    required = {"Inversion", "SNP", "p_value", "selection_coeff", "peak_interval_kya"}
-    if not required.issubset(ages.columns):
-        missing = ", ".join(sorted(required - set(ages.columns)))
-        return [f"AGES selection table missing required columns: {missing}."]
+    traj = pd.read_csv(trajectory_path, sep="\t", low_memory=False)
+    numeric_cols = [
+        "date_left",
+        "date_right",
+        "date_center",
+        "num_allele",
+        "num_alt_allele",
+        "af",
+        "af_low",
+        "af_up",
+        "pt",
+        "pt_low",
+        "pt_up",
+    ]
+    for col in numeric_cols:
+        if col in traj.columns:
+            traj[col] = pd.to_numeric(traj[col], errors="coerce")
 
-    lines = ["Ancient DNA-based selection inferences (AGES model):"]
-    for inv, group in ages.groupby("Inversion"):
-        best = group.sort_values("p_value").iloc[0]
+    value_col = "af" if "af" in traj.columns else "pt"
+    traj = traj.dropna(subset=["date_center", value_col])
+    if traj.empty:
+        return ["AGES trajectory table is empty after filtering numeric values."]
+
+    traj = traj.sort_values("date_center")
+    present = traj.iloc[0]
+    ancient = traj.iloc[-1]
+    change = present[value_col] - ancient[value_col]
+    value_min = traj[value_col].min()
+    value_max = traj[value_col].max()
+    sample_median = _safe_median(traj.get("num_allele"))
+    window_summary = _largest_window_change(traj["date_center"], traj[value_col], window=1000.0)
+
+    lines = [
+        "Ancient DNA-based selection inferences (AGES trajectory 12_47296118_A_G):",
+        f"  Windows analyzed: {_fmt(len(traj), 0)} spanning {_fmt(traj['date_center'].min(), 0)}–{_fmt(traj['date_center'].max(), 0)} years before present.",
+        f"  Observed allele-frequency ranges {_fmt(value_min, 3)}–{_fmt(value_max, 3)}; net change from {_fmt(ancient.date_center, 0)} to {_fmt(present.date_center, 0)} years BP is {_fmt(change, 3)}.",
+    ]
+    if sample_median is not None:
         lines.append(
-            f"  {inv}: best tag SNP {best.SNP} with p = {_fmt(best.p_value, 3)}, "
-            f"s ≈ {_fmt(best.selection_coeff, 3)}, peak 1-kyr change window {_fmt(best.peak_interval_kya, 3)} kya."
+            f"  Median haploid sample size per window ≈ {_fmt(sample_median, 0)} alleles."
+        )
+    if window_summary is not None:
+        start, end, delta = window_summary
+        lines.append(
+            "  Largest ~1,000-year change: "
+            f"Δf = {_plain_number(delta)} between {_plain_number(start)} and {_plain_number(end)} years BP."
         )
     return lines
 
