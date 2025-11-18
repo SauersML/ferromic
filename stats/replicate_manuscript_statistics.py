@@ -1,17 +1,4 @@
-"""Replicate manuscript metrics and tests from staged summary tables.
-
-This script consolidates the computations used throughout the manuscript into a
-single reproducible entry point. It mirrors the statistics described in the
-Results text, prints a human-readable report, and writes the same content to
-``stats/replicate_manuscript_statistics.txt`` for archival purposes.
-
-Each section below draws on tables or intermediate outputs that already live in
-the ``data`` directory. When a statistic depends on a previously published
-analysis module, we re-use the corresponding helper (for example the
-orientation × recurrence linear model in ``stats.inv_dir_recur_model``). If a
-required data product is missing, the script records this explicitly so the
-reader understands which metrics could not be regenerated in the current
-checkout.
+"""Replicate manuscript metrics and tests.
 """
 from __future__ import annotations
 
