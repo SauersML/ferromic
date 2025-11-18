@@ -1208,7 +1208,8 @@ def codeml_worker(gene_info, region_tree_file, region_label):
         h1_bm_key, _ = _hash_key_attempt(gene_phy_sha, h1_tree_str, taxa_used, ctl_bm_h1, exe_fp)
 
         # Clade-model (cmc) attempts
-        ctl_cmc_h0 = _ctl_string(phy_abs, h0_tree, "H0_cmc.out", model=0, NSsites=22, ncatG=3)
+        # H0: Restricted Clade Model C (Humans=#1, Chimp=Background). Model=3 allows Chimp to differ.
+        ctl_cmc_h0 = _ctl_string(phy_abs, h0_tree, "H0_cmc.out", model=3, NSsites=2, ncatG=3)
         ctl_cmc_h1 = _ctl_string(phy_abs, h1_tree, "H1_cmc.out", model=3, NSsites=2, ncatG=3)
         h0_cmc_key, _ = _hash_key_attempt(gene_phy_sha, h0_tree_str, taxa_used, ctl_cmc_h0, exe_fp)
         h1_cmc_key, _ = _hash_key_attempt(gene_phy_sha, h1_tree_str, taxa_used, ctl_cmc_h1, exe_fp)
@@ -1575,12 +1576,12 @@ def codeml_worker(gene_info, region_tree_file, region_label):
 
             else:
                 with ThreadPoolExecutor(max_workers=2) as ex:
+                    # Null model uses model=3 (Clade Model C) with merged human labels (#1)
+                    # to ensure Chimp (Background) rate is separate from Human rate.
                     fut_h0 = ex.submit(get_attempt_result, h0_cmc_key, h0_tree, "H0_cmc.out",
-                                       {"model": 0, "NSsites": 22, "ncatG": 3}, None)
+                                       {"model": 3, "NSsites": 2, "ncatG": 3}, None)
                     fut_h1 = ex.submit(get_attempt_result, h1_cmc_key, h1_tree, "H1_cmc.out",
                                        {"model": 3, "NSsites": 2, "ncatG": 3}, parse_h1_cmc_paml_output)
-                    h0_payload = fut_h0.result()
-                    h1_payload = fut_h1.result()
 
                 lnl0, lnl1 = h0_payload.get("lnl", -np.inf), h1_payload.get("lnl", -np.inf)
                 if np.isfinite(lnl0) and np.isfinite(lnl1) and lnl1 >= lnl0:
