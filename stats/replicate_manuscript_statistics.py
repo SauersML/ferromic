@@ -295,29 +295,16 @@ def summarize_diversity() -> List[str]:
 
 
 def summarize_linear_model() -> List[str]:
-    df = _load_pi_summary()
-    inv_ids = df.get("inversion_id")
-    if inv_ids is None:
-        inv_ids = pd.Series(["" for _ in range(len(df))])
-    matched = pd.DataFrame(
-        {
-            "pi_direct": df["0_pi_filtered"].astype(float),
-            "pi_inverted": df["1_pi_filtered"].astype(float),
-            "Recurrence": df["recurrence_flag"].map({0: "Single-event", 1: "Recurrent"}),
-            "region_id": inv_ids,
-            "chromosome": df["chromosome"],
-            "start": df["start"],
-            "end": df["end"],
-        }
-    )
-    matched["region_id"] = matched.apply(
-        lambda row: row["region_id"]
-        if isinstance(row["region_id"], str) and row["region_id"]
-        else f"chr{row['chromosome']}:{int(row['start'])}-{int(row['end'])}",
-        axis=1,
-    )
-    matched = matched.dropna(subset=["pi_direct", "pi_inverted", "Recurrence"])
+    pi_path = DATA_DIR / "output.csv"
+    inv_path = DATA_DIR / "inv_properties.tsv"
 
+    # load_and_match expects string paths and handles strict matching logic.
+    try:
+        matched = inv_dir_recur_model.load_and_match(str(pi_path), str(inv_path))
+    except Exception as exc:
+        return [f"Strict data loading failed: {exc}"]
+
+    # Calculate epsilon floor exactly as in the modeling script
     all_pi = np.r_[matched["pi_direct"].to_numpy(float), matched["pi_inverted"].to_numpy(float)]
     eps = inv_dir_recur_model.choose_floor_from_quantile(
         all_pi,
@@ -325,16 +312,62 @@ def summarize_linear_model() -> List[str]:
         min_floor=inv_dir_recur_model.MIN_FLOOR,
     )
 
-    _, effects, _ = inv_dir_recur_model.run_model_A(matched, eps=eps, nonzero_only=False)
-    lines = ["Orientation × recurrence linear model on log π ratios (Model A):"]
+    lines = ["Orientation × recurrence linear models (replicated strict logic):"]
     lines.append(f"  Detection floor applied before logs: ε = {_fmt(eps, 6)}.")
-    for effect in effects.itertuples():
-        lines.append(
-            f"  {effect.effect}: fold-change = {_fmt(effect.ratio, 3)} "
-            f"(95% CI {_fmt(effect.ci_low, 3)}–{_fmt(effect.ci_high, 3)}), p = {_fmt(effect.p, 3)}."
-        )
-    return lines
 
+    # Model A (Basic)
+    lines.append("  [Model A] Basic interaction (Δ-logπ ~ Recurrence):")
+    try:
+        _, tabA, dfA = inv_dir_recur_model.run_model_A(matched, eps=eps, nonzero_only=False)
+        for row in tabA.itertuples():
+            lines.append(
+                f"    {row.effect}: fold-change = {_fmt(row.ratio, 3)} "
+                f"(95% CI {_fmt(row.ci_low, 3)}–{_fmt(row.ci_high, 3)}), p = {_fmt(row.p, 3)}."
+            )
+    except Exception as exc:
+        lines.append(f"    Model A failed: {exc}")
+
+    # Model B (Fixed Effects)
+    lines.append("  [Model B] Fixed-effects validation (Cluster-robust):")
+    try:
+        _, tabB, _, _ = inv_dir_recur_model.run_model_B(matched, eps=eps)
+        for row in tabB.itertuples():
+            lines.append(
+                f"    {row.effect}: fold-change = {_fmt(row.ratio, 3)} "
+                f"(95% CI {_fmt(row.ci_low, 3)}–{_fmt(row.ci_high, 3)}), p = {_fmt(row.p, 3)}."
+            )
+    except Exception as exc:
+        lines.append(f"    Model B failed: {exc}")
+
+    # Model C (Covariate Adjusted)
+    lines.append("  [Model C] Covariate-adjusted (Recurrence + formation/size/AF):")
+    try:
+        _, tabC, _, _ = inv_dir_recur_model.run_model_C(
+            matched, invinfo_path=str(inv_path), eps=eps, nonzero_only=False
+        )
+        for row in tabC.itertuples():
+            lines.append(
+                f"    {row.effect}: fold-change = {_fmt(row.ratio, 3)} "
+                f"(95% CI {_fmt(row.ci_low, 3)}–{_fmt(row.ci_high, 3)}), p = {_fmt(row.p, 3)}."
+            )
+    except Exception as exc:
+        lines.append(f"    Model C failed: {exc}")
+
+    # Permutation Test
+    lines.append(
+        f"  [Permutation] Model A interaction (n={_fmt(inv_dir_recur_model.N_PERMUTATIONS, 0)}):"
+    )
+    try:
+        obs, p_perm = inv_dir_recur_model.perm_test_interaction(
+            dfA,
+            n=inv_dir_recur_model.N_PERMUTATIONS,
+            seed=inv_dir_recur_model.PERM_SEED,
+        )
+        lines.append(f"    Observed Δ(mean log-ratio) = {_fmt(obs, 4)}, p = {_fmt(p_perm, 4)}.")
+    except Exception as exc:
+        lines.append(f"    Permutation test failed: {exc}")
+
+    return lines
 
 def summarize_cds_conservation_glm() -> List[str]:
     lines: List[str] = [
