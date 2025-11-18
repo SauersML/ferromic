@@ -644,6 +644,12 @@ def _format_or(row: pd.Series) -> str:
 
 
 def summarize_key_associations() -> List[str]:
+    SOURCE_LABELS = {
+        "phewas_results.tsv": "MAIN IMPUTED",
+        "all_pop_phewas_tag.tsv": "TAG SNP",
+        "PGS_controls.tsv": "PGS CONTROL",
+    }
+
     targets = [
         AssocSpec(
             "chr10-79542902-INV-674513",
@@ -667,7 +673,13 @@ def summarize_key_associations() -> List[str]:
         ),
         AssocSpec(
             "chr17-45974480-INV-29218",
-            "Morbid obesity",
+            "Morbid obesity (Main Imputed)",
+            ("morbid", "obesity"),
+            table_name="phewas_results.tsv",
+        ),
+        AssocSpec(
+            "chr17-45974480-INV-29218",
+            "Morbid obesity (Tag SNP)",
             ("morbid", "obesity"),
             table_name="all_pop_phewas_tag.tsv",
         ),
@@ -784,8 +796,9 @@ def summarize_key_associations() -> List[str]:
         if bh is None:
             bh = pval
         parts = _format_or(r)
+        source_lbl = SOURCE_LABELS.get(spec.table_name, "UNKNOWN SOURCE")
         lines.append(
-            f"  {spec.inversion} vs {spec.label}: {parts}, "
+            f"  [{source_lbl}] {spec.inversion} vs {spec.label}: {parts}, "
             f"BH-adjusted p ≈ {_fmt(bh, 3)} (raw p = {_fmt(pval, 3)})."
         )
     return lines
@@ -891,7 +904,7 @@ def summarize_pgs_controls() -> List[str]:
     largest = pgs.sort_values("fold_change", ascending=False).iloc[0]
 
     lines = [
-        "Sensitivity of PheWAS associations to regional PGS covariates:",
+        "[PGS CONTROL] Sensitivity of PheWAS associations to regional PGS covariates:",
         f"  Source table: {source}.",
     ]
     lines.append(
@@ -899,6 +912,49 @@ def summarize_pgs_controls() -> List[str]:
         f"(p_nominal = {_fmt(largest.p_nominal, 3)}, p_with_pgs = {_fmt(largest.p_with_pgs, 3)}, "
         f"fold-change = {_fmt(largest.fold_change, 3)})."
     )
+    return lines
+
+
+def summarize_family_history() -> List[str]:
+    fam_path = REPO_ROOT / "assoc_outputs" / "assoc_family_groups_gee_single_beta.csv"
+
+    if not fam_path.exists():
+        return [
+            "Family history validation results not found (run stats/extra/family.py first)."
+        ]
+
+    try:
+        df = pd.read_csv(fam_path)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        return [f"Error reading family history results: {exc}"]
+
+    if "phenotype" not in df.columns:
+        return [
+            "Family history validation file missing 'phenotype' column; cannot summarize results."
+        ]
+
+    lines = ["Family History Validation (GEE Model):"]
+    key_phenos = ["Breast Cancer", "Obesity", "Heart Failure", "Cognitive Impairment"]
+
+    found_any = False
+    for pheno in key_phenos:
+        mask = df["phenotype"].astype(str).str.contains(pheno, case=False, na=False)
+        row = df[mask]
+        if row.empty:
+            continue
+        found_any = True
+        r = row.iloc[0]
+        or_val = r.get("OR")
+        ci_lo = r.get("CI_low")
+        ci_hi = r.get("CI_high")
+        p_val = r.get("p")
+        lines.append(
+            f"  [FAMILY FOLLOW-UP] {pheno}: OR = {_fmt(or_val, 3)} "
+            f"(95% CI {_fmt(ci_lo, 3)}–{_fmt(ci_hi, 3)}), p = {_fmt(p_val, 3)}."
+        )
+
+    if not found_any:
+        lines.append("  No manuscript phenotypes recovered from family history validation table.")
     return lines
 
 
@@ -1022,6 +1078,7 @@ def build_report() -> List[str]:
         ("Key associations", summarize_key_associations()),
         ("Category tests", summarize_category_tests()),
         ("PGS controls", summarize_pgs_controls()),
+        ("Family History", summarize_family_history()),
         ("Selection", summarize_selection()),
     ]
 
