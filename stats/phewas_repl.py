@@ -264,7 +264,7 @@ def add_aou_covariates(cohort_path):
         cohort_csv_path=cohort_path,
         age_at_last_event=True,
         sex_at_birth=True,
-        first_n_pcs=10,
+        first_n_pcs=16,
         drop_nulls=True,
         output_file_name="cohort_rs1052553_additive_cov.csv",
     )
