@@ -258,9 +258,9 @@ jobs:
       - name: Archive PHY files
         run: |
           set -euo pipefail
-          echo "[Archive PHY] Searching for *.phy files in $(pwd)"
+          echo "[Archive PHY] Searching for *.phy or *.phy.gz files in $(pwd)"
           shopt -s nullglob
-          phy_files=( *.phy )
+          phy_files=( *.phy *.phy.gz )
           echo "[Archive PHY] Found ${#phy_files[@]} PHY files"
           if [ "${#phy_files[@]}" -gt 0 ]; then
             echo "[Archive PHY] Listing PHY files: ${phy_files[*]}"
