@@ -94,7 +94,7 @@ REMOTE_PATHS: Sequence[RemoteResource] = [
     "public_internet/gene_inversion_fixed_differences.tsv",
     "public_internet/gene_inversion_permutation.tsv",
     "public_internet/glm_category_coefs.tsv",
-    "public_internet/hudson_fst_results.tsv",
+    "public_internet/hudson_fst_results.tsv.gz",
     "public_internet/inv_info.tsv",
     (
         "data/imputation_results.tsv",

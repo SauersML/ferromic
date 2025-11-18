@@ -173,10 +173,14 @@ def _load_pi_summary() -> pd.DataFrame:
 
 
 def _load_fst_table() -> pd.DataFrame | None:
-    fst_path = DATA_DIR / "hudson_fst_results.tsv"
-    if not fst_path.exists():
+    fst_candidates = [
+        DATA_DIR / "hudson_fst_results.tsv.gz",
+        DATA_DIR / "hudson_fst_results.tsv",
+    ]
+    fst_path = next((path for path in fst_candidates if path.exists()), None)
+    if fst_path is None:
         return None
-    fst = pd.read_csv(fst_path, sep="\t", low_memory=False)
+    fst = pd.read_csv(fst_path, sep="\t", low_memory=False, compression="infer")
     required = {"chr", "region_start_0based", "region_end_0based", "FST"}
     if not required.issubset(fst.columns):
         return None
