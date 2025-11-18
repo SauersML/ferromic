@@ -1231,6 +1231,8 @@ pub fn process_config_entries(
     let temp_output_file = temp_dir_path.join(output_file.file_name().unwrap());
     let mut writer = create_and_setup_csv_writer(&temp_output_file)?;
     write_csv_header(&mut writer)?;
+    // Ensure the header is written to disk immediately before any row data.
+    writer.flush().map_err(|e| VcfError::Io(e.into()))?;
 
     // Group config entries by chromosome for efficiency
     let grouped = group_config_entries_by_chr(config_entries);
@@ -1341,7 +1343,7 @@ pub fn process_config_entries(
         for (csv_row, per_site_diversity_vec, fst_data_wc, fst_data_hudson) in
             main_data_for_chr.drain(..)
         {
-            append_csv_row(&temp_output_file, &csv_row)?; // CSV (temp) immediate
+            write_csv_row(&mut writer, &csv_row)?; // CSV (temp) immediate
 
             append_diversity_falsta(
                 &temp_dir_path.join("per_site_diversity_output.falsta.gz"),
@@ -3037,26 +3039,12 @@ fn format_optional_usize(val_opt: Option<usize>) -> String {
     }
 }
 
-// ── shared append opener ──────────────────────────────────────────────────────
-fn open_append(path: &std::path::Path) -> std::io::Result<BufWriter<std::fs::File>> {
-    let f = OpenOptions::new().create(true).append(true).open(path)?;
-    Ok(BufWriter::new(f))
-}
-
 fn open_append_compressed(
     path: &std::path::Path,
 ) -> std::io::Result<BufWriter<GzEncoder<std::fs::File>>> {
     let f = OpenOptions::new().create(true).append(true).open(path)?;
     let encoder = GzEncoder::new(f, Compression::default());
     Ok(BufWriter::new(encoder))
-}
-
-// ── csv append: write ONE row (no header) ─────────────────────────────────────
-fn append_csv_row(csv_path: &std::path::Path, row: &CsvRowData) -> Result<(), VcfError> {
-    let f = open_append(csv_path).map_err(VcfError::Io)?;
-    let mut w = csv::WriterBuilder::new().has_headers(false).from_writer(f);
-    write_csv_row(&mut w, row)?;
-    w.flush().map_err(|e| VcfError::Io(e.into()))
 }
 
 // ── FALSTA helpers (use your existing header/value formats) ───────────────────
