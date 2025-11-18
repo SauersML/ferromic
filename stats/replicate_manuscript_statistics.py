@@ -787,25 +787,29 @@ def summarize_category_tests() -> List[str]:
         return ["Phecode category-level omnibus results not found; skipping summary."]
 
     categories = pd.read_csv(cat_path, sep="\t", low_memory=False)
-    required = {"Inversion", "Category", "P_GBJ", "P_GLS"}
+    required = {"Inversion", "Category", "P_GBJ", "P_GLS", "Q_GBJ", "Q_GLS"}
     if not required.issubset(categories.columns):
         missing = ", ".join(sorted(required - set(categories.columns)))
         return [f"Category table missing required columns: {missing}."]
 
     lines = ["Phecode category omnibus and directional tests:"]
     for inv, group in categories.groupby("Inversion"):
-        sig = group[(group["P_GBJ"] < 0.05) | (group["P_GLS"] < 0.05)]
+        sig = group[(group["Q_GBJ"] < 0.05) | (group["Q_GLS"] < 0.05)]
         if sig.empty:
             continue
         summaries = []
         for row in sig.itertuples():
-            gbj = _fmt(row.P_GBJ, 3) if not pd.isna(row.P_GBJ) else "NA"
-            gls = _fmt(row.P_GLS, 3) if not pd.isna(row.P_GLS) else "NA"
-            summaries.append(f"{row.Category}: GBJ p = {gbj}, GLS p = {gls}")
+            gbj_q = _fmt(row.Q_GBJ, 3) if not pd.isna(row.Q_GBJ) else "NA"
+            gls_q = _fmt(row.Q_GLS, 3) if not pd.isna(row.Q_GLS) else "NA"
+            gbj_p = _fmt(row.P_GBJ, 3) if not pd.isna(row.P_GBJ) else "NA"
+            gls_p = _fmt(row.P_GLS, 3) if not pd.isna(row.P_GLS) else "NA"
+            summaries.append(
+                f"{row.Category}: GBJ q = {gbj_q} (p = {gbj_p}), GLS q = {gls_q} (p = {gls_p})"
+            )
         lines.append(f"  {inv}: " + "; ".join(summaries))
 
     if len(lines) == 1:
-        lines.append("  No categories reached the significance threshold (p < 0.05).")
+        lines.append("  No categories reached the significance threshold (q < 0.05).")
     return lines
 
 
