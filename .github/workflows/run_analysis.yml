@@ -140,7 +140,7 @@ jobs:
           required = {
               "run-vcf-output-csv": "output.csv",
               "run-vcf-falsta": None,
-              "run-vcf-hudson-fst": "hudson_fst_results.tsv",
+              "run-vcf-hudson-fst": "hudson_fst_results.tsv.gz",
           }
 
           missing = [name for name in required if name not in artifacts]
@@ -196,8 +196,9 @@ jobs:
           # Hudson FST results
           with download_artifact(artifacts["run-vcf-hudson-fst"]) as zf:
               for member in zf.namelist():
-                  if member.endswith("hudson_fst_results.tsv"):
-                      target = public_root / "hudson_fst_results.tsv"
+                  if member.endswith("hudson_fst_results.tsv") or member.endswith("hudson_fst_results.tsv.gz"):
+                      target_name = Path(member).name
+                      target = public_root / target_name
                       target.parent.mkdir(parents=True, exist_ok=True)
                       with target.open("wb") as fh:
                           fh.write(zf.read(member))
@@ -205,7 +206,7 @@ jobs:
                       print(f"Wrote {target.relative_to(repo_root)}")
                       break
               else:
-                  raise SystemExit("hudson_fst_results.tsv not found in run-vcf-hudson-fst artefact")
+                  raise SystemExit("hudson_fst_results.tsv(.gz) not found in run-vcf-hudson-fst artefact")
 
           with download_log.open("a", encoding="utf-8") as fh:
               for path in log_entries:
