@@ -29,7 +29,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from stats import inv_dir_recur_model  # noqa: E402
+from stats import inv_dir_recur_model, recur_breakpoint_tests  # noqa: E402
 from stats._inv_common import map_inversion_series, map_inversion_value
 
 DATA_DIR = REPO_ROOT / "data"
@@ -372,15 +372,22 @@ def summarize_frf() -> List[str]:
         lines.append("  Recurrence annotations missing; cannot stratify FRF deltas.")
         return lines
 
+    vecs: dict[int, np.ndarray] = {}
     deltas: dict[int, float] = {}
+    counts: dict[int, int] = {}
     for flag in [0, 1]:
         subset = usable[usable["recurrence_flag"] == flag]
         if subset.empty:
             continue
-        deltas[flag] = float(_safe_mean(subset["edge_minus_middle"]))
+        vec = subset["edge_minus_middle"].dropna().to_numpy(dtype=float)
+        if vec.size == 0:
+            continue
+        vecs[flag] = vec
+        deltas[flag] = float(np.mean(vec))
+        counts[flag] = int(vec.size)
         label = "Single-event" if flag == 0 else "Recurrent"
         lines.append(
-            f"  {label}: mean(FST_flank - FST_middle) = {_fmt(deltas[flag], 3)} (n = {_fmt(len(subset), 0)})."
+            f"  {label}: mean(FST_flank - FST_middle) = {_fmt(deltas[flag], 3)} (n = {_fmt(counts[flag], 0)})."
         )
 
     if set(deltas) == {0, 1}:
@@ -390,12 +397,18 @@ def summarize_frf() -> List[str]:
             f"{_fmt(diff, 3)}."
         )
 
-    if "perm_p_value" in usable.columns:
-        p_val = _safe_mean(usable["perm_p_value"])
-        lines.append(
-            "  One-sided permutation test on recurrence labels: "
-            f"mean p-value ≈ {_fmt(p_val, 3)} (see per-inversion table for details)."
-        )
+    if set(vecs) == {0, 1}:
+        if len(vecs[0]) > 0 and len(vecs[1]) > 0:
+            res = recur_breakpoint_tests.directional_energy_test(
+                vecs[0],
+                vecs[1],
+                n_perm=10000,
+                random_state=2025,
+            )
+            lines.append(
+                "  Global permutation test (Energy distance, Single-event > Recurrent): "
+                f"p = {_fmt(res['p_value_0gt1'], 3)}."
+            )
 
     return lines
 
