@@ -783,26 +783,9 @@ def _plain_number(value: float | int | None) -> str:
 
 
 def summarize_selection() -> List[str]:
-    path = DATA_DIR / "ages_selection.tsv"
-    if path.exists():
-        ages = pd.read_csv(path, sep="\t", low_memory=False)
-        required = {"Inversion", "SNP", "p_value", "selection_coeff", "peak_interval_kya"}
-        if not required.issubset(ages.columns):
-            missing = ", ".join(sorted(required - set(ages.columns)))
-            return [f"AGES selection table missing required columns: {missing}."]
-
-        lines = ["Ancient DNA-based selection inferences (AGES model):"]
-        for inv, group in ages.groupby("Inversion"):
-            best = group.sort_values("p_value").iloc[0]
-            lines.append(
-                f"  {inv}: best tag SNP {best.SNP} with p = {_fmt(best.p_value, 3)}, "
-                f"s ≈ {_fmt(best.selection_coeff, 3)}, peak 1-kyr change window {_fmt(best.peak_interval_kya, 3)} kya."
-            )
-        return lines
-
     trajectory_path = DATA_DIR / "Trajectory-12_47296118_A_G.tsv"
     if not trajectory_path.exists():
-        return ["Ancient DNA selection results not found; skipping summary."]
+        return ["Trajectory data not found; skipping summary."]
 
     traj = pd.read_csv(trajectory_path, sep="\t", low_memory=False)
     numeric_cols = [
@@ -837,7 +820,7 @@ def summarize_selection() -> List[str]:
     window_summary = _largest_window_change(traj["date_center"], traj[value_col], window=1000.0)
 
     lines = [
-        "Ancient DNA-based selection inferences (AGES trajectory 12_47296118_A_G):",
+        "Allele frequency trajectory summary (12_47296118_A_G):",
         f"  Windows analyzed: {_fmt(len(traj), 0)} spanning {_fmt(traj['date_center'].min(), 0)}–{_fmt(traj['date_center'].max(), 0)} years before present.",
         f"  Observed allele-frequency ranges {_fmt(value_min, 3)}–{_fmt(value_max, 3)}; net change from {_fmt(ancient.date_center, 0)} to {_fmt(present.date_center, 0)} years BP is {_fmt(change, 3)}.",
     ]
