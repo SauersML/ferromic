@@ -265,7 +265,7 @@ def main():
     energy_results = directional_energy_test(group0, group1, n_perm=N_PERMUTATIONS, random_state=RANDOM_SEED)
     ks_results = directional_ks_test(group0, group1, n_perm=N_PERMUTATIONS, random_state=RANDOM_SEED)
     
-    print("anderson_darling_stat_0gt1={:.4f}".format(ad_results['statistic_0gt1']))s
+    print("anderson_darling_stat_0gt1={:.4f}".format(ad_results['statistic_0gt1']))
     print("anderson_darling_p_0gt1={:.4f}".format(ad_results['p_value_0gt1']))
     print("anderson_darling_stat_1gt0={:.4f}".format(ad_results['statistic_1gt0']))
     print("anderson_darling_p_1gt0={:.4f}".format(ad_results['p_value_1gt0']))
