@@ -25,6 +25,8 @@ use clap::Parser;
 use colored::*;
 use crossbeam_channel::bounded;
 use csv::WriterBuilder;
+use flate2::write::GzEncoder;
+use flate2::Compression;
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use prettytable::{Table, row};
@@ -1342,13 +1344,13 @@ pub fn process_config_entries(
             append_csv_row(&temp_output_file, &csv_row)?; // CSV (temp) immediate
 
             append_diversity_falsta(
-                &temp_dir_path.join("per_site_diversity_output.falsta"),
+                &temp_dir_path.join("per_site_diversity_output.falsta.gz"),
                 &csv_row,
                 &per_site_diversity_vec,
             )?;
 
             append_fst_falsta(
-                &temp_dir_path.join("per_site_fst_output.falsta"),
+                &temp_dir_path.join("per_site_fst_output.falsta.gz"),
                 &csv_row,
                 &fst_data_wc,
                 &fst_data_hudson,
@@ -1357,7 +1359,7 @@ pub fn process_config_entries(
 
         // Hudson TSV append for this chromosome
         if args.enable_fst && !hudson_data_for_chr.is_empty() {
-            let hudson_output_filename = "hudson_fst_results.tsv".to_string();
+            let hudson_output_filename = "hudson_fst_results.tsv.gz".to_string();
             let hudson_output_path = if let Some(main_output_parent) = output_file.parent() {
                 main_output_parent.join(&hudson_output_filename)
             } else {
@@ -1370,8 +1372,10 @@ pub fn process_config_entries(
     }
 
     writer.flush().map_err(|e| VcfError::Io(e.into()))?;
-    println!("Wrote FASTA-style per-site diversity data to per_site_diversity_output.falsta");
-    println!("Wrote FASTA-style per-site FST data to per_site_fst_output.falsta");
+    println!(
+        "Wrote FASTA-style per-site diversity data to per_site_diversity_output.falsta.gz"
+    );
+    println!("Wrote FASTA-style per-site FST data to per_site_fst_output.falsta.gz");
     println!(
         "Processing complete. Check the output file: {:?}",
         output_file
@@ -1397,19 +1401,19 @@ pub fn process_config_entries(
     std::fs::copy(&temp_csv, output_file)?;
 
     // Copy FASTA files
-    let temp_fasta = temp_dir_path.join("per_site_diversity_output.falsta");
+    let temp_fasta = temp_dir_path.join("per_site_diversity_output.falsta.gz");
     if temp_fasta.exists() {
         std::fs::copy(
             &temp_fasta,
-            std::path::Path::new("per_site_diversity_output.falsta"),
+            std::path::Path::new("per_site_diversity_output.falsta.gz"),
         )?;
     }
 
-    let temp_fst_fasta = temp_dir_path.join("per_site_fst_output.falsta");
+    let temp_fst_fasta = temp_dir_path.join("per_site_fst_output.falsta.gz");
     if temp_fst_fasta.exists() {
         std::fs::copy(
             &temp_fst_fasta,
-            std::path::Path::new("per_site_fst_output.falsta"),
+            std::path::Path::new("per_site_fst_output.falsta.gz"),
         )?;
     }
 
@@ -1417,9 +1421,10 @@ pub fn process_config_entries(
     for entry in std::fs::read_dir(&temp_dir_path)? {
         let entry = entry?;
         let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) == Some("phy") {
-            let file_name = path.file_name().unwrap();
-            std::fs::copy(&path, std::path::Path::new(".").join(file_name))?;
+        if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+            if file_name.ends_with(".phy.gz") {
+                std::fs::copy(&path, std::path::Path::new(".").join(file_name))?;
+            }
         }
     }
 
@@ -1433,7 +1438,7 @@ pub fn process_config_entries(
 
     // Write Hudson FST results if FST calculations were enabled
     if args.enable_fst {
-        let hudson_output_filename = "hudson_fst_results.tsv".to_string();
+        let hudson_output_filename = "hudson_fst_results.tsv.gz".to_string();
 
         // Place the Hudson FST output file in the same directory as the main output file.
         let hudson_output_path = if let Some(main_output_parent) = output_file.parent() {
@@ -1451,9 +1456,10 @@ pub fn process_config_entries(
         );
 
         let hudson_file = File::create(&hudson_output_path).map_err(|e| VcfError::Io(e.into()))?;
+        let encoder = GzEncoder::new(hudson_file, Compression::default());
         let mut hudson_writer = WriterBuilder::new()
             .delimiter(b'\t')
-            .from_writer(BufWriter::new(hudson_file));
+            .from_writer(BufWriter::new(encoder));
 
         // Write Hudson FST header
         hudson_writer.write_record(&[
@@ -3037,6 +3043,14 @@ fn open_append(path: &std::path::Path) -> std::io::Result<BufWriter<std::fs::Fil
     Ok(BufWriter::new(f))
 }
 
+fn open_append_compressed(
+    path: &std::path::Path,
+) -> std::io::Result<BufWriter<GzEncoder<std::fs::File>>> {
+    let f = OpenOptions::new().create(true).append(true).open(path)?;
+    let encoder = GzEncoder::new(f, Compression::default());
+    Ok(BufWriter::new(encoder))
+}
+
 // ── csv append: write ONE row (no header) ─────────────────────────────────────
 fn append_csv_row(csv_path: &std::path::Path, row: &CsvRowData) -> Result<(), VcfError> {
     let f = open_append(csv_path).map_err(VcfError::Io)?;
@@ -3059,7 +3073,7 @@ fn append_diversity_falsta<P: AsRef<std::path::Path>>(
     row: &CsvRowData,
     per_site: &[(i64, f64, f64, u8, bool)],
 ) -> Result<(), VcfError> {
-    let mut w = open_append(path.as_ref()).map_err(VcfError::Io)?;
+    let mut w = open_append_compressed(path.as_ref()).map_err(VcfError::Io)?;
     // region in 0-based half-open for mapping
     let region = ZeroBasedHalfOpen::from_1based_inclusive(row.region_start, row.region_end);
     let region_len = region.len();
@@ -3117,7 +3131,7 @@ fn append_fst_falsta<P: AsRef<std::path::Path>>(
     wc_sites: &[(i64, f64, f64)],
     hudson_sites: &[(i64, f64, f64, f64)],
 ) -> Result<(), VcfError> {
-    let mut w = open_append(path.as_ref()).map_err(VcfError::Io)?;
+    let mut w = open_append_compressed(path.as_ref()).map_err(VcfError::Io)?;
     let region = ZeroBasedHalfOpen::from_1based_inclusive(row.region_start, row.region_end);
     let n = region.len();
 
@@ -3235,7 +3249,7 @@ fn append_hudson_tsv(
     out_path: &std::path::Path,
     rows: &[RegionalHudsonFSTOutcome],
 ) -> Result<(), VcfError> {
-    let f = open_append(out_path).map_err(VcfError::Io)?;
+    let f = open_append_compressed(out_path).map_err(VcfError::Io)?;
     let mut w = csv::WriterBuilder::new()
         .delimiter(b'\t')
         .has_headers(false)
