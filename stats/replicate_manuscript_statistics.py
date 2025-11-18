@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import math
 import sys
+import os
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List, Tuple
@@ -29,10 +31,11 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from stats import inv_dir_recur_model, recur_breakpoint_tests  # noqa: E402
+from stats import CDS_identical_model, inv_dir_recur_model, recur_breakpoint_tests  # noqa: E402
 from stats._inv_common import map_inversion_series, map_inversion_value
 
 DATA_DIR = REPO_ROOT / "data"
+ANALYSIS_DOWNLOAD_DIR = REPO_ROOT / "analysis_downloads"
 REPORT_PATH = Path(__file__).with_suffix(".txt")
 
 
@@ -82,6 +85,43 @@ def _safe_median(series: pd.Series) -> float | None:
     if vals.empty:
         return None
     return float(vals.median())
+
+
+def _relative_to_repo(path: Path) -> str:
+    try:
+        return str(path.relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
+
+
+def _resolve_repo_artifact(basename: str) -> Path | None:
+    """Search common locations for derived analysis artefacts."""
+
+    search_dirs = [
+        REPO_ROOT,
+        DATA_DIR,
+        REPO_ROOT / "cds",
+        REPO_ROOT / "stats",
+        ANALYSIS_DOWNLOAD_DIR,
+        ANALYSIS_DOWNLOAD_DIR / "public_internet",
+    ]
+    for directory in search_dirs:
+        if directory is None or not directory.exists():
+            continue
+        candidate = directory / basename
+        if candidate.exists():
+            return candidate
+    return None
+
+
+@contextmanager
+def _temporary_workdir(path: Path):
+    prev = Path.cwd()
+    os.chdir(path)
+    try:
+        yield
+    finally:
+        os.chdir(prev)
 
 
 # ---------------------------------------------------------------------------
@@ -302,6 +342,105 @@ def summarize_linear_model() -> List[str]:
             f"  {effect.effect}: fold-change = {_fmt(effect.ratio, 3)} "
             f"(95% CI {_fmt(effect.ci_low, 3)}–{_fmt(effect.ci_high, 3)}), p = {_fmt(effect.p, 3)}."
         )
+    return lines
+
+
+def summarize_cds_conservation_glm() -> List[str]:
+    lines: List[str] = [
+        "CDS conservation GLM (proportion of identical CDS pairs):"
+    ]
+
+    pairwise_df: pd.DataFrame | None = None
+    source_label: str | None = None
+    errors: List[str] = []
+
+    cds_input = _resolve_repo_artifact("cds_identical_proportions.tsv")
+    if cds_input is not None:
+        try:
+            with _temporary_workdir(cds_input.parent):
+                cds_df = CDS_identical_model.load_data()
+                res = CDS_identical_model.fit_glm_binom(cds_df, include_covariates=True)
+                _, pairwise_df = CDS_identical_model.emms_and_pairs(
+                    res, cds_df, include_covariates=True
+                )
+            source_label = "recomputed from cds_identical_proportions.tsv"
+        except SystemExit as exc:  # stats/CDS_identical_model exits on missing inputs
+            errors.append(f"CDS GLM exited early: {exc}")
+        except FileNotFoundError as exc:
+            errors.append(f"Missing CDS supporting file: {exc}")
+        except Exception as exc:  # pragma: no cover - defensive
+            errors.append(f"Failed to recompute GLM: {exc}")
+
+    if pairwise_df is None:
+        pairwise_path = _resolve_repo_artifact("cds_pairwise_adjusted.tsv")
+        if pairwise_path is not None:
+            try:
+                pairwise_df = pd.read_csv(pairwise_path, sep="\t", low_memory=False)
+                source_label = f"loaded from {_relative_to_repo(pairwise_path)}"
+            except Exception as exc:  # pragma: no cover - defensive
+                errors.append(f"Unable to read {pairwise_path}: {exc}")
+
+    if pairwise_df is None:
+        lines.append(
+            "  CDS GLM inputs unavailable (expected cds_identical_proportions.tsv or cds_pairwise_adjusted.tsv)."
+        )
+        lines.extend(f"  {msg}" for msg in errors)
+        return lines
+
+    if source_label:
+        lines.append(f"  Source: {source_label}.")
+
+    required = {
+        "A",
+        "B",
+        "diff_logit",
+        "diff_prob",
+        "p_value",
+        "q_value_fdr",
+    }
+    if not required.issubset(pairwise_df.columns):
+        missing = ", ".join(sorted(required - set(pairwise_df.columns)))
+        lines.append(f"  Pairwise contrast table missing required columns: {missing}.")
+        return lines
+
+    target_label = "Single/Inverted"
+    comparisons = [
+        (target_label, "Single/Direct"),
+        (target_label, "Recurrent/Inverted"),
+        (target_label, "Recurrent/Direct"),
+    ]
+
+    def _extract_contrast(a: str, b: str) -> pd.Series | None:
+        mask = (
+            ((pairwise_df["A"] == a) & (pairwise_df["B"] == b))
+            | ((pairwise_df["A"] == b) & (pairwise_df["B"] == a))
+        )
+        subset = pairwise_df.loc[mask]
+        if subset.empty:
+            return None
+        return subset.iloc[0]
+
+    found_any = False
+    for target, other in comparisons:
+        row = _extract_contrast(target, other)
+        if row is None:
+            lines.append(f"  Contrast {target} vs {other} not present in CDS pairwise table.")
+            continue
+        found_any = True
+        diff_prob = float(row["diff_prob"])
+        diff_logit = float(row["diff_logit"])
+        if row["A"] != target:
+            diff_prob *= -1
+            diff_logit *= -1
+        lines.append(
+            "  "
+            + f"{target} vs {other}: Δlogit = {_fmt(diff_logit, 3)}, Δp = {_fmt(diff_prob, 3)}, "
+            + f"p = {_fmt(row['p_value'], 3)}, BH q = {_fmt(row['q_value_fdr'], 3)}."
+        )
+
+    if not found_any:
+        lines.append("  No pairwise contrasts reported for Single/Inverted haplotypes.")
+
     return lines
 
 
@@ -861,6 +1000,7 @@ def build_report() -> List[str]:
         ("Sample sizes", summarize_sample_sizes()),
         ("Diversity", summarize_diversity()),
         ("Linear model", summarize_linear_model()),
+        ("CDS conservation", summarize_cds_conservation_glm()),
         ("Differentiation", summarize_fst()),
         ("Breakpoint FRF", summarize_frf()),
         ("Imputation", summarize_imputation()),
