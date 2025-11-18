@@ -225,13 +225,13 @@ On startup Ferromic prints a status box summarising version, CPU threads, and ti
 
 - **PCA** – `pca_per_chr_outputs/chr_<id>.tsv` hold per-chromosome coordinates with haplotype labels; `pca_results.tsv` aggregates global PCA.
 - **Weir & Cockerham** – CSV columns prefixed with `haplotype_` cover overall FST, between/within population variance, and informative site counts.
-- **Hudson** – Summary columns `hudson_fst_hap_group_0v1`, `hudson_dxy_hap_group_0v1`, and per-group π values are produced, with an optional `hudson_fst_results.tsv` listing every pairwise comparison.
+- **Hudson** – Summary columns `hudson_fst_hap_group_0v1`, `hudson_dxy_hap_group_0v1`, and per-group π values are produced, with an optional `hudson_fst_results.tsv.gz` listing every pairwise comparison.
 
 ## Output artefacts
 
 - **Main CSV** – per-region statistics: raw/adjusted sequence lengths, segregating site counts, Watterson’s θ, nucleotide diversity π, inversion allele frequencies, and haplotype counts for both filtered and unfiltered tracks.
 - **Per-site FASTA-style files** – `per_site_diversity_output.falsta` exposes site-level π/θ arrays, while `per_site_fst_output.falsta` stores Weir & Cockerham and Hudson components per base.
-- **Hudson TSV (optional)** – When `--fst` is active, `hudson_fst_results.tsv` lists 0-based coordinates and FST components for each population comparison.
+- **Hudson TSV (optional)** – When `--fst` is active, `hudson_fst_results.tsv.gz` lists 0-based coordinates and FST components for each population comparison.
 - **PHYLIP alignments** – For every transcript overlapping a region Ferromic writes `group_{0|1}_{transcript_id}_chr_<chr>_start_<start>_end_<end>_combined.phy` containing reference-adjusted CDS sequences with `_L`/`_R` haplotype suffixes.
 
 ## Additional binaries
