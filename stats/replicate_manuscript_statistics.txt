@@ -20,9 +20,9 @@ Nucleotide diversity (π) by orientation and recurrence:
 
 PI STRUCTURE
 Mean of what: Nucleotide diversity (π) averaged across the two 10 kbp flanking windows of each qualifying sequence.
-In what: The 63 group_0 (orientation-0) haplotype sequences with ≥40 kbp of per-site filtered π estimates, spanning 63 unique inversion intervals.
+In what: The 63 group_0 (orientation-0) entries in the filtered-π FALSTA with ≥40 kbp of per-site filtered π estimates, spanning 63 unique inversion intervals.
 Where: Specifically within the filtered π regions, the combined flanking mean is 4.197e-04.
-Internal decay: 42 qualifying sequences extend ≥100 kbp and support the Spearman’s correlation (ρ = 0.104) between nucleotide diversity (50 × 2 kbp windows across the first 100 kbp) and distance from the sequence start.
+Internal decay: 42 qualifying entries extend ≥100 kbp and support the Spearman’s correlation (ρ = 0.104) between nucleotide diversity (50 × 2 kbp windows across the first 100 kbp) and distance from the sequence start.
 
 LINEAR MODEL
 Orientation × recurrence linear models (replicated strict logic):

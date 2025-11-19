@@ -446,7 +446,7 @@ def summarize_pi_structure() -> List[str]:
         "Mean of what: Nucleotide diversity (π) averaged across the two 10 kbp flanking windows of each qualifying sequence.",
         (
             "In what: The "
-            f"{_fmt(metrics.qualifying_sequences, 0)} group_0 (orientation-0) haplotype sequences with ≥40 kbp of per-site "
+            f"{_fmt(metrics.qualifying_sequences, 0)} group_0 (orientation-0) entries in the filtered-π FALSTA with ≥40 kbp of per-site "
             f"filtered π estimates, spanning {_fmt(metrics.unique_inversions, 0)} unique inversion intervals."
         ),
         f"Where: Specifically within the filtered π regions, the combined flanking mean is {_fmt(metrics.flank_mean)}.",
@@ -454,7 +454,7 @@ def summarize_pi_structure() -> List[str]:
 
     lines.append(
         "Internal decay: "
-        f"{_fmt(metrics.decay_sequences, 0)} qualifying sequences extend ≥100 kbp and support the Spearman’s correlation "
+        f"{_fmt(metrics.decay_sequences, 0)} qualifying entries extend ≥100 kbp and support the Spearman’s correlation "
         f"(ρ = {_fmt(metrics.decay_rho)}) between nucleotide diversity (50 × 2 kbp windows across the first 100 kbp) and "
         "distance from the sequence start."
     )
