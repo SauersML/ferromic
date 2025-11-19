@@ -4,8 +4,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  actions: write
-  contents: read
+  contents: write
 
 env:
   MANUAL_WORKFLOW_FILE: manual_run_vcf.yml
