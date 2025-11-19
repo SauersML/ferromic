@@ -1,5 +1,7 @@
 # Ferromic
 
+[![PyPI](https://img.shields.io/pypi/v/ferromic)](https://pypi.org/project/ferromic/) [![Build Status](https://github.com/SauersML/ferromic/actions/workflows/CI.yml/badge.svg)](https://github.com/SauersML/ferromic/actions/workflows/CI.yml) [![License](https://img.shields.io/crates/l/ferromic)](LICENSE.md)
+
 Ferromic is a Rust-accelerated population genetics toolkit built for haplotype-aware studies on large variant cohorts. It offers batteries-included CLI workflows alongside polished Python bindings so the same core algorithms can be reused in notebooks and scripted pipelines.
 
 ## Highlights
@@ -8,8 +10,33 @@ Ferromic is a Rust-accelerated population genetics toolkit built for haplotype-a
 - **Designed for big cohorts.** Rayon-powered multithreading, streaming VCF readers, progress bars, and resumable temporary directories keep terabyte-scale runs responsive.
 - **Rich output surface.** Generates region summaries, per-base FASTA-style tracks, PCA tables, PHYLIP files, and optional Hudson TSV exports ready for downstream notebooks.
 - **First-class Python ergonomics.** A PyO3-powered module exposes the same core statistics to Python, NumPy, and pandas workflows without sacrificing performance.
+- **Memory-aware dense matrices.** Detects ploidy, compresses genotypes into dense representations, and caches population summaries to accelerate repeated scans.
 - **Operationally friendly.** Ships with helper scripts, resumable temporary workspaces, and informative logging so long-running analyses can be monitored and resumed with confidence.
 
+## Table of contents
+
+- [Quick start](#quick-start)
+  - [Rust command-line pipeline](#rust-command-line-pipeline)
+  - [Python API](#python-api)
+- [Installation](#installation)
+  - [Use the prebuilt binaries](#use-the-prebuilt-binaries)
+  - [Build from source](#build-from-source)
+  - [Install the Python wheel](#install-the-python-wheel)
+- [Input requirements](#input-requirements)
+  - [Regional configuration file](#regional-configuration-file)
+  - [Coordinate conventions](#coordinate-conventions)
+  - [Optional masks and group definitions](#optional-masks-and-group-definitions)
+- [Running analyses with `run_vcf`](#running-analyses-with-run_vcf)
+  - [CLI options](#cli-options)
+  - [Example end-to-end run](#example-end-to-end-run)
+  - [Principal components and FST outputs](#principal-components-and-fst-outputs)
+- [Output artefacts](#output-artefacts)
+- [Additional binaries](#additional-binaries)
+- [Phenome-wide association (PheWAS) pipeline](#phenome-wide-association-phewas-pipeline)
+- [Project layout and helper scripts](#project-layout-and-helper-scripts)
+- [Development](#development)
+- [License](#license)
+- [References](#references)
 ## Quick start
 
 ### Rust command-line pipeline
@@ -73,20 +100,20 @@ pca = fm.chromosome_pca(
 print("PCA components shape:", pca.coordinates.shape)
 ```
 
-The Python surface mirrors the Rust crate: Hudson-style populations, per-site diversity iterators, PCA utilities, and sequence-length helpers are available under the top-level `ferromic` namespace. The bindings favour "plain" Python collections—variants can be dictionaries, dataclasses, or any object exposing `position` and `genotypes`, while haplotypes accept tuples such as `(sample_index, "L")` or `(sample_index, 1)`. All heavy lifting happens in Rust, so interactive workflows retain native performance.
+The Python surface mirrors the Rust crate: Hudson-style populations, per-site diversity iterators, PCA utilities, and sequence-length helpers are available under the top-level `ferromic` namespace. The bindings favour "plain" Python collections—variants can be dictionaries, dataclasses, or any object exposing `position` and `genotypes`, while haplotypes accept tuples such as `(sample_index, "L")` or `(sample_index, 1)`. All heavy lifting happens in Rust, so interactive workflows retain native performance, and return values are rich Python objects with cached attributes (for example, `FstEstimate.value`, `FstEstimate.sum_a`, `FstEstimate.sum_b`, and `FstEstimate.sites`).
 
 #### High-level API surface
 
 | Object | Description |
 | --- | --- |
-| `ferromic.Population` | Container with cached diversity metrics for a haplotype group; backs Hudson-style comparisons. |
+| `ferromic.Population` | Container with cached diversity metrics for a haplotype group; backs Hudson-style comparisons and exposes `from_numpy(id, genotypes, positions, haplotypes, sequence_length, sample_names)` for ergonomic construction. |
 | `ferromic.segregating_sites(variants)` | Count polymorphic sites for a cohort or region. |
 | `ferromic.nucleotide_diversity(variants, haplotypes, sequence_length)` | Compute π with optional BED-style masks. |
 | `ferromic.watterson_theta(segregating_sites, sample_count, sequence_length)` | Closed-form θ estimator mirroring the CLI output. |
 | `ferromic.per_site_diversity(variants, haplotypes, region=None)` | Iterator over per-position π/θ values that underpins `per_site_diversity_output.falsta`. |
-| `ferromic.wc_fst(...)` | Weir & Cockerham FST estimates with per-site and aggregate components. |
-| `ferromic.hudson_fst(pop1, pop2)` / `hudson_dxy` | Hudson-style FST and D<sub>xy</sub> between arbitrary `Population` objects. |
-| `ferromic.chromosome_pca(...)` family | Memory-aware PCA helpers that stream per-chromosome loadings, matching the CLI `--pca` artefacts. |
+| `ferromic.wc_fst(...)` | Weir & Cockerham FST results returned as a `WcFstResult` object containing pairwise matrices and per-site components. |
+| `ferromic.hudson_fst(pop1, pop2)` / `hudson_dxy` | Hudson-style FST and D<sub>xy</sub> between arbitrary `Population` objects, returned as structured `HudsonFstResult` instances. |
+| `ferromic.chromosome_pca(...)` family | Memory-aware PCA helpers that stream per-chromosome loadings using Faer-backed SVD, matching the CLI `--pca` artefacts. |
 | Utility helpers | Functions such as `adjusted_sequence_length` and `inversion_allele_frequency` mirror CLI adjustments for masked bases and inversion calls. |
 
 Consult `src/pytests` for end-to-end regression suites that exercise PCA, Hudson, and Weir & Cockerham pipelines directly from Python.
@@ -152,12 +179,13 @@ When the wheel is installed via `pip`, the Rust extensions are compiled in relea
 
 ### Regional configuration file
 
-Tab-delimited TSV with a header containing seven metadata columns followed by one column per haplotype sample:
+Tab-delimited TSV with a header containing **seven metadata columns** (which must be present even if blank) followed immediately by one column per haplotype sample:
 
 | Column | Description |
 | --- | --- |
 | `seqnames` | Chromosome identifier (with or without `chr`). |
-| `start` / `end` | 1-based inclusive coordinates for the region window. |
+| `start` | 1-based inclusive start coordinate for the region window. |
+| `end` | 1-based inclusive end coordinate for the region window. |
 | `POS` | Representative variant used for provenance. |
 | `orig_ID` | Region identifier carried into outputs. |
 | `verdict` | Manual or automated verdict flag. |
@@ -170,10 +198,11 @@ Values to the left/right of the `|` assign each haplotype to group 0 or 1. Suffi
 
 Ferromic consumes several genomics formats and keeps their native coordinate systems:
 
-- VCF positions are treated as **1-based inclusive**.
-- BED masks/allow lists are **0-based half-open** intervals.
-- TSV configuration files expect **1-based inclusive** coordinates.
+- Input VCFs use **1-based inclusive** coordinates as defined in the VCF specification.
+- Input BED masks/allow lists are **0-based half-open** intervals.
+- Config TSV entries expect **1-based inclusive** coordinates for start/end/POS fields.
 - GTF/GFF annotations are interpreted as **1-based inclusive** when extracting CDS spans.
+- Outputs use **1-based inclusive** coordinates for CSV/TSV reports, and PHYLIP filenames encode `start`/`end` in the same 1-based inclusive system (for example, `start100_end200`).
 
 ### Optional masks and group definitions
 
@@ -223,22 +252,27 @@ On startup Ferromic prints a status box summarising version, CPU threads, and ti
 
 ### Principal components and FST outputs
 
-- **PCA** – `pca_per_chr_outputs/chr_<id>.tsv` hold per-chromosome coordinates with haplotype labels; `pca_results.tsv` aggregates global PCA.
+- **PCA** – `pca_per_chr_outputs/chr_<id>.tsv` hold per-chromosome coordinates with haplotype labels; `pca_results.tsv` aggregates global PCA computed via SVD using the Faer linear algebra backend for high-performance CPU execution.
 - **Weir & Cockerham** – CSV columns prefixed with `haplotype_` cover overall FST, between/within population variance, and informative site counts.
 - **Hudson** – Summary columns `hudson_fst_hap_group_0v1`, `hudson_dxy_hap_group_0v1`, and per-group π values are produced, with an optional `hudson_fst_results.tsv.gz` listing every pairwise comparison.
 
 ## Output artefacts
 
-- **Main CSV** – per-region statistics: raw/adjusted sequence lengths, segregating site counts, Watterson’s θ, nucleotide diversity π, inversion allele frequencies, and haplotype counts for both filtered and unfiltered tracks.
-- **Per-site FASTA-style files** – `per_site_diversity_output.falsta` exposes site-level π/θ arrays, while `per_site_fst_output.falsta` stores Weir & Cockerham and Hudson components per base.
-- **Hudson TSV (optional)** – When `--fst` is active, `hudson_fst_results.tsv.gz` lists 0-based coordinates and FST components for each population comparison.
-- **PHYLIP alignments** – For every transcript overlapping a region Ferromic writes `group_{0|1}_{transcript_id}_chr_<chr>_start_<start>_end_<end>_combined.phy` containing reference-adjusted CDS sequences with `_L`/`_R` haplotype suffixes.
+- **Summary tables:**
+  - `output.csv` – per-region statistics: raw/adjusted sequence lengths, segregating site counts, Watterson’s θ, nucleotide diversity π, inversion allele frequencies, and haplotype counts for both filtered and unfiltered tracks.
+  - `phy_metadata.tsv` – index of generated PHYLIP files linking transcript IDs, gene names, genomic coordinates, and spliced CDS lengths to the corresponding alignment paths.
+- **Track files (`.falsta`):**
+  - `per_site_diversity_output.falsta` – per-base arrays for π and Watterson’s θ stored as FASTA-like tracks (headers such as `>per_site_diversity_pi`).
+  - `per_site_fst_output.falsta` – per-base Weir & Cockerham and Hudson components with headers like `>hudson_pairwise_fst_hap_0v1_num` and `>wc_weighted_fst_denominator` to ease parsing and genome-browser visualisation.
+- **Alignments:**
+  - `*.phy.gz` – PHYLIP-formatted CDS alignments for every transcript overlapping a region, phased by haplotype group (`group_{0|1}_{transcript_id}_chr_<chr>_start_<start>_end_<end>_combined.phy`).
+  - Optional `hudson_fst_results.tsv.gz` when `--fst` is active, listing Hudson components per comparison for the same 1-based inclusive coordinates.
 
 ## Additional binaries
 
 | Binary | Purpose |
 | --- | --- |
-| `ferromic` | High-throughput VCF concatenator with chromosome-aware ordering, async writers, and Rayon chunking controls. |
+| `ferromic` | High-throughput VCF concatenator (distinct from the library) with chromosome-aware ordering, async writers, and Rayon chunking controls. |
 | `vcf_merge` | Memory-aware VCF merge utility with optional RAM ceilings, mmap-assisted buffering, and per-chromosome progress readouts. |
 | `run_vcf` | Primary Ferromic CLI that streams regions, emits diversity/FST summaries, PCA tables, per-base FASTA tracks, and PHYLIP CDS exports. |
 
@@ -285,3 +319,8 @@ Benchmarks such as `cargo bench --bench pca` quantify PCA throughput. Contributi
 ## License
 
 Ferromic is released under the MIT License. See [LICENSE.md](LICENSE.md) for details.
+
+## References
+
+- Hudson, R. R., Slatkin, M., & Maddison, W. P. (1992). Estimation of levels of gene flow from DNA sequence data. *Genetics*, 132(2), 583–589. https://doi.org/10.1093/genetics/132.2.583
+- Weir, B. S., & Cockerham, C. C. (1984). Estimating F-statistics for the analysis of population structure. *Evolution*, 38(6), 1358–1370. https://doi.org/10.2307/2408641
