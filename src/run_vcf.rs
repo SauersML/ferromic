@@ -8,7 +8,7 @@ use ferromic::progress::{
     StatusBox,
 };
 use rayon::ThreadPoolBuilder;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -43,6 +43,12 @@ fn read_sample_names_from_vcf(vcf_path: &Path) -> Result<Vec<String>, VcfError> 
 
 fn main() -> Result<(), VcfError> {
     let args = Args::parse();
+    let exclusion_set: HashSet<String> = args
+        .exclude
+        .clone()
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
 
     // Set Rayon to use all logical CPUs
     let num_logical_cpus = num_cpus::get();
@@ -121,7 +127,15 @@ fn main() -> Result<(), VcfError> {
             LogLevel::Info,
             &format!("Config file provided: {}", config_file),
         );
-        let config_entries = parse_config_file(Path::new(config_file))?;
+        let mut config_entries = parse_config_file(Path::new(config_file))?;
+        for entry in config_entries.iter_mut() {
+            entry
+                .samples_unfiltered
+                .retain(|sample, _| !exclusion_set.contains(sample));
+            entry
+                .samples_filtered
+                .retain(|sample, _| !exclusion_set.contains(sample));
+        }
 
         let output_file = args
             .output_file
@@ -145,6 +159,7 @@ fn main() -> Result<(), VcfError> {
             mask_regions.clone(),
             allow_regions.clone(),
             &args,
+            &exclusion_set,
         )?;
 
     // ------------------------------------------------------------------------
@@ -163,7 +178,16 @@ fn main() -> Result<(), VcfError> {
         // Find a VCF for this chromosome
         let vcf_file = find_vcf_file(&args.vcf_folder, chr)?;
         // Collect sample names so we can assign them to a default group
-        let sample_names = read_sample_names_from_vcf(&vcf_file)?;
+        let sample_names: Vec<String> = read_sample_names_from_vcf(&vcf_file)?
+            .into_iter()
+            .filter(|name| !exclusion_set.contains(name))
+            .collect();
+
+        if sample_names.is_empty() {
+            return Err(VcfError::Parse(
+                "No samples remain after applying exclusions".to_string(),
+            ));
+        }
 
         log(
             LogLevel::Info,
@@ -210,6 +234,7 @@ fn main() -> Result<(), VcfError> {
             mask_regions.clone(),
             allow_regions.clone(),
             &args,
+            &exclusion_set,
         )?;
     } else {
         // Neither a config file nor a chromosome was specified
