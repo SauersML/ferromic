@@ -830,7 +830,15 @@ def summarize_category_tests() -> List[str]:
         return ["Phecode category-level omnibus results not found; skipping summary."]
 
     categories = pd.read_csv(cat_path, sep="\t", low_memory=False)
-    required = {"Inversion", "Category", "P_GBJ", "P_GLS", "Q_GBJ", "Q_GLS"}
+    required = {
+        "Inversion",
+        "Category",
+        "Direction",
+        "P_GBJ",
+        "P_GLS",
+        "Q_GBJ",
+        "Q_GLS",
+    }
     if not required.issubset(categories.columns):
         missing = ", ".join(sorted(required - set(categories.columns)))
         return [f"Category table missing required columns: {missing}."]
@@ -846,8 +854,24 @@ def summarize_category_tests() -> List[str]:
             gls_q = _fmt(row.Q_GLS, 3) if not pd.isna(row.Q_GLS) else "NA"
             gbj_p = _fmt(row.P_GBJ, 3) if not pd.isna(row.P_GBJ) else "NA"
             gls_p = _fmt(row.P_GLS, 3) if not pd.isna(row.P_GLS) else "NA"
+            direction_label: str | None
+            raw_direction = getattr(row, "Direction", None)
+            if isinstance(raw_direction, str):
+                normalized = raw_direction.strip().lower()
+                if normalized == "increase":
+                    direction_label = "Increased risk"
+                elif normalized == "decrease":
+                    direction_label = "Decreased risk"
+                else:
+                    direction_label = raw_direction.strip() or None
+            else:
+                direction_label = None
+            if direction_label:
+                category_name = f"{row.Category} ({direction_label})"
+            else:
+                category_name = f"{row.Category}"
             summaries.append(
-                f"{row.Category}: GBJ q = {gbj_q} (p = {gbj_p}), GLS q = {gls_q} (p = {gls_p})"
+                f"{category_name}: GBJ q = {gbj_q} (p = {gbj_p}), GLS q = {gls_q} (p = {gls_p})"
             )
         lines.append(f"  {inv}: " + "; ".join(summaries))
 
