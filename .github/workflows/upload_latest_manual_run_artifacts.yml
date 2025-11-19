@@ -144,6 +144,8 @@ jobs:
                 echo "Updated data/output.csv"
                 ;;
             esac
+
+            rm -rf "$dest"
           done
 
       - name: Commit and push data updates
