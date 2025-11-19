@@ -900,11 +900,14 @@ pub fn process_variants(
         let mut allele_values = Vec::new();
 
         // Iterate over haplotype group indices, borrowing each tuple
-        for (mapped_index, _) in &group_haps {
-            // We don't need side in this outer loop
-            // Access genotypes using the dereferenced index
+        for (mapped_index, side) in &group_haps {
+            // Access genotypes using the dereferenced index and respect haplotype side
             if let Some(genotype) = current_variant.genotypes.get(*mapped_index) {
-                if let Some(&val) = genotype.get(0) {
+                let allele_idx = match side {
+                    HaplotypeSide::Left => 0,
+                    HaplotypeSide::Right => 1,
+                };
+                if let Some(&val) = genotype.get(allele_idx) {
                     allele_values.push(val);
                 }
             }
