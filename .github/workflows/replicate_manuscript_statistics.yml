@@ -29,7 +29,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install numpy pandas scipy statsmodels requests
+          pip install numpy pandas scipy statsmodels requests tqdm
 
       - name: Generate manuscript statistics
         run: python stats/replicate_manuscript_statistics.py
