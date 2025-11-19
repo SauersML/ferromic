@@ -55,7 +55,7 @@ jobs:
           fi
 
           artifact_json="${artifact_json//$'\n'/}"
-          echo "artifacts=$artifact_json" >> "$GITHUB_OUTPUT"
+          printf 'artifacts=%s\n' "$artifact_json" >> "$GITHUB_OUTPUT"
 
   sync-data:
     needs: collect-artifacts
