@@ -8,14 +8,11 @@ use tempfile::tempdir;
 #[test]
 fn test_variant_filtering_unit() -> Result<(), Box<dyn std::error::Error>> {
     use crate::process::{process_variant, FilteringStats, MissingDataInfo, ZeroBasedHalfOpen};
-    use parking_lot::Mutex;
-    use std::collections::HashMap;
 
     // Test the core filtering functionality directly (unit test)
     let sample_names = vec!["SAMPLE1".to_string(), "SAMPLE2".to_string()];
     let mut missing_data_info = MissingDataInfo::default();
     let mut filtering_stats = FilteringStats::default();
-    let position_allele_map = Mutex::new(HashMap::new());
     let region = ZeroBasedHalfOpen {
         start: 999,
         end: 2000,
@@ -33,14 +30,13 @@ fn test_variant_filtering_unit() -> Result<(), Box<dyn std::error::Error>> {
         &mut filtering_stats,
         None,
         None,
-        &position_allele_map,
     );
 
     assert!(
         result_high.is_ok(),
         "High GQ variant should be processed successfully"
     );
-    let (variant_high, is_valid_high) = result_high.unwrap().unwrap();
+    let (variant_high, is_valid_high, _) = result_high.unwrap().unwrap();
     assert!(is_valid_high, "High GQ variant should be marked as valid");
     assert_eq!(variant_high.position, 999); // 1-based to 0-based conversion
 
@@ -56,14 +52,13 @@ fn test_variant_filtering_unit() -> Result<(), Box<dyn std::error::Error>> {
         &mut filtering_stats,
         None,
         None,
-        &position_allele_map,
     );
 
     assert!(
         result_low.is_ok(),
         "Low GQ variant should be processed successfully"
     );
-    let (variant_low, is_valid_low) = result_low.unwrap().unwrap();
+    let (variant_low, is_valid_low, _) = result_low.unwrap().unwrap();
     assert!(
         !is_valid_low,
         "Low GQ variant should be marked as invalid (filtered)"
