@@ -13,30 +13,6 @@ Ferromic is a Rust-accelerated population genetics toolkit built for haplotype-a
 - **Memory-aware dense matrices.** Detects ploidy, compresses genotypes into dense representations, and caches population summaries to accelerate repeated scans.
 - **Operationally friendly.** Ships with helper scripts, resumable temporary workspaces, and informative logging so long-running analyses can be monitored and resumed with confidence.
 
-## Table of contents
-
-- [Quick start](#quick-start)
-  - [Rust command-line pipeline](#rust-command-line-pipeline)
-  - [Python API](#python-api)
-- [Installation](#installation)
-  - [Use the prebuilt binaries](#use-the-prebuilt-binaries)
-  - [Build from source](#build-from-source)
-  - [Install the Python wheel](#install-the-python-wheel)
-- [Input requirements](#input-requirements)
-  - [Regional configuration file](#regional-configuration-file)
-  - [Coordinate conventions](#coordinate-conventions)
-  - [Optional masks and group definitions](#optional-masks-and-group-definitions)
-- [Running analyses with `run_vcf`](#running-analyses-with-run_vcf)
-  - [CLI options](#cli-options)
-  - [Example end-to-end run](#example-end-to-end-run)
-  - [Principal components and FST outputs](#principal-components-and-fst-outputs)
-- [Output artefacts](#output-artefacts)
-- [Additional binaries](#additional-binaries)
-- [Phenome-wide association (PheWAS) pipeline](#phenome-wide-association-phewas-pipeline)
-- [Project layout and helper scripts](#project-layout-and-helper-scripts)
-- [Development](#development)
-- [License](#license)
-- [References](#references)
 ## Quick start
 
 ### Rust command-line pipeline
