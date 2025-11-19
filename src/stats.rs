@@ -19,9 +19,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 /// near-zero denominators and floating-point precision issues.
 ///
 /// Usage Guidelines:
-/// - FST_EPSILON (1e-12): For Hudson FST denominators and component sums
-/// - 1e-9: For Weir-Cockerham calculations and general float comparisons
-/// - The choice depends on the expected magnitude of values and required precision
+/// - `FST_EPSILON` (1e-12) is used for Hudson and Weir-Cockerham FST calculations
+///   to consistently gate floating-point noise across per-site and aggregated values.
 const FST_EPSILON: f64 = 1e-12;
 
 /// Encapsulates the result of an FST (Fixation Index) calculation for a specific genetic site or genomic region.
@@ -1617,7 +1616,7 @@ fn dense_fst_components_from_biallelic(
 ///   - `pairwise_variance_components_map` (`HashMap<String, (f64, f64)>`): The (a_xy, b_xy) components for each pair of subpopulations.
 fn fst_estimate_from_components(site_a: f64, site_b: f64) -> FstEstimate {
     let denominator = site_a + site_b;
-    let eps = 1e-9;
+    let eps = FST_EPSILON;
 
     if denominator > eps {
         FstEstimate::Calculable {
@@ -2003,7 +2002,7 @@ fn calculate_overall_fst_wc(
         // Assertion: num_sites_in_overall_sum should equal sites_contributing_to_overall_sum if logic is correct.
 
         let denominator = sum_a_total + sum_b_total;
-        let eps = 1e-9;
+        let eps = FST_EPSILON;
 
         if denominator > eps {
             FstEstimate::Calculable {
@@ -2060,7 +2059,7 @@ fn calculate_overall_fst_wc(
             aggregated_pairwise_variance_components.insert(pair_key.clone(), (sum_a_xy, sum_b_xy));
 
             let denominator_pair = sum_a_xy + sum_b_xy;
-            let eps = 1e-9;
+            let eps = FST_EPSILON;
 
             let estimate_for_pair = if denominator_pair > eps {
                 FstEstimate::Calculable {
@@ -2240,6 +2239,7 @@ pub fn calculate_d_xy_hudson<'a>(
     // Use unbiased per-site aggregation approach
     let mut sum_dxy = 0.0;
     let mut variant_count = 0;
+    let mut skipped_sites = 0i64;
 
     let pop1_mem = HapMembership::build(pop1_context.sample_names.len(), &pop1_context.haplotypes);
     let pop2_mem = HapMembership::build(pop2_context.sample_names.len(), &pop2_context.haplotypes);
@@ -2250,9 +2250,14 @@ pub fn calculate_d_xy_hudson<'a>(
         let counts2 = freq_summary_for_pop(variant, &pop2_mem);
 
         // Calculate per-site Dxy using existing helper
-        if let Some(dxy_site) = dxy_from_counts(&counts1, &counts2) {
-            sum_dxy += dxy_site;
-            variant_count += 1;
+        match dxy_from_counts(&counts1, &counts2) {
+            Some(dxy_site) => {
+                sum_dxy += dxy_site;
+                variant_count += 1;
+            }
+            None => {
+                skipped_sites += 1;
+            }
         }
         // Sites where either population has n=0 are skipped but contribute 0 to the sum
     }
@@ -2267,9 +2272,10 @@ pub fn calculate_d_xy_hudson<'a>(
 
     // Final Dxy = sum of per-site Dxy values divided by sequence length
     // Monomorphic sites (including those not in variants list) contribute 0
-    let effective_sequence_length = pop1_context.sequence_length as f64;
-    let d_xy_value = if effective_sequence_length > 0.0 {
-        Some(sum_dxy / effective_sequence_length)
+    let effective_sequence_length = (pop1_context.sequence_length as i64)
+        .saturating_sub(skipped_sites);
+    let d_xy_value = if effective_sequence_length > 0 {
+        Some(sum_dxy / effective_sequence_length as f64)
     } else {
         log(
             LogLevel::Warning,
@@ -2302,12 +2308,14 @@ fn calculate_dxy_dense(
     let mut counts2 = vec![0u32; 256];
     let mut used2 = Vec::with_capacity(8);
     let mut sum_dxy = 0.0_f64;
+    let mut skipped_sites = 0i64;
 
     for variant_idx in 0..matrix.variant_count() {
         let (n1, _) = dense_collect_counts(matrix, pop1_mem, variant_idx, &mut counts1, &mut used1);
         let (n2, _) = dense_collect_counts(matrix, pop2_mem, variant_idx, &mut counts2, &mut used2);
 
         if n1 == 0 || n2 == 0 {
+            skipped_sites += 1;
             dense_reset_counts(&mut counts1, &mut used1);
             dense_reset_counts(&mut counts2, &mut used2);
             continue;
@@ -2354,7 +2362,19 @@ fn calculate_dxy_dense(
         dense_reset_counts(&mut counts2, &mut used2);
     }
 
-    Some(sum_dxy / sequence_length as f64)
+    let effective_length = sequence_length.saturating_sub(skipped_sites);
+    if effective_length > 0 {
+        Some(sum_dxy / effective_length as f64)
+    } else {
+        log(
+            LogLevel::Warning,
+            &format!(
+                "Invalid effective sequence length for dense Dxy calculation: {}",
+                effective_length
+            ),
+        );
+        None
+    }
 }
 
 /// Extract allele counts for a population at a specific variant site.
