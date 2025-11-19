@@ -25,6 +25,8 @@ from stats import (
     inv_dir_recur_model,
     recur_breakpoint_tests,
     per_inversion_breakpoint_metric,
+    cds_differences,
+    per_gene_cds_differences_jackknife,
 )  # noqa: E402
 from stats._inv_common import map_inversion_series, map_inversion_value
 
@@ -116,6 +118,47 @@ def _temporary_workdir(path: Path):
         yield
     finally:
         os.chdir(prev)
+
+
+def run_fresh_cds_pipeline():
+    """
+    Force regeneration of CDS statistics from raw .phy files.
+
+    This replaces the need for pre-existing .tsv summary files.
+    """
+
+    print("\n" + "=" * 80)
+    print(">>> PIPELINE: REGENERATING CDS DATA FROM RAW .PHY FILES <<<")
+    print("=" * 80)
+
+    # 1. Clean up old intermediate files to ensure we are using raw data
+    print("... Cleaning old summary tables to ensure fresh run ...")
+    for f in Path(".").glob("cds_identical_proportions.tsv"):
+        f.unlink()
+    for f in Path(".").glob("pairs_CDS__*.tsv"):
+        f.unlink()
+    for f in Path(".").glob("gene_inversion_direct_inverted.tsv"):
+        f.unlink()
+
+    # 2. Run the Raw Processor (equivalent to running stats/cds_differences.py)
+    # This reads *.phy and inv_info.tsv -> outputs cds_identical_proportions.tsv
+    print("\n[Step 1/2] Parsing raw PHYLIP files (cds_differences.py)...")
+    try:
+        cds_differences.main()
+    except Exception as e:
+        print(f"FATAL: Raw .phy processing failed: {e}")
+        sys.exit(1)
+
+    # 3. Run the Jackknife Analysis (equivalent to stats/per_gene_cds_differences_jackknife.py)
+    # This reads the file created in Step 1 -> outputs gene_inversion_direct_inverted.tsv
+    print("\n[Step 2/2] Running Jackknife statistics (per_gene_cds_differences_jackknife.py)...")
+    try:
+        per_gene_cds_differences_jackknife.main()
+    except Exception as e:
+        print(f"FATAL: Jackknife analysis failed: {e}")
+        sys.exit(1)
+
+    print("\n>>> PIPELINE: GENERATION COMPLETE. Proceeding to manuscript report...\n")
 
 
 # ---------------------------------------------------------------------------
@@ -311,8 +354,8 @@ def _load_pi_summary() -> pd.DataFrame:
 
 def _load_fst_table() -> pd.DataFrame | None:
     fst_candidates = [
-        DATA_DIR / "hudson_fst_results.tsv.gz",
-        DATA_DIR / "hudson_fst_results.tsv",
+        DATA_DIR / "FST_data.tsv",
+        DATA_DIR / "FST_data.tsv.gz",
     ]
     fst_path = next((path for path in fst_candidates if path.exists()), None)
     if fst_path is None:
@@ -1454,6 +1497,7 @@ def build_report() -> List[str]:
 
 
 def main() -> None:
+    run_fresh_cds_pipeline()
     lines = build_report()
     text = "\n".join(lines).strip() + "\n"
     print(text)
