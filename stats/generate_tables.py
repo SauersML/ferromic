@@ -110,90 +110,213 @@ GENE_CONSERVATION_COLUMN_DEFS: Dict[str, str] = OrderedDict(
 
 PHEWAS_COLUMN_DEFS: Dict[str, str] = OrderedDict(
     [
-        ("Phenotype", "The phecode string representing the disease phenotype."),
-        ("Inversion", "The Inversion ID being tested."),
-        ("Q_GLOBAL", "The q-value (FDR) derived from the global heterogeneity test across all phenotypes."),
-        ("N_Controls", "Number of control participants."),
-        ("OR", "Odds Ratio per unit of inversion dosage."),
-        ("CI_LO_OR", "Lower bound of the 95% confidence interval for the Odds Ratio."),
-        ("CI_HI_OR", "Upper bound of the 95% confidence interval for the Odds Ratio."),
-        ("N_Total", "Total number of participants (Cases + Controls)."),
-        ("N_Cases", "Number of case participants."),
-        ("P_Value_unadjusted", "Nominal p-value from the logistic regression likelihood ratio test."),
-        ("P_Source_x", "The source of the p-value (e.g., LRT, Score)."),
-        ("CI_Method", "Method used to calculate confidence intervals (e.g., Profile-Likelihood or Wald)."),
-        ("Inference_Type", "Type of statistical inference performed."),
-        ("Model_Notes", "Notes regarding model convergence or covariate selection."),
-        ("Sig_Global", "Boolean indicating global significance after correction."),
-        ("P_LRT_AncestryxDosage", "P-value for the interaction term between dosage and ancestry."),
-        ("P_Stage2_Valid", "Boolean indicating if the stage 2 (ancestry-specific) analysis was valid."),
-        ("Stage2_P_Source", "Source of the stage 2 p-value."),
-        ("Stage2_Inference_Type", "Inference type for stage 2 analysis."),
-        ("Stage2_Model_Notes", "Notes regarding the stage 2 model."),
-        ("EUR_N", "Total participants (European ancestry)."),
-        ("EUR_N_Cases", "Number of cases (European ancestry)."),
-        ("EUR_N_Controls", "Number of controls (European ancestry)."),
-        ("EUR_OR", "Odds Ratio (European ancestry)."),
-        ("EUR_P", "P-value (European ancestry)."),
-        ("EUR_P_Source", "P-value source (European ancestry)."),
-        ("EUR_Inference_Type", "Inference type (European ancestry)."),
-        ("EUR_CI_Method", "CI calculation method (European ancestry)."),
-        ("EUR_CI_LO_OR", "Lower 95% CI bound (European ancestry)."),
-        ("EUR_CI_HI_OR", "Upper 95% CI bound (European ancestry)."),
-        ("AFR_N", "Total participants (African ancestry)."),
-        ("AFR_N_Cases", "Number of cases (African ancestry)."),
-        ("AFR_N_Controls", "Number of controls (African ancestry)."),
-        ("AFR_OR", "Odds Ratio (African ancestry)."),
-        ("AFR_P", "P-value (African ancestry)."),
-        ("AFR_P_Source", "P-value source (African ancestry)."),
-        ("AFR_Inference_Type", "Inference type (African ancestry)."),
-        ("AFR_CI_Method", "CI calculation method (African ancestry)."),
-        ("AFR_CI_LO_OR", "Lower 95% CI bound (African ancestry)."),
-        ("AFR_CI_HI_OR", "Upper 95% CI bound (African ancestry)."),
-        ("AMR_N", "Total participants (Admixed American ancestry)."),
-        ("AMR_N_Cases", "Number of cases (Admixed American ancestry)."),
-        ("AMR_N_Controls", "Number of controls (Admixed American ancestry)."),
-        ("AMR_OR", "Odds Ratio (Admixed American ancestry)."),
-        ("AMR_P", "P-value (Admixed American ancestry)."),
-        ("AMR_P_Source", "P-value source (Admixed American ancestry)."),
-        ("AMR_Inference_Type", "Inference type (Admixed American ancestry)."),
-        ("AMR_CI_Method", "CI calculation method (Admixed American ancestry)."),
-        ("AMR_CI_LO_OR", "Lower 95% CI bound (Admixed American ancestry)."),
-        ("AMR_CI_HI_OR", "Upper 95% CI bound (Admixed American ancestry)."),
-        ("SAS_N", "Total participants (South Asian ancestry)."),
-        ("SAS_N_Cases", "Number of cases (South Asian ancestry)."),
-        ("SAS_N_Controls", "Number of controls (South Asian ancestry)."),
-        ("SAS_OR", "Odds Ratio (South Asian ancestry)."),
-        ("SAS_P", "P-value (South Asian ancestry)."),
-        ("SAS_P_Source", "P-value source (South Asian ancestry)."),
-        ("SAS_Inference_Type", "Inference type (South Asian ancestry)."),
-        ("SAS_CI_Method", "CI calculation method (South Asian ancestry)."),
-        ("SAS_CI_LO_OR", "Lower 95% CI bound (South Asian ancestry)."),
-        ("SAS_CI_HI_OR", "Upper 95% CI bound (South Asian ancestry)."),
-        ("EAS_N", "Total participants (East Asian ancestry)."),
-        ("EAS_N_Cases", "Number of cases (East Asian ancestry)."),
-        ("EAS_N_Controls", "Number of controls (East Asian ancestry)."),
-        ("EAS_OR", "Odds Ratio (East Asian ancestry)."),
-        ("EAS_P", "P-value (East Asian ancestry)."),
-        ("EAS_P_Source", "P-value source (East Asian ancestry)."),
-        ("EAS_Inference_Type", "Inference type (East Asian ancestry)."),
-        ("EAS_CI_Method", "CI calculation method (East Asian ancestry)."),
-        ("EAS_CI_LO_OR", "Lower 95% CI bound (East Asian ancestry)."),
-        ("EAS_CI_HI_OR", "Upper 95% CI bound (East Asian ancestry)."),
-        ("MID_N", "Total participants (Middle Eastern ancestry)."),
-        ("MID_N_Cases", "Number of cases (Middle Eastern ancestry)."),
-        ("MID_N_Controls", "Number of controls (Middle Eastern ancestry)."),
-        ("MID_OR", "Odds Ratio (Middle Eastern ancestry)."),
-        ("MID_P", "P-value (Middle Eastern ancestry)."),
-        ("MID_P_Source", "P-value source (Middle Eastern ancestry)."),
-        ("MID_Inference_Type", "Inference type (Middle Eastern ancestry)."),
-        ("MID_CI_Method", "CI calculation method (Middle Eastern ancestry)."),
-        ("MID_CI_LO_OR", "Lower 95% CI bound (Middle Eastern ancestry)."),
-        ("MID_CI_HI_OR", "Upper 95% CI bound (Middle Eastern ancestry)."),
+        (
+            "Phenotype",
+            "The unique phecode string representing the disease phenotype (derived from ICD billing codes).",
+        ),
+        ("Inversion", "The unique identifier of the chromosomal inversion locus being tested."),
+        (
+            "Q_GLOBAL",
+            "The Global Benjamini-Hochberg False Discovery Rate (FDR) q-value, corrected across all phenotypes and all inversions tested in the study.",
+        ),
+        (
+            "N_Controls",
+            "The number of control participants (individuals without the phenotype) included in the analysis.",
+        ),
+        (
+            "OR",
+            "The Odds Ratio (OR) representing the change in disease risk per copy of the inversion allele. Derived from the exponential of the logistic regression beta coefficient.",
+        ),
+        (
+            "CI_LO_OR",
+            "The lower bound of the 95% confidence interval for the Odds Ratio. Calculated via Profile Likelihood for Firth/Penalized models, or Wald/Score methods for standard MLE.",
+        ),
+        ("CI_HI_OR", "The upper bound of the 95% confidence interval for the Odds Ratio."),
+        (
+            "N_Total",
+            "The total number of participants (Cases + Controls) included in the logistic regression model after quality control and exclusion of related individuals.",
+        ),
+        ("N_Cases", "The number of case participants (individuals with the phenotype) included in the analysis."),
+        (
+            "P_Value_unadjusted",
+            "The nominal p-value for the association. Derived from a Likelihood Ratio Test (LRT) for stable fits, or a Score Test/Firth Penalized Likelihood if the standard model failed to converge or exhibited separation.",
+        ),
+        (
+            "P_Source_x",
+            "The specific statistical test used to generate the p-value (e.g., 'lrt_mle', 'score_chi2', 'score_boot_mle'). Identifies if fallback methods were required.",
+        ),
+        (
+            "CI_Method",
+            "The statistical method used to calculate the confidence intervals (e.g., 'profile' for robust likelihood-based intervals, or 'wald_mle').",
+        ),
+        (
+            "Inference_Type",
+            "The statistical framework selected by the pipeline (e.g., 'mle', 'firth', 'score'). 'Firth' indicates penalized regression was used to handle rare case counts or separation.",
+        ),
+        (
+            "Model_Notes",
+            "Diagnostic flags generated during model fitting (e.g., 'sex_restricted' if analysis was limited to one sex, 'ridge_seeded' if regularization was needed for convergence).",
+        ),
+        (
+            "Sig_Global",
+            "Boolean indicator (TRUE/FALSE) denoting if the association is statistically significant at the global FDR threshold (q < 0.05).",
+        ),
+        (
+            "P_LRT_AncestryxDosage",
+            "P-value from a Stage-2 Likelihood Ratio or Rao Score test comparing a model with 'Ancestry x Inversion' interaction terms against a base model. Tests if the inversion's effect size differs significantly by genetic ancestry.",
+        ),
+        (
+            "P_Stage2_Valid",
+            "Boolean indicating if the Stage-2 ancestry interaction model converged successfully and produced a valid p-value.",
+        ),
+        (
+            "Stage2_P_Source",
+            "The method used to calculate the interaction p-value (e.g., 'rao_score' is used for robust multi-degree-of-freedom tests when multiple ancestry groups are present).",
+        ),
+        (
+            "Stage2_Inference_Type",
+            "The statistical framework used for the Stage-2 interaction test.",
+        ),
+        ("Stage2_Model_Notes", "Diagnostic notes specific to the Stage-2 interaction model fit."),
+        (
+            "EUR_N",
+            "Total participants included in the European ancestry stratum analysis.",
+        ),
+        ("EUR_N_Cases", "Number of cases in the European ancestry stratum."),
+        ("EUR_N_Controls", "Number of controls in the European ancestry stratum."),
+        (
+            "EUR_OR",
+            "Odds Ratio estimated specifically within the European ancestry stratum.",
+        ),
+        ("EUR_P", "Nominal p-value for the association within the European ancestry stratum."),
+        (
+            "EUR_P_Source",
+            "Source of the p-value for the European ancestry stratum (e.g., 'score_chi2' if case counts were low).",
+        ),
+        (
+            "EUR_Inference_Type",
+            "Statistical framework used for the European ancestry stratum (e.g., 'firth' if the stratum had low case counts).",
+        ),
+        ("EUR_CI_Method", "Method used for confidence intervals in the European ancestry stratum."),
+        ("EUR_CI_LO_OR", "Lower 95% CI bound for the European ancestry stratum."),
+        ("EUR_CI_HI_OR", "Upper 95% CI bound for the European ancestry stratum."),
+        (
+            "AFR_N",
+            "Total participants included in the African ancestry stratum analysis.",
+        ),
+        ("AFR_N_Cases", "Number of cases in the African ancestry stratum."),
+        ("AFR_N_Controls", "Number of controls in the African ancestry stratum."),
+        (
+            "AFR_OR",
+            "Odds Ratio estimated specifically within the African ancestry stratum.",
+        ),
+        ("AFR_P", "Nominal p-value for the association within the African ancestry stratum."),
+        (
+            "AFR_P_Source",
+            "Source of the p-value for the African ancestry stratum (e.g., 'score_chi2' if case counts were low).",
+        ),
+        (
+            "AFR_Inference_Type",
+            "Statistical framework used for the African ancestry stratum (e.g., 'firth' if the stratum had low case counts).",
+        ),
+        ("AFR_CI_Method", "Method used for confidence intervals in the African ancestry stratum."),
+        ("AFR_CI_LO_OR", "Lower 95% CI bound for the African ancestry stratum."),
+        ("AFR_CI_HI_OR", "Upper 95% CI bound for the African ancestry stratum."),
+        (
+            "AMR_N",
+            "Total participants included in the Admixed American ancestry stratum analysis.",
+        ),
+        ("AMR_N_Cases", "Number of cases in the Admixed American ancestry stratum."),
+        ("AMR_N_Controls", "Number of controls in the Admixed American ancestry stratum."),
+        (
+            "AMR_OR",
+            "Odds Ratio estimated specifically within the Admixed American ancestry stratum.",
+        ),
+        ("AMR_P", "Nominal p-value for the association within the Admixed American ancestry stratum."),
+        (
+            "AMR_P_Source",
+            "Source of the p-value for the Admixed American ancestry stratum (e.g., 'score_chi2' if case counts were low).",
+        ),
+        (
+            "AMR_Inference_Type",
+            "Statistical framework used for the Admixed American ancestry stratum (e.g., 'firth' if the stratum had low case counts).",
+        ),
+        ("AMR_CI_Method", "Method used for confidence intervals in the Admixed American ancestry stratum."),
+        ("AMR_CI_LO_OR", "Lower 95% CI bound for the Admixed American ancestry stratum."),
+        ("AMR_CI_HI_OR", "Upper 95% CI bound for the Admixed American ancestry stratum."),
+        (
+            "SAS_N",
+            "Total participants included in the South Asian ancestry stratum analysis.",
+        ),
+        ("SAS_N_Cases", "Number of cases in the South Asian ancestry stratum."),
+        ("SAS_N_Controls", "Number of controls in the South Asian ancestry stratum."),
+        (
+            "SAS_OR",
+            "Odds Ratio estimated specifically within the South Asian ancestry stratum.",
+        ),
+        ("SAS_P", "Nominal p-value for the association within the South Asian ancestry stratum."),
+        (
+            "SAS_P_Source",
+            "Source of the p-value for the South Asian ancestry stratum (e.g., 'score_chi2' if case counts were low).",
+        ),
+        (
+            "SAS_Inference_Type",
+            "Statistical framework used for the South Asian ancestry stratum (e.g., 'firth' if the stratum had low case counts).",
+        ),
+        ("SAS_CI_Method", "Method used for confidence intervals in the South Asian ancestry stratum."),
+        ("SAS_CI_LO_OR", "Lower 95% CI bound for the South Asian ancestry stratum."),
+        ("SAS_CI_HI_OR", "Upper 95% CI bound for the South Asian ancestry stratum."),
+        (
+            "EAS_N",
+            "Total participants included in the East Asian ancestry stratum analysis.",
+        ),
+        ("EAS_N_Cases", "Number of cases in the East Asian ancestry stratum."),
+        ("EAS_N_Controls", "Number of controls in the East Asian ancestry stratum."),
+        (
+            "EAS_OR",
+            "Odds Ratio estimated specifically within the East Asian ancestry stratum.",
+        ),
+        ("EAS_P", "Nominal p-value for the association within the East Asian ancestry stratum."),
+        (
+            "EAS_P_Source",
+            "Source of the p-value for the East Asian ancestry stratum (e.g., 'score_chi2' if case counts were low).",
+        ),
+        (
+            "EAS_Inference_Type",
+            "Statistical framework used for the East Asian ancestry stratum (e.g., 'firth' if the stratum had low case counts).",
+        ),
+        ("EAS_CI_Method", "Method used for confidence intervals in the East Asian ancestry stratum."),
+        ("EAS_CI_LO_OR", "Lower 95% CI bound for the East Asian ancestry stratum."),
+        ("EAS_CI_HI_OR", "Upper 95% CI bound for the East Asian ancestry stratum."),
+        (
+            "MID_N",
+            "Total participants included in the Middle Eastern ancestry stratum analysis.",
+        ),
+        ("MID_N_Cases", "Number of cases in the Middle Eastern ancestry stratum."),
+        ("MID_N_Controls", "Number of controls in the Middle Eastern ancestry stratum."),
+        (
+            "MID_OR",
+            "Odds Ratio estimated specifically within the Middle Eastern ancestry stratum.",
+        ),
+        ("MID_P", "Nominal p-value for the association within the Middle Eastern ancestry stratum."),
+        (
+            "MID_P_Source",
+            "Source of the p-value for the Middle Eastern ancestry stratum (e.g., 'score_chi2' if case counts were low).",
+        ),
+        (
+            "MID_Inference_Type",
+            "Statistical framework used for the Middle Eastern ancestry stratum (e.g., 'firth' if the stratum had low case counts).",
+        ),
+        ("MID_CI_Method", "Method used for confidence intervals in the Middle Eastern ancestry stratum."),
+        ("MID_CI_LO_OR", "Lower 95% CI bound for the Middle Eastern ancestry stratum."),
+        ("MID_CI_HI_OR", "Upper 95% CI bound for the Middle Eastern ancestry stratum."),
     ]
 )
 
 TAG_PHEWAS_COLUMN_DEFS: Dict[str, str] = PHEWAS_COLUMN_DEFS.copy()
+TAG_PHEWAS_COLUMN_DEFS["OR"] = (
+    "The Odds Ratio representing the change in disease risk per copy of the inversion haplotype (defined by tagging SNPs)."
+)
 
 CATEGORY_COLUMN_DEFS: Dict[str, str] = OrderedDict(
     [
@@ -494,6 +617,9 @@ def _clean_phewas_df(
 
     if "P_Value_unadjusted" not in df.columns and "P_Value" in df.columns:
         df = df.rename(columns={"P_Value": "P_Value_unadjusted"})
+
+    if "P_Source" in df.columns and "P_Source_x" not in df.columns:
+        df = df.rename(columns={"P_Source": "P_Source_x"})
 
     empty_cols = [
         col for col in df.columns if df[col].isna().all() or (df[col].astype(str).str.strip() == "").all()
