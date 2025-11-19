@@ -314,9 +314,47 @@ PHEWAS_COLUMN_DEFS: Dict[str, str] = OrderedDict(
     ]
 )
 
-TAG_PHEWAS_COLUMN_DEFS: Dict[str, str] = PHEWAS_COLUMN_DEFS.copy()
-TAG_PHEWAS_COLUMN_DEFS["OR"] = (
-    "The Odds Ratio representing the change in disease risk per copy of the inversion haplotype (defined by tagging SNPs)."
+TAG_PHEWAS_COLUMN_DEFS: Dict[str, str] = OrderedDict(
+    [
+        ("Phenotype", PHEWAS_COLUMN_DEFS["Phenotype"]),
+        ("Q_GLOBAL", PHEWAS_COLUMN_DEFS["Q_GLOBAL"]),
+        ("P_Value_unadjusted", "Nominal p-value for the association using the tagging SNP model."),
+        ("N_Total", PHEWAS_COLUMN_DEFS["N_Total"]),
+        ("N_Cases", PHEWAS_COLUMN_DEFS["N_Cases"]),
+        ("N_Controls", PHEWAS_COLUMN_DEFS["N_Controls"]),
+        ("Beta", PHEWAS_COLUMN_DEFS["Beta"]),
+        (
+            "OR",
+            "Odds Ratio representing the change in disease risk per copy of the inversion haplotype (defined by tagging SNPs).",
+        ),
+        ("P_Valid", PHEWAS_COLUMN_DEFS["P_Valid"]),
+        ("P_Source_x", PHEWAS_COLUMN_DEFS["P_Source"]),
+        ("OR_CI95", PHEWAS_COLUMN_DEFS["OR_CI95"]),
+        ("CI_Method", PHEWAS_COLUMN_DEFS["CI_Method"]),
+        ("CI_Sided", PHEWAS_COLUMN_DEFS["CI_Sided"]),
+        ("CI_Valid", PHEWAS_COLUMN_DEFS["CI_Valid"]),
+        ("CI_LO_OR", PHEWAS_COLUMN_DEFS["CI_LO_OR"]),
+        ("CI_HI_OR", PHEWAS_COLUMN_DEFS["CI_HI_OR"]),
+        ("Used_Ridge", PHEWAS_COLUMN_DEFS["Used_Ridge"]),
+        ("Final_Is_MLE", PHEWAS_COLUMN_DEFS["Final_Is_MLE"]),
+        ("Used_Firth", PHEWAS_COLUMN_DEFS["Used_Firth"]),
+        ("Inference_Type", PHEWAS_COLUMN_DEFS["Inference_Type"]),
+        ("N_Total_Used", PHEWAS_COLUMN_DEFS["N_Total_Used"]),
+        ("N_Cases_Used", PHEWAS_COLUMN_DEFS["N_Cases_Used"]),
+        ("N_Controls_Used", PHEWAS_COLUMN_DEFS["N_Controls_Used"]),
+        ("Model_Notes", PHEWAS_COLUMN_DEFS["Model_Notes"]),
+        ("Inversion", PHEWAS_COLUMN_DEFS["Inversion"]),
+        ("P_LRT_Overall", PHEWAS_COLUMN_DEFS["P_LRT_Overall"]),
+        ("P_Overall_Valid", PHEWAS_COLUMN_DEFS["P_Overall_Valid"]),
+        ("P_Source_y", PHEWAS_COLUMN_DEFS["P_Source"]),
+        ("P_Method", PHEWAS_COLUMN_DEFS["P_Method"]),
+        ("Sig_Global", PHEWAS_COLUMN_DEFS["Sig_Global"]),
+        ("CI_Valid_DISPLAY", PHEWAS_COLUMN_DEFS["CI_Valid_DISPLAY"]),
+        ("CI_Method_DISPLAY", PHEWAS_COLUMN_DEFS["CI_Method_DISPLAY"]),
+        ("OR_CI95_DISPLAY", PHEWAS_COLUMN_DEFS["OR_CI95_DISPLAY"]),
+        ("CI_LO_OR_DISPLAY", PHEWAS_COLUMN_DEFS["CI_LO_OR_DISPLAY"]),
+        ("CI_HI_OR_DISPLAY", PHEWAS_COLUMN_DEFS["CI_HI_OR_DISPLAY"]),
+    ]
 )
 
 CATEGORY_COLUMN_DEFS: Dict[str, str] = OrderedDict(
