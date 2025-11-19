@@ -123,7 +123,16 @@ def _temporary_workdir(path: Path):
 # ---------------------------------------------------------------------------
 
 
-def _calc_pi_structure_metrics() -> tuple[float | None, int, float | None]:
+@dataclass
+class PiStructureMetrics:
+    flank_mean: float | None
+    qualifying_sequences: int
+    unique_inversions: int
+    decay_sequences: int
+    decay_rho: float | None
+
+
+def _calc_pi_structure_metrics() -> PiStructureMetrics:
     """Parse per-site diversity tracks to replicate π structure metrics."""
 
     falsta_candidates = [
@@ -138,33 +147,62 @@ def _calc_pi_structure_metrics() -> tuple[float | None, int, float | None]:
 
     flank_means_40k: list[float] = []
     window_data_100k: list[np.ndarray] = []
-    header_pattern = re.compile(r"start\s*(\d+).*end\s*(\d+)", re.IGNORECASE)
+    qualifying_regions: list[tuple[str, int, int]] = []
+    decay_regions: list[tuple[str, int, int]] = []
+    header_pattern = re.compile(
+        r"chr[_:=]*(?P<chrom>[^_]+).*?start[_:=]*(?P<start>\d+).*?end[_:=]*(?P<end>\d+)",
+        re.IGNORECASE,
+    )
+
+    def _parse_values(body_lines: list[str]) -> np.ndarray:
+        if not body_lines:
+            return np.array([], dtype=float)
+        body_text = "".join(body_lines).strip()
+        if not body_text:
+            return np.array([], dtype=float)
+        clean_text = re.sub(r"\bNA\b", "nan", body_text)
+        try:
+            return np.fromstring(clean_text, sep=",")
+        except ValueError:
+            return np.array([], dtype=float)
 
     def _process_record(header: str | None, body_lines: list[str]) -> None:
-        if not header or not body_lines or "filtered_pi" not in header:
+        if not header or not body_lines or not header.startswith(">filtered_pi"):
             return
         match = header_pattern.search(header)
         if not match:
             return
-        start = int(match.group(1))
-        end = int(match.group(2))
-        total_length = abs(end - start)
-        values = np.fromstring("".join(body_lines), sep=",")
-        if not np.isfinite(values).any():
+        chrom = match.group("chrom")
+        start = int(match.group("start"))
+        end = int(match.group("end"))
+        values = _parse_values(body_lines)
+        if values.size == 0 or not np.isfinite(values).any():
             return
 
-        if total_length >= 40_000 and values.size >= 20_000:
+        if "group_0" not in header:
+            return
+
+        finite_mask = np.isfinite(values)
+        finite_bases = int(finite_mask.sum())
+        if finite_bases < 40_000:
+            return
+
+        region = (chrom, start, end)
+        qualifying_regions.append(region)
+
+        if values.size >= 40_000:
             flanks = np.r_[values[:10_000], values[-10_000:]]
             flank_mean = float(np.nanmean(flanks))
             if np.isfinite(flank_mean):
                 flank_means_40k.append(flank_mean)
 
-        if total_length >= 100_000 and values.size >= 100_000:
+        if values.size >= 100_000:
             first = values[:100_000]
             if first.size == 100_000:
                 reshaped = first.reshape(50, 2_000)
                 window_means = np.nanmean(reshaped, axis=1)
                 window_data_100k.append(window_means)
+                decay_regions.append(region)
 
     current_header: str | None = None
     sequence_lines: list[str] = []
@@ -192,12 +230,25 @@ def _calc_pi_structure_metrics() -> tuple[float | None, int, float | None]:
         window_values = np.concatenate(window_data_100k)
         base_distances = np.arange(0, 100_000, 2_000, dtype=float)
         distances = np.tile(base_distances, len(window_data_100k))
-        rho_val, _ = stats.spearmanr(distances, window_values)
-        rho = float(rho_val) if np.isfinite(rho_val) else None
+        mask = np.isfinite(window_values)
+        if mask.sum() >= 2:
+            rho_val, _ = stats.spearmanr(distances[mask], window_values[mask])
+            rho = float(rho_val) if np.isfinite(rho_val) else None
+        else:
+            rho = None
     else:
         rho = None
 
-    return mean_flank, len(flank_means_40k), rho
+    unique_inversions = len(set(qualifying_regions))
+    decay_sequences = len(decay_regions)
+
+    return PiStructureMetrics(
+        flank_mean=mean_flank,
+        qualifying_sequences=len(flank_means_40k),
+        unique_inversions=unique_inversions,
+        decay_sequences=decay_sequences,
+        decay_rho=rho,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -385,7 +436,7 @@ def summarize_diversity() -> List[str]:
 
 def summarize_pi_structure() -> List[str]:
     try:
-        mean_flank, flank_count, rho = _calc_pi_structure_metrics()
+        metrics = _calc_pi_structure_metrics()
     except FileNotFoundError as exc:
         return [f"Pi structure inputs unavailable: {exc}"]
     except Exception as exc:  # pragma: no cover - defensive parsing guard
@@ -393,10 +444,21 @@ def summarize_pi_structure() -> List[str]:
 
     lines = [
         "Mean of what: Nucleotide diversity (π) averaged across the two 10 kbp flanking windows of each qualifying sequence.",
-        f"In what: The {_fmt(flank_count, 0)} haplotype sequences with ≥40 kbp of per-site filtered π estimates.",
-        f"Where: Specifically within the filtered π regions, the combined flanking mean is {_fmt(mean_flank)}.",
-        f"the Spearman’s correlation (ρ = {_fmt(rho)}) between nucleotide diversity (50 × 2 kbp windows across the first 100 kbp) and distance from the sequence start characterizes the internal decay.",
+        (
+            "In what: The "
+            f"{_fmt(metrics.qualifying_sequences, 0)} group_0 (orientation-0) haplotype sequences with ≥40 kbp of per-site "
+            f"filtered π estimates, spanning {_fmt(metrics.unique_inversions, 0)} unique inversion intervals."
+        ),
+        f"Where: Specifically within the filtered π regions, the combined flanking mean is {_fmt(metrics.flank_mean)}.",
     ]
+
+    lines.append(
+        "Internal decay: "
+        f"{_fmt(metrics.decay_sequences, 0)} qualifying sequences extend ≥100 kbp and support the Spearman’s correlation "
+        f"(ρ = {_fmt(metrics.decay_rho)}) between nucleotide diversity (50 × 2 kbp windows across the first 100 kbp) and "
+        "distance from the sequence start."
+    )
+
     return lines
 
 
