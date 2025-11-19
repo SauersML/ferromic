@@ -23,9 +23,17 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          api_root="https://api.github.com"
+          headers=(
+            -H "Authorization: Bearer $GH_TOKEN"
+            -H "Accept: application/vnd.github+json"
+            -H "X-GitHub-Api-Version: 2022-11-28"
+          )
 
-          run_json="$(gh api repos/${{ github.repository }}/actions/workflows/${MANUAL_WORKFLOW_FILE}/runs \
-            -f status=success -f per_page=1)"
+          run_json="$(
+            curl -sS -L "${headers[@]}" \
+              "$api_root/repos/${{ github.repository }}/actions/workflows/${MANUAL_WORKFLOW_FILE}/runs?status=success&per_page=1"
+          )"
           run_id="$(echo "$run_json" | jq '.workflow_runs[0].id')"
 
           if [[ -z "$run_id" || "$run_id" == "null" ]]; then
@@ -35,8 +43,11 @@ jobs:
 
           echo "run-id=$run_id" >> "$GITHUB_OUTPUT"
 
-          artifact_json="$(gh api repos/${{ github.repository }}/actions/runs/$run_id/artifacts \
-            --jq '[.artifacts[] | {name: .name, url: .archive_download_url}]')"
+          artifact_json="$(
+            curl -sS -L "${headers[@]}" \
+              "$api_root/repos/${{ github.repository }}/actions/runs/$run_id/artifacts" \
+            | jq '[.artifacts[] | {name: .name, url: .archive_download_url}]'
+          )"
 
           if [[ -z "$artifact_json" || "$artifact_json" == "[]" ]]; then
             echo "No artifacts were produced by run $run_id" >&2
@@ -73,7 +84,11 @@ jobs:
           set -euo pipefail
           zip_path="data/${NAME}.zip"
 
-          gh api "$URL" > "$zip_path"
+          curl -sS -L \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$URL" > "$zip_path"
 
           dest="data/${NAME}"
           rm -rf "$dest"
