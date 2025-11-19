@@ -3880,6 +3880,9 @@ pub fn process_variant(
             "{}: Filtered due to multi-allelic variant",
             line.trim()
         ));
+        filtering_stats
+            .filtered_positions
+            .insert(zero_based_position);
         return Ok(None);
     }
     if alt_alleles.get(0).map_or(false, |s| s.len() > 1) {
@@ -3895,6 +3898,9 @@ pub fn process_variant(
             "{}: Filtered due to multi-nucleotide alt allele",
             line.trim()
         ));
+        filtering_stats
+            .filtered_positions
+            .insert(zero_based_position);
         return Ok(None);
     }
 
