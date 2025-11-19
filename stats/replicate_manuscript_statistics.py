@@ -620,164 +620,108 @@ def summarize_fst() -> List[str]:
 def summarize_frf() -> List[str]:
     frf_path = DATA_DIR / "per_inversion_frf_effects.tsv"
     if not frf_path.exists():
-        return ["Breakpoint FRF results not found; skipping enrichment analysis."]
+        frf_path = REPO_ROOT / "per_inversion_breakpoint_tests" / "per_inversion_frf_effects.tsv"
+        if not frf_path.exists():
+            return ["Breakpoint FRF results not found; skipping enrichment analysis."]
 
     frf = pd.read_csv(frf_path, sep="\t", low_memory=False)
-    required_cols = {"usable_for_meta", "recurrence_flag", "frf_var_delta"}
-    missing = [col for col in required_cols if col not in frf.columns]
-    if missing:
-        return [
-            "Breakpoint enrichment (Precision-Weighted Meta-Analysis):",
-            f"  Missing required columns for meta-analysis: {', '.join(sorted(missing))}.",
-        ]
 
-    if "frf_delta_centered" in frf.columns:
-        y_col = "frf_delta_centered"
-    elif "frf_delta" in frf.columns:
-        y_col = "frf_delta"
-    else:
-        return [
-            "Breakpoint enrichment (Precision-Weighted Meta-Analysis):",
-            "  FRF delta columns not found (expected frf_delta or frf_delta_centered).",
-        ]
+    if "STATUS" in frf.columns and "recurrence_flag" not in frf.columns:
+        frf["recurrence_flag"] = frf["STATUS"]
 
-    usable_series = frf["usable_for_meta"]
-    if usable_series.dtype == bool or np.issubdtype(usable_series.dtype, np.number):
-        usable_mask = usable_series.fillna(False).astype(bool)
+    frf = frf.rename(columns={"frf_delta": "edge_minus_middle", "usable_for_meta": "usable"})
+    
+    if {"chrom", "start", "end"}.issubset(frf.columns):
+        frf["chromosome_norm"] = frf["chrom"].astype(str).str.replace("^chr", "", regex=True)
+        try:
+            inv_df = _load_inv_properties()
+            frf = frf.merge(
+                inv_df[["chromosome", "start", "end", "recurrence_label", "inversion_id"]],
+                left_on=["chromosome_norm", "start", "end"],
+                right_on=["chromosome", "start", "end"],
+                how="left",
+                suffixes=("", "_inv"),
+            )
+        except Exception:
+            pass
+
+    lines: List[str] = ["Breakpoint enrichment (Flat–Ramp–Flat Model):"]
+
+    if "usable" in frf.columns:
+        usable_mask = frf["usable"].fillna(False).astype(bool) | \
+                      frf["usable"].astype(str).str.lower().isin(["true", "1"])
+        usable = frf[usable_mask].copy()
     else:
-        usable_mask = (
-            usable_series.fillna("")
-            .astype(str)
-            .str.strip()
-            .str.lower()
-            .isin({"true", "1", "yes"})
+        usable = frf[np.isfinite(frf["frf_var_delta"]) & (frf["frf_var_delta"] > 0)].copy()
+
+    if "recurrence_flag" not in usable.columns:
+        lines.append("  Recurrence annotations missing (no 'STATUS' or 'recurrence_flag' column).")
+        return lines
+    
+    # --- Descriptive Stats (Unweighted Levels) ---
+    if {"frf_mu_edge", "frf_mu_mid"}.issubset(usable.columns):
+        lines.append("  [Descriptive Levels] Raw FST averages (Unweighted):")
+        for flag, label in [(0, "Single-event"), (1, "Recurrent")]:
+            sub = usable[usable["recurrence_flag"] == flag]
+            if not sub.empty:
+                mean_edge = _safe_mean(sub["frf_mu_edge"])
+                mean_mid = _safe_mean(sub["frf_mu_mid"])
+                lines.append(f"    {label} (n={len(sub)}): Edge={_fmt(mean_edge)}, Middle={_fmt(mean_mid)}.")
+    lines.append("")
+
+    # --- Old Method (Unweighted Delta) ---
+    lines.append("  [Unweighted Delta Analysis]")
+    vecs = {}
+    deltas = {}
+    for flag, label in [(0, "Single-event"), (1, "Recurrent")]:
+        sub = usable[usable["recurrence_flag"] == flag]
+        vec = sub["edge_minus_middle"].dropna().to_numpy(dtype=float)
+        if vec.size > 0:
+            vecs[flag] = vec
+            deltas[flag] = float(np.mean(vec))
+            lines.append(f"    {label} mean delta: {_fmt(deltas[flag], 3)}.")
+
+    if 0 in vecs and 1 in vecs:
+        diff = deltas[0] - deltas[1]
+        lines.append(f"    Diff-of-diffs (Single - Recurrent): {_fmt(diff, 3)}.")
+        res = recur_breakpoint_tests.directional_energy_test(
+            vecs[0], vecs[1], n_perm=10000, random_state=2025
         )
+        lines.append(f"    Energy Test p-value (Single > Recurrent): {_fmt(res['p_value_0gt1'], 3)}.")
+    lines.append("")
 
-    frf_var = pd.to_numeric(frf["frf_var_delta"], errors="coerce")
-    recurrence = pd.to_numeric(frf["recurrence_flag"], errors="coerce")
+    # --- New Method (Precision-Weighted Meta-Analysis) ---
+    lines.append("  [Precision-Weighted Meta-Analysis]")
+    
+    y = usable["edge_minus_middle"].to_numpy(dtype=float)
+    s2 = usable["frf_var_delta"].to_numpy(dtype=float)
+    group = usable["recurrence_flag"].to_numpy(dtype=int)
 
-    mask = (
-        usable_mask
-        & recurrence.isin([0, 1])
-        & np.isfinite(frf_var)
-        & (frf_var > 0.0)
-    )
-
-    sub = frf.loc[mask].copy()
-    lines: List[str] = ["Breakpoint enrichment (Precision-Weighted Meta-Analysis):"]
-    if sub.empty:
-        lines.append("  No inversions satisfied the meta-analysis inclusion criteria.")
+    if len(y) == 0 or len(s2) == 0:
+        lines.append("    Insufficient data for weighted analysis.")
         return lines
-
-    y_values = pd.to_numeric(sub[y_col], errors="coerce")
-    if not np.isfinite(y_values).any():
-        lines.append("  FRF delta values are not finite after filtering.")
-        return lines
-
-    s2 = pd.to_numeric(sub["frf_var_delta"], errors="coerce").to_numpy(dtype=float)
-    group = pd.to_numeric(sub["recurrence_flag"], errors="coerce").to_numpy(dtype=int)
-    y = y_values.to_numpy(dtype=float)
 
     weights = per_inversion_breakpoint_metric.compute_meta_weights_from_s2(s2)
-    tau2 = per_inversion_breakpoint_metric.estimate_tau2_descriptive(y, s2)
-    delta_median, median_single, median_recurrent = (
-        per_inversion_breakpoint_metric.weighted_median_difference(y, weights, group)
-    )
-    delta_mean, mean_single, mean_recurrent = (
-        per_inversion_breakpoint_metric.weighted_mean_difference(y, weights, group)
-    )
-
-    n_total = int(sub.shape[0])
-    n_single = int(np.sum(group == 0))
-    n_recurrent = int(np.sum(group == 1))
-
-    n_perm_target = 1_000_000
-    chunk_size = 1_000
+    n_perm = 1_000_000
     n_workers = os.cpu_count() or 1
 
-    perm_median = per_inversion_breakpoint_metric.meta_permutation_pvalue(
-        y=y,
-        weights=weights,
-        group=group,
-        n_perm=n_perm_target,
-        chunk=chunk_size,
-        base_seed=2025,
-        n_workers=n_workers,
+    # Weighted Median
+    d_med, med_s, med_r = per_inversion_breakpoint_metric.weighted_median_difference(y, weights, group)
+    perm_med = per_inversion_breakpoint_metric.meta_permutation_pvalue(
+        y, weights, group, n_perm=n_perm, chunk=1000, base_seed=2025, n_workers=n_workers
     )
+    lines.append(f"    Weighted Median Delta: Single={_fmt(med_s)}, Recurrent={_fmt(med_r)}, Diff={_fmt(d_med)}.")
+    lines.append(f"    Median P-value (Two-sided): {_fmt(perm_med['p_perm_two_sided'], 4)}.")
+
+    # Weighted Mean
+    d_mean, mean_s, mean_r = per_inversion_breakpoint_metric.weighted_mean_difference(y, weights, group)
     perm_mean = per_inversion_breakpoint_metric.meta_permutation_pvalue_mean(
-        y=y,
-        weights=weights,
-        group=group,
-        n_perm=n_perm_target,
-        chunk=chunk_size,
-        base_seed=2025 + 123,
-        n_workers=n_workers,
+        y, weights, group, n_perm=n_perm, chunk=1000, base_seed=2026, n_workers=n_workers
     )
-
-    lines.append(
-        "  Inversions included: "
-        f"{_fmt(n_total, 0)} (Single={_fmt(n_single, 0)}, Recurrent={_fmt(n_recurrent, 0)})."
-    )
-    lines.append(
-        "  Descriptive tau^2 (random-effects mean model, not used for weights): "
-        f"{_fmt(tau2)}."
-    )
-
-    region_cols = {"frf_mu_edge", "frf_mu_mid"}
-    if region_cols.issubset(sub.columns):
-        lines.append("  FRF edge vs middle FST means (per inversion group):")
-        for flag, label in [(0, "Single-event"), (1, "Recurrent")]:
-            mask_group = group == flag
-            edge_mean = _safe_mean(sub.loc[mask_group, "frf_mu_edge"])
-            mid_mean = _safe_mean(sub.loc[mask_group, "frf_mu_mid"])
-            lines.append(
-                f"    {label}: Edge Mean={_fmt(edge_mean)}, Middle Mean={_fmt(mid_mean)}."
-            )
-    else:
-        missing_regions = ", ".join(sorted(region_cols - set(sub.columns)))
-        lines.append(
-            "  Edge/middle FRF summaries unavailable "
-            f"(missing columns: {missing_regions})."
-        )
-
-    lines.append("  [WEIGHTED MEDIAN]")
-    lines.append(
-        f"    Single: {_fmt(median_single)}, Recurrent: {_fmt(median_recurrent)}, "
-        f"Delta: {_fmt(delta_median)}."
-    )
-    lines.append(
-        "    P-value (Single > Recurrent): "
-        f"{_fmt(perm_median['p_perm_one_sided_upper'])}."
-    )
-    lines.append(
-        "    P-value (Recurrent > Single): "
-        f"{_fmt(perm_median['p_perm_one_sided_lower'])}."
-    )
-    lines.append(
-        "    P-value (Two-sided):          "
-        f"{_fmt(perm_median['p_perm_two_sided'])}."
-    )
-
-    lines.append("  [WEIGHTED MEAN]")
-    lines.append(
-        f"    Single: {_fmt(mean_single)}, Recurrent: {_fmt(mean_recurrent)}, "
-        f"Delta: {_fmt(delta_mean)}."
-    )
-    lines.append(
-        "    P-value (Single > Recurrent): "
-        f"{_fmt(perm_mean['p_perm_one_sided_upper'])}."
-    )
-    lines.append(
-        "    P-value (Recurrent > Single): "
-        f"{_fmt(perm_mean['p_perm_one_sided_lower'])}."
-    )
-    lines.append(
-        "    P-value (Two-sided):          "
-        f"{_fmt(perm_mean['p_perm_two_sided'])}."
-    )
+    lines.append(f"    Weighted Mean Delta:   Single={_fmt(mean_s)}, Recurrent={_fmt(mean_r)}, Diff={_fmt(d_mean)}.")
+    lines.append(f"    Mean P-value (Two-sided):   {_fmt(perm_mean['p_perm_two_sided'], 4)}.")
 
     return lines
-
 
 # ---------------------------------------------------------------------------
 # Section 4. PheWAS breadth and highlights
