@@ -13,36 +13,39 @@ DIVERSITY
 Nucleotide diversity (π) by orientation and recurrence:
   Total loci with finite π estimates: 69.
   Across all loci: mean π(inverted) = 0.000274, mean π(direct) = 0.000384.
-    Two-sided paired t-test comparing orientations: t = -2.826, p = 6.178e-03.
+    Two-sided paired t-test comparing orientations: t = -2.825, p = 6.193e-03.
   Single-event inversions: median π(inverted) = 0.000013, median π(direct) = 0.000233.
   Recurrent inversions: median π(inverted) = 0.000359, median π(direct) = 0.000442.
   Within inverted haplotypes: recurrent median π = 0.000359; single-event median π = 0.000013.
 
 PI STRUCTURE
-Pi structure inputs unavailable: Missing per-site diversity FALSTA: data/per_site_diversity_output.falsta
+Mean of what: Nucleotide diversity (π) averaged across the two 10 kbp flanking windows of each qualifying sequence.
+In what: The 63 group_0 (orientation-0) haplotype sequences with ≥40 kbp of per-site filtered π estimates, spanning 63 unique inversion intervals.
+Where: Specifically within the filtered π regions, the combined flanking mean is 4.197e-04.
+Internal decay: 42 qualifying sequences extend ≥100 kbp and support the Spearman’s correlation (ρ = 0.104) between nucleotide diversity (50 × 2 kbp windows across the first 100 kbp) and distance from the sequence start.
 
 LINEAR MODEL
 Orientation × recurrence linear models (replicated strict logic):
   Detection floor applied before logs: ε = 6.465000e-06.
   [Model A] Basic interaction (Δ-logπ ~ Recurrence):
     Single-event: Inverted vs Direct: fold-change = 0.302 (95% CI 0.168–0.544), p = 6.583e-05.
-    Recurrent: Inverted vs Direct: fold-change = 1.099 (95% CI 0.905–1.336), p = 0.342.
-    Interaction (difference between those two): fold-change = 3.634 (95% CI 1.957–6.748), p = 4.363e-05.
-    Overall inversion effect (pooled Δ-logπ): fold-change = 0.550 (95% CI 0.385–0.787), p = 1.080e-03.
+    Recurrent: Inverted vs Direct: fold-change = 1.099 (95% CI 0.905–1.336), p = 0.341.
+    Interaction (difference between those two): fold-change = 3.635 (95% CI 1.958–6.748), p = 4.359e-05.
+    Overall inversion effect (pooled Δ-logπ): fold-change = 0.550 (95% CI 0.385–0.787), p = 1.081e-03.
   [Model B] Fixed-effects validation (Cluster-robust):
     Single-event: Inverted vs Direct: fold-change = 0.302 (95% CI 0.133–0.689), p = 4.405e-03.
-    Recurrent: Inverted vs Direct: fold-change = 1.099 (95% CI 0.837–1.443), p = 0.495.
-    Interaction (difference between those two): fold-change = 3.634 (95% CI 1.527–8.648), p = 3.527e-03.
+    Recurrent: Inverted vs Direct: fold-change = 1.099 (95% CI 0.838–1.443), p = 0.495.
+    Interaction (difference between those two): fold-change = 3.635 (95% CI 1.527–8.648), p = 3.525e-03.
   [Model C] Covariate-adjusted (Recurrence + formation/size/AF):
     Single-event: Inverted vs Direct (adjusted): fold-change = 0.406 (95% CI 0.251–0.656), p = 2.276e-04.
     Recurrent: Inverted vs Direct (adjusted): fold-change = 0.432 (95% CI 0.207–0.901), p = 0.025.
-    Interaction (difference between those two): fold-change = 1.063 (95% CI 0.448–2.523), p = 0.889.
+    Interaction (difference between those two): fold-change = 1.063 (95% CI 0.448–2.522), p = 0.889.
     Covariate: Number_recurrent_events (ln1p, z): fold-change = 0.533 (95% CI 0.237–1.199), p = 0.128.
     Covariate: Size_.kbp. (ln, z): fold-change = 1.411 (95% CI 0.976–2.040), p = 0.067.
     Covariate: Inverted_AF (z): fold-change = 1.741 (95% CI 1.030–2.944), p = 0.038.
     Covariate: Formation_rate_per_generation (ln, z): fold-change = 2.737 (95% CI 0.948–7.899), p = 0.063.
   [Permutation] Model A interaction (n=10000):
-    Observed Δ(mean log-ratio) = 1.2904, p = 2.9997e-04.
+    Observed Δ(mean log-ratio) = 1.2905, p = 2.9997e-04.
 
 CDS CONSERVATION
 CDS conservation GLM (proportion of identical CDS pairs):
@@ -59,11 +62,8 @@ Differentiation between orientations (Hudson's FST):
   Highly differentiated loci: 26 with FST > 0.2 and 10 with FST > 0.5.
 
 BREAKPOINT FRF
-Breakpoint enrichment (flat–ramp–flat model deltas):
-  Single-event: mean(FST_flank - FST_middle) = 0.043 (n = 14).
-  Recurrent: mean(FST_flank - FST_middle) = -0.079 (n = 17).
-  Difference-of-differences (single-event minus recurrent): 0.122.
-  Global permutation test (Energy distance, Single-event > Recurrent): p = 0.016.
+Breakpoint enrichment (Precision-Weighted Meta-Analysis):
+  Missing required columns for meta-analysis: recurrence_flag.
 
 IMPUTATION
 Imputation performance summary:
@@ -101,10 +101,20 @@ Selected inversion–phenotype associations (logistic regression with LRT p-valu
     Interaction (Ancestry × Dosage): p = 2.748e-03.
     [EUR] p = 5.607e-04, OR = 1.069 (95% CI 1.032–1.080).
     [AFR] p = 4.138e-04, OR = 1.228 (95% CI 1.097–1.352).
+  [MAIN IMPUTED] chr17-45585160-INV-706887 vs Breast lump or abnormal exam (Main Imputed): OR = 0.929 (95% CI 0.928–0.951), BH-adjusted p ≈ 2.703e-03 (raw p = 4.400e-06).
+    Interaction (Ancestry × Dosage): p = 0.025.
+    [EUR] p = 1.140e-05, OR = 0.924 (95% CI 0.923–0.949).
+  [MAIN IMPUTED] chr17-45585160-INV-706887 vs Abnormal mammogram (Main Imputed): OR = 0.906 (95% CI 0.897–0.940), BH-adjusted p ≈ 7.722e-03 (raw p = 1.640e-05).
+    Interaction (Ancestry × Dosage): p = 0.023.
+    [EUR] p = 5.790e-06, OR = 0.890 (95% CI 0.887–0.924).
+  [MAIN IMPUTED] chr17-45585160-INV-706887 vs Mild cognitive impairment (Main Imputed): OR = 0.856 (95% CI 0.824–0.922), BH-adjusted p ≈ 0.040 (raw p = 1.707e-04).
+    Interaction (Ancestry × Dosage): p = 0.013.
+    [EUR] p = 4.998e-04, OR = 0.854 (95% CI 0.786–0.925).
+    [AMR] p = 0.012, OR = 0.736 (95% CI 0.564–0.944).
   [TAG SNP] chr17-45974480-INV-29218 vs Morbid obesity (Tag SNP): OR = 1.054 (95% CI 1.031–1.078), BH-adjusted p ≈ 8.151e-04 (raw p = 3.650e-06).
-  [TAG SNP] chr17-45974480-INV-29218 vs Breast lump or abnormal exam: OR = 0.956 (95% CI 0.936–0.977), BH-adjusted p ≈ 6.375e-03 (raw p = 4.280e-05).
-  [TAG SNP] chr17-45974480-INV-29218 vs Abnormal mammogram: OR = 0.939 (95% CI 0.910–0.969), BH-adjusted p ≈ 7.326e-03 (raw p = 6.870e-05).
-  [TAG SNP] chr17-45974480-INV-29218 vs Mild cognitive impairment: OR = 0.903 (95% CI 0.853–0.956), BH-adjusted p ≈ 0.017 (raw p = 3.708e-04).
+  [TAG SNP] chr17-45974480-INV-29218 vs Breast lump or abnormal exam (Tag SNP): OR = 0.956 (95% CI 0.936–0.977), BH-adjusted p ≈ 6.375e-03 (raw p = 4.280e-05).
+  [TAG SNP] chr17-45974480-INV-29218 vs Abnormal mammogram (Tag SNP): OR = 0.939 (95% CI 0.910–0.969), BH-adjusted p ≈ 7.326e-03 (raw p = 6.870e-05).
+  [TAG SNP] chr17-45974480-INV-29218 vs Mild cognitive impairment (Tag SNP): OR = 0.903 (95% CI 0.853–0.956), BH-adjusted p ≈ 0.017 (raw p = 3.708e-04).
 
 CATEGORY TESTS
 Phecode category omnibus and directional tests:
@@ -117,7 +127,11 @@ PGS CONTROLS
   Largest p-value inflation: inversion chr17-45585160-INV-706887 × Morbid_obesity (p_nominal = 7.940e-09, p_with_pgs = 8.476e-03, fold-change = 1.068e+06).
 
 FAMILY HISTORY
-Family history validation results not found (run stats/extra/family.py first).
+Family History Validation (Family-based PheWAS):
+  [FAMILY FOLLOW-UP] Breast Cancer: OR = 0.914 (95% CI 0.862–0.968), p = 2.314e-03.
+  [FAMILY FOLLOW-UP] Obesity: OR = 1.098 (95% CI 1.041–1.159), p = 5.796e-04.
+  [FAMILY FOLLOW-UP] Heart Failure: OR = 1.043 (95% CI 0.984–1.106), p = 0.154.
+  [FAMILY FOLLOW-UP] Cognitive Impairment: OR = 0.922 (95% CI 0.869–0.978), p = 6.748e-03.
 
 SELECTION
 Allele frequency trajectory summary (12_47296118_A_G):
