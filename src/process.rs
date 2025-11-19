@@ -91,6 +91,10 @@ pub struct Args {
     #[arg(long = "allow_file")]
     pub allow_file: Option<String>,
 
+    /// Comma-separated list of samples to exclude
+    #[arg(long, value_delimiter = ',')]
+    pub exclude: Option<Vec<String>>,
+
     /// Reference genome .fa file
     #[arg(long = "reference")]
     pub reference_path: String,
@@ -1221,6 +1225,7 @@ pub fn process_config_entries(
     mask: Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     allow: Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     args: &Args,
+    exclusion_set: &HashSet<String>,
 ) -> Result<(), VcfError> {
     // Create a temp directory and save it to TEMP_DIR
     let temp_dir_path = {
@@ -1287,7 +1292,12 @@ pub fn process_config_entries(
                 ),
             );
             match crate::stats::parse_population_csv(Path::new(csv_path_str)) {
-                Ok(parsed_map) => Some(Arc::new(parsed_map)),
+                Ok(mut parsed_map) => {
+                    for samples in parsed_map.values_mut() {
+                        samples.retain(|s| !exclusion_set.contains(s));
+                    }
+                    Some(Arc::new(parsed_map))
+                }
                 Err(e) => {
                     log(
                         LogLevel::Error,
@@ -1327,6 +1337,7 @@ pub fn process_config_entries(
                 &mask,
                 &allow,
                 args,
+                exclusion_set,
                 if args.enable_pca {
                     Some((
                         global_filtered_variants.clone(),
@@ -1650,6 +1661,7 @@ fn process_chromosome_entries(
     mask: &Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     allow: &Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     args: &Args,
+    exclusion_set: &HashSet<String>,
     pca_storage: Option<(
         Arc<Mutex<HashMap<String, Vec<Variant>>>>,
         Arc<Mutex<Vec<String>>>,
@@ -1795,11 +1807,18 @@ fn process_chromosome_entries(
                 sample_names = buffer
                     .split_whitespace()
                     .skip(9)
+                    .filter(|name| !exclusion_set.contains(*name))
                     .map(String::from)
                     .collect();
                 break;
             }
             buffer.clear();
+        }
+
+        if sample_names.is_empty() {
+            return Err(VcfError::Parse(
+                "No samples remain after applying exclusions".to_string(),
+            ));
         }
 
         // Store sample names (once)
@@ -1834,6 +1853,7 @@ fn process_chromosome_entries(
             &cds_regions,
             chr,
             args,
+            exclusion_set,
             pca_storage.as_ref(),
             parsed_csv_populations_arc.clone(), // Pass down the Arc<HashMap<String, Vec<String>>>
         );
@@ -2112,6 +2132,7 @@ fn process_single_config_entry(
     cds_regions: &[TranscriptAnnotationCDS],
     chr: &str,
     args: &Args,
+    exclusion_set: &HashSet<String>,
     pca_storage: Option<&(
         Arc<Mutex<HashMap<String, Vec<Variant>>>>,
         Arc<Mutex<Vec<String>>>,
@@ -2206,6 +2227,7 @@ fn process_single_config_entry(
         min_gq,
         mask.clone(),
         allow.clone(),
+        exclusion_set,
         position_allele_map.clone(),
     ) {
         Ok(data) => data,
@@ -3395,6 +3417,7 @@ pub fn process_vcf(
     min_gq: u16,
     mask_regions: Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     allow_regions: Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
+    exclusion_set: &HashSet<String>,
     position_allele_map: Arc<Mutex<HashMap<i64, (char, char)>>>,
 ) -> Result<
     (
@@ -3422,6 +3445,7 @@ pub fn process_vcf(
     // Initialize the VCF reader
     let mut reader = open_vcf_reader(file)?;
     let mut sample_names = Vec::new();
+    let mut kept_col_indices = Vec::new();
 
     // Get chromosome length from reference
     let chr_length = {
@@ -3479,16 +3503,24 @@ pub fn process_vcf(
         if buffer.starts_with("##") {
         } else if buffer.starts_with("#CHROM") {
             validate_vcf_header(&buffer)?;
-            sample_names = buffer
-                .split_whitespace()
-                .skip(9)
-                .map(String::from)
-                .collect();
+            let header_fields: Vec<&str> = buffer.split_whitespace().collect();
+            for (idx, name) in header_fields.iter().enumerate().skip(9) {
+                if !exclusion_set.contains(*name) {
+                    sample_names.push((*name).to_string());
+                    kept_col_indices.push(idx);
+                }
+            }
             break;
         }
         buffer.clear();
     }
     buffer.clear();
+
+    if sample_names.is_empty() {
+        return Err(VcfError::Parse(
+            "No samples remain after applying exclusions".to_string(),
+        ));
+    }
 
     // Bounded channels for lines and results.
     let (line_sender, line_receiver) = bounded(2000);
@@ -3516,11 +3548,13 @@ pub fn process_vcf(
     // Consumers for variant lines.
     let num_threads = num_cpus::get();
     let arc_sample_names = Arc::new(sample_names);
+    let arc_kept_col_indices = Arc::new(kept_col_indices);
     let mut consumers = Vec::with_capacity(num_threads);
     for _ in 0..num_threads {
         let line_receiver = line_receiver.clone();
         let rs = result_sender.clone();
         let arc_names = Arc::clone(&arc_sample_names);
+        let arc_indices = Arc::clone(&arc_kept_col_indices);
         let arc_mask = mask_regions.clone();
         let arc_allow = allow_regions.clone();
         let chr_copy = chr.to_string();
@@ -3542,6 +3576,7 @@ pub fn process_vcf(
                     consumer_region,
                     &mut single_line_miss_info,
                     &arc_names,
+                    &arc_indices,
                     min_gq,
                     &mut single_line_filt_stats,
                     arc_allow.as_ref().map(|x| x.as_ref()),
@@ -3745,6 +3780,7 @@ pub fn process_variant(
     region: ZeroBasedHalfOpen,
     missing_data_info: &mut MissingDataInfo,
     sample_names: &[String],
+    kept_col_indices: &[usize],
     min_gq: u16,
     filtering_stats: &mut FilteringStats,
     allow_regions: Option<&HashMap<String, Vec<(i64, i64)>>>,
@@ -3753,12 +3789,22 @@ pub fn process_variant(
     let fields: Vec<&str> = line.split('\t').collect();
 
     let required_fixed_fields = 9;
-    if fields.len() < required_fixed_fields + sample_names.len() {
+    if fields.len() < required_fixed_fields {
         return Err(VcfError::Parse(format!(
-            "Invalid VCF line format: expected at least {} fields, found {}",
-            required_fixed_fields + sample_names.len(),
+            "Invalid VCF line format: expected at least {} fixed fields, found {}",
+            required_fixed_fields,
             fields.len()
         )));
+    }
+
+    if let Some(&max_idx) = kept_col_indices.iter().max() {
+        if fields.len() <= max_idx {
+            return Err(VcfError::Parse(format!(
+                "Invalid VCF line format: expected genotype field at column {}, found {} columns",
+                max_idx + 1,
+                fields.len()
+            )));
+        }
     }
 
     let vcf_chr = fields[0].trim().trim_start_matches("chr");
@@ -3918,34 +3964,40 @@ pub fn process_variant(
     }
     let gq_index = gq_index.unwrap();
 
-    let raw_genotypes: Vec<Option<Vec<u8>>> = fields[9..]
-        .iter()
-        .map(|gt| {
-            missing_data_info.total_data_points += 1;
-            let alleles_str = gt.split(':').next().unwrap_or(".");
-            if alleles_str == "." || alleles_str == "./." || alleles_str == ".|." {
-                missing_data_info.missing_data_points += 1;
-                missing_data_info
-                    .positions_with_missing
-                    .insert(zero_based_position);
-                return None;
-            }
-            let alleles = alleles_str
-                .split(|c| c == '|' || c == '/')
-                .map(|allele| allele.parse::<u8>().ok())
-                .collect::<Option<Vec<u8>>>();
-            if alleles.is_none() {
-                missing_data_info.missing_data_points += 1;
-                missing_data_info
-                    .positions_with_missing
-                    .insert(zero_based_position);
-            }
-            alleles
-        })
-        .collect();
+    let mut raw_genotypes: Vec<Option<Vec<u8>>> = Vec::with_capacity(sample_names.len());
+    for &idx in kept_col_indices {
+        let gt = fields
+            .get(idx)
+            .ok_or_else(|| "Missing genotype field")
+            .unwrap();
+        missing_data_info.total_data_points += 1;
+        let alleles_str = gt.split(':').next().unwrap_or(".");
+        if alleles_str == "." || alleles_str == "./." || alleles_str == ".|." {
+            missing_data_info.missing_data_points += 1;
+            missing_data_info
+                .positions_with_missing
+                .insert(zero_based_position);
+            raw_genotypes.push(None);
+            continue;
+        }
+        let alleles = alleles_str
+            .split(|c| c == '|' || c == '/')
+            .map(|allele| allele.parse::<u8>().ok())
+            .collect::<Option<Vec<u8>>>();
+        if alleles.is_none() {
+            missing_data_info.missing_data_points += 1;
+            missing_data_info
+                .positions_with_missing
+                .insert(zero_based_position);
+        }
+        raw_genotypes.push(alleles);
+    }
 
     let mut sample_has_low_gq = false;
-    for gt_field in fields[9..].iter() {
+    for &idx in kept_col_indices {
+        let gt_field = fields
+            .get(idx)
+            .ok_or_else(|| VcfError::Parse("Missing genotype field".to_string()))?;
         let gt_subfields: Vec<&str> = gt_field.split(':').collect();
         if gq_index >= gt_subfields.len() {
             return Err(VcfError::Parse(format!(
