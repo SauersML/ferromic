@@ -72,7 +72,7 @@ jobs:
 
       - name: Sync artifacts into data directory
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.WRITE_TOKEN }}
           ARTIFACTS: ${{ needs.collect-artifacts.outputs.artifacts }}
         run: |
           set -euo pipefail
@@ -135,6 +135,7 @@ jobs:
       - name: Commit and push data updates
         env:
           RUN_ID: ${{ needs.collect-artifacts.outputs.run-id }}
+          PUSH_TOKEN: ${{ secrets.WRITE_TOKEN }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
@@ -145,4 +146,4 @@ jobs:
             exit 0
           fi
           git commit -m "Sync data from Manual Run VCF Pipeline (run $RUN_ID)"
-          git push origin HEAD:main
+          git push https://${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git HEAD:main
