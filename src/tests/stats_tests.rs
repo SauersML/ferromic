@@ -597,6 +597,7 @@ mod tests {
             &reference_sequence,
             &vec![], // Empty TranscriptAnnotationCDS for test
             &empty_filtered_positions,
+            None,
         );
         assert!(invalid_group.unwrap_or(None).is_none(), "Expected None for invalid haplotype group");
     }
@@ -704,7 +705,6 @@ mod tests {
         let mut filtering_stats = FilteringStats::default();
         let min_gq = 30;
         let _mask: Option<&[(i64, i64)]> = None;
-        let position_allele_map = Mutex::new(HashMap::new());
     
         // Define the expected variant using the helper function
         let expected_variant = create_variant(
@@ -726,16 +726,18 @@ mod tests {
             &sample_names,
             min_gq,
             &mut filtering_stats,
-            None, 
             None,
-            &position_allele_map,
+            None,
         );
-    
+
         // the function executed without errors
         assert!(result.is_ok());
-    
+
         // Assert that the variant is returned but marked as invalid (filtered out)
-        assert_eq!(result.unwrap(), Some((expected_variant, false)));
+        assert_eq!(
+            result.unwrap(),
+            Some((expected_variant, false, Some((999, 'A', 'T'))))
+        );
     }
 
     #[test]
@@ -745,7 +747,6 @@ mod tests {
         let mut _filtering_stats = FilteringStats::default();
         let min_gq = 30;
         let _mask: Option<&[(i64, i64)]> = None;
-        let position_allele_map = Mutex::new(HashMap::new());
 
         let valid_variant_line = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:35\t0|1:40";
         let region = ZeroBasedHalfOpen { start: 999, end: 2000 };
@@ -757,15 +758,14 @@ mod tests {
             &sample_names,
             min_gq,
             &mut _filtering_stats,
-            None, 
             None,
-            &position_allele_map,
+            None,
         ).expect("Failed to process variants");
-    
+
         // Variant should be Some because all samples have GQ >= min_gq
         assert!(result.is_some());
-    
-        if let Some((variant, is_valid)) = result {
+
+        if let Some((variant, is_valid, allele_info)) = result {
             assert!(is_valid);
             let expected: Vec<Option<PackedGenotype>> = vec![
                 Some(PackedGenotype::from_vec(vec![0, 0])),
@@ -774,6 +774,7 @@ mod tests {
             let actual: Vec<Option<PackedGenotype>> =
                 (0..variant.genotypes.len()).map(|idx| variant.genotypes.get(idx)).collect();
             assert_eq!(actual, expected);
+            assert_eq!(allele_info, Some((999, 'A', 'T')));
         } else {
             panic!("Expected Some variant, got None");
         }
@@ -983,9 +984,15 @@ mod tests {
                 &mut filtering_stats,
                 None,
                 None,
-                &position_allele_map,
             );
             assert!(result.is_ok(), "Failed to process variant: {}", line);
+            if let Some((_, _, allele_info)) = result.unwrap() {
+                if let Some((pos, ref_allele, alt_allele)) = allele_info {
+                    position_allele_map
+                        .lock()
+                        .insert(pos, (ref_allele, alt_allele));
+                }
+            }
         }
     
         // Now, process the variants
@@ -1018,6 +1025,7 @@ mod tests {
             &reference_sequence,
             &vec![], // Empty TranscriptAnnotationCDS for test
             &empty_filtered_positions,
+            None,
         ).unwrap();
     
         // Calculate allele frequency globally
@@ -1074,6 +1082,7 @@ mod tests {
             &reference_sequence,
             &vec![], // Empty TranscriptAnnotationCDS for test
             &empty_filtered_positions,
+            None,
         ).unwrap();
     
         let (_segsites, _w_theta, _pi, n_hap, _site_diversity) = match _result_group1 {
@@ -1139,6 +1148,7 @@ mod tests {
             &reference_sequence,
             &vec![], // Empty TranscriptAnnotationCDS for test
             &empty_filtered_positions,
+            None,
         ).unwrap();
 
         // Correctly unwrap the Option to access the inner tuple
@@ -1207,6 +1217,7 @@ mod tests {
            &reference_sequence,
            &vec![], // Empty TranscriptAnnotationCDS for test
            &empty_filtered_positions,
+            None,
        ).unwrap();
     
        let (segsites, w_theta, _pi, n_hap, _site_diversity) = match result {
@@ -1258,6 +1269,7 @@ mod tests {
             &reference_sequence,
             &vec![], // Empty TranscriptAnnotationCDS for test
             &empty_filtered_positions,
+            None,
         ).unwrap();
     
         // Correctly unwrap the Option to access the inner tuple
@@ -1317,6 +1329,7 @@ mod tests {
             &reference_sequence,
             &vec![], // Empty TranscriptAnnotationCDS for test
             &empty_filtered_positions,
+            None,
         ).unwrap();
 
         // Calculate global allele frequency
@@ -1375,6 +1388,7 @@ mod tests {
             &reference_sequence,
             &vec![], // Empty TranscriptAnnotationCDS for test
             &empty_filtered_positions,
+            None,
         ).unwrap();
     
         let (_segsites, _w_theta, _pi, n_hap, _site_diversity) = match _result_group1 {
@@ -1431,6 +1445,7 @@ mod tests {
             &reference_sequence,
             &vec![], // Empty TranscriptAnnotationCDS for test
             &empty_filtered_positions,
+            None,
         ).unwrap();
     
         // Correctly unwrap the Option to access the inner tuple
@@ -1487,6 +1502,7 @@ mod tests {
             &reference_sequence,
             &vec![], // Empty TranscriptAnnotationCDS for test
             &empty_filtered_positions,
+            None,
         ).unwrap();
     
         // Correctly unwrap the Option to access the inner tuple
@@ -1599,6 +1615,7 @@ mod tests {
             &reference_sequence,
             &vec![], // Empty TranscriptAnnotationCDS for test
             &empty_filtered_positions,
+            None,
         ).expect("Failed to process variants");
     
         // Calculate global allele frequency using the revised function (no haplotype_group parameter)

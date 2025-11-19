@@ -4319,11 +4319,14 @@ pub fn calculate_pi_for_population(context: &PopulationContext<'_>) -> f64 {
 /// informative loci while preserving aggregate results.
 /// `filtered_positions` marks callable loci that were excluded for quality reasons;
 /// these coordinates will be emitted as NaN instead of zeroed reference sites.
+/// `mask_intervals` allows callers to provide mask coordinates (half-open [start, end)) so
+/// bases absent from the VCF but masked in the BED file are also emitted as NaN.
 pub fn calculate_per_site_diversity(
     variants: &[Variant],
     haplotypes_in_group: &[(usize, HaplotypeSide)],
     region: QueryRegion, // Inclusive range [start..end] in 0-based coordinates
     filtered_positions: &HashSet<i64>,
+    mask_intervals: Option<&[(i64, i64)]>,
 ) -> Vec<SiteDiversity> {
     set_stage(ProcessingStage::StatsCalculation);
 
@@ -4442,6 +4445,11 @@ pub fn calculate_per_site_diversity(
 
     for offset in 0..region_len_usize {
         let zero_based_pos = region.start + offset as i64;
+        let is_masked_region = mask_intervals.map_or(false, |intervals| {
+            intervals
+                .iter()
+                .any(|&(start, end)| zero_based_pos >= start && zero_based_pos < end)
+        });
         if let Some((pi_value, watterson_value)) = variant_metrics.get(&zero_based_pos) {
             site_diversities.push(SiteDiversity {
                 position: ZeroBasedPosition(zero_based_pos).to_one_based(),
@@ -4451,7 +4459,9 @@ pub fn calculate_per_site_diversity(
             continue;
         }
 
-        let (pi_value, watterson_value) = if filtered_positions.contains(&zero_based_pos) {
+        let (pi_value, watterson_value) = if filtered_positions.contains(&zero_based_pos)
+            || is_masked_region
+        {
             (f64::NAN, f64::NAN)
         } else {
             (0.0, 0.0)
