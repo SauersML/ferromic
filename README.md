@@ -319,8 +319,3 @@ Benchmarks such as `cargo bench --bench pca` quantify PCA throughput. Contributi
 ## License
 
 Ferromic is released under the MIT License. See [LICENSE.md](LICENSE.md) for details.
-
-## References
-
-- Hudson, R. R., Slatkin, M., & Maddison, W. P. (1992). Estimation of levels of gene flow from DNA sequence data. *Genetics*, 132(2), 583–589. https://doi.org/10.1093/genetics/132.2.583
-- Weir, B. S., & Cockerham, C. C. (1984). Estimating F-statistics for the analysis of population structure. *Evolution*, 38(6), 1358–1370. https://doi.org/10.2307/2408641
