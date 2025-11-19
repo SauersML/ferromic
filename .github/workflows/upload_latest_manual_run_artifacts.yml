@@ -1,0 +1,139 @@
+name: Upload Latest Manual Run VCF Artifacts
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+env:
+  MANUAL_WORKFLOW_FILE: manual_run_vcf.yml
+
+jobs:
+  collect-artifacts:
+    runs-on: ubuntu-latest
+    outputs:
+      run-id: ${{ steps.collect.outputs.run-id }}
+      artifact-matrix: ${{ steps.collect.outputs.artifact-matrix }}
+    steps:
+      - name: Determine latest successful manual run
+        id: collect
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          run_json="$(gh api repos/${{ github.repository }}/actions/workflows/${MANUAL_WORKFLOW_FILE}/runs \
+            -f status=success -f per_page=1)"
+          run_id="$(echo "$run_json" | jq '.workflow_runs[0].id')"
+
+          if [[ -z "$run_id" || "$run_id" == "null" ]]; then
+            echo "No successful Manual Run VCF Pipeline runs found" >&2
+            exit 1
+          fi
+
+          echo "run-id=$run_id" >> "$GITHUB_OUTPUT"
+
+          artifact_json="$(gh api repos/${{ github.repository }}/actions/runs/$run_id/artifacts \
+            --jq '[.artifacts[] | {name: .name, url: .archive_download_url}]')"
+
+          if [[ -z "$artifact_json" || "$artifact_json" == "[]" ]]; then
+            echo "No artifacts were produced by run $run_id" >&2
+            exit 1
+          fi
+
+          {
+            echo "artifact-matrix<<'EOF'"
+            echo "$artifact_json"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+  reupload-artifacts:
+    needs: collect-artifacts
+    if: ${{ needs.collect-artifacts.outputs.artifact-matrix != '' && needs.collect-artifacts.outputs.artifact-matrix != '[]' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        artifact: ${{ fromJSON(needs.collect-artifacts.outputs.artifact-matrix) }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Ensure data directory
+        run: mkdir -p data
+
+      - name: Download ${{ matrix.artifact.name }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NAME: ${{ matrix.artifact.name }}
+          URL: ${{ matrix.artifact.url }}
+        run: |
+          set -euo pipefail
+          zip_path="data/${NAME}.zip"
+
+          gh api "$URL" > "$zip_path"
+
+          dest="data/${NAME}"
+          rm -rf "$dest"
+          mkdir -p "$dest"
+
+          if [[ "$NAME" == "run-vcf-phy-outputs" ]]; then
+            mv "$zip_path" "$dest/phy_outputs.zip"
+          elif [[ "$NAME" == "run-vcf-falsta" ]]; then
+            unzip -q "$zip_path" -d "$dest"
+            rm -f "$zip_path"
+            shopt -s nullglob
+            for gz in "$dest"/*.gz; do
+              base="$(basename "$gz")"
+              cp "$gz" "data/$base"
+            done
+            shopt -u nullglob
+          else
+            unzip -q "$zip_path" -d "$dest"
+            rm -f "$zip_path"
+          fi
+
+      - name: Update FST_data.tsv with Hudson output
+        if: ${{ matrix.artifact.name == 'run-vcf-hudson-fst' }}
+        run: |
+          set -euo pipefail
+          src="data/run-vcf-hudson-fst/hudson_fst_results.tsv.gz"
+          dst="data/run-vcf-hudson-fst/FST_data.tsv"
+          if [[ ! -f "$src" ]]; then
+            echo "Missing Hudson FST results at $src" >&2
+            exit 1
+          fi
+
+          gunzip -c "$src" | tee "$dst" > data/FST_data.tsv
+          rm -f "$src"
+          echo "Wrote $(wc -l < data/FST_data.tsv) rows to data/FST_data.tsv"
+
+      - name: Copy output.csv to data root
+        if: ${{ matrix.artifact.name == 'run-vcf-output-csv' }}
+        run: |
+          set -euo pipefail
+          src="data/run-vcf-output-csv/output.csv"
+          if [[ ! -f "$src" ]]; then
+            echo "Missing output.csv at $src" >&2
+            exit 1
+          fi
+          cp "$src" data/output.csv
+          echo "Copied $(wc -l < data/output.csv) rows to data/output.csv"
+
+      - name: Upload ${{ matrix.artifact.name }}
+        if: ${{ matrix.artifact.name != 'run-vcf-output-csv' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact.name }}
+          path: data/${{ matrix.artifact.name }}
+          if-no-files-found: error
+
+      - name: Upload output.csv
+        if: ${{ matrix.artifact.name == 'run-vcf-output-csv' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-vcf-output-csv
+          path: data/output.csv
+          if-no-files-found: error
