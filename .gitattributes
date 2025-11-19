@@ -1,1 +1,1 @@
-data/run-vcf-phy-outputs/phy_outputs.zip filter=lfs diff=lfs merge=lfs -text
+data/phy_outputs.zip filter=lfs diff=lfs merge=lfs -text
