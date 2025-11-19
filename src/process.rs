@@ -775,6 +775,7 @@ pub fn process_variants(
     reference_sequence: &[u8],
     cds_regions: &[TranscriptAnnotationCDS],
     filtered_positions: &HashSet<i64>,
+    mask_intervals: Option<&[(i64, i64)]>,
 ) -> Result<Option<(usize, f64, f64, usize, Vec<SiteDiversity>)>, VcfError> {
     set_stage(ProcessingStage::VariantAnalysis);
 
@@ -1117,6 +1118,7 @@ pub fn process_variants(
         &group_haps,
         query_region_for_diversity,
         filtered_positions,
+        mask_intervals,
     );
     spinner.finish_and_clear();
     log(
@@ -2238,6 +2240,7 @@ fn process_single_config_entry(
 
     let allow_regions_chr = allow.as_ref().and_then(|a| a.get(chr));
     let mask_regions_chr = mask.as_ref().and_then(|m| m.get(chr));
+    let mask_intervals_slice = mask_regions_chr.map(|regions| regions.as_slice());
 
     // Track callable sites that failed quality filters within the region.
     let filtered_positions_in_region: HashSet<i64> = filtering_stats
@@ -2592,6 +2595,7 @@ fn process_single_config_entry(
             ref_sequence,
             &local_cds,
             call.filtered_positions,
+            mask_intervals_slice,
         )?;
 
         if let Some(x) = stats_opt {
@@ -2722,7 +2726,7 @@ fn process_single_config_entry(
                     haplotypes: haplotypes_group_0,
                     variants: variants_for_hudson_slice, // Use the correctly scoped variant slice
                     sample_names: &sample_names,
-                    sequence_length: adjusted_sequence_length,
+                    sequence_length: filtered_adjusted_sequence_length,
                     dense_genotypes: None,
                     dense_summary: None,
                 };
@@ -2731,7 +2735,7 @@ fn process_single_config_entry(
                     haplotypes: haplotypes_group_1,
                     variants: variants_for_hudson_slice, // Use the correctly scoped variant slice
                     sample_names: &sample_names,
-                    sequence_length: adjusted_sequence_length,
+                    sequence_length: filtered_adjusted_sequence_length,
                     dense_genotypes: None,
                     dense_summary: None,
                 };
@@ -2836,7 +2840,7 @@ fn process_single_config_entry(
                             haplotypes: haplotypes_pop_a.clone(), // Clone Vec for ownership
                             variants: variants_for_hudson_slice, // Use the correctly scoped variant slice
                             sample_names: &sample_names,
-                            sequence_length: adjusted_sequence_length,
+                            sequence_length: filtered_adjusted_sequence_length,
                             dense_genotypes: None,
                             dense_summary: None,
                         };
@@ -2845,7 +2849,7 @@ fn process_single_config_entry(
                             haplotypes: haplotypes_pop_b.clone(), // Clone Vec for ownership
                             variants: variants_for_hudson_slice, // Use the correctly scoped variant slice
                             sample_names: &sample_names,
-                            sequence_length: adjusted_sequence_length,
+                            sequence_length: filtered_adjusted_sequence_length,
                             dense_genotypes: None,
                             dense_summary: None,
                         };
@@ -3521,8 +3525,8 @@ pub fn process_vcf(
         let arc_mask = mask_regions.clone();
         let arc_allow = allow_regions.clone();
         let chr_copy = chr.to_string();
-        let pos_map = Arc::clone(&position_allele_map);
-        consumers.push(thread::spawn(move || -> Result<(), VcfError> {
+        consumers.push(thread::spawn(move || -> Result<HashMap<i64, (char, char)>, VcfError> {
+            let mut local_allele_map: HashMap<i64, (char, char)> = HashMap::new();
             while let Ok(line) = line_receiver.recv() {
                 let mut single_line_miss_info = MissingDataInfo::default();
                 let mut single_line_filt_stats = FilteringStats::default();
@@ -3543,11 +3547,19 @@ pub fn process_vcf(
                     &mut single_line_filt_stats,
                     arc_allow.as_ref().map(|x| x.as_ref()),
                     arc_mask.as_ref().map(|x| x.as_ref()),
-                    &pos_map,
                 ) {
                     Ok(variant_opt) => {
+                        let variant_for_channel = match variant_opt {
+                            Some((variant, passes, allele_info)) => {
+                                if let Some((pos, ref_allele, alt_allele)) = allele_info {
+                                    local_allele_map.insert(pos, (ref_allele, alt_allele));
+                                }
+                                Some((variant, passes))
+                            }
+                            None => None,
+                        };
                         rs.send(Ok((
-                            variant_opt,
+                            variant_for_channel,
                             single_line_miss_info.clone(),
                             single_line_filt_stats.clone(),
                         )))
@@ -3558,7 +3570,7 @@ pub fn process_vcf(
                     }
                 }
             }
-            Ok(())
+            Ok(local_allele_map)
         }));
     }
 
@@ -3637,8 +3649,23 @@ pub fn process_vcf(
     // Wait for consumers.
     drop(line_receiver);
     drop(result_sender);
+    let mut merged_local_maps: Vec<HashMap<i64, (char, char)>> = Vec::with_capacity(num_threads);
     for c in consumers {
-        c.join().expect("Consumer thread panicked")?;
+        match c.join() {
+            Ok(Ok(local_map)) => merged_local_maps.push(local_map),
+            Ok(Err(e)) => return Err(e),
+            Err(_) => {
+                return Err(VcfError::Parse(
+                    "Consumer thread panicked while processing variants".to_string(),
+                ))
+            }
+        }
+    }
+    {
+        let mut global_map = position_allele_map.lock();
+        for local_map in merged_local_maps {
+            global_map.extend(local_map);
+        }
     }
     // Signal done, wait for collector.
     processing_complete.store(true, Ordering::Relaxed);
@@ -3741,8 +3768,7 @@ pub fn process_variant(
     filtering_stats: &mut FilteringStats,
     allow_regions: Option<&HashMap<String, Vec<(i64, i64)>>>,
     mask_regions: Option<&HashMap<String, Vec<(i64, i64)>>>,
-    position_allele_map: &Mutex<HashMap<i64, (char, char)>>,
-) -> Result<Option<(Variant, bool)>, VcfError> {
+) -> Result<Option<(Variant, bool, Option<(i64, char, char)>)>, VcfError> {
     let fields: Vec<&str> = line.split('\t').collect();
 
     let required_fixed_fields = 9;
@@ -3844,8 +3870,8 @@ pub fn process_variant(
         );
     }
 
-    // Store reference and alternate alleles
-    if !fields[3].is_empty() && !fields[4].is_empty() {
+    // Capture reference and alternate alleles for downstream sequence rendering.
+    let allele_info = if !fields[3].is_empty() && !fields[4].is_empty() {
         let ref_allele = match fields[3].chars().next().unwrap_or('N') {
             'A' | 'a' => 'A',
             'C' | 'c' => 'C',
@@ -3860,10 +3886,10 @@ pub fn process_variant(
             'T' | 't' => 'T',
             _ => 'N',
         };
-        position_allele_map
-            .lock()
-            .insert(zero_based_position, (ref_allele, alt_allele));
-    }
+        Some((zero_based_position, ref_allele, alt_allele))
+    } else {
+        None
+    };
 
     let alt_alleles: Vec<&str> = fields[4].split(',').collect();
     let is_multiallelic = alt_alleles.len() > 1;
@@ -3990,7 +4016,7 @@ pub fn process_variant(
             position: zero_based_position,
             genotypes: CompressedGenotypes::new(packed_genotypes),
         };
-        return Ok(Some((variant, passes_filters)));
+        return Ok(Some((variant, passes_filters, allele_info)));
     }
 
     if has_missing_genotypes {
@@ -4028,5 +4054,5 @@ pub fn process_variant(
     };
 
     // Return the parsed variant and whether it passes filters
-    Ok(Some((variant, passes_filters)))
+    Ok(Some((variant, passes_filters, allele_info)))
 }

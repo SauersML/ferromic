@@ -1635,7 +1635,7 @@ fn per_site_diversity_py(
     let region = build_optional_region(region, &variants)?;
     let filtered_positions: HashSet<i64> = HashSet::new();
     let sites = py.allow_threads(|| {
-        calculate_per_site_diversity(&variants, &haplotypes, region, &filtered_positions)
+        calculate_per_site_diversity(&variants, &haplotypes, region, &filtered_positions, None)
     });
     diversity_sites_to_py(py, &sites)
 }
