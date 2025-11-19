@@ -5,8 +5,9 @@ from __future__ import annotations
 import math
 import sys
 import os
+import re
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, List, Tuple
 
@@ -109,6 +110,79 @@ def _temporary_workdir(path: Path):
         yield
     finally:
         os.chdir(prev)
+
+
+# ---------------------------------------------------------------------------
+# π structure helpers
+# ---------------------------------------------------------------------------
+
+
+def _calc_pi_structure_metrics() -> tuple[float | None, int, float | None]:
+    """Parse per-site diversity tracks to replicate π structure metrics."""
+
+    falsta_path = DATA_DIR / "per_site_diversity_output.falsta"
+    if not falsta_path.exists():
+        raise FileNotFoundError(
+            f"Missing per-site diversity FALSTA: {_relative_to_repo(falsta_path)}"
+        )
+
+    flank_means_40k: list[float] = []
+    window_data_100k: list[np.ndarray] = []
+    header_pattern = re.compile(r"start\s*(\d+).*end\s*(\d+)", re.IGNORECASE)
+
+    def _process_record(header: str | None, body_lines: list[str]) -> None:
+        if not header or not body_lines or "filtered_pi" not in header:
+            return
+        match = header_pattern.search(header)
+        if not match:
+            return
+        start = int(match.group(1))
+        end = int(match.group(2))
+        total_length = abs(end - start)
+        values = np.fromstring("".join(body_lines), sep=",")
+        if not np.isfinite(values).any():
+            return
+
+        if total_length >= 40_000 and values.size >= 20_000:
+            flanks = np.r_[values[:10_000], values[-10_000:]]
+            flank_mean = float(np.nanmean(flanks))
+            if np.isfinite(flank_mean):
+                flank_means_40k.append(flank_mean)
+
+        if total_length >= 100_000 and values.size >= 100_000:
+            first = values[:100_000]
+            if first.size == 100_000:
+                reshaped = first.reshape(50, 2_000)
+                window_means = np.nanmean(reshaped, axis=1)
+                window_data_100k.append(window_means)
+
+    current_header: str | None = None
+    sequence_lines: list[str] = []
+    with falsta_path.open("r", encoding="utf-8") as handle:
+        for raw_line in handle:
+            line = raw_line.strip()
+            if not line:
+                continue
+            if line.startswith(">"):
+                _process_record(current_header, sequence_lines)
+                current_header = line
+                sequence_lines = []
+            else:
+                sequence_lines.append(line)
+    _process_record(current_header, sequence_lines)
+
+    mean_flank = float(np.mean(flank_means_40k)) if flank_means_40k else None
+    rho: float | None
+    if window_data_100k:
+        window_values = np.concatenate(window_data_100k)
+        base_distances = np.arange(0, 100_000, 2_000, dtype=float)
+        distances = np.tile(base_distances, len(window_data_100k))
+        rho_val, _ = stats.spearmanr(distances, window_values)
+        rho = float(rho_val) if np.isfinite(rho_val) else None
+    else:
+        rho = None
+
+    return mean_flank, len(flank_means_40k), rho
 
 
 # ---------------------------------------------------------------------------
@@ -291,6 +365,23 @@ def summarize_diversity() -> List[str]:
         "  Within inverted haplotypes: recurrent median π = "
         f"{_fmt(grouped.get(1, np.nan), 6)}; single-event median π = {_fmt(grouped.get(0, np.nan), 6)}."
     )
+    return lines
+
+
+def summarize_pi_structure() -> List[str]:
+    try:
+        mean_flank, flank_count, rho = _calc_pi_structure_metrics()
+    except FileNotFoundError as exc:
+        return [f"Pi structure inputs unavailable: {exc}"]
+    except Exception as exc:  # pragma: no cover - defensive parsing guard
+        return [f"Pi structure summary failed: {exc}"]
+
+    lines = [
+        "Mean of what: Nucleotide diversity (π) averaged across the two 10 kbp flanking windows of each qualifying sequence.",
+        f"In what: The {_fmt(flank_count, 0)} haplotype sequences with ≥40 kbp of per-site filtered π estimates.",
+        f"Where: Specifically within the filtered π regions, the combined flanking mean is {_fmt(mean_flank)}.",
+        f"the Spearman’s correlation (ρ = {_fmt(rho)}) between nucleotide diversity (50 × 2 kbp windows across the first 100 kbp) and distance from the sequence start characterizes the internal decay.",
+    ]
     return lines
 
 
@@ -624,6 +715,7 @@ class AssocSpec:
     label: str
     search_terms: Tuple[str, ...]
     table_name: str = "phewas_results.tsv"
+    ancestry_targets: List[str] = field(default_factory=list)
 
 
 def _format_or(row: pd.Series) -> str:
@@ -680,6 +772,7 @@ def summarize_key_associations() -> List[str]:
             "chr6-141867315-INV-29159",
             "Laryngitis and tracheitis",
             ("laryngitis", "tracheitis"),
+            ancestry_targets=["AFR"],
         ),
         AssocSpec(
             "chr12-46897663-INV-16289",
@@ -696,30 +789,35 @@ def summarize_key_associations() -> List[str]:
             "Morbid obesity (Main Imputed)",
             ("morbid", "obesity"),
             table_name="phewas_results.tsv",
+            ancestry_targets=["EUR", "AFR"],
         ),
         AssocSpec(
             "chr17-45974480-INV-29218",
             "Morbid obesity (Tag SNP)",
             ("morbid", "obesity"),
             table_name="all_pop_phewas_tag.tsv",
+            ancestry_targets=["EUR", "AFR"],
         ),
         AssocSpec(
             "chr17-45974480-INV-29218",
             "Breast lump or abnormal exam",
             ("lump", "breast"),
             table_name="all_pop_phewas_tag.tsv",
+            ancestry_targets=["EUR"],
         ),
         AssocSpec(
             "chr17-45974480-INV-29218",
             "Abnormal mammogram",
             ("mammogram",),
             table_name="all_pop_phewas_tag.tsv",
+            ancestry_targets=["EUR"],
         ),
         AssocSpec(
             "chr17-45974480-INV-29218",
             "Mild cognitive impairment",
             ("mild", "cognitive"),
             table_name="all_pop_phewas_tag.tsv",
+            ancestry_targets=["EUR", "AMR"],
         ),
     ]
 
@@ -821,6 +919,39 @@ def summarize_key_associations() -> List[str]:
             f"  [{source_lbl}] {spec.inversion} vs {spec.label}: {parts}, "
             f"BH-adjusted p ≈ {_fmt(bh, 3)} (raw p = {_fmt(pval, 3)})."
         )
+
+        interaction_col = "P_LRT_AncestryxDosage"
+        interaction_val = r.get(interaction_col) if interaction_col in r.index else None
+        if interaction_val is not None and not pd.isna(interaction_val):
+            lines.append(
+                f"    Interaction (Ancestry × Dosage): p = {_fmt(interaction_val, 3)}."
+            )
+
+        for anc in spec.ancestry_targets:
+            p_col = f"{anc}_P"
+            or_col = f"{anc}_OR"
+            lo_col = f"{anc}_CI_LO_OR"
+            hi_col = f"{anc}_CI_HI_OR"
+            p_val = r.get(p_col)
+            if p_val is None or pd.isna(p_val):
+                continue
+            line = f"    [{anc}] p = {_fmt(p_val, 3)}"
+            or_val = r.get(or_col)
+            if or_val is not None and not pd.isna(or_val):
+                lo_val = r.get(lo_col)
+                hi_val = r.get(hi_col)
+                if (
+                    lo_val is not None
+                    and hi_val is not None
+                    and not pd.isna(lo_val)
+                    and not pd.isna(hi_val)
+                ):
+                    line += (
+                        f", OR = {_fmt(or_val, 3)} (95% CI {_fmt(lo_val, 3)}–{_fmt(hi_val, 3)})"
+                    )
+                else:
+                    line += f", OR = {_fmt(or_val, 3)}"
+            lines.append(line + ".")
     return lines
 
 
@@ -1113,6 +1244,7 @@ def build_report() -> List[str]:
         ("Recurrence", summarize_recurrence()),
         ("Sample sizes", summarize_sample_sizes()),
         ("Diversity", summarize_diversity()),
+        ("Pi Structure", summarize_pi_structure()),
         ("Linear model", summarize_linear_model()),
         ("CDS conservation", summarize_cds_conservation_glm()),
         ("Differentiation", summarize_fst()),
