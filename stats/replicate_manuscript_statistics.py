@@ -7,6 +7,7 @@ import sys
 import os
 import re
 from contextlib import contextmanager
+import gzip
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, List, Tuple
@@ -120,10 +121,14 @@ def _temporary_workdir(path: Path):
 def _calc_pi_structure_metrics() -> tuple[float | None, int, float | None]:
     """Parse per-site diversity tracks to replicate π structure metrics."""
 
-    falsta_path = DATA_DIR / "per_site_diversity_output.falsta"
-    if not falsta_path.exists():
+    falsta_candidates = [
+        DATA_DIR / "per_site_diversity_output.falsta",
+        DATA_DIR / "per_site_diversity_output.falsta.gz",
+    ]
+    falsta_path = next((path for path in falsta_candidates if path.exists()), None)
+    if falsta_path is None:
         raise FileNotFoundError(
-            f"Missing per-site diversity FALSTA: {_relative_to_repo(falsta_path)}"
+            "Missing per-site diversity FALSTA: per_site_diversity_output.falsta(.gz)"
         )
 
     flank_means_40k: list[float] = []
@@ -158,7 +163,12 @@ def _calc_pi_structure_metrics() -> tuple[float | None, int, float | None]:
 
     current_header: str | None = None
     sequence_lines: list[str] = []
-    with falsta_path.open("r", encoding="utf-8") as handle:
+    if falsta_path.suffix == ".gz":
+        handle_factory = lambda: gzip.open(falsta_path, "rt", encoding="utf-8")
+    else:
+        handle_factory = lambda: falsta_path.open("r", encoding="utf-8")
+
+    with handle_factory() as handle:
         for raw_line in handle:
             line = raw_line.strip()
             if not line:
