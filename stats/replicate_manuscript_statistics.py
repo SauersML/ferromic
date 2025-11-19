@@ -7,7 +7,7 @@ import sys
 import os
 import re
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, List, Tuple
 
@@ -715,6 +715,7 @@ class AssocSpec:
     label: str
     search_terms: Tuple[str, ...]
     table_name: str = "phewas_results.tsv"
+    ancestry_targets: List[str] = field(default_factory=list)
 
 
 def _format_or(row: pd.Series) -> str:
@@ -771,6 +772,7 @@ def summarize_key_associations() -> List[str]:
             "chr6-141867315-INV-29159",
             "Laryngitis and tracheitis",
             ("laryngitis", "tracheitis"),
+            ancestry_targets=["AFR"],
         ),
         AssocSpec(
             "chr12-46897663-INV-16289",
@@ -787,30 +789,35 @@ def summarize_key_associations() -> List[str]:
             "Morbid obesity (Main Imputed)",
             ("morbid", "obesity"),
             table_name="phewas_results.tsv",
+            ancestry_targets=["EUR", "AFR"],
         ),
         AssocSpec(
             "chr17-45974480-INV-29218",
             "Morbid obesity (Tag SNP)",
             ("morbid", "obesity"),
             table_name="all_pop_phewas_tag.tsv",
+            ancestry_targets=["EUR", "AFR"],
         ),
         AssocSpec(
             "chr17-45974480-INV-29218",
             "Breast lump or abnormal exam",
             ("lump", "breast"),
             table_name="all_pop_phewas_tag.tsv",
+            ancestry_targets=["EUR"],
         ),
         AssocSpec(
             "chr17-45974480-INV-29218",
             "Abnormal mammogram",
             ("mammogram",),
             table_name="all_pop_phewas_tag.tsv",
+            ancestry_targets=["EUR"],
         ),
         AssocSpec(
             "chr17-45974480-INV-29218",
             "Mild cognitive impairment",
             ("mild", "cognitive"),
             table_name="all_pop_phewas_tag.tsv",
+            ancestry_targets=["EUR", "AMR"],
         ),
     ]
 
@@ -912,6 +919,39 @@ def summarize_key_associations() -> List[str]:
             f"  [{source_lbl}] {spec.inversion} vs {spec.label}: {parts}, "
             f"BH-adjusted p ≈ {_fmt(bh, 3)} (raw p = {_fmt(pval, 3)})."
         )
+
+        interaction_col = "P_LRT_AncestryxDosage"
+        interaction_val = r.get(interaction_col) if interaction_col in r.index else None
+        if interaction_val is not None and not pd.isna(interaction_val):
+            lines.append(
+                f"    Interaction (Ancestry × Dosage): p = {_fmt(interaction_val, 3)}."
+            )
+
+        for anc in spec.ancestry_targets:
+            p_col = f"{anc}_P"
+            or_col = f"{anc}_OR"
+            lo_col = f"{anc}_CI_LO_OR"
+            hi_col = f"{anc}_CI_HI_OR"
+            p_val = r.get(p_col)
+            if p_val is None or pd.isna(p_val):
+                continue
+            line = f"    [{anc}] p = {_fmt(p_val, 3)}"
+            or_val = r.get(or_col)
+            if or_val is not None and not pd.isna(or_val):
+                lo_val = r.get(lo_col)
+                hi_val = r.get(hi_col)
+                if (
+                    lo_val is not None
+                    and hi_val is not None
+                    and not pd.isna(lo_val)
+                    and not pd.isna(hi_val)
+                ):
+                    line += (
+                        f", OR = {_fmt(or_val, 3)} (95% CI {_fmt(lo_val, 3)}–{_fmt(hi_val, 3)})"
+                    )
+                else:
+                    line += f", OR = {_fmt(or_val, 3)}"
+            lines.append(line + ".")
     return lines
 
 
