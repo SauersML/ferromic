@@ -1117,15 +1117,15 @@ def summarize_pgs_controls() -> List[str]:
 
 
 def summarize_family_history() -> List[str]:
-    fam_path = REPO_ROOT / "assoc_outputs" / "assoc_family_groups_gee_single_beta.csv"
+    fam_path = DATA_DIR / "family_phewas.tsv"
 
     if not fam_path.exists():
         return [
-            "Family history validation results not found (run stats/extra/family.py first)."
+            "Family history validation results not found; expected data/family_phewas.tsv."
         ]
 
     try:
-        df = pd.read_csv(fam_path)
+        df = pd.read_csv(fam_path, sep="\t", low_memory=False)
     except Exception as exc:  # pragma: no cover - defensive logging
         return [f"Error reading family history results: {exc}"]
 
@@ -1134,7 +1134,9 @@ def summarize_family_history() -> List[str]:
             "Family history validation file missing 'phenotype' column; cannot summarize results."
         ]
 
-    lines = ["Family History Validation (GEE Model):"]
+    df["phenotype"] = df["phenotype"].astype(str).str.strip()
+
+    lines = ["Family History Validation (Family-based PheWAS):"]
     key_phenos = ["Breast Cancer", "Obesity", "Heart Failure", "Cognitive Impairment"]
 
     found_any = False
