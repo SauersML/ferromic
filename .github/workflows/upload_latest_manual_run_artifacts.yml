@@ -96,6 +96,11 @@ jobs:
               -H "X-GitHub-Api-Version: 2022-11-28" \
               "$url" > "$zip_path"
 
+            if [[ "$name" == "run-vcf-phy-outputs" ]]; then
+              mv "$zip_path" "data/phy_outputs.zip"
+              continue
+            fi
+
             dest="data/${name}"
             rm -rf "$dest"
             mkdir -p "$dest"
