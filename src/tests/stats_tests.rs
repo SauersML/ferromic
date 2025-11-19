@@ -2,7 +2,7 @@
 mod tests {
     use tempfile::NamedTempFile;
     use std::fs::File;
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     use std::io::{Read, Write};
     use parking_lot::Mutex;
     use std::path::PathBuf;
@@ -50,7 +50,13 @@ mod tests {
         ];
 
         let region = QueryRegion { start: 0, end: 4 };
-        let per_site = calculate_per_site_diversity(&variants, &haplotypes, region);
+        let filtered_positions = HashSet::new();
+        let per_site = calculate_per_site_diversity(
+            &variants,
+            &haplotypes,
+            region,
+            &filtered_positions,
+        );
 
         assert_eq!(per_site.len(), 5);
         for (offset, site) in per_site.iter().enumerate() {
@@ -576,6 +582,7 @@ mod tests {
             pam.insert(3000, ('G', 'A'));
         }
 
+        let empty_filtered_positions = HashSet::new();
         let invalid_group = process_variants(
             &variants,
             &sample_names,
@@ -589,6 +596,7 @@ mod tests {
             false, // is_filtered_set
             &reference_sequence,
             &vec![], // Empty TranscriptAnnotationCDS for test
+            &empty_filtered_positions,
         );
         assert!(invalid_group.unwrap_or(None).is_none(), "Expected None for invalid haplotype group");
     }
@@ -995,6 +1003,7 @@ mod tests {
             pam.insert(3000, ('G', 'A'));
         }
     
+        let empty_filtered_positions = HashSet::new();
         let result = process_variants(
             &variants,
             &sample_names,
@@ -1008,6 +1017,7 @@ mod tests {
             false, // is_filtered_set
             &reference_sequence,
             &vec![], // Empty TranscriptAnnotationCDS for test
+            &empty_filtered_positions,
         ).unwrap();
     
         // Calculate allele frequency globally
@@ -1049,6 +1059,7 @@ mod tests {
             pam.insert(3000, ('G', 'A'));
         }
     
+        let empty_filtered_positions = HashSet::new();
         let _result_group1 = process_variants(
             &variants,
             &sample_names,
@@ -1062,6 +1073,7 @@ mod tests {
             false, // is_filtered_set
             &reference_sequence,
             &vec![], // Empty TranscriptAnnotationCDS for test
+            &empty_filtered_positions,
         ).unwrap();
     
         let (_segsites, _w_theta, _pi, n_hap, _site_diversity) = match _result_group1 {
@@ -1112,6 +1124,7 @@ mod tests {
             pam.insert(3000, ('G', 'A'));
         }
     
+        let empty_filtered_positions = HashSet::new();
         let _result_group1 = process_variants(
             &variants,
             &sample_names,
@@ -1125,6 +1138,7 @@ mod tests {
             true, // is_filtered_set
             &reference_sequence,
             &vec![], // Empty TranscriptAnnotationCDS for test
+            &empty_filtered_positions,
         ).unwrap();
 
         // Correctly unwrap the Option to access the inner tuple
@@ -1178,6 +1192,7 @@ mod tests {
             pam.insert(2000, ('T', 'C'));
         }
     
+       let empty_filtered_positions = HashSet::new();
        let result = process_variants(
            &variants,
            &sample_names,
@@ -1191,6 +1206,7 @@ mod tests {
            false,
            &reference_sequence,
            &vec![], // Empty TranscriptAnnotationCDS for test
+           &empty_filtered_positions,
        ).unwrap();
     
        let (segsites, w_theta, _pi, n_hap, _site_diversity) = match result {
@@ -1227,6 +1243,7 @@ mod tests {
             pam.insert(3000, ('G', 'A'));
         }
     
+        let empty_filtered_positions = HashSet::new();
         let _result_group1 = process_variants(
             &variants,
             &sample_names,
@@ -1240,6 +1257,7 @@ mod tests {
             false, // is_filtered_set
             &reference_sequence,
             &vec![], // Empty TranscriptAnnotationCDS for test
+            &empty_filtered_positions,
         ).unwrap();
     
         // Correctly unwrap the Option to access the inner tuple
@@ -1284,6 +1302,7 @@ mod tests {
             pam.insert(3000, ('A', 'T'));
         }
 
+        let empty_filtered_positions = HashSet::new();
         let result = process_variants(
             &variants,
             &sample_names,
@@ -1297,6 +1316,7 @@ mod tests {
             true, // is_filtered_set
             &reference_sequence,
             &vec![], // Empty TranscriptAnnotationCDS for test
+            &empty_filtered_positions,
         ).unwrap();
 
         // Calculate global allele frequency
@@ -1340,6 +1360,7 @@ mod tests {
             pam.insert(3000, ('G', 'A'));
         }
     
+        let empty_filtered_positions = HashSet::new();
         let _result_group1 = process_variants(
             &variants,
             &sample_names,
@@ -1353,6 +1374,7 @@ mod tests {
             true, // is_filtered_set
             &reference_sequence,
             &vec![], // Empty TranscriptAnnotationCDS for test
+            &empty_filtered_positions,
         ).unwrap();
     
         let (_segsites, _w_theta, _pi, n_hap, _site_diversity) = match _result_group1 {
@@ -1394,6 +1416,7 @@ mod tests {
             pam.insert(3000, ('G', 'A'));
         }
     
+        let empty_filtered_positions = HashSet::new();
         let _result_group1 = process_variants(
             &variants,
             &sample_names,
@@ -1407,6 +1430,7 @@ mod tests {
             true, // is_filtered_set
             &reference_sequence,
             &vec![], // Empty TranscriptAnnotationCDS for test
+            &empty_filtered_positions,
         ).unwrap();
     
         // Correctly unwrap the Option to access the inner tuple
@@ -1448,6 +1472,7 @@ mod tests {
             pam.insert(3000, ('G', 'A'));
         }
     
+        let empty_filtered_positions = HashSet::new();
         let _result_group1 = process_variants(
             &variants,
             &sample_names,
@@ -1461,6 +1486,7 @@ mod tests {
             true, // is_filtered_set
             &reference_sequence,
             &vec![], // Empty TranscriptAnnotationCDS for test
+            &empty_filtered_positions,
         ).unwrap();
     
         // Correctly unwrap the Option to access the inner tuple
@@ -1558,6 +1584,7 @@ mod tests {
         }
     
         // Process variants for haplotype_group=1 (Group 1)
+        let empty_filtered_positions = HashSet::new();
         let _result_group1 = process_variants(
             &variants,
             &sample_names,
@@ -1571,6 +1598,7 @@ mod tests {
             true, // is_filtered_set
             &reference_sequence,
             &vec![], // Empty TranscriptAnnotationCDS for test
+            &empty_filtered_positions,
         ).expect("Failed to process variants");
     
         // Calculate global allele frequency using the revised function (no haplotype_group parameter)
