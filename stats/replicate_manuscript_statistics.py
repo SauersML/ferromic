@@ -8,6 +8,8 @@ import os
 import re
 from contextlib import contextmanager
 import gzip
+import shutil
+import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, List, Tuple
@@ -120,6 +122,56 @@ def _temporary_workdir(path: Path):
         os.chdir(prev)
 
 
+def _stage_cds_inputs() -> list[Path]:
+    """Prepare required inputs for cds_differences in the working directory."""
+
+    staged_paths: list[Path] = []
+
+    metadata_src = DATA_DIR / "inv_properties.tsv"
+    if not metadata_src.exists():
+        raise FileNotFoundError(
+            "Missing metadata: expected data/inv_properties.tsv to stage inv_info.tsv"
+        )
+
+    metadata_dest = Path("inv_info.tsv")
+    shutil.copy2(metadata_src, metadata_dest)
+    staged_paths.append(metadata_dest)
+
+    zip_archives = sorted(DATA_DIR.glob("*.zip"))
+    if not zip_archives:
+        raise FileNotFoundError("No .zip archives found in data/ for PHYLIP extraction")
+
+    extracted_any = False
+    for archive_path in zip_archives:
+        with zipfile.ZipFile(archive_path) as archive:
+            members = [
+                name
+                for name in archive.namelist()
+                if name.endswith(".phy") or name.endswith(".phy.gz")
+            ]
+            if not members:
+                continue
+            extracted_any = True
+            for member in members:
+                target_name = Path(member).name
+                target_path = Path(target_name)
+                with archive.open(member) as zipped_member:
+                    if member.endswith(".gz"):
+                        with gzip.open(zipped_member) as gz_member:
+                            data = gz_member.read()
+                    else:
+                        data = zipped_member.read()
+                target_path.write_bytes(data)
+                staged_paths.append(target_path)
+
+    if not extracted_any:
+        raise FileNotFoundError(
+            "No .phy or .phy.gz files found inside data/*.zip archives"
+        )
+
+    return staged_paths
+
+
 def run_fresh_cds_pipeline():
     """
     Force regeneration of CDS statistics from raw .phy files.
@@ -131,34 +183,49 @@ def run_fresh_cds_pipeline():
     print(">>> PIPELINE: REGENERATING CDS DATA FROM RAW .PHY FILES <<<")
     print("=" * 80)
 
-    # 1. Clean up old intermediate files to ensure we are using raw data
-    print("... Cleaning old summary tables to ensure fresh run ...")
-    for f in Path(".").glob("cds_identical_proportions.tsv"):
-        f.unlink()
-    for f in Path(".").glob("pairs_CDS__*.tsv"):
-        f.unlink()
-    for f in Path(".").glob("gene_inversion_direct_inverted.tsv"):
-        f.unlink()
+    with _temporary_workdir(REPO_ROOT):
+        # 1. Clean up old intermediate files to ensure we are using raw data
+        print("... Cleaning old summary tables to ensure fresh run ...")
+        for f in Path(".").glob("cds_identical_proportions.tsv"):
+            f.unlink()
+        for f in Path(".").glob("pairs_CDS__*.tsv"):
+            f.unlink()
+        for f in Path(".").glob("gene_inversion_direct_inverted.tsv"):
+            f.unlink()
 
-    # 2. Run the Raw Processor (equivalent to running stats/cds_differences.py)
-    # This reads *.phy and inv_info.tsv -> outputs cds_identical_proportions.tsv
-    print("\n[Step 1/2] Parsing raw PHYLIP files (cds_differences.py)...")
-    try:
-        cds_differences.main()
-    except Exception as e:
-        print(f"FATAL: Raw .phy processing failed: {e}")
-        sys.exit(1)
+        staged_paths: list[Path] = []
+        try:
+            # 2. Stage required inputs for cds_differences.py
+            print("... Staging metadata and PHYLIP archives from data/ ...")
+            staged_paths = _stage_cds_inputs()
 
-    # 3. Run the Jackknife Analysis (equivalent to stats/per_gene_cds_differences_jackknife.py)
-    # This reads the file created in Step 1 -> outputs gene_inversion_direct_inverted.tsv
-    print("\n[Step 2/2] Running Jackknife statistics (per_gene_cds_differences_jackknife.py)...")
-    try:
-        per_gene_cds_differences_jackknife.main()
-    except Exception as e:
-        print(f"FATAL: Jackknife analysis failed: {e}")
-        sys.exit(1)
+            # 3. Run the Raw Processor (equivalent to running stats/cds_differences.py)
+            # This reads *.phy and inv_info.tsv -> outputs cds_identical_proportions.tsv
+            print("\n[Step 1/2] Parsing raw PHYLIP files (cds_differences.py)...")
+            try:
+                cds_differences.main()
+            except Exception as e:
+                print(f"FATAL: Raw .phy processing failed: {e}")
+                sys.exit(1)
 
-    print("\n>>> PIPELINE: GENERATION COMPLETE. Proceeding to manuscript report...\n")
+            # 4. Run the Jackknife Analysis (equivalent to stats/per_gene_cds_differences_jackknife.py)
+            # This reads the file created in Step 1 -> outputs gene_inversion_direct_inverted.tsv
+            print("\n[Step 2/2] Running Jackknife statistics (per_gene_cds_differences_jackknife.py)...")
+            try:
+                per_gene_cds_differences_jackknife.main()
+            except Exception as e:
+                print(f"FATAL: Jackknife analysis failed: {e}")
+                sys.exit(1)
+
+            print("\n>>> PIPELINE: GENERATION COMPLETE. Proceeding to manuscript report...\n")
+        finally:
+            if staged_paths:
+                print("... Cleaning staged metadata and PHYLIP files ...")
+                for path in staged_paths:
+                    try:
+                        path.unlink()
+                    except FileNotFoundError:
+                        pass
 
 
 # ---------------------------------------------------------------------------
