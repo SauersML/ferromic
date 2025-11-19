@@ -100,13 +100,19 @@ jobs:
               mv "$zip_path" "data/phy_outputs.zip"
               continue
             elif [[ "$name" == "run-vcf-falsta" ]]; then
-              unzip -q "$zip_path" -d "data"
+              dest="data/run-vcf-falsta"
+              rm -rf "$dest"
+              mkdir -p "$dest"
+              unzip -q "$zip_path" -d "$dest"
               rm -f "$zip_path"
               shopt -s nullglob
-              for gz in data/*.falsta.gz; do
-                echo "Synced $(basename "$gz")"
+              for gz in "$dest"/*.falsta.gz; do
+                base="$(basename "$gz")"
+                mv "$gz" "data/$base"
+                echo "Synced $base"
               done
               shopt -u nullglob
+              rm -rf "$dest"
               continue
             fi
 
