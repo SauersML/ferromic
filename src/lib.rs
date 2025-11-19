@@ -15,7 +15,7 @@
 //! introspection-friendly attributes. The goal is to make Ferromic feel like a
 //! native Python library while retaining Rust's performance.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
@@ -1633,7 +1633,10 @@ fn per_site_diversity_py(
     }
 
     let region = build_optional_region(region, &variants)?;
-    let sites = py.allow_threads(|| calculate_per_site_diversity(&variants, &haplotypes, region));
+    let filtered_positions: HashSet<i64> = HashSet::new();
+    let sites = py.allow_threads(|| {
+        calculate_per_site_diversity(&variants, &haplotypes, region, &filtered_positions)
+    });
     diversity_sites_to_py(py, &sites)
 }
 
