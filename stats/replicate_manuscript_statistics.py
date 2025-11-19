@@ -781,11 +781,37 @@ def summarize_key_associations() -> List[str]:
         ),
         AssocSpec(
             "chr12-46897663-INV-16289",
+            "Acne",
+            ("acne",),
+        ),
+        AssocSpec(
+            "chr12-46897663-INV-16289",
+            "Epidermal thickening",
+            ("epidermal", "thicken"),
+        ),
+        AssocSpec(
+            "chr12-46897663-INV-16289",
+            "Inflammation of the eye",
+            ("inflamm", "eye"),
+        ),
+        AssocSpec(
+            "chr12-46897663-INV-16289",
             "Migraine",
             ("migraine",),
         ),
         AssocSpec(
-            "chr17-45974480-INV-29218",
+            "chr12-46897663-INV-16289",
+            "Disorder of nervous system",
+            ("disorder", "nervous"),
+        ),
+        AssocSpec(
+            # The main imputed Morbid obesity signal comes from the 17q21 inversion
+            # (chr17-45585160-INV-706887). The tag-SNP analyses use a synthetic
+            # identifier (chr17-45974480-INV-29218), so we keep the tag-SNP
+            # entries below on that ID but point the main PheWAS summary at the
+            # true inversion identifier so the odds ratios reported here match
+            # the imputed results discussed in the manuscript.
+            "chr17-45585160-INV-706887",
             "Morbid obesity (Main Imputed)",
             ("morbid", "obesity"),
             table_name="phewas_results.tsv",

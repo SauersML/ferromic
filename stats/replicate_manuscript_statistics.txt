@@ -7,30 +7,55 @@ SAMPLE SIZES
 Sample sizes for diversity analyses:
   Inversion callset columns indicate 44 phased individuals (sample columns).
   Reporting haplotypes as twice the sample count yields 88 potential phased haplotypes.
-  Loci with ≥2 haplotypes per orientation for π: 60 (from output.csv).
+  Loci with ≥2 haplotypes per orientation for π: 62 (from output.csv).
 
 DIVERSITY
 Nucleotide diversity (π) by orientation and recurrence:
-  Total loci with finite π estimates: 67.
-  Across all loci: mean π(inverted) = 0.000273, mean π(direct) = 0.000387.
-    Two-sided paired t-test comparing orientations: t = -2.870, p = 5.505e-03.
-  Single-event inversions: median π(inverted) = 6.000000e-06, median π(direct) = 0.000233.
+  Total loci with finite π estimates: 69.
+  Across all loci: mean π(inverted) = 0.000274, mean π(direct) = 0.000384.
+    Two-sided paired t-test comparing orientations: t = -2.826, p = 6.178e-03.
+  Single-event inversions: median π(inverted) = 0.000013, median π(direct) = 0.000233.
   Recurrent inversions: median π(inverted) = 0.000359, median π(direct) = 0.000442.
-  Within inverted haplotypes: recurrent median π = 0.000359; single-event median π = 6.000000e-06.
+  Within inverted haplotypes: recurrent median π = 0.000359; single-event median π = 0.000013.
+
+PI STRUCTURE
+Pi structure inputs unavailable: Missing per-site diversity FALSTA: data/per_site_diversity_output.falsta
 
 LINEAR MODEL
-Orientation × recurrence linear model on log π ratios (Model A):
-  Detection floor applied before logs: ε = 6.325000e-06.
-  Single-event: Inverted vs Direct: fold-change = 0.279 (95% CI 0.151–0.515), p = 4.427e-05.
-  Recurrent: Inverted vs Direct: fold-change = 1.099 (95% CI 0.905–1.336), p = 0.341.
-  Interaction (difference between those two): fold-change = 3.941 (95% CI 2.072–7.497), p = 2.910e-05.
-  Overall inversion effect (pooled Δ-logπ): fold-change = 0.537 (95% CI 0.372–0.776), p = 9.424e-04.
+Orientation × recurrence linear models (replicated strict logic):
+  Detection floor applied before logs: ε = 6.465000e-06.
+  [Model A] Basic interaction (Δ-logπ ~ Recurrence):
+    Single-event: Inverted vs Direct: fold-change = 0.302 (95% CI 0.168–0.544), p = 6.583e-05.
+    Recurrent: Inverted vs Direct: fold-change = 1.099 (95% CI 0.905–1.336), p = 0.342.
+    Interaction (difference between those two): fold-change = 3.634 (95% CI 1.957–6.748), p = 4.363e-05.
+    Overall inversion effect (pooled Δ-logπ): fold-change = 0.550 (95% CI 0.385–0.787), p = 1.080e-03.
+  [Model B] Fixed-effects validation (Cluster-robust):
+    Single-event: Inverted vs Direct: fold-change = 0.302 (95% CI 0.133–0.689), p = 4.405e-03.
+    Recurrent: Inverted vs Direct: fold-change = 1.099 (95% CI 0.837–1.443), p = 0.495.
+    Interaction (difference between those two): fold-change = 3.634 (95% CI 1.527–8.648), p = 3.527e-03.
+  [Model C] Covariate-adjusted (Recurrence + formation/size/AF):
+    Single-event: Inverted vs Direct (adjusted): fold-change = 0.406 (95% CI 0.251–0.656), p = 2.276e-04.
+    Recurrent: Inverted vs Direct (adjusted): fold-change = 0.432 (95% CI 0.207–0.901), p = 0.025.
+    Interaction (difference between those two): fold-change = 1.063 (95% CI 0.448–2.523), p = 0.889.
+    Covariate: Number_recurrent_events (ln1p, z): fold-change = 0.533 (95% CI 0.237–1.199), p = 0.128.
+    Covariate: Size_.kbp. (ln, z): fold-change = 1.411 (95% CI 0.976–2.040), p = 0.067.
+    Covariate: Inverted_AF (z): fold-change = 1.741 (95% CI 1.030–2.944), p = 0.038.
+    Covariate: Formation_rate_per_generation (ln, z): fold-change = 2.737 (95% CI 0.948–7.899), p = 0.063.
+  [Permutation] Model A interaction (n=10000):
+    Observed Δ(mean log-ratio) = 1.2904, p = 2.9997e-04.
+
+CDS CONSERVATION
+CDS conservation GLM (proportion of identical CDS pairs):
+  Source: loaded from data/cds_pairwise_adjusted.tsv.
+  Single/Inverted vs Single/Direct: Δlogit = 5.496, Δp = 0.225, p = 3.049e-07, BH q = 9.195e-07.
+  Single/Inverted vs Recurrent/Inverted: Δlogit = 5.225, Δp = 0.181, p = 7.267e-07, BH q = 1.453e-06.
+  Single/Inverted vs Recurrent/Direct: Δlogit = 5.254, Δp = 0.185, p = 3.065e-07, BH q = 9.195e-07.
 
 DIFFERENTIATION
 Differentiation between orientations (Hudson's FST):
-  Single-event: median FST = 0.325 (n = 28).
+  Single-event: median FST = 0.275 (n = 30).
   Recurrent: median FST = 0.070 (n = 32).
-  Mann–Whitney U test (single-event vs recurrent): U = 628.000, p = 7.680e-03.
+  Mann–Whitney U test (single-event vs recurrent): U = 649.000, p = 0.017.
   Highly differentiated loci: 26 with FST > 0.2 and 10 with FST > 0.5.
 
 BREAKPOINT FRF
@@ -38,6 +63,7 @@ Breakpoint enrichment (flat–ramp–flat model deltas):
   Single-event: mean(FST_flank - FST_middle) = 0.043 (n = 14).
   Recurrent: mean(FST_flank - FST_middle) = -0.079 (n = 17).
   Difference-of-differences (single-event minus recurrent): 0.122.
+  Global permutation test (Energy distance, Single-event > Recurrent): p = 0.016.
 
 IMPUTATION
 Imputation performance summary:
@@ -54,29 +80,47 @@ PheWAS scale summary:
 KEY ASSOCIATIONS
 Selected inversion–phenotype associations (logistic regression with LRT p-values):
   Available source tables: all_pop_phewas_tag.tsv, phewas_results.tsv.
-  chr10-79542902-INV-674513 vs Positive DNA test for high-risk HPV types: OR = 1.241 (95% CI 1.114–1.382), BH-adjusted p ≈ 0.032 (raw p = 1.144e-04).
-  chr6-141867315-INV-29159 vs Laryngitis and tracheitis: OR = 0.572 (95% CI 0.491–0.751), BH-adjusted p ≈ 0.041 (raw p = 2.193e-04).
-  chr12-46897663-INV-16289 vs Conjunctivitis: OR = 1.147 (95% CI 1.091–1.205), BH-adjusted p ≈ 1.970e-04 (raw p = 9.630e-08).
-  chr12-46897663-INV-16289 vs Migraine: OR = 1.086 (95% CI 1.044–1.103), BH-adjusted p ≈ 0.040 (raw p = 1.717e-04).
-  chr17-45974480-INV-29218 vs Morbid obesity: OR = 1.054 (95% CI 1.031–1.078), BH-adjusted p ≈ 8.151e-04 (raw p = 3.650e-06).
-  chr17-45974480-INV-29218 vs Breast lump or abnormal exam: OR = 0.956 (95% CI 0.936–0.977), BH-adjusted p ≈ 6.375e-03 (raw p = 4.280e-05).
-  chr17-45974480-INV-29218 vs Abnormal mammogram: OR = 0.939 (95% CI 0.910–0.969), BH-adjusted p ≈ 7.326e-03 (raw p = 6.870e-05).
+  [MAIN IMPUTED] chr10-79542902-INV-674513 vs Positive DNA test for high-risk HPV types: OR = 1.241 (95% CI 1.114–1.382), BH-adjusted p ≈ 0.032 (raw p = 1.144e-04).
+    Interaction (Ancestry × Dosage): p = 0.074.
+  [MAIN IMPUTED] chr6-141867315-INV-29159 vs Laryngitis and tracheitis: OR = 0.572 (95% CI 0.491–0.751), BH-adjusted p ≈ 0.041 (raw p = 2.193e-04).
+    Interaction (Ancestry × Dosage): p = 5.670e-05.
+    [AFR] p = 7.340e-05, OR = 0.518 (95% CI 0.451–0.689).
+  [MAIN IMPUTED] chr12-46897663-INV-16289 vs Conjunctivitis: OR = 1.147 (95% CI 1.091–1.205), BH-adjusted p ≈ 1.970e-04 (raw p = 9.630e-08).
+    Interaction (Ancestry × Dosage): p = 0.813.
+  [MAIN IMPUTED] chr12-46897663-INV-16289 vs Acne: OR = 1.158 (95% CI 1.090–1.231), BH-adjusted p ≈ 2.225e-03 (raw p = 2.900e-06).
+    Interaction (Ancestry × Dosage): p = 0.840.
+  [MAIN IMPUTED] chr12-46897663-INV-16289 vs Epidermal thickening: OR = 1.111 (95% CI 1.060–1.128), BH-adjusted p ≈ 0.029 (raw p = 9.110e-05).
+    Interaction (Ancestry × Dosage): p = 0.800.
+  [MAIN IMPUTED] chr12-46897663-INV-16289 vs Inflammation of the eye: OR = 1.118 (95% CI 1.070–1.169), BH-adjusted p ≈ 8.678e-04 (raw p = 7.070e-07).
+    Interaction (Ancestry × Dosage): p = 0.778.
+  [MAIN IMPUTED] chr12-46897663-INV-16289 vs Migraine: OR = 1.086 (95% CI 1.044–1.103), BH-adjusted p ≈ 0.040 (raw p = 1.717e-04).
+    Interaction (Ancestry × Dosage): p = 0.020.
+  [MAIN IMPUTED] chr12-46897663-INV-16289 vs Disorder of nervous system: OR = 1.168 (95% CI 1.095–1.184), BH-adjusted p ≈ 0.018 (raw p = 5.090e-05).
+    Interaction (Ancestry × Dosage): p = 0.690.
+  [MAIN IMPUTED] chr17-45585160-INV-706887 vs Morbid obesity (Main Imputed): OR = 1.078 (95% CI 1.043–1.113), BH-adjusted p ≈ 4.138e-03 (raw p = 7.490e-06).
+    Interaction (Ancestry × Dosage): p = 2.748e-03.
+    [EUR] p = 5.607e-04, OR = 1.069 (95% CI 1.032–1.080).
+    [AFR] p = 4.138e-04, OR = 1.228 (95% CI 1.097–1.352).
+  [TAG SNP] chr17-45974480-INV-29218 vs Morbid obesity (Tag SNP): OR = 1.054 (95% CI 1.031–1.078), BH-adjusted p ≈ 8.151e-04 (raw p = 3.650e-06).
+  [TAG SNP] chr17-45974480-INV-29218 vs Breast lump or abnormal exam: OR = 0.956 (95% CI 0.936–0.977), BH-adjusted p ≈ 6.375e-03 (raw p = 4.280e-05).
+  [TAG SNP] chr17-45974480-INV-29218 vs Abnormal mammogram: OR = 0.939 (95% CI 0.910–0.969), BH-adjusted p ≈ 7.326e-03 (raw p = 6.870e-05).
+  [TAG SNP] chr17-45974480-INV-29218 vs Mild cognitive impairment: OR = 0.903 (95% CI 0.853–0.956), BH-adjusted p ≈ 0.017 (raw p = 3.708e-04).
 
 CATEGORY TESTS
 Phecode category omnibus and directional tests:
-  chr12-46897663-INV-16289: Gastrointestinal: GBJ p = 2.000e-05, GLS p = 9.320e-05; Genitourinary: GBJ p = 2.000e-05, GLS p = 1.817e-04; Neoplasms: GBJ p = 2.000e-05, GLS p = 1.500e-04; Dermatological: GBJ p = 2.000e-05, GLS p = 2.410e-06; Symptoms: GBJ p = 8.570e-05, GLS p = 1.390e-04; Sense organs: GBJ p = 1.143e-04, GLS p = 9.060e-03; Muscloskeletal: GBJ p = 2.000e-04, GLS p = 0.057; Endocrine/Metab: GBJ p = 1.600e-03, GLS p = 1.688e-03; Respiratory: GBJ p = 1.600e-03, GLS p = 9.401e-03; Neurological: GBJ p = 0.012, GLS p = 0.308; Cardiovascular: GBJ p = 0.132, GLS p = 0.030; Mental: GBJ p = 0.386, GLS p = 0.036
-  chr17-45585160-INV-706887: Symptoms: GBJ p = 2.000e-05, GLS p = 2.239e-04; Neoplasms: GBJ p = 2.000e-05, GLS p = 5.800e-05; Dermatological: GBJ p = 2.000e-05, GLS p = 1.380e-03; Gastrointestinal: GBJ p = 3.999e-04, GLS p = 9.044e-03; Neurological: GBJ p = 3.999e-04, GLS p = 0.068; Endocrine/Metab: GBJ p = 5.999e-04, GLS p = 0.107; Respiratory: GBJ p = 7.998e-04, GLS p = 0.044; Sense organs: GBJ p = 2.999e-03, GLS p = 0.171; Muscloskeletal: GBJ p = 4.599e-03, GLS p = 0.033; Cardiovascular: GBJ p = 0.013, GLS p = 0.615; Blood/Immune: GBJ p = 0.170, GLS p = 0.010
-  chr4-33098029-INV-7075: Blood/Immune: GBJ p = 0.112, GLS p = 0.038; Respiratory: GBJ p = 0.199, GLS p = 0.029
-  chr6-141867315-INV-29159: Blood/Immune: GBJ p = 0.025, GLS p = 0.712; Respiratory: GBJ p = 0.044, GLS p = 0.625
-  chr6-167181003-INV-209976: Infections: GBJ p = 0.369, GLS p = 7.906e-03
+  chr12-46897663-INV-16289: Gastrointestinal (Increased risk): GBJ q = 8.000e-05 (p = 2.000e-05), GLS q = 5.813e-04 (p = 9.320e-05); Genitourinary (Increased risk): GBJ q = 8.000e-05 (p = 2.000e-05), GLS q = 5.813e-04 (p = 1.817e-04); Neoplasms (Increased risk): GBJ q = 8.000e-05 (p = 2.000e-05), GLS q = 5.813e-04 (p = 1.500e-04); Dermatological (Increased risk): GBJ q = 8.000e-05 (p = 2.000e-05), GLS q = 3.860e-05 (p = 2.410e-06); Symptoms (Increased risk): GBJ q = 2.743e-04 (p = 8.570e-05), GLS q = 5.813e-04 (p = 1.390e-04); Sense organs (Increased risk): GBJ q = 3.048e-04 (p = 1.143e-04), GLS q = 0.019 (p = 9.060e-03); Muscloskeletal (Increased risk): GBJ q = 4.571e-04 (p = 2.000e-04), GLS q = 0.081 (p = 0.057); Endocrine/Metab (Increased risk): GBJ q = 2.844e-03 (p = 1.600e-03), GLS q = 4.501e-03 (p = 1.688e-03); Respiratory (Increased risk): GBJ q = 2.844e-03 (p = 1.600e-03), GLS q = 0.019 (p = 9.401e-03); Neurological (Increased risk): GBJ q = 0.020 (p = 0.012), GLS q = 0.353 (p = 0.308)
+  chr17-45585160-INV-706887: Symptoms (Decreased risk): GBJ q = 1.067e-04 (p = 2.000e-05), GLS q = 1.791e-03 (p = 2.239e-04); Neoplasms (Decreased risk): GBJ q = 1.067e-04 (p = 2.000e-05), GLS q = 9.272e-04 (p = 5.800e-05); Dermatological (Decreased risk): GBJ q = 1.067e-04 (p = 2.000e-05), GLS q = 7.362e-03 (p = 1.380e-03); Gastrointestinal (Decreased risk): GBJ q = 1.280e-03 (p = 3.999e-04), GLS q = 0.033 (p = 9.044e-03); Neurological (Decreased risk): GBJ q = 1.280e-03 (p = 3.999e-04), GLS q = 0.137 (p = 0.068); Endocrine/Metab (Decreased risk): GBJ q = 1.600e-03 (p = 5.999e-04), GLS q = 0.156 (p = 0.107); Respiratory (Decreased risk): GBJ q = 1.828e-03 (p = 7.998e-04), GLS q = 0.101 (p = 0.044); Sense organs (Decreased risk): GBJ q = 5.999e-03 (p = 2.999e-03), GLS q = 0.228 (p = 0.171); Muscloskeletal (Decreased risk): GBJ q = 8.176e-03 (p = 4.599e-03), GLS q = 0.089 (p = 0.033); Cardiovascular (Decreased risk): GBJ q = 0.021 (p = 0.013), GLS q = 0.703 (p = 0.615); Blood/Immune (Decreased risk): GBJ q = 0.247 (p = 0.170), GLS q = 0.033 (p = 0.010)
 
 PGS CONTROLS
-Sensitivity of PheWAS associations to regional PGS covariates:
+[PGS CONTROL] Sensitivity of PheWAS associations to regional PGS covariates:
   Source table: PGS_controls.tsv.
   Largest p-value inflation: inversion chr17-45585160-INV-706887 × Morbid_obesity (p_nominal = 7.940e-09, p_with_pgs = 8.476e-03, fold-change = 1.068e+06).
 
+FAMILY HISTORY
+Family history validation results not found (run stats/extra/family.py first).
+
 SELECTION
-Ancient DNA-based selection inferences (AGES trajectory 12_47296118_A_G):
+Allele frequency trajectory summary (12_47296118_A_G):
   Windows analyzed: 101 spanning 0–1e+04 years before present.
   Observed allele-frequency ranges 0.019–0.090; net change from 1e+04 to 0 years BP is 0.071.
   Median haploid sample size per window ≈ 1e+03 alleles.
