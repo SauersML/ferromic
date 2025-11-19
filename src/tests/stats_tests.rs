@@ -56,6 +56,7 @@ mod tests {
             &haplotypes,
             region,
             &filtered_positions,
+            None,
         );
 
         assert_eq!(per_site.len(), 5);
