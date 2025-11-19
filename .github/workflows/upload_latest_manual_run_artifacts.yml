@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       run-id: ${{ steps.collect.outputs.run-id }}
-      artifact-matrix: ${{ steps.collect.outputs.artifact-matrix }}
+      artifacts: ${{ steps.collect.outputs.artifacts }}
     steps:
       - name: Determine latest successful manual run
         id: collect
@@ -46,7 +46,7 @@ jobs:
           artifact_json="$(
             curl -sS -L "${headers[@]}" \
               "$api_root/repos/${{ github.repository }}/actions/runs/$run_id/artifacts" \
-            | jq '[.artifacts[] | {name: .name, url: .archive_download_url}]'
+            | jq -c '[.artifacts[] | {name: .name, url: .archive_download_url}]'
           )"
 
           if [[ -z "$artifact_json" || "$artifact_json" == "[]" ]]; then
@@ -54,99 +54,95 @@ jobs:
             exit 1
           fi
 
-          {
-            printf 'artifact-matrix<<JSON\n%s\nJSON\n' "$artifact_json" >> "$GITHUB_OUTPUT"
-          }
+          artifact_json="${artifact_json//$'\n'/}"
+          echo "artifacts=$artifact_json" >> "$GITHUB_OUTPUT"
 
-  reupload-artifacts:
+  sync-data:
     needs: collect-artifacts
-    if: ${{ needs.collect-artifacts.outputs.artifact-matrix != '' && needs.collect-artifacts.outputs.artifact-matrix != '[]' }}
+    if: ${{ needs.collect-artifacts.outputs.artifacts != '' && needs.collect-artifacts.outputs.artifacts != '[]' }}
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        artifact: ${{ fromJSON(needs.collect-artifacts.outputs.artifact-matrix) }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Ensure data directory
         run: mkdir -p data
 
-      - name: Download ${{ matrix.artifact.name }}
+      - name: Sync artifacts into data directory
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NAME: ${{ matrix.artifact.name }}
-          URL: ${{ matrix.artifact.url }}
+          ARTIFACTS: ${{ needs.collect-artifacts.outputs.artifacts }}
         run: |
           set -euo pipefail
-          zip_path="data/${NAME}.zip"
-
-          curl -sS -L \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "$URL" > "$zip_path"
-
-          dest="data/${NAME}"
-          rm -rf "$dest"
-          mkdir -p "$dest"
-
-          if [[ "$NAME" == "run-vcf-phy-outputs" ]]; then
-            mv "$zip_path" "$dest/phy_outputs.zip"
-          elif [[ "$NAME" == "run-vcf-falsta" ]]; then
-            unzip -q "$zip_path" -d "$dest"
-            rm -f "$zip_path"
-            shopt -s nullglob
-            for gz in "$dest"/*.gz; do
-              base="$(basename "$gz")"
-              cp "$gz" "data/$base"
-            done
-            shopt -u nullglob
-          else
-            unzip -q "$zip_path" -d "$dest"
-            rm -f "$zip_path"
-          fi
-
-      - name: Update FST_data.tsv with Hudson output
-        if: ${{ matrix.artifact.name == 'run-vcf-hudson-fst' }}
-        run: |
-          set -euo pipefail
-          src="data/run-vcf-hudson-fst/hudson_fst_results.tsv.gz"
-          dst="data/run-vcf-hudson-fst/FST_data.tsv"
-          if [[ ! -f "$src" ]]; then
-            echo "Missing Hudson FST results at $src" >&2
+          artifacts_json="$ARTIFACTS"
+          if [[ -z "$artifacts_json" || "$artifacts_json" == "[]" ]]; then
+            echo "No artifacts to sync"
             exit 1
           fi
 
-          gunzip -c "$src" | tee "$dst" > data/FST_data.tsv
-          rm -f "$src"
-          echo "Wrote $(wc -l < data/FST_data.tsv) rows to data/FST_data.tsv"
+          echo "$artifacts_json" | jq -c '.[]' | while read -r entry; do
+            name="$(echo "$entry" | jq -r '.name')"
+            url="$(echo "$entry" | jq -r '.url')"
 
-      - name: Copy output.csv to data root
-        if: ${{ matrix.artifact.name == 'run-vcf-output-csv' }}
+            echo "Processing $name"
+            zip_path="data/${name}.zip"
+            curl -sS -L \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "$url" > "$zip_path"
+
+            dest="data/${name}"
+            rm -rf "$dest"
+            mkdir -p "$dest"
+            unzip -q "$zip_path" -d "$dest"
+            rm -f "$zip_path"
+
+            case "$name" in
+              run-vcf-falsta)
+                shopt -s nullglob
+                for gz in "$dest"/*.gz; do
+                  base="$(basename "$gz")"
+                  cp "$gz" "data/$base"
+                done
+                shopt -u nullglob
+                ;;
+              run-vcf-hudson-fst)
+                src="$dest/hudson_fst_results.tsv.gz"
+                dst="$dest/FST_data.tsv"
+                if [[ ! -f "$src" ]]; then
+                  echo "Missing Hudson FST results at $src" >&2
+                  exit 1
+                fi
+                gunzip -c "$src" | tee "$dst" > data/FST_data.tsv
+                rm -f "$src"
+                echo "Updated data/FST_data.tsv"
+                ;;
+              run-vcf-output-csv)
+                src="$dest/output.csv"
+                if [[ ! -f "$src" ]]; then
+                  echo "Missing output.csv at $src" >&2
+                  exit 1
+                fi
+                cp "$src" data/output.csv
+                echo "Updated data/output.csv"
+                ;;
+            esac
+          done
+
+      - name: Commit and push data updates
+        env:
+          RUN_ID: ${{ needs.collect-artifacts.outputs.run-id }}
         run: |
           set -euo pipefail
-          src="data/run-vcf-output-csv/output.csv"
-          if [[ ! -f "$src" ]]; then
-            echo "Missing output.csv at $src" >&2
-            exit 1
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data
+          if git diff --staged --quiet; then
+            echo "No data changes to commit"
+            exit 0
           fi
-          cp "$src" data/output.csv
-          echo "Copied $(wc -l < data/output.csv) rows to data/output.csv"
-
-      - name: Upload ${{ matrix.artifact.name }}
-        if: ${{ matrix.artifact.name != 'run-vcf-output-csv' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact.name }}
-          path: data/${{ matrix.artifact.name }}
-          if-no-files-found: error
-
-      - name: Upload output.csv
-        if: ${{ matrix.artifact.name == 'run-vcf-output-csv' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: run-vcf-output-csv
-          path: data/output.csv
-          if-no-files-found: error
+          git commit -m "Sync data from Manual Run VCF Pipeline (run $RUN_ID)"
+          git push origin HEAD:main
