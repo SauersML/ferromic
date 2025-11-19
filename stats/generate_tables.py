@@ -453,17 +453,16 @@ def _download_file(url: str, destination: Path) -> None:
 
 def _prune_columns(df: pd.DataFrame, column_defs: Dict[str, str], sheet_name: str) -> pd.DataFrame:
     expected_cols = list(column_defs.keys())
+    available_cols = [col for col in expected_cols if col in df.columns]
     missing = [col for col in expected_cols if col not in df.columns]
     if missing:
         warnings.warn(
             f"Sheet '{sheet_name}' is missing columns: {', '.join(missing)}. "
-            "Filling with empty values.",
+            "Proceeding with available columns only.",
             RuntimeWarning,
         )
-        for col in missing:
-            df[col] = pd.NA
 
-    return df.loc[:, expected_cols].copy()
+    return df.loc[:, available_cols].copy()
 
 
 def ensure_cds_summary() -> Path:
