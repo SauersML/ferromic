@@ -33,6 +33,7 @@ use prettytable::{Table, row};
 use rayon::prelude::*;
 use smallvec::SmallVec;
 use std::collections::{HashMap, HashSet};
+use std::convert::TryFrom;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead};
 use std::io::{BufWriter, Write};
@@ -773,6 +774,7 @@ pub fn process_variants(
     is_filtered_set: bool,
     reference_sequence: &[u8],
     cds_regions: &[TranscriptAnnotationCDS],
+    filtered_positions: &HashSet<i64>,
 ) -> Result<Option<(usize, f64, f64, usize, Vec<SiteDiversity>)>, VcfError> {
     set_stage(ProcessingStage::VariantAnalysis);
 
@@ -1110,8 +1112,12 @@ pub fn process_variants(
     let spinner = create_spinner("Calculating per-site diversity");
     // query_region_for_diversity was defined earlier based on entry.interval.start and entry.interval.end
     // to correctly represent the 0-based inclusive range [entry.interval.start, entry.interval.end - 1].
-    let site_diversities =
-        calculate_per_site_diversity(variants, &group_haps, query_region_for_diversity);
+    let site_diversities = calculate_per_site_diversity(
+        variants,
+        &group_haps,
+        query_region_for_diversity,
+        filtered_positions,
+    );
     spinner.finish_and_clear();
     log(
         LogLevel::Info,
@@ -2230,6 +2236,53 @@ fn process_single_config_entry(
         .cloned()
         .collect();
 
+    let allow_regions_chr = allow.as_ref().and_then(|a| a.get(chr));
+    let mask_regions_chr = mask.as_ref().and_then(|m| m.get(chr));
+
+    // Track callable sites that failed quality filters within the region.
+    let filtered_positions_in_region: HashSet<i64> = filtered_idxs
+        .iter()
+        .filter_map(|&idx| {
+            let variant = all_variants.get(idx)?;
+            if entry
+                .interval
+                .contains(ZeroBasedPosition(variant.position))
+            {
+                Some(variant.position)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let num_excluded_sites = filtered_positions_in_region
+        .iter()
+        .filter(|&&pos| {
+            let pos_1based = pos.saturating_add(1);
+
+            if let Some(allow_regions) = allow_regions_chr {
+                if !allow_regions
+                    .iter()
+                    .any(|&(start, end)| pos_1based >= start && pos_1based <= end)
+                {
+                    return false;
+                }
+            }
+
+            if let Some(mask_regions) = mask_regions_chr {
+                if mask_regions
+                    .iter()
+                    .any(|&(start, end)| pos_1based >= start && pos_1based <= end)
+                {
+                    return false;
+                }
+            }
+
+            true
+        })
+        .count();
+    let num_excluded_sites = i64::try_from(num_excluded_sites).unwrap_or(i64::MAX);
+
     if !region_variants_filtered.is_empty() {
         let is_sorted = region_variants_filtered
             .windows(2)
@@ -2422,9 +2475,12 @@ fn process_single_config_entry(
     let adjusted_sequence_length = calculate_adjusted_sequence_length(
         adj_seq_len_start_1based_inclusive,
         adj_seq_len_end_1based_inclusive,
-        allow.as_ref().and_then(|a| a.get(&chr.to_string())),
-        mask.as_ref().and_then(|m| m.get(&chr.to_string())),
+        allow_regions_chr,
+        mask_regions_chr,
     );
+
+    let filtered_adjusted_sequence_length =
+        adjusted_sequence_length.saturating_sub(num_excluded_sites);
 
     log(
         LogLevel::Info,
@@ -2433,6 +2489,16 @@ fn process_single_config_entry(
             sequence_length, adjusted_sequence_length
         ),
     );
+
+    if num_excluded_sites > 0 {
+        log(
+            LogLevel::Info,
+            &format!(
+                "Excluding {} additional low-quality positions from callable length ({}bp)",
+                num_excluded_sites, filtered_adjusted_sequence_length
+            ),
+        );
+    }
 
     log(
         LogLevel::Info,
@@ -2457,6 +2523,7 @@ fn process_single_config_entry(
         variants: &'a [Variant],
         sample_filter: &'a HashMap<String, (u8, u8)>,
         maybe_adjusted_len: Option<i64>,
+        filtered_positions: &'a HashSet<i64>,
         position_allele_map: Arc<Mutex<HashMap<i64, (char, char)>>>,
     }
 
@@ -2464,13 +2531,16 @@ fn process_single_config_entry(
     set_stage(ProcessingStage::VariantAnalysis);
     init_step_progress("Analyzing haplotype groups", 4);
 
+    let empty_filtered_positions: HashSet<i64> = HashSet::new();
+
     let invocations = [
         VariantInvocation {
             group_id: 0,
             is_filtered: true,
             variants: &region_variants_filtered,
             sample_filter: &entry.samples_filtered,
-            maybe_adjusted_len: Some(adjusted_sequence_length),
+            maybe_adjusted_len: Some(filtered_adjusted_sequence_length),
+            filtered_positions: &filtered_positions_in_region,
             position_allele_map: position_allele_map.clone(),
         },
         VariantInvocation {
@@ -2478,7 +2548,8 @@ fn process_single_config_entry(
             is_filtered: true,
             variants: &region_variants_filtered,
             sample_filter: &entry.samples_filtered,
-            maybe_adjusted_len: Some(adjusted_sequence_length),
+            maybe_adjusted_len: Some(filtered_adjusted_sequence_length),
+            filtered_positions: &filtered_positions_in_region,
             position_allele_map: position_allele_map.clone(),
         },
         VariantInvocation {
@@ -2487,6 +2558,7 @@ fn process_single_config_entry(
             variants: &region_variants_unfiltered,
             sample_filter: &entry.samples_unfiltered,
             maybe_adjusted_len: Some(adjusted_sequence_length),
+            filtered_positions: &empty_filtered_positions,
             position_allele_map: position_allele_map.clone(),
         },
         VariantInvocation {
@@ -2495,6 +2567,7 @@ fn process_single_config_entry(
             variants: &region_variants_unfiltered,
             sample_filter: &entry.samples_unfiltered,
             maybe_adjusted_len: Some(adjusted_sequence_length),
+            filtered_positions: &empty_filtered_positions,
             position_allele_map: position_allele_map.clone(),
         },
     ];
@@ -2526,6 +2599,7 @@ fn process_single_config_entry(
             call.is_filtered,
             ref_sequence,
             &local_cds,
+            call.filtered_positions,
         )?;
 
         if let Some(x) = stats_opt {

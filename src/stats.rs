@@ -4317,10 +4317,13 @@ pub fn calculate_pi_for_population(context: &PopulationContext<'_>) -> f64 {
 /// sites contribute zeros—so callers should no longer expect `site_diversities.len()` to equal
 /// `region.len()`. The sparsity keeps runtime and memory proportional to the number of
 /// informative loci while preserving aggregate results.
+/// `filtered_positions` marks callable loci that were excluded for quality reasons;
+/// these coordinates will be emitted as NaN instead of zeroed reference sites.
 pub fn calculate_per_site_diversity(
     variants: &[Variant],
     haplotypes_in_group: &[(usize, HaplotypeSide)],
     region: QueryRegion, // Inclusive range [start..end] in 0-based coordinates
+    filtered_positions: &HashSet<i64>,
 ) -> Vec<SiteDiversity> {
     set_stage(ProcessingStage::StatsCalculation);
 
@@ -4439,10 +4442,20 @@ pub fn calculate_per_site_diversity(
 
     for offset in 0..region_len_usize {
         let zero_based_pos = region.start + offset as i64;
-        let (pi_value, watterson_value) = variant_metrics
-            .get(&zero_based_pos)
-            .copied()
-            .unwrap_or((0.0, 0.0));
+        if let Some((pi_value, watterson_value)) = variant_metrics.get(&zero_based_pos) {
+            site_diversities.push(SiteDiversity {
+                position: ZeroBasedPosition(zero_based_pos).to_one_based(),
+                pi: *pi_value,
+                watterson_theta: *watterson_value,
+            });
+            continue;
+        }
+
+        let (pi_value, watterson_value) = if filtered_positions.contains(&zero_based_pos) {
+            (f64::NAN, f64::NAN)
+        } else {
+            (0.0, 0.0)
+        };
 
         site_diversities.push(SiteDiversity {
             position: ZeroBasedPosition(zero_based_pos).to_one_based(),
