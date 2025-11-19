@@ -1164,6 +1164,10 @@ def codeml_worker(gene_info, region_tree_file, region_label):
         region_taxa = Tree(region_tree_file, format=1).get_leaf_names()
         gene_taxa = read_taxa_from_phy(gene_info['path'])
         keep = [taxon for taxon in gene_taxa if taxon in set(region_taxa)]
+        has_chimp = any('pantro' in t.lower() or 'pan_troglodytes' in t.lower() for t in keep)
+        if not has_chimp:
+            final_result.update({'status': 'uninformative_topology', 'reason': 'Chimp outgroup missing in gene alignment'})
+            return final_result
         if len(keep) < 4:
             final_result.update({'status': 'uninformative_topology', 'reason': f'Fewer than four shared taxa (n={len(keep)})'})
             return final_result
