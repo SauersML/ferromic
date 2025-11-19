@@ -2236,21 +2236,52 @@ fn process_single_config_entry(
         .cloned()
         .collect();
 
+    let allow_regions_chr = allow.as_ref().and_then(|a| a.get(chr));
+    let mask_regions_chr = mask.as_ref().and_then(|m| m.get(chr));
+
     // Track callable sites that failed quality filters within the region.
-    let filtered_idx_lookup: HashSet<usize> = filtered_idxs.iter().copied().collect();
-    let filtered_positions_in_region: HashSet<i64> = all_variants
+    let filtered_positions_in_region: HashSet<i64> = filtered_idxs
         .iter()
-        .enumerate()
-        .filter(|(idx, variant)| {
-            entry
+        .filter_map(|&idx| {
+            let variant = all_variants.get(idx)?;
+            if entry
                 .interval
                 .contains(ZeroBasedPosition(variant.position))
-                && !filtered_idx_lookup.contains(idx)
+            {
+                Some(variant.position)
+            } else {
+                None
+            }
         })
-        .map(|(_, variant)| variant.position)
         .collect();
 
-    let num_excluded_sites = i64::try_from(filtered_positions_in_region.len()).unwrap_or(i64::MAX);
+    let num_excluded_sites = filtered_positions_in_region
+        .iter()
+        .filter(|&&pos| {
+            let pos_1based = pos.saturating_add(1);
+
+            if let Some(allow_regions) = allow_regions_chr {
+                if !allow_regions
+                    .iter()
+                    .any(|&(start, end)| pos_1based >= start && pos_1based <= end)
+                {
+                    return false;
+                }
+            }
+
+            if let Some(mask_regions) = mask_regions_chr {
+                if mask_regions
+                    .iter()
+                    .any(|&(start, end)| pos_1based >= start && pos_1based <= end)
+                {
+                    return false;
+                }
+            }
+
+            true
+        })
+        .count();
+    let num_excluded_sites = i64::try_from(num_excluded_sites).unwrap_or(i64::MAX);
 
     if !region_variants_filtered.is_empty() {
         let is_sorted = region_variants_filtered
@@ -2444,8 +2475,8 @@ fn process_single_config_entry(
     let adjusted_sequence_length = calculate_adjusted_sequence_length(
         adj_seq_len_start_1based_inclusive,
         adj_seq_len_end_1based_inclusive,
-        allow.as_ref().and_then(|a| a.get(&chr.to_string())),
-        mask.as_ref().and_then(|m| m.get(&chr.to_string())),
+        allow_regions_chr,
+        mask_regions_chr,
     );
 
     let filtered_adjusted_sequence_length =
