@@ -2240,19 +2240,11 @@ fn process_single_config_entry(
     let mask_regions_chr = mask.as_ref().and_then(|m| m.get(chr));
 
     // Track callable sites that failed quality filters within the region.
-    let filtered_positions_in_region: HashSet<i64> = filtered_idxs
+    let filtered_positions_in_region: HashSet<i64> = filtering_stats
+        .filtered_positions
         .iter()
-        .filter_map(|&idx| {
-            let variant = all_variants.get(idx)?;
-            if entry
-                .interval
-                .contains(ZeroBasedPosition(variant.position))
-            {
-                Some(variant.position)
-            } else {
-                None
-            }
-        })
+        .copied()
+        .filter(|&pos| entry.interval.contains(ZeroBasedPosition(pos)))
         .collect();
 
     let num_excluded_sites = filtered_positions_in_region
