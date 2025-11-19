@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
+import warnings
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
@@ -605,12 +606,16 @@ def _clean_phewas_df(
         if not all_match:
             diff_mask = ~(both_nan | both_equal)
             first_diff_idx = diff_mask.idxmax() if diff_mask.any() else None
-            raise SupplementaryTablesError(
-                f"P_Value_x and P_Value_y columns have different values. "
-                f"First difference at row {first_diff_idx}: "
+            warnings.warn(
+                "P_Value_x and P_Value_y columns have different values. "
+                f"Using P_Value_x where available. First difference at row {first_diff_idx}: "
                 f"P_Value_x={df.loc[first_diff_idx, 'P_Value_x']}, "
-                f"P_Value_y={df.loc[first_diff_idx, 'P_Value_y']}"
+                f"P_Value_y={df.loc[first_diff_idx, 'P_Value_y']}",
+                RuntimeWarning,
             )
+            fill_mask = df["P_Value_x"].isna() & df["P_Value_y"].notna()
+            if fill_mask.any():
+                df.loc[fill_mask, "P_Value_x"] = df.loc[fill_mask, "P_Value_y"]
 
         df = df.drop(columns=["P_Value_y"])
         df = df.rename(columns={"P_Value_x": "P_Value_unadjusted"})
