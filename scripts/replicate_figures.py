@@ -596,10 +596,27 @@ def _iter_dependency_aliases(name: str) -> Sequence[str]:
     return tuple(ordered)
 
 
+def _iter_compressed_aliases(name: str) -> Sequence[str]:
+    """Yield dependency aliases plus possible ``.gz`` variants."""
+
+    seen: set[str] = set()
+    ordered: List[str] = []
+    for candidate in _iter_dependency_aliases(name):
+        if candidate not in seen:
+            ordered.append(candidate)
+            seen.add(candidate)
+        if not candidate.endswith(".gz"):
+            gz_candidate = f"{candidate}.gz"
+            if gz_candidate not in seen:
+                ordered.append(gz_candidate)
+                seen.add(gz_candidate)
+    return tuple(ordered)
+
+
 def find_local_data_file(name: str) -> Optional[Path]:
     """Return a repository-local data file matching ``name`` if available."""
 
-    for candidate_name in _iter_dependency_aliases(name):
+    for candidate_name in _iter_compressed_aliases(name):
         candidate_path = Path(candidate_name)
 
         # If the alias includes a directory component, check that exact path
@@ -663,39 +680,87 @@ def ensure_local_copy(name: str, index: Dict[str, List[Path]]) -> Optional[Path]
     if target.is_symlink() and not target.exists():
         target.unlink()
 
-    for candidate in index.get(name, []):
+    def _link_candidate(candidate: Path) -> Optional[Path]:
         if not candidate.exists() or not is_valid_data_file(candidate):
-            continue
+            return None
         try:
             if candidate.resolve() == target.resolve():
-                continue
+                return target
         except FileNotFoundError:
-            continue
+            return None
         try:
             target.symlink_to(candidate.resolve())
             return target
         except OSError:
-            # Fall back to copying if symlinks are unsupported.
             shutil.copy2(candidate, target)
             return target
-    for alias in DEPENDENCY_ALIASES.get(name, ()):  # pragma: no branch - tiny loop
-        for candidate in index.get(Path(alias).name, []):
-            if not candidate.exists() or not is_valid_data_file(candidate):
-                continue
-            try:
-                candidate_resolved = candidate.resolve()
-                target_resolved = target.resolve()
-            except FileNotFoundError:
-                continue
-            if candidate_resolved == target_resolved:
-                continue
-            try:
-                target.symlink_to(candidate_resolved)
-                return target
-            except OSError:
-                shutil.copy2(candidate_resolved, target)
-                return target
+
+    # Try to satisfy the dependency using direct copies/symlinks first.
+    for candidate_name in _iter_dependency_aliases(name):
+        basename = Path(candidate_name).name
+        for candidate in index.get(basename, []):
+            linked = _link_candidate(candidate)
+            if linked is not None:
+                return linked
+
+    # Attempt to resolve any repo-relative alias paths explicitly.
+    for alias in _iter_dependency_aliases(name):
+        alias_path = Path(alias)
+        if alias_path.parent == Path("."):
+            continue
+        resolved_alias = REPO_ROOT / alias_path
+        if not resolved_alias.exists() or not is_valid_data_file(resolved_alias):
+            continue
+        linked = _link_candidate(resolved_alias)
+        if linked is not None:
+            return linked
+
+    # Fall back to checking for gzip-compressed artefacts.
+    for candidate_name in _iter_compressed_aliases(name):
+        if not candidate_name.endswith(".gz"):
+            continue
+        basename = Path(candidate_name).name
+        for candidate in index.get(basename, []):
+            decompressed = _decompress_gzip_to_target(candidate, target)
+            if decompressed is not None:
+                return decompressed
+        alias_path = Path(candidate_name)
+        if alias_path.parent != Path("."):
+            resolved_alias = REPO_ROOT / alias_path
+            if resolved_alias.exists():
+                decompressed = _decompress_gzip_to_target(resolved_alias, target)
+                if decompressed is not None:
+                    return decompressed
     return None
+
+
+def _decompress_gzip_to_target(source: Path, target: Path) -> Optional[Path]:
+    """Decompress ``source`` into ``target`` if possible."""
+
+    import gzip
+
+    if not source.exists() or not is_valid_data_file(source):
+        return None
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temp_name = target.with_name(target.name + ".tmp")
+    try:
+        with gzip.open(source, "rb") as src, temp_name.open("wb") as dst:
+            shutil.copyfileobj(src, dst)
+        temp_name.replace(target)
+    except OSError:
+        if temp_name.exists():
+            temp_name.unlink()
+        return None
+
+    if not is_valid_data_file(target):
+        try:
+            target.unlink()
+        except FileNotFoundError:
+            pass
+        return None
+
+    return target
 
 
 def build_file_index(plan: Dict[str, str]) -> Dict[str, List[Path]]:
