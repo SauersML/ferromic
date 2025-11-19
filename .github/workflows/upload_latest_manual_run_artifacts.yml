@@ -54,11 +54,11 @@ jobs:
             exit 1
           fi
 
-          {
-            echo "artifact-matrix<<'EOF'"
-            echo "$artifact_json"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
+          cat >> "$GITHUB_OUTPUT" <<EOF
+artifact-matrix<<JSON
+$artifact_json
+JSON
+EOF
 
   reupload-artifacts:
     needs: collect-artifacts
