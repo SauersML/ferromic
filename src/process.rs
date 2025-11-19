@@ -3441,8 +3441,7 @@ pub fn process_vcf(
     );
 
     // Small vectors to hold variants in batches, limiting memory usage
-    let all_variants = Arc::new(Mutex::new(Vec::with_capacity(10000)));
-    let filtered_idxs = Arc::new(Mutex::new(Vec::<usize>::with_capacity(10000)));
+    let all_variants = Arc::new(Mutex::new(Vec::<(Variant, bool)>::with_capacity(10000)));
 
     // Shared stats
     let missing_data_info = Arc::new(Mutex::new(MissingDataInfo::default()));
@@ -3577,7 +3576,6 @@ pub fn process_vcf(
     // Collector merges results from consumers.
     let collector_thread = thread::spawn({
         let all_variants = Arc::clone(&all_variants);
-        let filtered_idxs = Arc::clone(&filtered_idxs);
         let missing_data_info = Arc::clone(&missing_data_info);
         let _filtering_stats = Arc::clone(&_filtering_stats);
         move || -> Result<(), VcfError> {
@@ -3585,11 +3583,7 @@ pub fn process_vcf(
                 match msg {
                     Ok((Some((variant, passes)), local_miss, mut local_stats)) => {
                         let mut u = all_variants.lock();
-                        u.push(variant); // single owner of the heavy genotypes
-                        let idx = u.len() - 1;
-                        if passes {
-                            filtered_idxs.lock().push(idx); // just remember the index
-                        }
+                        u.push((variant, passes)); // single owner of the heavy genotypes
 
                         {
                             let mut global_miss = missing_data_info.lock();
@@ -3675,34 +3669,21 @@ pub fn process_vcf(
     progress_thread.join().expect("Progress thread panicked");
 
     // Extract final variant vectors.
-    let mut final_all = Arc::try_unwrap(all_variants)
+    let mut final_all_with_flags = Arc::try_unwrap(all_variants)
         .map_err(|_| VcfError::Parse("Variants still have multiple owners".to_string()))?
         .into_inner();
-    let mut final_filtered_idxs = Arc::try_unwrap(filtered_idxs)
-        .map_err(|_| VcfError::Parse("Filtered variants still have multiple owners".to_string()))?
-        .into_inner();
 
-    // build a set of filtered positions (single-alt enforced, so unique per pos)
-    let filt_pos: std::collections::HashSet<i64> = final_filtered_idxs
-        .iter()
-        .map(|&i| final_all[i].position)
-        .collect();
+    // sort the (variant, pass) tuples by genomic position while preserving their filter status
+    final_all_with_flags.sort_by_key(|(variant, _)| variant.position);
 
-    // sort the all-variants in place by position
-    final_all.sort_by_key(|v| v.position);
-
-    // rebuild filtered indices in the new order
-    final_filtered_idxs = final_all
-        .iter()
-        .enumerate()
-        .filter_map(|(i, v)| {
-            if filt_pos.contains(&v.position) {
-                Some(i)
-            } else {
-                None
-            }
-        })
-        .collect();
+    let mut final_all = Vec::with_capacity(final_all_with_flags.len());
+    let mut final_filtered_idxs = Vec::new();
+    for (idx, (variant, passes)) in final_all_with_flags.into_iter().enumerate() {
+        final_all.push(variant);
+        if passes {
+            final_filtered_idxs.push(idx);
+        }
+    }
 
     // Extract stats.
     let final_miss = Arc::try_unwrap(missing_data_info)
