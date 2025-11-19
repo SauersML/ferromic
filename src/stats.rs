@@ -4430,7 +4430,7 @@ pub fn calculate_per_site_diversity(
         let total_called = metrics.total_called;
 
         let (pi_value, watterson_value) = if total_called < 2 {
-            (0.0, 0.0)
+            (f64::NAN, f64::NAN)
         } else {
             let distinct_alleles = metrics.distinct_alleles;
             let watterson_value = if distinct_alleles > 1 {
