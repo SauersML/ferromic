@@ -163,6 +163,10 @@ PHEWAS_COLUMN_DEFS: Dict[str, str] = OrderedDict(
             "Boolean indicator (TRUE/FALSE) denoting if the association is statistically significant at the global FDR threshold (q < 0.05).",
         ),
         (
+            "Beta",
+            "Logistic regression beta coefficient (log odds) for the inversion dosage term.",
+        ),
+        (
             "P_LRT_AncestryxDosage",
             "P-value from a Stage-2 Likelihood Ratio or Rao Score test comparing a model with 'Ancestry x Inversion' interaction terms against a base model. Tests if the inversion's effect size differs significantly by genetic ancestry.",
         ),
