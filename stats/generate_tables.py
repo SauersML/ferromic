@@ -417,9 +417,13 @@ def _prune_columns(df: pd.DataFrame, column_defs: Dict[str, str], sheet_name: st
     expected_cols = list(column_defs.keys())
     missing = [col for col in expected_cols if col not in df.columns]
     if missing:
-        raise SupplementaryTablesError(
-            f"Sheet '{sheet_name}' is missing required columns: {', '.join(missing)}"
+        warnings.warn(
+            f"Sheet '{sheet_name}' is missing columns: {', '.join(missing)}. "
+            "Filling with empty values.",
+            RuntimeWarning,
         )
+        for col in missing:
+            df[col] = pd.NA
 
     return df.loc[:, expected_cols].copy()
 
