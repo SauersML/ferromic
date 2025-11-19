@@ -2483,7 +2483,7 @@ fn process_single_config_entry(
             is_filtered: false,
             variants: &region_variants_unfiltered,
             sample_filter: &entry.samples_unfiltered,
-            maybe_adjusted_len: None,
+            maybe_adjusted_len: Some(adjusted_sequence_length),
             position_allele_map: position_allele_map.clone(),
         },
         VariantInvocation {
@@ -2491,7 +2491,7 @@ fn process_single_config_entry(
             is_filtered: false,
             variants: &region_variants_unfiltered,
             sample_filter: &entry.samples_unfiltered,
-            maybe_adjusted_len: None,
+            maybe_adjusted_len: Some(adjusted_sequence_length),
             position_allele_map: position_allele_map.clone(),
         },
     ];
