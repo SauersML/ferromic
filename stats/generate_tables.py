@@ -201,13 +201,20 @@ CATEGORY_COLUMN_DEFS: Dict[str, str] = OrderedDict(
         ("Category", "The phecode category being tested."),
         ("Phenotypes in category", "Total number of phenotypes in this category."),
         ("Phenotypes included in GBJ", "Number of phenotypes passing QC that were included in the omnibus test."),
-        ("GLS test statistic", "Test statistic for the Generalized Least Squares directional meta-analysis."),
+        ("Phenotypes included in GLS", "Number of phenotypes included in the GLS directional meta-analysis."),
         ("P_GBJ", "P-value for the GBJ omnibus test (testing if any signal exists in the category)."),
-        ("Q_GBJ", "FDR q-value for the GBJ test."),
+        ("GLS test statistic", "Test statistic for the Generalized Least Squares directional meta-analysis."),
+        ("P_GLS", "P-value for the GLS directional test."),
         (
             "Direction",
             "The aggregate direction of effect (Increased Risk or Decreased Risk) if the GLS test is significant.",
         ),
+        ("N_Individuals", "Number of individuals contributing to the category-level analysis."),
+        ("GBJ_Draws", "Number of Monte Carlo draws used to approximate the GBJ p-value."),
+        ("Phenotypes", "List or count of phenotypes in the category considered for GBJ."),
+        ("Phenotypes_GLS", "List or count of phenotypes in the category considered for GLS."),
+        ("Q_GBJ", "FDR q-value for the GBJ test."),
+        ("Q_GLS", "FDR q-value for the GLS test."),
     ]
 )
 
@@ -507,14 +514,17 @@ def _load_categories() -> pd.DataFrame:
         if candidate.exists():
             df = _load_simple_tsv(candidate)
             # Remove Z_Cap and Dropped columns if present
-            columns_to_drop = ["Z_Cap", "Dropped"]
+            columns_to_drop = ["Z_Cap", "Dropped", "Method", "Shrinkage", "Lambda"]
             df = df.drop(columns=[col for col in columns_to_drop if col in df.columns])
-            
+
             # Rename columns for clarity
             rename_map = {
                 "K_Total": "Phenotypes in category",
                 "K_GBJ": "Phenotypes included in GBJ",
                 "T_GLS": "GLS test statistic",
+                "K_GLS": "Phenotypes included in GLS",
+                "P_GLS": "P_GLS",
+                "Q_GLS": "Q_GLS",
             }
             df = df.rename(columns=rename_map)
 
