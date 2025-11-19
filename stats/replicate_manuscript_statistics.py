@@ -126,9 +126,10 @@ def _temporary_workdir(path: Path):
 @dataclass
 class PiStructureMetrics:
     flank_mean: float | None
-    qualifying_sequences: int
+    middle_mean: float | None
+    qualifying_entries: int
     unique_inversions: int
-    decay_sequences: int
+    decay_entries: int
     decay_rho: float | None
 
 
@@ -146,7 +147,8 @@ def _calc_pi_structure_metrics() -> PiStructureMetrics:
         )
 
     flank_means_40k: list[float] = []
-    window_data_100k: list[np.ndarray] = []
+    middle_means_20k: list[float] = []
+    window_data_40k: list[np.ndarray] = []
     qualifying_regions: list[tuple[str, int, int]] = []
     decay_regions: list[tuple[str, int, int]] = []
     header_pattern = re.compile(
@@ -196,12 +198,18 @@ def _calc_pi_structure_metrics() -> PiStructureMetrics:
             if np.isfinite(flank_mean):
                 flank_means_40k.append(flank_mean)
 
-        if values.size >= 100_000:
-            first = values[:100_000]
-            if first.size == 100_000:
-                reshaped = first.reshape(50, 2_000)
+            middle_start = max((values.size - 20_000) // 2, 0)
+            middle_slice = values[middle_start : middle_start + 20_000]
+            if middle_slice.size == 20_000:
+                middle_mean = float(np.nanmean(middle_slice))
+                if np.isfinite(middle_mean):
+                    middle_means_20k.append(middle_mean)
+
+            first = values[:40_000]
+            if first.size == 40_000:
+                reshaped = first.reshape(20, 2_000)
                 window_means = np.nanmean(reshaped, axis=1)
-                window_data_100k.append(window_means)
+                window_data_40k.append(window_means)
                 decay_regions.append(region)
 
     current_header: str | None = None
@@ -225,11 +233,12 @@ def _calc_pi_structure_metrics() -> PiStructureMetrics:
     _process_record(current_header, sequence_lines)
 
     mean_flank = float(np.mean(flank_means_40k)) if flank_means_40k else None
+    mean_middle = float(np.mean(middle_means_20k)) if middle_means_20k else None
     rho: float | None
-    if window_data_100k:
-        window_values = np.concatenate(window_data_100k)
-        base_distances = np.arange(0, 100_000, 2_000, dtype=float)
-        distances = np.tile(base_distances, len(window_data_100k))
+    if window_data_40k:
+        window_values = np.concatenate(window_data_40k)
+        base_distances = np.arange(0, 40_000, 2_000, dtype=float)
+        distances = np.tile(base_distances, len(window_data_40k))
         mask = np.isfinite(window_values)
         if mask.sum() >= 2:
             rho_val, _ = stats.spearmanr(distances[mask], window_values[mask])
@@ -240,13 +249,14 @@ def _calc_pi_structure_metrics() -> PiStructureMetrics:
         rho = None
 
     unique_inversions = len(set(qualifying_regions))
-    decay_sequences = len(decay_regions)
+    decay_entries = len(decay_regions)
 
     return PiStructureMetrics(
         flank_mean=mean_flank,
-        qualifying_sequences=len(flank_means_40k),
+        middle_mean=mean_middle,
+        qualifying_entries=len(flank_means_40k),
         unique_inversions=unique_inversions,
-        decay_sequences=decay_sequences,
+        decay_entries=decay_entries,
         decay_rho=rho,
     )
 
@@ -443,19 +453,25 @@ def summarize_pi_structure() -> List[str]:
         return [f"Pi structure summary failed: {exc}"]
 
     lines = [
-        "Mean of what: Nucleotide diversity (π) averaged across the two 10 kbp flanking windows of each qualifying sequence.",
+        (
+            "First, nucleotide diversity was compared between 10 thousand base pairs (10 kbp) breakpoint-flanking regions at each "
+            "end within the inversion and the 20 kbp middle segment, which requires inversions with at least 40 kbp in total length."
+        ),
         (
             "In what: The "
-            f"{_fmt(metrics.qualifying_sequences, 0)} group_0 (orientation-0) entries in the filtered-π FALSTA with ≥40 kbp of per-site "
+            f"{_fmt(metrics.qualifying_entries, 0)} group_0 (orientation-0) entries in the filtered-π FALSTA with ≥40 kbp of per-site "
             f"filtered π estimates, spanning {_fmt(metrics.unique_inversions, 0)} unique inversion intervals."
         ),
-        f"Where: Specifically within the filtered π regions, the combined flanking mean is {_fmt(metrics.flank_mean)}.",
+        (
+            "Where: Specifically within the filtered π regions, the combined breakpoint-flanking mean is "
+            f"{_fmt(metrics.flank_mean)} and the middle-segment mean is {_fmt(metrics.middle_mean)}."
+        ),
     ]
 
     lines.append(
         "Internal decay: "
-        f"{_fmt(metrics.decay_sequences, 0)} qualifying entries extend ≥100 kbp and support the Spearman’s correlation "
-        f"(ρ = {_fmt(metrics.decay_rho)}) between nucleotide diversity (50 × 2 kbp windows across the first 100 kbp) and "
+        f"{_fmt(metrics.decay_entries, 0)} qualifying entries cover at least 40 kbp and support the Spearman’s correlation "
+        f"(ρ = {_fmt(metrics.decay_rho)}) between nucleotide diversity (20 × 2 kbp windows across the first 40 kbp) and "
         "distance from the sequence start."
     )
 

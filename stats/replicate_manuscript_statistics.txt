@@ -19,10 +19,10 @@ Nucleotide diversity (π) by orientation and recurrence:
   Within inverted haplotypes: recurrent median π = 0.000359; single-event median π = 0.000013.
 
 PI STRUCTURE
-Mean of what: Nucleotide diversity (π) averaged across the two 10 kbp flanking windows of each qualifying sequence.
+First, nucleotide diversity was compared between 10 thousand base pairs (10 kbp) breakpoint-flanking regions at each end within the inversion and the 20 kbp middle segment, which requires inversions with at least 40 kbp in total length.
 In what: The 63 group_0 (orientation-0) entries in the filtered-π FALSTA with ≥40 kbp of per-site filtered π estimates, spanning 63 unique inversion intervals.
-Where: Specifically within the filtered π regions, the combined flanking mean is 4.197e-04.
-Internal decay: 42 qualifying entries extend ≥100 kbp and support the Spearman’s correlation (ρ = 0.104) between nucleotide diversity (50 × 2 kbp windows across the first 100 kbp) and distance from the sequence start.
+Where: Specifically within the filtered π regions, the combined breakpoint-flanking mean is 4.197e-04 and the middle-segment mean is 5.077e-04.
+Internal decay: 63 qualifying entries cover at least 40 kbp and support the Spearman’s correlation (ρ = 0.055) between nucleotide diversity (20 × 2 kbp windows across the first 40 kbp) and distance from the sequence start.
 
 LINEAR MODEL
 Orientation × recurrence linear models (replicated strict logic):
