@@ -66,6 +66,9 @@ jobs:
         with:
           token: ${{ secrets.WRITE_TOKEN }}
 
+      - name: Setup Git LFS
+        run: git lfs install --local
+
       - name: Ensure data directory
         run: mkdir -p data
 
