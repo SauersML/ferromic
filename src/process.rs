@@ -770,7 +770,7 @@ pub fn process_variants(
     inversion_interval: ZeroBasedHalfOpen,
     extended_region: ZeroBasedHalfOpen,
     adjusted_sequence_length: Option<i64>,
-    position_allele_map: Arc<Mutex<HashMap<i64, (char, char)>>>,
+    position_allele_map: Arc<Mutex<HashMap<i64, (char, Vec<char>)>>>,
     chromosome: String,
     is_filtered_set: bool,
     reference_sequence: &[u8],
@@ -2033,7 +2033,7 @@ fn generate_full_region_alignment(
     region_variants: &[Variant],
     sample_names: &[String],
     full_ref_sequence: &[u8],
-    position_allele_map: &Arc<Mutex<HashMap<i64, (char, char)>>>,
+    position_allele_map: &Arc<Mutex<HashMap<i64, (char, Vec<char>)>>>,
     mask: &Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     allow: &Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     vcf_sample_id_to_index: &HashMap<String, usize>,
@@ -2074,11 +2074,16 @@ fn generate_full_region_alignment(
                     HaplotypeSide::Left => genotype_vec.get(0),
                     HaplotypeSide::Right => genotype_vec.get(1),
                 };
-                if let Some(&1) = allele_opt {
-                    if let Some((_ref_allele, alt_allele)) = pos_map.get(&variant.position) {
-                        let rel = (variant.position - entry.interval.start as i64) as usize;
-                        if rel < seq.len() {
-                            seq[rel] = *alt_allele as u8;
+                if let Some(&allele_idx) = allele_opt {
+                    if allele_idx > 0 {
+                        if let Some((_ref_allele, alt_alleles)) = pos_map.get(&variant.position) {
+                            let rel = (variant.position - entry.interval.start as i64) as usize;
+                            if rel < seq.len() {
+                                // allele_idx is 1-based index into alt_alleles (1 => 0th element)
+                                if let Some(alt_char) = alt_alleles.get((allele_idx - 1) as usize) {
+                                    seq[rel] = *alt_char as u8;
+                                }
+                            }
                         }
                     }
                 }
@@ -2217,7 +2222,7 @@ fn process_single_config_entry(
         extended_region.get_1based_inclusive_end_coord()
     ));
 
-    let position_allele_map = Arc::new(Mutex::new(HashMap::<i64, (char, char)>::new()));
+    let position_allele_map = Arc::new(Mutex::new(HashMap::<i64, (char, Vec<char>)>::new()));
 
     // Gatekeeper Rule: Scan reference for 'N' blocks and add them to the mask.
     // This ensures that:
@@ -2587,7 +2592,7 @@ fn process_single_config_entry(
         sample_filter: &'a HashMap<String, (u8, u8)>,
         maybe_adjusted_len: Option<i64>,
         filtered_positions: &'a HashSet<i64>,
-        position_allele_map: Arc<Mutex<HashMap<i64, (char, char)>>>,
+        position_allele_map: Arc<Mutex<HashMap<i64, (char, Vec<char>)>>>,
     }
 
     // Set up the four analysis invocations (filtered/unfiltered × group 0/1)
@@ -3479,7 +3484,7 @@ pub fn process_vcf(
     mask_regions: Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     allow_regions: Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     exclusion_set: &HashSet<String>,
-    position_allele_map: Arc<Mutex<HashMap<i64, (char, char)>>>,
+    position_allele_map: Arc<Mutex<HashMap<i64, (char, Vec<char>)>>>,
 ) -> Result<
     (
         Vec<Variant>,
@@ -3619,8 +3624,8 @@ pub fn process_vcf(
         let arc_mask = mask_regions.clone();
         let arc_allow = allow_regions.clone();
         let chr_copy = chr.to_string();
-        consumers.push(thread::spawn(move || -> Result<HashMap<i64, (char, char)>, VcfError> {
-            let mut local_allele_map: HashMap<i64, (char, char)> = HashMap::new();
+        consumers.push(thread::spawn(move || -> Result<HashMap<i64, (char, Vec<char>)>, VcfError> {
+            let mut local_allele_map: HashMap<i64, (char, Vec<char>)> = HashMap::new();
             while let Ok(line) = line_receiver.recv() {
                 let mut single_line_miss_info = MissingDataInfo::default();
                 let mut single_line_filt_stats = FilteringStats::default();
@@ -3646,8 +3651,8 @@ pub fn process_vcf(
                     Ok(variant_opt) => {
                         let variant_for_channel = match variant_opt {
                             Some((variant, passes, allele_info)) => {
-                                if let Some((pos, ref_allele, alt_allele)) = allele_info {
-                                    local_allele_map.insert(pos, (ref_allele, alt_allele));
+                                if let Some((pos, ref_allele, alt_alleles)) = allele_info {
+                                    local_allele_map.insert(pos, (ref_allele, alt_alleles));
                                 }
                                 Some((variant, passes))
                             }
@@ -3739,7 +3744,7 @@ pub fn process_vcf(
     // Wait for consumers.
     drop(line_receiver);
     drop(result_sender);
-    let mut merged_local_maps: Vec<HashMap<i64, (char, char)>> = Vec::with_capacity(num_threads);
+    let mut merged_local_maps: Vec<HashMap<i64, (char, Vec<char>)>> = Vec::with_capacity(num_threads);
     for c in consumers {
         match c.join() {
             Ok(Ok(local_map)) => merged_local_maps.push(local_map),
@@ -3846,7 +3851,7 @@ pub fn process_variant(
     filtering_stats: &mut FilteringStats,
     allow_regions: Option<&HashMap<String, Vec<(i64, i64)>>>,
     mask_regions: Option<&HashMap<String, Vec<(i64, i64)>>>,
-) -> Result<Option<(Variant, bool, Option<(i64, char, char)>)>, VcfError> {
+) -> Result<Option<(Variant, bool, Option<(i64, char, Vec<char>)>)>, VcfError> {
     let fields: Vec<&str> = line.split('\t').collect();
 
     let required_fixed_fields = 9;
@@ -3967,39 +3972,26 @@ pub fn process_variant(
             'T' | 't' => 'T',
             _ => 'N',
         };
-        let alt_allele = match fields[4].chars().next().unwrap_or('N') {
-            'A' | 'a' => 'A',
-            'C' | 'c' => 'C',
-            'G' | 'g' => 'G',
-            'T' | 't' => 'T',
-            _ => 'N',
-        };
-        Some((zero_based_position, ref_allele, alt_allele))
+        let alt_alleles_vec: Vec<char> = fields[4]
+            .split(',')
+            .map(|s| match s.chars().next().unwrap_or('N') {
+                'A' | 'a' => 'A',
+                'C' | 'c' => 'C',
+                'G' | 'g' => 'G',
+                'T' | 't' => 'T',
+                _ => 'N',
+            })
+            .collect();
+        Some((zero_based_position, ref_allele, alt_alleles_vec))
     } else {
         None
     };
 
     let alt_alleles: Vec<&str> = fields[4].split(',').collect();
-    let is_multiallelic = alt_alleles.len() > 1;
-    if is_multiallelic {
-        filtering_stats.multi_allelic_variants += 1;
-        eprintln!(
-            "{}",
-            format!(
-                "Warning: Multi-allelic site detected at position {}, which is not supported. Skipping.",
-                one_based_vcf_position.0
-            ).yellow()
-        );
-        filtering_stats.add_example(format!(
-            "{}: Filtered due to multi-allelic variant",
-            line.trim()
-        ));
-        filtering_stats
-            .filtered_positions
-            .insert(zero_based_position);
-        return Ok(None);
-    }
-    if alt_alleles.get(0).map_or(false, |s| s.len() > 1) {
+    // Removed multiallelic filter here.
+    // We still filter MNPs (Multi-Nucleotide Polymorphisms) below.
+    // Ensure ALL alt alleles are single nucleotides.
+    if alt_alleles.iter().any(|s| s.len() > 1) {
         filtering_stats.multi_allelic_variants += 1;
         eprintln!(
             "{}",
@@ -4091,7 +4083,7 @@ pub fn process_variant(
     }
 
     let has_missing_genotypes = raw_genotypes.iter().any(|gt| gt.is_none());
-    let passes_filters = !sample_has_low_gq && !has_missing_genotypes && !is_multiallelic;
+    let passes_filters = !sample_has_low_gq && !has_missing_genotypes;
 
     if sample_has_low_gq {
         // Skip this variant
@@ -4128,13 +4120,6 @@ pub fn process_variant(
         if has_missing_genotypes {
             filtering_stats.missing_data_variants += 1;
             filtering_stats.add_example(format!("{}: Filtered due to missing data", line.trim()));
-        }
-        if is_multiallelic {
-            filtering_stats.multi_allelic_variants += 1;
-            filtering_stats.add_example(format!(
-                "{}: Filtered due to multi-allelic variant",
-                line.trim()
-            ));
         }
     }
 
