@@ -6,6 +6,13 @@ on:
       - main
       - master
   pull_request:
+    paths:
+      - '**.rs'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'pyproject.toml'
+      - 'src/pybenches/**'
+      - '.github/workflows/benchmarks.yml'
   workflow_dispatch:
 
 permissions:
