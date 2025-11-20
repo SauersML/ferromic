@@ -3519,7 +3519,7 @@ pub fn calculate_adjusted_sequence_length(
         // If allowed regions are provided, intersect the input region with each allowed region
         for &(start, end) in allow_regions {
             // Convert each allowed region to ZeroBasedHalfOpen for consistent interval operations
-            let allow_region = ZeroBasedHalfOpen::from_1based_inclusive(start, end);
+            let allow_region = ZeroBasedHalfOpen::from_0based_half_open(start, end);
 
             // Find the overlapping section between the input region and the allowed region
             if let Some(overlap) = region.intersect(&allow_region) {
