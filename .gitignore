@@ -36,3 +36,5 @@ node_modules/
 out/
 **/out/
 web/figures-site/.turbo/
+per_site_diversity_output.falsta
+per_site_fst_output.falsta
