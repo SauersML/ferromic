@@ -8,6 +8,7 @@ use crate::progress::{
 use rayon::prelude::*;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::fmt;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -694,11 +695,9 @@ pub fn calculate_fst_wc_haplotype_groups(
     let mut workspace = WcSiteWorkspace::new(membership.group_count());
 
     let total_variants = variants
-        .iter()
+        .par_iter()
         .filter(|variant| region.contains(variant.position))
         .count();
-
-    let mut site_fst_values = Vec::with_capacity(total_variants);
 
     init_step_progress(
         &format!(
@@ -708,35 +707,42 @@ pub fn calculate_fst_wc_haplotype_groups(
         total_variants as u64,
     );
 
-    for (idx, variant) in variants
-        .iter()
+    let progress_counter = AtomicUsize::new(0);
+
+    let site_fst_values: Vec<SiteFstWc> = variants
+        .par_iter()
         .filter(|variant| region.contains(variant.position))
-        .enumerate()
-    {
-        if idx % 1000 == 0 || idx + 1 == total_variants {
-            update_step_progress(
-                idx as u64,
-                &format!(
-                    "Variant {}/{} ({:.1}%)",
-                    idx + 1,
-                    total_variants,
-                    ((idx + 1) as f64 / total_variants.max(1) as f64) * 100.0
-                ),
-            );
-        }
+        .map_init(
+            || WcSiteWorkspace::new(membership.group_count()),
+            |workspace, variant| {
+                workspace.reset();
+                let (overall_fst, pairwise_fst, var_comps, pop_sizes, pairwise_var_comps) =
+                    calculate_fst_wc_at_site_with_membership(variant, &membership, workspace);
 
-        let (overall_fst, pairwise_fst, var_comps, pop_sizes, pairwise_var_comps) =
-            calculate_fst_wc_at_site_with_membership(variant, &membership, &mut workspace);
+                let idx = progress_counter.fetch_add(1, Ordering::Relaxed);
+                if idx % 1000 == 0 || idx + 1 == total_variants {
+                    update_step_progress(
+                        idx as u64,
+                        &format!(
+                            "Variant {}/{} ({:.1}%)",
+                            idx + 1,
+                            total_variants,
+                            ((idx + 1) as f64 / total_variants.max(1) as f64) * 100.0
+                        ),
+                    );
+                }
 
-        site_fst_values.push(SiteFstWc {
-            position: ZeroBasedPosition(variant.position).to_one_based(),
-            overall_fst,
-            pairwise_fst,
-            variance_components: var_comps,
-            population_sizes: pop_sizes,
-            pairwise_variance_components: pairwise_var_comps,
-        });
-    }
+                SiteFstWc {
+                    position: ZeroBasedPosition(variant.position).to_one_based(),
+                    overall_fst,
+                    pairwise_fst,
+                    variance_components: var_comps,
+                    population_sizes: pop_sizes,
+                    pairwise_variance_components: pairwise_var_comps,
+                }
+            },
+        )
+        .collect();
 
     finish_step_progress("Completed per-site FST calculations for haplotype groups");
 
@@ -833,11 +839,9 @@ pub fn calculate_fst_wc_csv_populations(
     let mut workspace = WcSiteWorkspace::new(membership.group_count());
 
     let total_variants = variants
-        .iter()
+        .par_iter()
         .filter(|variant| region.contains(variant.position))
         .count();
-
-    let mut site_fst_values = Vec::with_capacity(total_variants);
 
     init_step_progress(
         &format!(
@@ -847,35 +851,42 @@ pub fn calculate_fst_wc_csv_populations(
         total_variants as u64,
     );
 
-    for (idx, variant) in variants
-        .iter()
+    let progress_counter = AtomicUsize::new(0);
+
+    let site_fst_values: Vec<SiteFstWc> = variants
+        .par_iter()
         .filter(|variant| region.contains(variant.position))
-        .enumerate()
-    {
-        if idx % 1000 == 0 || idx + 1 == total_variants {
-            update_step_progress(
-                idx as u64,
-                &format!(
-                    "Variant {}/{} ({:.1}%)",
-                    idx + 1,
-                    total_variants,
-                    ((idx + 1) as f64 / total_variants.max(1) as f64) * 100.0
-                ),
-            );
-        }
+        .map_init(
+            || WcSiteWorkspace::new(membership.group_count()),
+            |workspace, variant| {
+                workspace.reset();
+                let (overall_fst, pairwise_fst, var_comps, pop_sizes, pairwise_var_comps) =
+                    calculate_fst_wc_at_site_with_membership(variant, &membership, workspace);
 
-        let (overall_fst, pairwise_fst, var_comps, pop_sizes, pairwise_var_comps) =
-            calculate_fst_wc_at_site_with_membership(variant, &membership, &mut workspace);
+                let idx = progress_counter.fetch_add(1, Ordering::Relaxed);
+                if idx % 1000 == 0 || idx + 1 == total_variants {
+                    update_step_progress(
+                        idx as u64,
+                        &format!(
+                            "Variant {}/{} ({:.1}%)",
+                            idx + 1,
+                            total_variants,
+                            ((idx + 1) as f64 / total_variants.max(1) as f64) * 100.0
+                        ),
+                    );
+                }
 
-        site_fst_values.push(SiteFstWc {
-            position: ZeroBasedPosition(variant.position).to_one_based(),
-            overall_fst,
-            pairwise_fst,
-            variance_components: var_comps,
-            population_sizes: pop_sizes,
-            pairwise_variance_components: pairwise_var_comps,
-        });
-    }
+                SiteFstWc {
+                    position: ZeroBasedPosition(variant.position).to_one_based(),
+                    overall_fst,
+                    pairwise_fst,
+                    variance_components: var_comps,
+                    population_sizes: pop_sizes,
+                    pairwise_variance_components: pairwise_var_comps,
+                }
+            },
+        )
+        .collect();
 
     finish_step_progress("Completed per-site FST calculations for CSV populations");
 
@@ -2472,30 +2483,33 @@ pub fn calculate_d_xy_hudson<'a>(
     }
 
     // Use unbiased per-site aggregation approach
-    let mut sum_dxy = 0.0;
-    let mut variant_count = 0;
-    let mut skipped_sites = 0i64;
-
     let pop1_mem = HapMembership::build(pop1_context.sample_names.len(), &pop1_context.haplotypes);
     let pop2_mem = HapMembership::build(pop2_context.sample_names.len(), &pop2_context.haplotypes);
 
-    for variant in pop1_context.variants {
-        // Get allele counts for both populations at this variant
-        let counts1 = freq_summary_for_pop(variant, &pop1_mem);
-        let counts2 = freq_summary_for_pop(variant, &pop2_mem);
-
-        // Calculate per-site Dxy using existing helper
-        match dxy_from_counts(&counts1, &counts2) {
-            Some(dxy_site) => {
-                sum_dxy += dxy_site;
-                variant_count += 1;
-            }
-            None => {
-                skipped_sites += 1;
-            }
-        }
-        // Sites where either population has n=0 are skipped but contribute 0 to the sum
-    }
+    let (sum_dxy, variant_count, skipped_sites) = pop1_context
+        .variants
+        .par_iter()
+        .fold(
+            || (0.0f64, 0usize, 0i64),
+            |(mut acc_dxy, mut acc_count, mut acc_skipped), variant| {
+                let counts1 = freq_summary_for_pop(variant, &pop1_mem);
+                let counts2 = freq_summary_for_pop(variant, &pop2_mem);
+                match dxy_from_counts(&counts1, &counts2) {
+                    Some(dxy_site) => {
+                        acc_dxy += dxy_site;
+                        acc_count += 1;
+                    }
+                    None => {
+                        acc_skipped += 1;
+                    }
+                }
+                (acc_dxy, acc_count, acc_skipped)
+            },
+        )
+        .reduce(
+            || (0.0, 0, 0),
+            |a, b| (a.0 + b.0, a.1 + b.1, a.2 + b.2),
+        );
 
     log(
         LogLevel::Debug,
@@ -3046,21 +3060,15 @@ pub fn calculate_hudson_fst_per_site(
         );
     }
 
-    let estimated_count = pop1_context
-        .variants
-        .iter()
-        .filter(|v| region.contains(v.position))
-        .count();
-    let mut sites = Vec::with_capacity(estimated_count);
-
     let pop1_mem = HapMembership::build(pop1_context.sample_names.len(), &pop1_context.haplotypes);
     let pop2_mem = HapMembership::build(pop2_context.sample_names.len(), &pop2_context.haplotypes);
 
-    for variant in pop1_context.variants {
-        if region.contains(variant.position) {
-            sites.push(hudson_site_from_variant(variant, &pop1_mem, &pop2_mem));
-        }
-    }
+    let sites: Vec<SiteFstHudson> = pop1_context
+        .variants
+        .par_iter()
+        .filter(|variant| region.contains(variant.position))
+        .map(|variant| hudson_site_from_variant(variant, &pop1_mem, &pop2_mem))
+        .collect();
 
     sites
 }
