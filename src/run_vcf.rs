@@ -9,12 +9,76 @@ use ferromic::progress::{
     display_status_box, finish_all, force_flush_all, init_global_progress, log,
     update_global_progress, LogLevel, StatusBox,
 };
+use colored::*;
 use ferromic::transcripts;
 use rayon::ThreadPoolBuilder;
 use std::collections::{HashMap, HashSet};
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+/// A helper function to validate exclusions against a representative VCF file.
+fn validate_exclusions(
+    vcf_folder: &str,
+    chr: &str,
+    exclusion_set: &HashSet<String>,
+) -> Result<(), VcfError> {
+    if exclusion_set.is_empty() {
+        return Ok(());
+    }
+
+    // 1. Locate a representative VCF file
+    // We catch error here to avoid crashing if VCF not found (though main logic would crash later anyway)
+    let vcf_file = match find_vcf_file(vcf_folder, chr) {
+        Ok(f) => f,
+        Err(_) => return Ok(()), // If we can't find it, we can't validate.
+    };
+
+    // 2. Read Sample Names
+    let raw_samples = match read_sample_names_from_vcf(&vcf_file) {
+        Ok(s) => s,
+        Err(_) => return Ok(()), // If parse fails, skip validation
+    };
+    let present_set: HashSet<String> = raw_samples.into_iter().collect();
+
+    // 3. Compute Sets
+    let mut confirmed = Vec::new();
+    let mut missing = Vec::new();
+
+    for name in exclusion_set {
+        if present_set.contains(name) {
+            confirmed.push(name);
+        } else {
+            missing.push(name);
+        }
+    }
+
+    // 4. Print Confirmation
+    if !confirmed.is_empty() {
+        // Sorting for deterministic output
+        confirmed.sort();
+        log(
+            LogLevel::Info,
+            &format!(
+                "Confirmed: {} samples will be excluded from analysis: {:?}",
+                confirmed.len(),
+                confirmed
+            ),
+        );
+    }
+
+    // 5. Print Warnings
+    if !missing.is_empty() {
+        missing.sort();
+        let msg = format!(
+            "WARNING: The following samples were requested for exclusion but NOT found in the VCF header: {:?}. Check your spelling.",
+            missing
+        );
+        eprintln!("{}", msg.yellow().bold());
+    }
+
+    Ok(())
+}
 
 /// A helper function to read sample names from the VCF header,
 /// returning them in the order found after the `#CHROM POS ID REF ALT ...` columns.
@@ -146,13 +210,43 @@ fn main() -> Result<(), VcfError> {
             &format!("Config file provided: {}", config_file),
         );
         let mut config_entries = parse_config_file(Path::new(config_file))?;
+
+        // Startup Check: Validate exclusions using the first entry's chromosome
+        if let Some(first_entry) = config_entries.first() {
+            let _ = validate_exclusions(&args.vcf_folder, &first_entry.seqname, &exclusion_set);
+        }
+
+        let mut removed_from_config_count: HashMap<String, usize> = HashMap::new();
+
         for entry in config_entries.iter_mut() {
-            entry
-                .samples_unfiltered
-                .retain(|sample, _| !exclusion_set.contains(sample));
-            entry
-                .samples_filtered
-                .retain(|sample, _| !exclusion_set.contains(sample));
+            entry.samples_unfiltered.retain(|sample, _| {
+                if exclusion_set.contains(sample) {
+                    *removed_from_config_count.entry(sample.clone()).or_default() += 1;
+                    false
+                } else {
+                    true
+                }
+            });
+            entry.samples_filtered.retain(|sample, _| {
+                if exclusion_set.contains(sample) {
+                    *removed_from_config_count.entry(sample.clone()).or_default() += 1;
+                    false
+                } else {
+                    true
+                }
+            });
+        }
+
+        if !removed_from_config_count.is_empty() {
+            for (sample, count) in removed_from_config_count {
+                log(
+                    LogLevel::Info,
+                    &format!(
+                        "Removed '{}' from {} entries in configuration file maps.",
+                        sample, count
+                    ),
+                );
+            }
         }
 
         let output_file = args
@@ -186,6 +280,9 @@ fn main() -> Result<(), VcfError> {
     //         We build a single config entry with all samples in group 0.
     // ------------------------------------------------------------------------
     } else if let Some(chr) = args.chr.as_ref() {
+        // Startup Check: Validate exclusions
+        let _ = validate_exclusions(&args.vcf_folder, chr, &exclusion_set);
+
         // Figure out region start/end from user input, or default to the entire chromosome
         let interval = if let Some(region_str) = args.region.as_ref() {
             parse_region(region_str)?
