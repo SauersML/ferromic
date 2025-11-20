@@ -308,6 +308,14 @@ pub fn make_sequences(
     Ok(())
 }
 
+/// Flushes the shared metadata writer to ensure all buffered data is written to disk.
+/// This should be called once at the end of the program.
+pub fn flush_metadata() -> io::Result<()> {
+    // Lock the writer and explicitly flush it.
+    // The `?` operator will propagate any IO errors that occur during flushing.
+    METADATA_WRITER.lock().flush()
+}
+
 pub fn initialize_hap_sequences(
     haplotype_indices: &[(usize, HaplotypeSide)],
     sample_names: &[String],
