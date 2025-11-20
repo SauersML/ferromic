@@ -544,12 +544,36 @@ def summarize_sample_sizes() -> List[str]:
     pi_df_unfiltered = _load_pi_summary(drop_na_pi=False)
 
     # Count loci with at least two haplotypes, regardless of orientation
-    num_with_two_haps = pi_df_unfiltered[
-        (pi_df_unfiltered["0_num_hap_filter"] >= 2) | (pi_df_unfiltered["1_num_hap_filter"] >= 2)
-    ]
+    # Using fillna(0) because NaN implies 0 valid haplotypes for that orientation
+    h0 = pi_df_unfiltered["0_num_hap_filter"].fillna(0)
+    h1 = pi_df_unfiltered["1_num_hap_filter"].fillna(0)
+    total_haps = h0 + h1
+
+    num_with_two_haps_total = (total_haps >= 2).sum()
+    num_dir_ge_2 = (h0 >= 2).sum()
+    num_inv_ge_2 = (h1 >= 2).sum()
+    num_both_ge_2 = ((h0 >= 2) & (h1 >= 2)).sum()
+    num_either_ge_2 = ((h0 >= 2) | (h1 >= 2)).sum()
+
     lines.append(
-        "  Number of loci with at least two haplotypes: "
-        f"{_fmt(len(num_with_two_haps), 0)}."
+        "  Number of loci with at least two haplotypes (total across orientations): "
+        f"{_fmt(num_with_two_haps_total, 0)}."
+    )
+    lines.append(
+        "  Number of loci with at least two direct haplotypes: "
+        f"{_fmt(num_dir_ge_2, 0)}."
+    )
+    lines.append(
+        "  Number of loci with at least two inverted haplotypes: "
+        f"{_fmt(num_inv_ge_2, 0)}."
+    )
+    lines.append(
+        "  Number of loci with at least two haplotypes in either orientation (union): "
+        f"{_fmt(num_either_ge_2, 0)}."
+    )
+    lines.append(
+        "  Number of loci with at least two haplotypes in each orientation (intersection): "
+        f"{_fmt(num_both_ge_2, 0)}."
     )
 
     pi_df = _load_pi_summary()
