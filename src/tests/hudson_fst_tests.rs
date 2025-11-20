@@ -726,27 +726,8 @@ mod hudson_fst_tests {
 
         let (outcome, sites) = result.unwrap();
 
-        // Should have 3 sites (positions 100, 101, 102), all with no data
-        assert_eq!(sites.len(), 3, "Should have exactly 3 sites in region");
-
-        // Each site should have None for all components
-        for site in &sites {
-            assert!(
-                site.fst.is_none(),
-                "Site {} FST should be None",
-                site.position
-            );
-            assert!(
-                site.num_component.is_none(),
-                "Site {} num_component should be None",
-                site.position
-            );
-            assert!(
-                site.den_component.is_none(),
-                "Site {} den_component should be None",
-                site.position
-            );
-        }
+        // Should have 0 sites, as per-site output is now sparse and there are no variants
+        assert_eq!(sites.len(), 0, "Should have exactly 0 sites in region");
 
         // Aggregated FST should be 0.0 (Σnum = 0, Σden = 0)
         let aggregated_fst =
