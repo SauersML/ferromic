@@ -32,6 +32,8 @@ jobs:
       - name: Unzip PHY files
         run: |
           unzip -o data/phy_outputs.zip
+          unzip -o '*.zip' || echo "No nested zip files found"
+          rm -f '*.zip'
           ls -R
       - name: Run AXT to PHY
         run: |
