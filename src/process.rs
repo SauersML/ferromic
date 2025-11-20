@@ -4255,8 +4255,7 @@ pub fn process_variant(
     };
 
 
-    let format_fields: Vec<&str> = fields[8].split(':').collect();
-    let gq_index = format_fields.iter().position(|&s| s == "GQ");
+    let gq_index = fields[8].split(':').position(|s| s == "GQ");
     if gq_index.is_none() {
         return Err(VcfError::Parse("GQ field not found in FORMAT".to_string()));
     }
@@ -4296,14 +4295,15 @@ pub fn process_variant(
         let gt_field = fields
             .get(idx)
             .ok_or_else(|| VcfError::Parse("Missing genotype field".to_string()))?;
-        let gt_subfields: Vec<&str> = gt_field.split(':').collect();
-        if gq_index >= gt_subfields.len() {
+
+        let gq_part = gt_field.split(':').nth(gq_index);
+        if gq_part.is_none() {
             return Err(VcfError::Parse(format!(
                 "GQ value missing in sample genotype field at chr{}:{}",
                 chr, one_based_vcf_position.0
             )));
         }
-        let gq_str = gt_subfields[gq_index].trim();
+        let gq_str = gq_part.unwrap().trim();
 
         // Attempt to parse GQ value as u16
         // Parse GQ value, treating '.' or empty string as 0
