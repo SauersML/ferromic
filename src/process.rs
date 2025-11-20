@@ -1325,7 +1325,7 @@ pub fn process_config_entries(
     };
 
     // The map operation collects results per chromosome.
-    // Each result is a tuple: (main_csv_data_for_this_chr, hudson_data_for_this_chr)
+    // Each result is a tuple: (main_csv_data_for_this_chr, hudson_data_for_this_chr, wc_data_for_this_chr)
     // We iterate over sorted chromosomes to ensure deterministic order of results collection
     let per_chromosome_collected_results: Vec<(
         Vec<(
@@ -1335,6 +1335,7 @@ pub fn process_config_entries(
             Vec<(i64, f64, f64, f64)>,
         )>,
         Vec<RegionalHudsonFSTOutcome>,
+        Vec<RegionalWcFSTOutcome>,
     )> = sorted_chromosomes
         .par_iter()
         .map(|&chr| {
@@ -1369,9 +1370,11 @@ pub fn process_config_entries(
         .filter_map(|optional_result| optional_result) // Remove None entries (failed chromosomes)
         .collect();
 
+    let mut all_regional_wc_outcomes: Vec<RegionalWcFSTOutcome> = Vec::new();
+
     // BEFORE: big aggregation into all_main_csv_data_tuples + later write
     // AFTER:
-    for (mut main_data_for_chr, mut hudson_data_for_chr) in per_chromosome_collected_results {
+    for (mut main_data_for_chr, mut hudson_data_for_chr, mut wc_data_for_this_chr) in per_chromosome_collected_results {
         // write each main CSV row + per-site outputs now
         for (csv_row, per_site_diversity_vec, fst_data_wc, fst_data_hudson) in
             main_data_for_chr.drain(..)
@@ -1402,6 +1405,11 @@ pub fn process_config_entries(
             };
             append_hudson_tsv(&hudson_output_path, &hudson_data_for_chr)?;
             all_regional_hudson_outcomes.append(&mut hudson_data_for_chr);
+        }
+
+        // W&C data accumulation for this chromosome
+        if args.enable_fst && !wc_data_for_this_chr.is_empty() {
+            all_regional_wc_outcomes.append(&mut wc_data_for_this_chr);
         }
         // all per-chr vectors drop here ✅
     }
@@ -1533,6 +1541,110 @@ pub fn process_config_entries(
                 hudson_output_path.display()
             ),
         );
+
+        // Write W&C FST results
+        if args.enable_fst && !all_regional_wc_outcomes.is_empty() {
+            let wc_output_filename = "wc_fst_results.tsv.gz".to_string();
+            let wc_output_path = if let Some(main_output_parent) = output_file.parent() {
+                main_output_parent.join(&wc_output_filename)
+            } else {
+                Path::new(&wc_output_filename).to_path_buf()
+            };
+
+            log(
+                LogLevel::Info,
+                &format!(
+                    "Writing W&C FST results to: {}",
+                    wc_output_path.display()
+                ),
+            );
+
+            let wc_file = File::create(&wc_output_path).map_err(|e| VcfError::Io(e.into()))?;
+            let encoder = GzEncoder::new(wc_file, Compression::default());
+            let mut wc_writer = WriterBuilder::new()
+                .delimiter(b'\t')
+                .from_writer(BufWriter::new(encoder));
+
+            // Write W&C FST header
+            wc_writer.write_record(&[
+                "chr",
+                "region_start_1based",
+                "region_end_1based",
+                "comparison_type",
+                "pop1",
+                "pop2",
+                "fst",
+                "numerator_a",
+                "denominator_a_plus_b",
+                "informative_sites",
+            ])?;
+
+            // Write W&C FST data
+            for r in &all_regional_wc_outcomes {
+                 // Write overall FST
+                let (fst_val, sum_a, sum_b, num_sites) =
+                    crate::stats::extract_wc_fst_components(&r.overall_fst);
+
+                let denom = match (sum_a, sum_b) {
+                    (Some(a), Some(b)) => Some(a + b),
+                    _ => None,
+                };
+
+                wc_writer.write_record(&[
+                    &r.chr,
+                    &r.region_start.to_string(),
+                    &r.region_end.to_string(),
+                    "overall",
+                    "ALL",
+                    "ALL",
+                    &format_optional_float(fst_val),
+                    &format_optional_float(sum_a),
+                    &format_optional_float(denom),
+                    &format_optional_usize(num_sites),
+                ])?;
+
+                // Write pairwise FSTs
+                let mut sorted_keys: Vec<_> = r.pairwise_fst.keys().collect();
+                sorted_keys.sort();
+
+                for pair_key in sorted_keys {
+                    let est = &r.pairwise_fst[pair_key];
+                    let (p_fst, p_a, p_b, p_sites) = crate::stats::extract_wc_fst_components(est);
+                    let parts: Vec<&str> = pair_key.split("_vs_").collect();
+                    let (pop1, pop2) = if parts.len() == 2 {
+                        (parts[0], parts[1])
+                    } else {
+                        ("unknown", "unknown")
+                    };
+                    let p_denom = match (p_a, p_b) {
+                        (Some(a), Some(b)) => Some(a + b),
+                        _ => None,
+                    };
+
+                    wc_writer.write_record(&[
+                        &r.chr,
+                        &r.region_start.to_string(),
+                        &r.region_end.to_string(),
+                        "pairwise",
+                        pop1,
+                        pop2,
+                        &format_optional_float(p_fst),
+                        &format_optional_float(p_a),
+                        &format_optional_float(p_denom),
+                        &format_optional_usize(p_sites),
+                    ])?;
+                }
+            }
+            wc_writer.flush()?;
+            log(
+                LogLevel::Info,
+                &format!(
+                    "Successfully wrote {} W&C FST regional records to {}",
+                    all_regional_wc_outcomes.len(),
+                    wc_output_path.display()
+                ),
+            );
+        }
     }
 
     Ok(())
@@ -1710,6 +1822,7 @@ fn process_chromosome_entries(
             Vec<(i64, f64, f64, f64)>,
         )>,
         Vec<RegionalHudsonFSTOutcome>,
+        Vec<RegionalWcFSTOutcome>,
     ),
     VcfError,
 > {
@@ -1796,7 +1909,7 @@ fn process_chromosome_entries(
                 &format!("Error finding VCF file for chr{}: {:?}", chr, e),
             );
             finish_step_progress(&format!("Failed to find VCF for chr{}", chr));
-            return Ok((Vec::new(), Vec::new())); // Return empty tuple for all results
+            return Ok((Vec::new(), Vec::new(), Vec::new())); // Return empty tuple for all results
         }
     };
 
@@ -1811,6 +1924,8 @@ fn process_chromosome_entries(
     )> = Vec::with_capacity(entries.len());
     // Stores RegionalHudsonFSTOutcome for the dedicated Hudson FST output file for this chromosome
     let mut chromosome_hudson_fst_results: Vec<RegionalHudsonFSTOutcome> = Vec::new();
+    // Stores RegionalWcFSTOutcome for the dedicated W&C FST output file for this chromosome
+    let mut chromosome_wc_fst_results: Vec<RegionalWcFSTOutcome> = Vec::new();
 
     // Store filtered variants for PCA if enabled
     if let Some((_, sample_names_storage)) = &pca_storage {
@@ -1821,7 +1936,7 @@ fn process_chromosome_entries(
                     LogLevel::Error,
                     &format!("Error finding VCF file for chr{} for PCA: {:?}", chr, e),
                 );
-                return Ok((Vec::new(), Vec::new())); // Return empty tuple for all results
+                return Ok((Vec::new(), Vec::new(), Vec::new())); // Return empty tuple for all results
             }
         };
 
@@ -1898,6 +2013,7 @@ fn process_chromosome_entries(
                 per_site_wc_fst_data,
                 per_site_hudson_fst_records,
                 mut hudson_outcomes_for_entry,
+                wc_outcome_opt,
             ))) => {
                 main_csv_tuples.push((
                     main_csv_tuple_content,
@@ -1906,6 +2022,9 @@ fn process_chromosome_entries(
                     per_site_hudson_fst_records,
                 ));
                 chromosome_hudson_fst_results.append(&mut hudson_outcomes_for_entry);
+                if let Some(wc_outcome) = wc_outcome_opt {
+                    chromosome_wc_fst_results.push(wc_outcome);
+                }
                 log(
                     LogLevel::Info,
                     &format!("Successfully processed region {}", region_desc),
@@ -2045,7 +2164,8 @@ fn process_chromosome_entries(
     // This function returns a tuple:
     // 1. Data for the main CSV output file.
     // 2. Data for the dedicated Hudson FST output file, specific to this chromosome.
-    Ok((main_csv_tuples, chromosome_hudson_fst_results))
+    // 3. Data for the dedicated W&C FST output file, specific to this chromosome.
+    Ok((main_csv_tuples, chromosome_hudson_fst_results, chromosome_wc_fst_results))
 }
 
 fn generate_full_region_alignment(
@@ -2187,6 +2307,7 @@ fn process_single_config_entry(
         Vec<(i64, f64, f64)>, // Per-site W&C FST data (pos, overall_wc_fst, pairwise_wc_fst_0vs1) for falsta output
         Vec<(i64, f64, f64, f64)>, // Per-site Hudson data (pos_1based, fst, numerator, denominator) for haplotype groups
         Vec<RegionalHudsonFSTOutcome>, // Hudson FST results specific to this config entry
+        Option<RegionalWcFSTOutcome>, // W&C FST results for CSV populations
     )>,
     VcfError,
 > {
@@ -2418,7 +2539,7 @@ fn process_single_config_entry(
     let hudson_region_is_valid = hudson_query_region.start <= hudson_query_region.end;
 
     // Calculate FST if enabled
-    let (fst_results_filtered, _) = if args.enable_fst {
+    let (fst_results_filtered, population_fst_results) = if args.enable_fst {
         let spinner = create_spinner("Calculating FST statistics");
 
         // Define the FST analysis region.
@@ -3163,6 +3284,16 @@ fn process_single_config_entry(
     // and is used directly in `process_config_entries` for detailed per-population-pair FALSTA output.
     // The overall FST for CSV populations is in `row_data.population_overall_fst_wc`.
 
+    // Prepare RegionalWcFSTOutcome if population FST results are available
+    let regional_wc_outcome = population_fst_results.map(|res| RegionalWcFSTOutcome {
+        chr: entry.seqname.clone(),
+        region_start: entry.interval.start_1based_inclusive(),
+        region_end: entry.interval.get_1based_inclusive_end_coord(),
+        overall_fst: res.overall_fst,
+        pairwise_fst: res.pairwise_fst,
+        pairwise_variance_components: res.pairwise_variance_components,
+    });
+
     log(
         LogLevel::Info,
         &format!(
@@ -3179,6 +3310,7 @@ fn process_single_config_entry(
         per_site_fst_records, // Vec<(i64, FstEstimate, FstEstimate)> containing only haplotype group FSTs
         per_site_hudson_fst_records, // Vec<(i64, fst, numerator, denominator)> for Hudson haplotype groups
         local_regional_hudson_outcomes,
+        regional_wc_outcome,
     )))
 }
 
@@ -3190,6 +3322,17 @@ struct RegionalHudsonFSTOutcome {
     region_start: i64, // 0-based inclusive, from ConfigEntry.interval.start
     region_end: i64,   // 0-based inclusive, from ConfigEntry.interval.end
     outcome: HudsonFSTOutcome,
+}
+
+#[derive(Debug, Clone)]
+struct RegionalWcFSTOutcome {
+    chr: String,
+    region_start: i64, // 1-based inclusive
+    region_end: i64,   // 1-based inclusive
+    overall_fst: crate::stats::FstEstimate,
+    pairwise_fst: HashMap<String, crate::stats::FstEstimate>,
+    #[allow(dead_code)] // Kept for potential future use
+    pairwise_variance_components: HashMap<String, (f64, f64)>,
 }
 
 /// Formats an Option<PopulationId> into type and name strings for output.
