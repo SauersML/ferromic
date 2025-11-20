@@ -77,10 +77,26 @@ fn discover_and_sort_vcf_files(dir: &str) -> Result<Vec<VcfFile>> {
                 let extension = path.extension()?.to_str()?;
                 if extension == "vcf" || extension == "gz" {
                     progress_bar.inc(1);
-                    Some(Ok(VcfFile {
-                        path: path.clone(),
-                        chromosome: get_chromosome(&path).ok()?,
-                    }))
+                    let chrom_result = get_chromosome(&path);
+                    match chrom_result {
+                        Ok(Some(chrom)) => {
+                            Some(Ok(VcfFile {
+                                path: path.clone(),
+                                chromosome: chrom,
+                            }))
+                        }
+                        Ok(None) => {
+                            // Skip empty/header-only files silently or with a debug log if we had one
+                            None
+                        }
+                        Err(e) => {
+                            // If error (e.g. IO), we skip or return error?
+                            // Original code used `ok()?` which effectively skipped the file.
+                            // We'll preserve that behavior but maybe log it?
+                            // For now, maintain behavior: skip file if error.
+                             None
+                        }
+                    }
                 } else {
                     None
                 }
@@ -113,39 +129,36 @@ fn custom_chromosome_sort(a: &str, b: &str) -> std::cmp::Ordering {
     a_pos.cmp(&b_pos)
 }
 
-fn get_chromosome(path: &Path) -> Result<String> {
+fn get_chromosome(path: &Path) -> Result<Option<String>> {
     let file = File::open(path)?;
-    let mut reader: Box<dyn Read> = if path.extension().and_then(|ext| ext.to_str()) == Some("gz") {
-        Box::new(MultiGzDecoder::new(file))
+    let mut reader: Box<dyn BufRead> = if path.extension().and_then(|ext| ext.to_str()) == Some("gz") {
+        Box::new(BufReader::new(MultiGzDecoder::new(file)))
     } else {
-        Box::new(file)
+        Box::new(BufReader::new(file))
     };
 
-    let mut buffer = [0; 1024];
     let mut first_data_line = String::new();
 
     loop {
-        let bytes_read = reader.read(&mut buffer)?;
+        let mut line = String::new();
+        let bytes_read = reader.read_line(&mut line)?;
         if bytes_read == 0 {
             break;
         }
-        let chunk = String::from_utf8_lossy(&buffer[..bytes_read]);
-        for line in chunk.lines() {
-            if !line.starts_with('#') {
-                first_data_line = line.to_string();
-                break;
-            }
-        }
-        if !first_data_line.is_empty() {
+        if !line.starts_with('#') {
+            first_data_line = line;
             break;
         }
     }
 
-    first_data_line
+    if first_data_line.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(first_data_line
         .split('\t')
         .next()
-        .map(|s| s.trim_start_matches("chr").to_string())
-        .context("Failed to extract chromosome from VCF file")
+        .map(|s| s.trim_start_matches("chr").to_string()))
 }
 
 async fn concatenate_files(
@@ -158,6 +171,11 @@ async fn concatenate_files(
     let output = Arc::new(tokio::sync::Mutex::new(BufWriter::new(File::create(
         output_file,
     )?)));
+
+    // Validate headers consistency
+    println!("Validating headers consistency across all files...");
+    validate_headers(&vcf_files)?;
+    println!("Headers are consistent.");
 
     println!("Extracting header from the first file...");
     let header = extract_header(&vcf_files[0])?;
@@ -226,9 +244,9 @@ async fn concatenate_files(
 fn extract_header(file: &VcfFile) -> Result<String> {
     let mut header = String::new();
     let reader = create_reader(&file.path)?;
-    let buf_reader = BufReader::new(reader);
+    // reader is already Box<dyn BufRead>, no need to wrap again
 
-    for line in buf_reader.lines() {
+    for line in reader.lines() {
         let line = line?;
         if line.starts_with('#') {
             header.push_str(&line);
@@ -241,12 +259,73 @@ fn extract_header(file: &VcfFile) -> Result<String> {
     Ok(header)
 }
 
+fn validate_headers(vcf_files: &[VcfFile]) -> Result<()> {
+    if vcf_files.is_empty() {
+        return Ok(());
+    }
+
+    let first_header_cols = extract_header_columns(&vcf_files[0])?;
+
+    // Using rayon for parallel validation might be good if many files, but sequential is safer for now to avoid borrow issues or complex code.
+    // Headers are small, so reading sequential is fine.
+    for (i, file) in vcf_files.iter().enumerate().skip(1) {
+        let cols = extract_header_columns(file)?;
+        if cols != first_header_cols {
+            bail!("Header mismatch in file {}: expected columns {:?}, found {:?}", file.path.display(), first_header_cols, cols);
+        }
+    }
+    Ok(())
+}
+
+fn extract_header_columns(file: &VcfFile) -> Result<Vec<String>> {
+    let reader = create_reader(&file.path)?;
+    // reader is already Box<dyn BufRead>, no need to wrap again
+
+    for line in reader.lines() {
+        let line = line?;
+        if line.starts_with("#CHROM") {
+            // This is the column definition line
+            let cols: Vec<String> = line.split('\t').map(|s| s.to_string()).collect();
+            // We care about sample columns (index 9 onwards)
+            // But if fixed columns differ, that's also an issue.
+            // So comparing the whole line (split) is correct.
+            return Ok(cols);
+        }
+    }
+    bail!("File {} has no #CHROM header line", file.path.display());
+}
+
 fn process_file(file: &VcfFile, chunk_size: usize, pb: ProgressBar) -> Result<Vec<Vec<u8>>> {
     let mut chunks = Vec::new();
     let mut reader = create_reader(&file.path)?;
+
+    // First, skip header by reading lines until we find data
+    let mut first_data_part = Vec::new();
+    let mut header_bytes_read = 0;
+
+    loop {
+        let mut line = String::new();
+        let bytes_read = reader.read_line(&mut line)?;
+        header_bytes_read += bytes_read;
+        if bytes_read == 0 {
+            break; // EOF
+        }
+        if !line.starts_with('#') {
+            first_data_part = line.into_bytes();
+            break;
+        }
+    }
+
+    if first_data_part.is_empty() {
+        // Only header found or empty file
+        pb.finish_with_message("File processed (empty data)");
+        return Ok(Vec::new());
+    }
+
+    chunks.push(first_data_part);
+
     let mut buffer = vec![0; chunk_size];
-    let mut in_header = true;
-    let mut total_bytes = 0;
+    let mut total_bytes = header_bytes_read; // Start counting from what we read
 
     loop {
         let bytes_read = reader.read(&mut buffer)?;
@@ -257,17 +336,7 @@ fn process_file(file: &VcfFile, chunk_size: usize, pb: ProgressBar) -> Result<Ve
         total_bytes += bytes_read;
         pb.set_position((total_bytes as f64 / chunk_size as f64 * 100.0) as u64);
 
-        let mut chunk = buffer[..bytes_read].to_vec();
-
-        if in_header {
-            if let Some(pos) = chunk.windows(2).position(|w| w == b"\n#") {
-                in_header = false;
-                chunk = chunk[pos + 1..].to_vec();
-            } else {
-                continue;
-            }
-        }
-
+        let chunk = buffer[..bytes_read].to_vec();
         chunks.push(chunk);
     }
 
