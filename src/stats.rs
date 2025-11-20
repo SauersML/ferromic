@@ -1598,9 +1598,8 @@ fn dense_fst_components_from_biallelic(
 /// variance components 'a' (among populations) and 'b' (within populations).
 /// From these, it derives overall and pairwise FST estimates for the site.
 ///
-/// LIMITATION: This implementation is effectively biallelic only. Multi-allelic sites
-/// are collapsed by treating all non-reference alleles (allele_code != 0) as "alternate".
-/// This distorts allele frequencies at truly multi-allelic sites.
+/// This implementation supports multi-allelic sites by calculating variance components
+/// for each unique allele against all others (generalized approach).
 ///
 /// # Arguments
 /// * `variant`: The `Variant` data for the site.

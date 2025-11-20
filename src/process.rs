@@ -400,7 +400,7 @@ pub struct FilteringStats {
     pub filtered_positions: HashSet<i64>,
     pub missing_data_variants: usize,
     pub low_gq_variants: usize,
-    pub multi_allelic_variants: usize,
+    pub mnp_variants: usize,
     pub filtered_examples: Vec<String>,
 }
 
@@ -2502,8 +2502,8 @@ fn process_single_config_entry(
                 filtering_stats.filtered_due_to_allow.to_string(),
             ),
             (
-                "Multi-allelic".to_string(),
-                filtering_stats.multi_allelic_variants.to_string(),
+                "MNP".to_string(),
+                filtering_stats.mnp_variants.to_string(),
             ),
             (
                 "Low GQ".to_string(),
@@ -2519,12 +2519,12 @@ fn process_single_config_entry(
     log(
         LogLevel::Info,
         &format!(
-            "Variant statistics: {} total, {} filtered (mask={}, allow={}, multi={}, lowGQ={}, missing={})",
+            "Variant statistics: {} total, {} filtered (mask={}, allow={}, mnp={}, lowGQ={}, missing={})",
             filtering_stats.total_variants,
             filtering_stats._filtered_variants,
             filtering_stats.filtered_due_to_mask,
             filtering_stats.filtered_due_to_allow,
-            filtering_stats.multi_allelic_variants,
+            filtering_stats.mnp_variants,
             filtering_stats.low_gq_variants,
             filtering_stats.missing_data_variants
         ),
@@ -3703,7 +3703,7 @@ pub fn process_vcf(
                             gs.filtered_due_to_allow += local_stats.filtered_due_to_allow;
                             gs.missing_data_variants += local_stats.missing_data_variants;
                             gs.low_gq_variants += local_stats.low_gq_variants;
-                            gs.multi_allelic_variants += local_stats.multi_allelic_variants;
+                            gs.mnp_variants += local_stats.mnp_variants;
                             for ex in local_stats.filtered_examples.drain(..) {
                                 gs.add_example(ex);
                             }
@@ -3725,7 +3725,7 @@ pub fn process_vcf(
                         gs.filtered_due_to_allow += local_stats.filtered_due_to_allow;
                         gs.missing_data_variants += local_stats.missing_data_variants;
                         gs.low_gq_variants += local_stats.low_gq_variants;
-                        gs.multi_allelic_variants += local_stats.multi_allelic_variants;
+                        gs.mnp_variants += local_stats.mnp_variants;
                         for ex in local_stats.filtered_examples.drain(..) {
                             gs.add_example(ex);
                         }
@@ -3980,10 +3980,15 @@ pub fn process_variant(
     // Check ALT length (any of them)
     if alt_alleles.iter().any(|a| a.len() != 1) {
         filtering_stats._filtered_variants += 1;
+        if alt_alleles.iter().any(|a| a.len() > 1) {
+            filtering_stats.mnp_variants += 1;
+            filtering_stats.add_example(format!("{}: Filtered due to ALT MNP", line.trim()));
+        } else {
+            filtering_stats.add_example(format!("{}: Filtered due to ALT INDEL", line.trim()));
+        }
         filtering_stats
             .filtered_positions
             .insert(zero_based_position);
-        filtering_stats.add_example(format!("{}: Filtered due to ALT INDEL/MNP", line.trim()));
         return Ok(None);
     }
     // --- END LENGTH GUARD ---
@@ -4012,27 +4017,6 @@ pub fn process_variant(
         None
     };
 
-    let alt_alleles: Vec<&str> = fields[4].split(',').collect();
-    // We still filter MNPs (Multi-Nucleotide Polymorphisms) below.
-    // Ensure ALL alt alleles are single nucleotides.
-    if alt_alleles.iter().any(|s| s.len() > 1) {
-        filtering_stats.multi_allelic_variants += 1;
-        eprintln!(
-            "{}",
-            format!(
-                "Warning: Multi-nucleotide ALT detected at position {}, which is not supported. Skipping.",
-                one_based_vcf_position.0
-            ).yellow()
-        );
-        filtering_stats.add_example(format!(
-            "{}: Filtered due to multi-nucleotide alt allele",
-            line.trim()
-        ));
-        filtering_stats
-            .filtered_positions
-            .insert(zero_based_position);
-        return Ok(None);
-    }
 
     let format_fields: Vec<&str> = fields[8].split(':').collect();
     let gq_index = format_fields.iter().position(|&s| s == "GQ");
