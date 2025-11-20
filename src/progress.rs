@@ -953,7 +953,9 @@ pub fn finish_all() {
 
 /// Force flush all log files. Designed to be called from a panic hook.
 pub fn force_flush_all() {
-    // Acquire lock - will block if another thread holds it, but that's acceptable for a panic hook
-    let mut tracker = PROGRESS_TRACKER.lock();
-    tracker.flush_logs();
+    // Attempt to acquire lock - if we can't, it means we might be recursively re-entering from a panic
+    // or another thread is stuck holding it. In either case, we skip flushing to avoid deadlock.
+    if let Some(mut tracker) = PROGRESS_TRACKER.try_lock() {
+        tracker.flush_logs();
+    }
 }
