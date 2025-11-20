@@ -7,7 +7,11 @@ SAMPLE SIZES
 Sample sizes for diversity analyses:
   Inversion callset columns indicate 44 phased individuals (sample columns).
   Reporting haplotypes as twice the sample count yields 88 potential phased haplotypes.
-  Number of loci with at least two haplotypes: 92.
+  Number of loci with at least two haplotypes (total across orientations): 92.
+  Number of loci with at least two direct haplotypes: 91.
+  Number of loci with at least two inverted haplotypes: 63.
+  Number of loci with at least two haplotypes in either orientation (union): 92.
+  Number of loci with at least two haplotypes in each orientation (intersection): 62.
   Loci with ≥2 haplotypes per orientation for π: 62 (from output.csv).
 
 DIVERSITY
