@@ -4,13 +4,17 @@ on:
   # Runs on pushes targeting the default branch
   push:
     branches: ["main"]
+    paths:
+      - "data/**"
+      - ".github/workflows/**"
+      - "web/figures-site/**"
 
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
   # Rebuild when the analysis workflow finishes so newly generated figures are published
   workflow_run:
-    workflows: ["run-analysis", "Generate supplementary tables"]
+    workflows: ["run-analysis", "Generate supplementary tables", "Manual Run VCF Pipeline"]
     types:
       - completed
 
