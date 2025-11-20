@@ -133,9 +133,6 @@ jobs:
           unzip -o '*.zip' || echo "No nested zip files found"
           rm -f '*.zip'
           ls -R
-      - name: Decompress Gzipped PHY files
-        if: steps.prep-cache.outputs.cache-hit != 'true'
-        run: gzip -d *.phy.gz || echo "No .phy.gz files to decompress."
       - name: Run AXT to PHY
         if: steps.prep-cache.outputs.cache-hit != 'true'
         run: |
