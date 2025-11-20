@@ -26,6 +26,10 @@ def main():
         logging.error("Environment variable GENE_BATCH is not set.")
         sys.exit(1)
 
+    if batch_str == "EMPTY_BATCH":
+        logging.info("Received EMPTY_BATCH. Skipping PAML run.")
+        sys.exit(0)
+
     gene_labels = [g.strip() for g in batch_str.split(',') if g.strip()]
     logging.info(f"Starting PAML Runner for Batch: {gene_labels}")
 
