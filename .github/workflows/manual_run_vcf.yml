@@ -253,7 +253,7 @@ jobs:
             --reference ../hg38.no_alt.fa \
             --gtf ../gencode.v47.basic.annotation.gtf \
             --fst \
-            --exclude HG00514, HG00733, NA19240
+            --exclude "HG00514, HG00733, NA19240"
           echo "[Run pipeline] Finished cargo run"
 
       - name: Archive PHY files
