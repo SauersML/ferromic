@@ -2112,7 +2112,10 @@ fn calculate_overall_fst_wc(
     let mut pairwise_fst_estimates = HashMap::new();
     let mut aggregated_pairwise_variance_components = HashMap::new();
 
-    for pair_key in all_observed_pair_keys {
+    let mut sorted_pair_keys: Vec<_> = all_observed_pair_keys.into_iter().collect();
+    sorted_pair_keys.sort();
+
+    for pair_key in sorted_pair_keys {
         if let Some(components_vec) = informative_site_components_pairwise.get(&pair_key) {
             // This pair had at least one site contributing (non-InsufficientData) components for it.
             let sum_a_xy: f64 = components_vec.iter().map(|(a, _)| *a).sum();
