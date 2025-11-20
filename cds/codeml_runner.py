@@ -5,6 +5,7 @@ import glob
 import traceback
 import pandas as pd
 import time
+import re
 
 # Ensure pipeline_lib is importable
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -89,7 +90,42 @@ def main():
             pass
 
     # Filter by ALLOWED_REGIONS if needed
-    if lib.ALLOWED_REGIONS:
+    # If REGION_OVERRIDE_FILTER is set (from GHA inputs), we bypass this check
+    # to allow running a region not in the whitelist.
+    override_filter = os.environ.get("REGION_OVERRIDE_FILTER")
+    if override_filter:
+        logging.info(f"Region override active: {override_filter}. Bypassing whitelist.")
+        # We assume the matrix generation step has already ensured we are only running
+        # relevant things, or we let everything pass here and rely on the fact that
+        # generate_gha_matrix only scheduled the specific region.
+        # However, we should probably filter `region_infos` to ONLY contain the override region
+        # just to be safe and avoid accidentally running other regions if they exist on disk.
+
+        # Parse override string manually or matching label?
+        # Easier to just let it pass all found regions, because generate_gha_matrix
+        # ensures only the specific region is in the job matrix if we were running per-region.
+        # But here we are running per-GENE-BATCH.
+        # A gene might overlap multiple regions.
+        # If we override for Region A, we only want to run Region A analysis for these genes.
+
+        # So, let's parse the override and filter `region_infos` to match ONLY that region.
+        try:
+            m = re.match(r"^(chr[0-9a-zA-Z]+):(\d+)-(\d+)$", override_filter)
+            if m:
+                o_chrom, o_start, o_end = m.groups()
+                o_start, o_end = int(o_start), int(o_end)
+                if o_start > o_end: o_start, o_end = o_end, o_start
+
+                region_infos = [
+                    r for r in region_infos
+                    if r['chrom'] == o_chrom and r['start'] == o_start and r['end'] == o_end
+                ]
+                logging.info(f"Filtered region_infos to override target: {len(region_infos)} regions kept.")
+        except Exception as e:
+            logging.error(f"Failed to parse override filter '{override_filter}': {e}. Aborting to avoid running everything.")
+            sys.exit(1)
+
+    elif lib.ALLOWED_REGIONS:
         allowed_set = set(lib.ALLOWED_REGIONS)
         region_infos = [r for r in region_infos if (r['chrom'], r['start'], r['end']) in allowed_set]
 
