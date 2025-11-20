@@ -7,6 +7,7 @@ use ferromic::progress::{
     display_status_box, finish_all, init_global_progress, log, update_global_progress, LogLevel,
     StatusBox,
 };
+use ferromic::transcripts;
 use rayon::ThreadPoolBuilder;
 use std::collections::{HashMap, HashSet};
 use std::io::BufRead;
@@ -244,5 +245,12 @@ fn main() -> Result<(), VcfError> {
     }
 
     finish_all();
+    // Flush the metadata writer to ensure all data is written to disk.
+    if let Err(e) = transcripts::flush_metadata() {
+        log(
+            LogLevel::Error,
+            &format!("Failed to flush metadata writer: {}", e),
+        );
+    }
     Ok(())
 }
