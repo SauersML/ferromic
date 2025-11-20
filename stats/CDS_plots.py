@@ -629,7 +629,35 @@ def draw_half_violin(
         ax.add_patch(patch)
 
 def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
-    dist = compute_group_distributions(cds_summary)
+    # -------------------------------------------------------------------------
+    # Filter for paired data only (must exist in BOTH phy_group=0 and 1)
+    # A CDS is defined by (transcript_id, inv_id)
+    # -------------------------------------------------------------------------
+    print("[plot_proportion_identical_violin] Filtering for paired data only (Direct AND Inverted)...")
+
+    # Create a composite key
+    # Use a temp copy to avoid setting on slice warning on the input df
+    temp = cds_summary.copy()
+    temp['unique_key'] = list(zip(temp['transcript_id'], temp['inv_id']))
+
+    # Identify keys present in Direct (phy_group=0)
+    keys_0 = set(temp.loc[temp['phy_group'] == 0, 'unique_key'])
+    # Identify keys present in Inverted (phy_group=1)
+    keys_1 = set(temp.loc[temp['phy_group'] == 1, 'unique_key'])
+
+    # Intersection
+    common_keys = keys_0.intersection(keys_1)
+    n_dropped = len(temp) - temp['unique_key'].isin(common_keys).sum()
+
+    print(f"[plot_proportion_identical_violin] CDSs in Direct: {len(keys_0)}")
+    print(f"[plot_proportion_identical_violin] CDSs in Inverted: {len(keys_1)}")
+    print(f"[plot_proportion_identical_violin] CDSs in Intersection: {len(common_keys)}")
+    print(f"[plot_proportion_identical_violin] Dropping {n_dropped} rows that lack a partner orientation.")
+
+    # Apply filter
+    cds_summary_filtered = temp[temp['unique_key'].isin(common_keys)].copy()
+
+    dist = compute_group_distributions(cds_summary_filtered)
 
     fig, ax = plt.subplots(figsize=(8.2, 5.4))
     ax.set_facecolor("white")
