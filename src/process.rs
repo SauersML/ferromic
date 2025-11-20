@@ -2326,12 +2326,10 @@ fn process_single_config_entry(
     let num_excluded_sites = filtered_positions_in_region
         .iter()
         .filter(|&&pos| {
-            let pos_1based = pos.saturating_add(1);
-
             if let Some(allow_regions) = allow_regions_chr {
                 if !allow_regions
                     .iter()
-                    .any(|&(start, end)| pos_1based >= start && pos_1based <= end)
+                    .any(|&(start, end)| pos >= start && pos < end)
                 {
                     return false;
                 }
@@ -2340,7 +2338,7 @@ fn process_single_config_entry(
             if let Some(mask_regions) = mask_regions_chr {
                 if mask_regions
                     .iter()
-                    .any(|&(start, end)| pos_1based >= start && pos_1based <= end)
+                    .any(|&(start, end)| pos >= start && pos < end)
                 {
                     return false;
                 }
