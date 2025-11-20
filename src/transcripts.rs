@@ -303,9 +303,16 @@ pub fn make_sequences(
 /// Flushes the shared metadata writer to ensure all buffered data is written to disk.
 /// This should be called once at the end of the program.
 pub fn flush_metadata() -> io::Result<()> {
-    // Lock the writer and explicitly flush it.
-    // The `?` operator will propagate any IO errors that occur during flushing.
-    METADATA_WRITER.lock().flush()
+    // Attempt to lock the writer.
+    // If we can't get the lock (e.g., it's held by a thread that panicked),
+    // we skip flushing to avoid a deadlock.
+    if let Some(mut writer) = METADATA_WRITER.try_lock() {
+        writer.flush()
+    } else {
+        // Lock is held, possibly by the panicking thread.
+        // We return Ok because we can't do anything about it and don't want to cause further panic.
+        Ok(())
+    }
 }
 
 pub fn initialize_hap_sequences(
