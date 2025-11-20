@@ -578,9 +578,9 @@ mod tests {
         // Manually populate the position_allele_map
         {
             let mut pam = position_allele_map.lock();
-            pam.insert(1000, ('A', 'T'));
-            pam.insert(2000, ('C', 'G'));
-            pam.insert(3000, ('G', 'A'));
+            pam.insert(1000, ('A', vec!['T']));
+            pam.insert(2000, ('C', vec!['G']));
+            pam.insert(3000, ('G', vec!['A']));
         }
 
         let empty_filtered_positions = HashSet::new();
@@ -741,7 +741,7 @@ mod tests {
         // Assert that the variant is returned but marked as invalid (filtered out)
         assert_eq!(
             result.unwrap(),
-            Some((expected_variant, false, Some((999, 'A', 'T'))))
+            Some((expected_variant, false, Some((999, 'A', vec!['T']))))
         );
     }
 
@@ -781,7 +781,7 @@ mod tests {
             let actual: Vec<Option<PackedGenotype>> =
                 (0..variant.genotypes.len()).map(|idx| variant.genotypes.get(idx)).collect();
             assert_eq!(actual, expected);
-            assert_eq!(allele_info, Some((999, 'A', 'T')));
+            assert_eq!(allele_info, Some((999, 'A', vec!['T'])));
         } else {
             panic!("Expected Some variant, got None");
         }
@@ -996,10 +996,10 @@ mod tests {
             );
             assert!(result.is_ok(), "Failed to process variant: {}", line);
             if let Some((_, _, allele_info)) = result.unwrap() {
-                if let Some((pos, ref_allele, alt_allele)) = allele_info {
+                if let Some((pos, ref_allele, alt_alleles)) = allele_info {
                     position_allele_map
                         .lock()
-                        .insert(pos, (ref_allele, alt_allele));
+                        .insert(pos, (ref_allele, alt_alleles));
                 }
             }
         }
@@ -1014,9 +1014,9 @@ mod tests {
         // Manually populate the position_allele_map
         {
             let mut pam = position_allele_map.lock();
-            pam.insert(1000, ('A', 'T'));
-            pam.insert(2000, ('C', 'G'));
-            pam.insert(3000, ('G', 'A'));
+            pam.insert(1000, ('A', vec!['T']));
+            pam.insert(2000, ('C', vec!['G']));
+            pam.insert(3000, ('G', vec!['A']));
         }
     
         let empty_filtered_positions = HashSet::new();
@@ -1073,9 +1073,9 @@ mod tests {
         // Manually populate the position_allele_map
         {
             let mut pam = position_allele_map.lock();
-            pam.insert(1000, ('A', 'T'));
-            pam.insert(2000, ('C', 'G'));
-            pam.insert(3000, ('G', 'A'));
+            pam.insert(1000, ('A', vec!['T']));
+            pam.insert(2000, ('C', vec!['G']));
+            pam.insert(3000, ('G', vec!['A']));
         }
     
         let empty_filtered_positions = HashSet::new();
@@ -1141,9 +1141,9 @@ mod tests {
         // Manually populate the position_allele_map
         {
             let mut pam = position_allele_map.lock();
-            pam.insert(1000, ('A', 'T'));
-            pam.insert(2000, ('C', 'G'));
-            pam.insert(3000, ('G', 'A'));
+            pam.insert(1000, ('A', vec!['T']));
+            pam.insert(2000, ('C', vec!['G']));
+            pam.insert(3000, ('G', vec!['A']));
         }
     
         let empty_filtered_positions = HashSet::new();
@@ -1202,8 +1202,8 @@ mod tests {
            ("Sample2".to_string(), (1, 1)), // Add both haplotypes to group 1
        ]);
        let position_allele_map = Arc::new(Mutex::new(HashMap::from([
-           (1000, ('A', 'T')),
-           (2000, ('A', 'T')),
+           (1000, ('A', vec!['T'])),
+           (2000, ('A', vec!['T'])),
        ])));
        let chromosome = "1".to_string();
        let (fasta_file, _cds_regions) = setup_test_data();
@@ -1213,8 +1213,8 @@ mod tests {
 
         {
             let mut pam = position_allele_map.lock();
-            pam.insert(1000, ('A', 'G'));
-            pam.insert(2000, ('T', 'C'));
+            pam.insert(1000, ('A', vec!['G']));
+            pam.insert(2000, ('T', vec!['C']));
         }
     
        let empty_filtered_positions = HashSet::new();
@@ -1266,9 +1266,9 @@ mod tests {
         // Manually populate the position_allele_map
         {
             let mut pam = position_allele_map.lock();
-            pam.insert(1000, ('A', 'T'));
-            pam.insert(2000, ('C', 'G'));
-            pam.insert(3000, ('G', 'A'));
+            pam.insert(1000, ('A', vec!['T']));
+            pam.insert(2000, ('C', vec!['G']));
+            pam.insert(3000, ('G', vec!['A']));
         }
     
         let empty_filtered_positions = HashSet::new();
@@ -1328,9 +1328,9 @@ mod tests {
         // Manually populate the position_allele_map
         {
             let mut pam = position_allele_map.lock();
-            pam.insert(1000, ('A', 'T'));
-            pam.insert(2000, ('A', 'A'));
-            pam.insert(3000, ('A', 'T'));
+            pam.insert(1000, ('A', vec!['T']));
+            pam.insert(2000, ('A', vec!['A']));
+            pam.insert(3000, ('A', vec!['T']));
         }
 
         let empty_filtered_positions = HashSet::new();
@@ -1389,9 +1389,9 @@ mod tests {
         // Manually populate the position_allele_map
         {
             let mut pam = position_allele_map.lock();
-            pam.insert(1000, ('A', 'T'));
-            pam.insert(2000, ('C', 'G'));
-            pam.insert(3000, ('G', 'A'));
+            pam.insert(1000, ('A', vec!['T']));
+            pam.insert(2000, ('C', vec!['G']));
+            pam.insert(3000, ('G', vec!['A']));
         }
     
         let empty_filtered_positions = HashSet::new();
@@ -1448,9 +1448,9 @@ mod tests {
         // Manually populate the position_allele_map
         {
             let mut pam = position_allele_map.lock();
-            pam.insert(1000, ('A', 'T'));
-            pam.insert(2000, ('C', 'G'));
-            pam.insert(3000, ('G', 'A'));
+            pam.insert(1000, ('A', vec!['T']));
+            pam.insert(2000, ('C', vec!['G']));
+            pam.insert(3000, ('G', vec!['A']));
         }
     
         let empty_filtered_positions = HashSet::new();
@@ -1507,9 +1507,9 @@ mod tests {
         // Manually populate the position_allele_map
         {
             let mut pam = position_allele_map.lock();
-            pam.insert(1000, ('A', 'T'));
-            pam.insert(2000, ('C', 'G'));
-            pam.insert(3000, ('G', 'A'));
+            pam.insert(1000, ('A', vec!['T']));
+            pam.insert(2000, ('C', vec!['G']));
+            pam.insert(3000, ('G', vec!['A']));
         }
     
         let empty_filtered_positions = HashSet::new();
@@ -1621,9 +1621,9 @@ mod tests {
         // Manually populate the position_allele_map
         {
             let mut pam = position_allele_map.lock();
-            pam.insert(1000, ('A', 'T'));
-            pam.insert(2000, ('C', 'G'));
-            pam.insert(3000, ('G', 'A'));
+            pam.insert(1000, ('A', vec!['T']));
+            pam.insert(2000, ('C', vec!['G']));
+            pam.insert(3000, ('G', vec!['A']));
         }
     
         // Process variants for haplotype_group=1 (Group 1)
