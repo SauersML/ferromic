@@ -114,6 +114,21 @@ jobs:
               shopt -u nullglob
               rm -rf "$dest"
               continue
+            elif [[ "$name" == "run-vcf-metadata" ]]; then
+              dest="data/run-vcf-metadata-unzipped"
+              rm -rf "$dest"
+              mkdir -p "$dest"
+              unzip -q "$zip_path" -d "$dest"
+              rm -f "$zip_path"
+              src="$dest/phy_metadata.tsv"
+              if [[ ! -f "$src" ]]; then
+                echo "Missing phy_metadata.tsv at $src" >&2
+                exit 1
+              fi
+              cp "$src" data/phy_metadata.tsv
+              echo "Updated data/phy_metadata.tsv"
+              rm -rf "$dest"
+              continue
             fi
 
             dest="data/${name}"
@@ -142,15 +157,6 @@ jobs:
                 fi
                 cp "$src" data/output.csv
                 echo "Updated data/output.csv"
-                ;;
-              run-vcf-metadata)
-                src="$dest/phy_metadata.tsv"
-                if [[ ! -f "$src" ]]; then
-                  echo "Missing phy_metadata.tsv at $src" >&2
-                  exit 1
-                fi
-                cp "$src" data/phy_metadata.tsv
-                echo "Updated data/phy_metadata.tsv"
                 ;;
             esac
 
