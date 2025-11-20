@@ -173,6 +173,11 @@ def setup_external_tools(base_dir):
             logging.error(f"Error setting up PAML: {e}")
     else:
         logging.info(f"PAML found at {paml_dir}")
+        try:
+            st = os.stat(paml_bin)
+            os.chmod(paml_bin, st.st_mode | stat.S_IEXEC)
+        except Exception as e:
+            logging.warning(f"Could not set execute permissions on PAML: {e}")
 
     # Setup IQ-TREE
     if not os.path.exists(iqtree_bin):
@@ -199,6 +204,11 @@ def setup_external_tools(base_dir):
              logging.error(f"Error setting up IQ-TREE: {e}")
     else:
         logging.info(f"IQ-TREE found at {iqtree_dir}")
+        try:
+            st = os.stat(iqtree_bin)
+            os.chmod(iqtree_bin, st.st_mode | stat.S_IEXEC)
+        except Exception as e:
+            logging.warning(f"Could not set execute permissions on IQ-TREE: {e}")
 
     return iqtree_bin, paml_bin
 
@@ -231,8 +241,13 @@ def run_command(command_list, work_dir, timeout=None, env=None, input_data=None)
 def load_gene_metadata(tsv_path='phy_metadata.tsv'):
     """Load gene coordinate metadata from a TSV file robustly."""
     if not os.path.exists(tsv_path):
-        raise FileNotFoundError(
-            f"Metadata file '{tsv_path}' not found; cannot map genes to regions.")
+        # Fallback check for data/ directory
+        alt_path = os.path.join('data', tsv_path)
+        if os.path.exists(alt_path):
+            tsv_path = alt_path
+        else:
+            raise FileNotFoundError(
+                f"Metadata file '{tsv_path}' not found (checked local and data/); cannot map genes to regions.")
 
     df = pd.read_csv(tsv_path, sep='\t', dtype=str)
 
