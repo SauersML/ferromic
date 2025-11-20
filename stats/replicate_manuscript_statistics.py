@@ -434,7 +434,7 @@ def _load_inv_properties() -> pd.DataFrame:
     return df
 
 
-def _load_pi_summary() -> pd.DataFrame:
+def _load_pi_summary(drop_na_pi: bool = True) -> pd.DataFrame:
     pi_path = DATA_DIR / "output.csv"
     if not pi_path.exists():
         raise FileNotFoundError(f"Missing per-inversion diversity summary: {pi_path}")
@@ -449,7 +449,8 @@ def _load_pi_summary() -> pd.DataFrame:
         how="inner",
     )
     merged = merged.replace([np.inf, -np.inf], np.nan)
-    merged = merged.dropna(subset=["0_pi_filtered", "1_pi_filtered"])
+    if drop_na_pi:
+        merged = merged.dropna(subset=["0_pi_filtered", "1_pi_filtered"])
     return merged
 
 
@@ -537,6 +538,19 @@ def summarize_sample_sizes() -> List[str]:
         )
     else:
         lines.append(f"  Callset not found at {callset_path}; sample counts unavailable.")
+
+    # Load with drop_na_pi=False to get haplotype counts for all loci,
+    # even those where pi could not be calculated for one orientation.
+    pi_df_unfiltered = _load_pi_summary(drop_na_pi=False)
+
+    # Count loci with at least two haplotypes, regardless of orientation
+    num_with_two_haps = pi_df_unfiltered[
+        (pi_df_unfiltered["0_num_hap_filter"] >= 2) | (pi_df_unfiltered["1_num_hap_filter"] >= 2)
+    ]
+    lines.append(
+        "  Number of loci with at least two haplotypes: "
+        f"{_fmt(len(num_with_two_haps), 0)}."
+    )
 
     pi_df = _load_pi_summary()
     usable = pi_df[(pi_df["0_num_hap_filter"] >= 2) & (pi_df["1_num_hap_filter"] >= 2)]
