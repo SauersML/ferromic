@@ -143,6 +143,15 @@ jobs:
                 cp "$src" data/output.csv
                 echo "Updated data/output.csv"
                 ;;
+              run-vcf-metadata)
+                src="$dest/phy_metadata.tsv"
+                if [[ ! -f "$src" ]]; then
+                  echo "Missing phy_metadata.tsv at $src" >&2
+                  exit 1
+                fi
+                cp "$src" data/phy_metadata.tsv
+                echo "Updated data/phy_metadata.tsv"
+                ;;
             esac
 
             rm -rf "$dest"
