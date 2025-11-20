@@ -1117,6 +1117,24 @@ def summarize_key_associations() -> List[str]:
             ancestry_targets=["EUR", "AMR"],
         ),
         AssocSpec(
+            "chr17-45585160-INV-706887",
+            "Abnormal Papanicolaou smear",
+            ("papanicolaou", "smear"),
+            table_name="phewas_results.tsv",
+        ),
+        AssocSpec(
+            "chr17-45585160-INV-706887",
+            "Melanocytic nevi",
+            ("melanocytic", "nevi"),
+            table_name="phewas_results.tsv",
+        ),
+        AssocSpec(
+            "chr17-45585160-INV-706887",
+            "Benign neoplasm of the skin",
+            ("benign", "neoplasm", "skin"),
+            table_name="phewas_results.tsv",
+        ),
+        AssocSpec(
             "chr17-45974480-INV-29218",
             "Morbid obesity (Tag SNP)",
             ("morbid", "obesity"),
@@ -1412,6 +1430,27 @@ def summarize_pgs_controls() -> List[str]:
         f"(p_nominal = {_fmt(largest.p_nominal, 3)}, p_with_pgs = {_fmt(largest.p_with_pgs, 3)}, "
         f"fold-change = {_fmt(largest.fold_change, 3)})."
     )
+
+    # Additional specific reporting for manuscript diseases
+    target_terms = ["Breast", "Obesity", "Heart", "Cognitive", "MCI", "Alzheimer"]
+
+    # Create a mask for phenotypes containing any of the target terms
+    mask = pgs["Phenotype"].astype(str).apply(
+        lambda x: any(term.lower() in x.lower() for term in target_terms)
+    )
+
+    relevant_rows = pgs[mask].copy()
+    if not relevant_rows.empty:
+        # Sort by fold change to be consistent with "largest inflation" logic or just by name
+        relevant_rows = relevant_rows.sort_values("fold_change", ascending=False)
+
+        lines.append("  Specific disease statistics:")
+        for row in relevant_rows.itertuples():
+             lines.append(
+                f"    {row.Phenotype}: p_nominal = {_fmt(row.p_nominal, 3)} -> p_with_pgs = {_fmt(row.p_with_pgs, 3)} "
+                f"(fold-change = {_fmt(row.fold_change, 3)})"
+            )
+
     return lines
 
 
