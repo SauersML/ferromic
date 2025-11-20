@@ -316,6 +316,175 @@ impl DenseGenotypeMatrix {
     pub fn max_allele(&self) -> u8 {
         self.max_allele
     }
+
+    /// Creates a DenseGenotypeMatrix from a slice of Variants.
+    ///
+    /// This method flattens the sparse/compressed genotype data into a dense matrix
+    /// suitable for SIMD-optimized calculations. It handles variable ploidy by finding
+    /// the maximum ploidy across all variants (or defaulting to 2 if ambiguous/variable)
+    /// but typically VCFs processed here have consistent ploidy.
+    pub fn from_variants(variants: &[Variant], sample_count: usize) -> Option<Self> {
+        if variants.is_empty() {
+            return None;
+        }
+
+        // Scan variants to find max ploidy.
+        // We only check the first few variants to guess ploidy to avoid scanning everything,
+        // or we can check all. For correctness with variable ploidy VCFs (rare here), we check all.
+        // However, CompressedGenotypes stores data efficiently.
+        // Let's assume max_ploidy is at least 1 if data exists.
+        let max_ploidy = variants
+            .par_iter()
+            .map(|v| {
+                v.genotypes
+                    .iter()
+                    .filter_map(|g| g.as_ref().map(|gt| gt.len()))
+                    .max()
+                    .unwrap_or(0)
+            })
+            .max()
+            .unwrap_or(0);
+
+        if max_ploidy == 0 {
+            // effectively no data
+            return None;
+        }
+
+        let variant_count = variants.len();
+        let stride = sample_count * max_ploidy;
+        let total_entries = variant_count * stride;
+
+        // Allocate data vector. Initialize with 0.
+        // We will fill it in parallel.
+        let mut data = vec![0u8; total_entries];
+
+        // Allocate missing bitmask.
+        // 1 bit per entry.
+        let missing_words = (total_entries + 63) / 64;
+        let mut missing = vec![0u64; missing_words];
+
+        // We use unsafe to allow parallel mutable access to disjoint parts of the vectors.
+        // Each variant writes to its own row (segment of data and missing).
+        // Stride is aligned to samples * ploidy.
+        // Missing bits are packed. To parallelize missing safely, we need to ensure
+        // threads don't write to the same u64 word.
+        // Rows might not align to 64-bit boundaries if stride is not multiple of 64.
+        // However, usually parallelizing over chunks of variants is fine if we are careful
+        // or if we just construct missing sequentially (it's small).
+        // bitmask is 1/8th of data size (1 bit vs 8 bits).
+        // Let's construct data in parallel and missing sequentially for safety/simplicity,
+        // or use AtomicU64 if needed (but that's slower).
+        //
+        // Actually, let's construct independent vectors in parallel chunks and merge?
+        // No, that involves copying.
+        //
+        // Given the constraints and "optimized" goal:
+        // - data: parallel fill is easy (chunks_mut).
+        // - missing: parallel fill is hard due to bit packing boundaries.
+        //
+        // But wait, `CompressedGenotypes` access is `get(sample_index)`.
+        //
+        // Optimization: Calculate missing bits locally and OR them?
+        // Or just fill missing sequentially. It's 8x less data writing than `data`.
+        // Actually, reading `CompressedGenotypes` is the slow part (decompression/unpacking).
+        // We want to do that in parallel.
+        //
+        // So, we can have each thread produce a `Vec<u8>` (row data) and `Vec<u64>` (row missing bits).
+        // Then we copy them into the final buffer.
+        // But copying is memory bandwidth.
+        //
+        // Better approach:
+        // `data` can be written in parallel directly.
+        // `missing`... if we treat it as `Vec<u8>` (bytes) temporarily and then pack?
+        // Or just accept sequential for missing?
+        //
+        // Let's try parallelizing over variants for `data`, and collect `missing` info.
+        // Actually, `DenseGenotypeMatrix` expects `Arc<[u64]>`.
+        //
+        // Let's do this:
+        // 1. Create `data` initialized to 0.
+        // 2. Create `missing` initialized to 0.
+        // 3. Use `par_chunks_mut` for `data`.
+        //    For `missing`, we can't easily split because of bit alignment.
+        //    UNLESS we construct `missing` as `Vec<u8>` (boolean byte array) first, then pack.
+        //    That uses 8x memory for the mask temporarily, but allows full parallel build.
+        //    `missing` as bytes = `total_entries` bytes.
+        //    `data` = `total_entries` bytes.
+        //    Total memory = 2 * `total_entries`.
+        //    Then pack `missing_bytes` -> `missing_bits`.
+        //    This is robust and parallelizable.
+
+        let mut missing_bytes = vec![0u8; total_entries];
+
+        // Zip variants with mutable slices of data and missing_bytes
+        // Each variant takes `stride` elements.
+        data.par_chunks_mut(stride)
+            .zip(missing_bytes.par_chunks_mut(stride))
+            .zip(variants.par_iter())
+            .for_each(|((data_row, missing_row), variant)| {
+                // Iterate samples
+                for sample_idx in 0..sample_count {
+                    let offset = sample_idx * max_ploidy;
+                    // Initialize as missing (1) or present (0)?
+                    // Default 0 in `missing_row`. We set to 1 if missing.
+
+                    if let Some(gt) = variant.genotypes.get(sample_idx) {
+                        // Genotype present
+                        let len = gt.len();
+                        for i in 0..len.min(max_ploidy) {
+                            data_row[offset + i] = gt[i];
+                            // missing_row[offset + i] = 0; // Already 0
+                        }
+                        // Pad if ploidy > len
+                        for i in len..max_ploidy {
+                            missing_row[offset + i] = 1;
+                        }
+                    } else {
+                        // Sample missing
+                        for i in 0..max_ploidy {
+                            missing_row[offset + i] = 1;
+                        }
+                    }
+                }
+            });
+
+        // Pack missing_bytes into missing (u64)
+        // This is fast and can be parallelized or sequential.
+        // Sequential packing:
+        // Iterate bytes, set bits.
+        // Optimization: Cast `missing_bytes` to `u64` chunks? No, bytes are 0/1.
+        // We can use a specialized packer.
+        // Or parallelize packing.
+        // Let's do parallel packing by chunks of 64 bytes -> 1 u64?
+        // Actually chunks of 64 bytes -> 1 u64 is easy.
+        // 1 bit per byte.
+
+        // Parallel packing of boolean bytes to bits
+        missing.par_iter_mut().enumerate().for_each(|(i, word)| {
+            let start_bit = i * 64;
+            let end_bit = (start_bit + 64).min(total_entries);
+            let mut w = 0u64;
+            for bit_idx in start_bit..end_bit {
+                if missing_bytes[bit_idx] == 1 {
+                    w |= 1 << (bit_idx - start_bit);
+                }
+            }
+            *word = w;
+        });
+
+        // Calculate max_allele in parallel from data
+        // (Optional optimization, but cheap given we just built it)
+        let global_max_allele = data.par_iter().copied().max().unwrap_or(0);
+
+        Some(Self::new(
+            data,
+            Some(missing),
+            variant_count,
+            sample_count,
+            max_ploidy,
+            global_max_allele,
+        ))
+    }
 }
 
 /// Holds the result of a Dxy (between-population nucleotide diversity) calculation,
