@@ -104,9 +104,8 @@ KEEP_PAML_OUT = bool(int(os.environ.get("KEEP_PAML_OUT", "0")))
 PAML_OUT_DIR  = os.environ.get("PAML_OUT_DIR", "paml_runs")
 PAML_CACHE_DIR = os.environ.get("PAML_CACHE_DIR", "paml_cache")
 
-ENABLE_PAML_TIMEOUT = False
 IQTREE_TIMEOUT = int(os.environ.get("IQTREE_TIMEOUT", "7200"))
-PAML_TIMEOUT   = int(os.environ.get("PAML_TIMEOUT", "3600")) if ENABLE_PAML_TIMEOUT else None
+PAML_TIMEOUT   = int(os.environ.get("PAML_TIMEOUT", "3600"))
 
 RUN_BRANCH_MODEL_TEST = False
 RUN_CLADE_MODEL_TEST = True
