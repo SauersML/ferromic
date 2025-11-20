@@ -540,13 +540,26 @@ def parse_transcript_metadata():
                 log_detail("CDS", t_id, "SKIP_MISSING_GROUP_PAIR", f"Unable to infer group0/group1 partner from '{base}'.", line=line_num)
                 continue
 
+            g0_exists = os.path.exists(g0_fname)
+            g1_exists = os.path.exists(g1_fname)
+
+            if not g0_exists or not g1_exists:
+                if not g0_exists:
+                    logger.add("Missing Input File", f"{t_id}: group0 file not found: {g0_fname}")
+                if not g1_exists:
+                    logger.add("Missing Input File", f"{t_id}: group1 file not found: {g1_fname}")
+                log_detail("CDS", t_id, "SKIP_MISSING_PHY", "group0 or group1 file not found.", group0=g0_fname, group1=g1_fname)
+                continue
+
             g0_seqs = read_phy_sequences(g0_fname)
             g1_seqs = read_phy_sequences(g1_fname)
 
             if not g0_seqs or not g1_seqs:
-                logger.add("Missing Input File", f"{t_id}: group0 or group1 .phy not found or empty.")
-                log_detail("CDS", t_id, "SKIP_MISSING_PHY", "Either group0 or group1 .phy file missing/empty.",
-                           group0=g0_fname, group1=g1_fname)
+                if not g0_seqs:
+                    logger.add("Empty Input File", f"{t_id}: group0 file is empty: {g0_fname}")
+                if not g1_seqs:
+                    logger.add("Empty Input File", f"{t_id}: group1 file is empty: {g1_fname}")
+                log_detail("CDS", t_id, "SKIP_EMPTY_PHY", "group0 or group1 file is empty.", group0=g0_fname, group1=g1_fname)
                 continue
 
             if not all(len(s) == expected_len for s in g0_seqs):
