@@ -62,8 +62,22 @@ Differentiation between orientations (Hudson's FST):
   Highly differentiated loci: 26 with FST > 0.2 and 10 with FST > 0.5.
 
 BREAKPOINT FRF
-Breakpoint enrichment (Precision-Weighted Meta-Analysis):
-  Missing required columns for meta-analysis: recurrence_flag.
+Breakpoint enrichment (Flat–Ramp–Flat Model):
+  [Descriptive Levels] Raw FST averages (Unweighted):
+    Single-event (n=14): Edge=0.501, Middle=0.458.
+    Recurrent (n=25): Edge=0.127, Middle=0.167.
+
+  [Unweighted Delta Analysis]
+    Single-event mean delta: 0.043.
+    Recurrent mean delta: -0.040.
+    Diff-of-diffs (Single - Recurrent): 0.083.
+    Energy Test p-value (Single > Recurrent): 6.800e-03.
+
+  [Precision-Weighted Meta-Analysis]
+    Weighted Median Delta: Single=0.176, Recurrent=-0.028, Diff=0.205.
+    Median P-value (Two-sided): 3.0000e-06.
+    Weighted Mean Delta:   Single=0.067, Recurrent=-0.024, Diff=0.091.
+    Mean P-value (Two-sided):   0.0111.
 
 IMPUTATION
 Imputation performance summary:
