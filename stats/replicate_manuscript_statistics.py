@@ -165,6 +165,7 @@ def _stage_cds_inputs() -> list[Path]:
                     target_path.write_bytes(data)
                     staged_paths.append(target_path)
         except zipfile.BadZipFile:
+
             # Check if this is a Git LFS pointer file
             is_lfs = False
             try:
@@ -243,6 +244,14 @@ def run_fresh_cds_pipeline():
                 sys.exit(1)
 
             print("\n>>> PIPELINE: GENERATION COMPLETE. Proceeding to manuscript report...\n")
+
+        except (FileNotFoundError, zipfile.BadZipFile) as e:
+            print(
+                f"WARNING: Skipping fresh CDS generation due to missing input data: {e}"
+            )
+            print("... Will proceed with pre-existing summary tables if available ...")
+            return
+
         finally:
             if staged_paths:
                 print("... Cleaning staged metadata and PHYLIP files ...")
