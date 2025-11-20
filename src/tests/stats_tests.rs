@@ -5,7 +5,7 @@ mod tests {
     use std::collections::{HashMap, HashSet};
     use std::io::{Read, Write};
     use parking_lot::Mutex;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::sync::Arc;
     use flate2::read::GzDecoder;
 
