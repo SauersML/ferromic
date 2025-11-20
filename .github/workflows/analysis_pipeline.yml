@@ -26,7 +26,7 @@ jobs:
       - name: Cache AXT file
         uses: actions/cache@v4
         with:
-          path: hg38.PanTro6.net.axt.gz
+          path: hg38.panTro6.net.axt.gz
           key: axt-file-v1
 
       - name: Unzip PHY files
@@ -174,7 +174,7 @@ jobs:
         with:
           pattern: region-tree-*
           merge-multiple: true
-          path: region_trees
+          path: .
 
       - name: Run PAML (Batch)
         run: python3 cds/codeml_runner.py
