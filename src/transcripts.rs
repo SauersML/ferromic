@@ -13,7 +13,7 @@ use flate2::write::GzEncoder;
 use flate2::Compression;
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufWriter, Write};
 use std::path::Path;
