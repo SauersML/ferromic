@@ -2,10 +2,12 @@ import os
 import re
 from collections import defaultdict
 import sys
+import gzip
 
 def parse_specific_phy_file(filename, group_type):
     """
     Parses a PHYLIP-like file based on specific rules for different group types.
+    Handles .gz files automatically.
 
     Args:
         filename (str): The path to the file to parse.
@@ -17,7 +19,12 @@ def parse_specific_phy_file(filename, group_type):
     """
     sequences = []
     try:
-        with open(filename, 'r') as f:
+        if filename.endswith('.gz'):
+            f = gzip.open(filename, 'rt')
+        else:
+            f = open(filename, 'r')
+
+        with f:
             lines = [line.strip() for line in f if line.strip()]
     except IOError as e:
         print(f"  [!] FATAL: Could not read file '{filename}': {e}", file=sys.stderr)
@@ -141,13 +148,15 @@ def find_and_combine_phy_files():
     print(f"First 10 files: {all_files[:10]}")
 
     # Regex to extract key parts from filenames, handling the optional ENSG ID. (Gene files)
+    # Added optional .gz suffix to regex
     pattern_gene = re.compile(
-        r"^(group0|group1|outgroup)_([A-Za-z0-9\._-]+?)_(?:ENSG[0-9\.]+_)?(ENST[0-9\.]+)_(chr.+)\.phy$"
+        r"^(group0|group1|outgroup)_([A-Za-z0-9\._-]+?)_(?:ENSG[0-9\.]+_)?(ENST[0-9\.]+)_(chr.+)\.phy(?:.gz)?$"
     )
 
     # Regex for overall region (inversion) files: inversion_group{0|1}_{CHR}_start{S}_end{E}.phy
+    # Added optional .gz suffix to regex
     pattern_region = re.compile(
-        r"^inversion_(group0|group1)_([A-Za-z0-9]+)_start(\d+)_end(\d+)\.phy$"
+        r"^inversion_(group0|group1)_([A-Za-z0-9]+)_start(\d+)_end(\d+)\.phy(?:.gz)?$"
     )
 
     gene_groups = defaultdict(dict)     # identifier -> {'group0': file, 'group1': file, 'outgroup': file}
@@ -175,7 +184,7 @@ def find_and_combine_phy_files():
             continue
 
         # If not matched, print failure for debugging
-        if filename.endswith(".phy"):
+        if filename.endswith(".phy") or filename.endswith(".phy.gz"):
             print(f"  -> Regex Mismatch: {filename}")
 
     if not gene_groups and not region_groups:
