@@ -15,6 +15,13 @@
 //! introspection-friendly attributes. The goal is to make Ferromic feel like a
 //! native Python library while retaining Rust's performance.
 
+#[cfg(not(target_env = "msvc"))]
+use mimalloc::MiMalloc;
+
+#[cfg(not(target_env = "msvc"))]
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
+
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::path::PathBuf;
