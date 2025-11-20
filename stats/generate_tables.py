@@ -855,6 +855,9 @@ def build_workbook(output_path: Path) -> None:
         col_name_fmt = workbook.add_format({"bold": True, "text_wrap": True, "bg_color": "#EEEEEE"})
         col_def_fmt = workbook.add_format({"text_wrap": True})
 
+        title_rich_fmt = workbook.add_format({"bold": True})
+        title_cell_fmt = workbook.add_format({"text_wrap": True, "valign": "top", "align": "left"})
+
         readme_ws.set_column(0, 0, 32)
         readme_ws.set_column(1, 1, 120)
 
@@ -877,8 +880,23 @@ def build_workbook(output_path: Path) -> None:
 
             row += 2
 
-        for sheet_info, df in zip(sheet_infos, sheet_frames):
-            df.to_excel(writer, index=False, sheet_name=sheet_info.name)
+        for i, (sheet_info, df) in enumerate(zip(sheet_infos, sheet_frames), start=1):
+            df.to_excel(writer, index=False, sheet_name=sheet_info.name, startrow=1)
+
+            worksheet = writer.sheets[sheet_info.name]
+            num_cols = max(len(df.columns), 1)
+
+            if num_cols > 1:
+                worksheet.merge_range(0, 0, 0, num_cols - 1, "", title_cell_fmt)
+
+            worksheet.write_rich_string(
+                0,
+                0,
+                title_rich_fmt,
+                f"Table S{i}. {sheet_info.name}.",
+                f" {sheet_info.description}",
+                title_cell_fmt,
+            )
 
     print(f"Supplementary tables written to {output_path}")
 
