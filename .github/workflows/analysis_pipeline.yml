@@ -2,6 +2,11 @@ name: Analysis Pipeline
 
 on:
   workflow_dispatch:
+    inputs:
+      region_override:
+        description: 'Specific region (e.g., chr22:123-456). Leave empty for full run.'
+        required: false
+        type: string
 
 jobs:
   prep-and-matrix:
@@ -143,9 +148,16 @@ jobs:
 
       - name: Generate GHA Matrix
         id: set-matrix
+        env:
+          REGION_INPUT: ${{ inputs.region_override }}
         run: |
           # Run the generator and capture JSON output
-          JSON=$(python3 cds/generate_gha_matrix.py --batch-size 4)
+          REGION_ARG=""
+          if [[ -n "$REGION_INPUT" ]]; then
+             REGION_ARG="--region-override $REGION_INPUT"
+          fi
+
+          JSON=$(python3 cds/generate_gha_matrix.py --batch-size 4 "$REGION_ARG")
 
           # Parse JSON to get regions and batches
           REGIONS=$(echo "$JSON" | python3 -c "import sys, json; print(json.dumps(json.load(sys.stdin)['regions']))")
@@ -301,6 +313,7 @@ jobs:
           GENE_BATCH: ${{ matrix.batch }}
           # Optional: configure timeouts etc
           PAML_TIMEOUT: 3600
+          REGION_OVERRIDE_FILTER: ${{ inputs.region_override }}
 
       - name: Upload Partial Results
         uses: actions/upload-artifact@v4
