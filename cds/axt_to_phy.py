@@ -14,6 +14,8 @@ import requests
 import multiprocessing
 from collections import defaultdict
 from contextlib import contextmanager
+import tempfile
+from pathlib import Path
 
 # =========================
 # --- Configuration -----
@@ -40,6 +42,8 @@ VALID_BASES = {"A", "C", "G", "T"}
 # Cache containers populated at runtime
 _PHY_CACHE = {}
 _BIN_INDEX = None
+_TEMP_DIR_OBJ = tempfile.TemporaryDirectory()
+_TEMP_DIR = _TEMP_DIR_OBJ.name
 
 _AXT_HEADER_RE = re.compile(
     r"^(-?\d+)\s+(\S+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(\d+)\s+(\d+)\s+([+-])\s+(\d+)$"
@@ -407,8 +411,36 @@ def ungzip_file():
         print(f"\nFATAL: Error decompressing file: {e}", flush=True)
         sys.exit(1)
 
+def _decompress_phy_gz(gz_path: str):
+    """Decompress .phy.gz file to temp dir, return new path."""
+    if not gz_path.endswith(".phy.gz"):
+        return None
+
+    source = Path(gz_path)
+    if not source.exists():
+        return None
+
+    target = Path(_TEMP_DIR) / source.name[:-3]
+    if target.exists():
+        return str(target)
+
+    try:
+        with gzip.open(source, 'rb') as f_in, open(target, 'wb') as f_out:
+            shutil.copyfileobj(f_in, f_out)
+        return str(target)
+    except (gzip.BadGzipFile, EOFError):
+        return None
+
+
 def read_phy_sequences(filename):
-    """Reads all sequences from a simple PHYLIP file. Returns list[str]."""
+    """Reads all sequences from a simple PHYLIP file. Handles .gz files."""
+    if filename.endswith(".phy.gz"):
+        decompressed_path = _decompress_phy_gz(filename)
+        if not decompressed_path:
+            _PHY_CACHE[filename] = []
+            return []
+        filename = decompressed_path
+
     cached = _PHY_CACHE.get(filename)
     if cached is not None:
         return cached
@@ -1683,3 +1715,5 @@ if __name__ == '__main__':
     except KeyboardInterrupt:
         print("\nInterrupted by user.", flush=True)
         sys.exit(130)
+    finally:
+        _TEMP_DIR_OBJ.cleanup()
