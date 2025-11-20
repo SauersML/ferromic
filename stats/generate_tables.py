@@ -414,6 +414,18 @@ TRAJECTORY_COLUMN_DEFS: Dict[str, str] = OrderedDict(
     ]
 )
 
+SIMULATION_COLUMN_DEFS: Dict[str, str] = OrderedDict(
+    [
+        ("First inversion event (years ago)", "Time of the first inversion event."),
+        ("Second inversion event (years ago)", "Time of the second inversion event."),
+        ("Third inversion event (years ago)", "Time of the third inversion event."),
+        ("Sample size (haplotypes)", "Number of haplotypes simulated."),
+        ("Inversion frequency", "Frequency of the inversion."),
+        ("Recombination rate (per generation per base pair)", "Recombination rate used in simulation."),
+        ("Gene flow (per generation per chromosome)", "Gene flow rate used in simulation."),
+    ]
+)
+
 GENE_RESULTS_SCRIPT = REPO_ROOT / "stats" / "per_gene_cds_differences_jackknife.py"
 GENE_RESULTS_TSV = REPO_ROOT / "gene_inversion_direct_inverted.tsv"
 CDS_SUMMARY_TSV = REPO_ROOT / "cds_identical_proportions.tsv"
@@ -427,6 +439,11 @@ CATEGORIES_RESULTS_CANDIDATES = (
 IMPUTATION_RESULTS = DATA_DIR / "imputation_results.tsv"
 INV_PROPERTIES = DATA_DIR / "inv_properties.tsv"
 TRAJECTORY_DATA = DATA_DIR / "Trajectory-12_47296118_A_G.tsv"
+
+TABLE_S1 = DATA_DIR / "tables.xlsx - Table S1.tsv"
+TABLE_S2 = DATA_DIR / "tables.xlsx - Table S2.tsv"
+TABLE_S3 = DATA_DIR / "tables.xlsx - Table S3.tsv"
+TABLE_S4 = DATA_DIR / "tables.xlsx - Table S4.tsv"
 
 
 @dataclass
@@ -732,6 +749,15 @@ def _load_phewas_tagging() -> pd.DataFrame:
 
 def _load_imputation_results() -> pd.DataFrame:
     df = _load_simple_tsv(IMPUTATION_RESULTS)
+    # Rename columns to match definitions
+    df = df.rename(
+        columns={
+            "id": "Inversion",
+            "best_n_components": "n_components",
+            "model_p_value": "p_value",
+        }
+    )
+
     # Remove unnamed columns (Column 6 and Column 9)
     columns_to_drop = ["Column 6", "Column 9"]
     df = df.drop(columns=[col for col in columns_to_drop if col in df.columns])
@@ -745,6 +771,11 @@ def _load_trajectory_data() -> pd.DataFrame:
     return _prune_columns(df, TRAJECTORY_COLUMN_DEFS, "AGES trajectory 12_47296118")
 
 
+def _load_simulation_table(path: Path) -> pd.DataFrame:
+    df = _load_simple_tsv(path)
+    return _prune_columns(df, SIMULATION_COLUMN_DEFS, path.name)
+
+
 def build_workbook(output_path: Path) -> None:
     sheet_infos: List[SheetInfo] = []
     sheet_frames: List[pd.DataFrame] = []
@@ -754,6 +785,42 @@ def build_workbook(output_path: Path) -> None:
         print(f"Preparing sheet: {sheet.name}")
         df = sheet.loader()
         sheet_frames.append(df)
+
+    register(
+        SheetInfo(
+            name="Old recurrent events",
+            description="Parameters used in simulations under different scenarios of old recurrent inversion events. Simulations were generated using a structured coalescent framework (Methods). The three inversion events are set to emerge at 500, 250, 100 thousand years ago. Six inversion frequencies (1%, 2%, 5%, 10%, 25%, and 50%) are considered.  Three recombination rates, including zero, 1e-8, and 1e-6 per generation per base pair are simulated. Gene flow is set as 1e-8 per generation per chromosome only between groups of haplotypes in the same orientations.",
+            column_defs=SIMULATION_COLUMN_DEFS,
+            loader=lambda: _load_simulation_table(TABLE_S1),
+        )
+    )
+
+    register(
+        SheetInfo(
+            name="Young recurrent events",
+            description="Parameters used in simulations under different scenarios of young recurrent inversion events. Simulations were generated using a structured coalescent framework (Methods). The three inversion events are set to emerge at 250, 100, 50 thousand years ago. Six inversion frequencies (1%, 2%, 5%, 10%, 25%, and 50%) are considered.  Three recombination rates, including zero, 1e-8, and 1e-6 per generation per base pair are simulated. Gene flow is set as 1e-8 per generation per chromosome only between groups of haplotypes in the same orientations.",
+            column_defs=SIMULATION_COLUMN_DEFS,
+            loader=lambda: _load_simulation_table(TABLE_S2),
+        )
+    )
+
+    register(
+        SheetInfo(
+            name="Recent recurrent events",
+            description="Parameters used in simulations under different scenarios of recent recurrent inversion events. Simulations were generated using a structured coalescent framework (Methods). The three inversion events are set to emerge at 100, 50, 25 thousand years ago. Six inversion frequencies (1%, 2%, 5%, 10%, 25%, and 50%) are considered.  Three recombination rates, including zero, 1e-8, and 1e-6 per generation per base pair are simulated. Gene flow is set as 1e-8 per generation per chromosome only between groups of haplotypes in the same orientations.",
+            column_defs=SIMULATION_COLUMN_DEFS,
+            loader=lambda: _load_simulation_table(TABLE_S3),
+        )
+    )
+
+    register(
+        SheetInfo(
+            name="Very recent recurrent events",
+            description="Parameters used in simulations under different scenarios of very recent recurrent inversion events. Simulations were generated using a structured coalescent framework (Methods). The three inversion events are set to emerge at 50, 25, 10 thousand years ago. Six inversion frequencies (1%, 2%, 5%, 10%, 25%, and 50%) are considered.  Three recombination rates, including zero, 1e-8, and 1e-6 per generation per base pair are simulated. Gene flow is set as 1e-8 per generation per chromosome only between groups of haplotypes in the same orientations.",
+            column_defs=SIMULATION_COLUMN_DEFS,
+            loader=lambda: _load_simulation_table(TABLE_S4),
+        )
+    )
 
     register(
         SheetInfo(
@@ -857,13 +924,14 @@ def build_workbook(output_path: Path) -> None:
 
         title_rich_fmt = workbook.add_format({"bold": True})
         title_cell_fmt = workbook.add_format({"text_wrap": True, "valign": "top", "align": "left"})
+        table_header_fmt = workbook.add_format({"bold": True})
 
         readme_ws.set_column(0, 0, 32)
         readme_ws.set_column(1, 1, 120)
 
         row = 0
-        for sheet_info in sheet_infos:
-            readme_ws.write(row, 0, sheet_info.name, header_fmt)
+        for i, sheet_info in enumerate(sheet_infos, start=1):
+            readme_ws.write(row, 0, f"Table S{i}: {sheet_info.name}", header_fmt)
             row += 1
 
             readme_ws.merge_range(row, 0, row, 1, sheet_info.description, desc_fmt)
@@ -881,7 +949,7 @@ def build_workbook(output_path: Path) -> None:
             row += 2
 
         for i, (sheet_info, df) in enumerate(zip(sheet_infos, sheet_frames), start=1):
-            df.to_excel(writer, index=False, sheet_name=sheet_info.name, startrow=1)
+            df.to_excel(writer, index=False, sheet_name=sheet_info.name, startrow=2, header=False)
 
             worksheet = writer.sheets[sheet_info.name]
             num_cols = max(len(df.columns), 1)
@@ -897,6 +965,9 @@ def build_workbook(output_path: Path) -> None:
                 f" {sheet_info.description}",
                 title_cell_fmt,
             )
+
+            for col_idx, col_name in enumerate(df.columns):
+                worksheet.write(1, col_idx, col_name, table_header_fmt)
 
     print(f"Supplementary tables written to {output_path}")
 
