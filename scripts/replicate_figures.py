@@ -504,6 +504,13 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         required=False,
         note="Requires PGS_controls.tsv showing effect of polygenic score adjustment.",
     ),
+    FigureTask(
+        name="Family History vs Main PheWAS Forest",
+        script=Path("stats/family_forest.py"),
+        outputs=(Path("family_vs_main_forest.pdf"), Path("family_vs_main_forest.png")),
+        dependencies=("family_phewas.tsv", "phewas_results.tsv"),
+        required=True,
+    ),
 )
 
 # ---------------------------------------------------------------------------
