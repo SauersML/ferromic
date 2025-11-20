@@ -3570,12 +3570,27 @@ pub fn process_vcf(
         } else if buffer.starts_with("#CHROM") {
             validate_vcf_header(&buffer)?;
             let header_fields: Vec<&str> = buffer.split_whitespace().collect();
+            let mut excluded_count = 0;
             for (idx, name) in header_fields.iter().enumerate().skip(9) {
                 if !exclusion_set.contains(*name) {
                     sample_names.push((*name).to_string());
                     kept_col_indices.push(idx);
+                } else {
+                    log(
+                        LogLevel::Debug,
+                        &format!("Skipping column for excluded sample: {}", name),
+                    );
+                    excluded_count += 1;
                 }
             }
+            log(
+                LogLevel::Info,
+                &format!(
+                    "Loaded {} samples (excluded {} samples requested by user).",
+                    sample_names.len(),
+                    excluded_count
+                ),
+            );
             break;
         }
         buffer.clear();
