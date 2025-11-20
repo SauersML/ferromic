@@ -3533,8 +3533,21 @@ pub fn calculate_adjusted_sequence_length(
     }
 
     // Subtract any masked regions from the allowed intervals to get the final unmasked intervals
+    // Mask regions are 0-based half-open [start, end), but allowed_intervals are 1-based inclusive.
+    // We must convert mask regions to 1-based inclusive [start+1, end] to match the coordinate system
+    // used by subtract_regions.
+    let converted_masks: Option<Vec<(i64, i64)>> = mask_regions_chr.map(|masks| {
+        masks
+            .iter()
+            .map(|&(start, end)| {
+                // Use ZeroBasedHalfOpen to handle the conversion logic consistently
+                ZeroBasedHalfOpen::from_0based_half_open(start, end).to_1based_inclusive_tuple()
+            })
+            .collect()
+    });
+
     let unmasked_intervals =
-        subtract_regions(&allowed_intervals, mask_regions_chr.map(|v| v.as_slice()));
+        subtract_regions(&allowed_intervals, converted_masks.as_deref());
 
     // Calculate the total length of all unmasked intervals
     let adjusted_length: i64 = unmasked_intervals
