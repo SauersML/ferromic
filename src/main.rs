@@ -213,20 +213,28 @@ async fn concatenate_files(
         tokio::spawn(async move {
             file_pb.set_message(format!("Processing file {}: {:?}", index + 1, file.path));
             let result = process_file(&file, chunk_size, file_pb);
-            tx.send(result).await.unwrap();
+            tx.send((index, result)).await.unwrap();
         });
     }
 
     let mut total_bytes_processed = 0;
+    let mut buffer: std::collections::HashMap<usize, Vec<Vec<u8>>> = std::collections::HashMap::new();
+    let mut next_file_index = 0;
+
     for _ in 0..total_files {
-        if let Some(result) = rx.recv().await {
+        if let Some((index, result)) = rx.recv().await {
             let chunks = result?;
-            for chunk in chunks {
-                total_bytes_processed += chunk.len();
-                output.lock().await.write_all(&chunk)?;
+            buffer.insert(index, chunks);
+
+            while let Some(chunks) = buffer.remove(&next_file_index) {
+                for chunk in chunks {
+                    total_bytes_processed += chunk.len();
+                    output.lock().await.write_all(&chunk)?;
+                }
+                progress.fetch_add(1, Ordering::SeqCst);
+                overall_pb.inc(1);
+                next_file_index += 1;
             }
-            progress.fetch_add(1, Ordering::SeqCst);
-            overall_pb.inc(1);
         }
     }
 

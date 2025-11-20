@@ -8,7 +8,7 @@ use log::{debug, info, LevelFilter};
 use memmap2::MmapOptions;
 use num_cpus;
 use rayon::prelude::*;
-use std::collections::HashMap;
+use std::collections::{BinaryHeap, HashMap};
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
@@ -64,6 +64,34 @@ struct VcfFile {
 struct Chunk {
     data: Vec<u8>,
     chromosome: String,
+    file_index: usize,
+    chunk_index: usize,
+    is_last_chunk: bool,
+}
+
+#[derive(Debug)]
+struct ChunkWrapper(Chunk);
+
+impl PartialEq for ChunkWrapper {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.file_index == other.0.file_index && self.0.chunk_index == other.0.chunk_index
+    }
+}
+
+impl Eq for ChunkWrapper {}
+
+impl PartialOrd for ChunkWrapper {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ChunkWrapper {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // Min-heap: reverse order for strict sequential processing
+        other.0.file_index.cmp(&self.0.file_index)
+            .then_with(|| other.0.chunk_index.cmp(&self.0.chunk_index))
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -204,7 +232,8 @@ async fn process_vcf_files(args: &Args) -> Result<(), VcfError> {
 
     let worker_results: Vec<Result<(), VcfError>> = vcf_files
         .into_par_iter()
-        .map(|file| {
+        .enumerate()
+        .map(|(file_index, file)| {
             let chunk_sender = chunk_sender.clone();
             let memory_usage = memory_usage.clone();
             let chromosome_progress = chromosome_progress.clone();
@@ -219,6 +248,7 @@ async fn process_vcf_files(args: &Args) -> Result<(), VcfError> {
                     chunk_sender,
                     chromosome_progress,
                     progress_bars,
+                    file_index,
                 )
             } else {
                 process_uncompressed_file(
@@ -228,6 +258,7 @@ async fn process_vcf_files(args: &Args) -> Result<(), VcfError> {
                     chunk_sender,
                     chromosome_progress,
                     progress_bars,
+                    file_index,
                 )
             }
         })
@@ -399,12 +430,14 @@ fn process_uncompressed_file(
     chunk_sender: Sender<Chunk>,
     chromosome_progress: Arc<Mutex<HashMap<String, ChromosomeProgress>>>,
     progress_bars: Arc<Mutex<HashMap<String, ProgressBar>>>,
+    file_index: usize,
 ) -> Result<(), VcfError> {
     let file_handle = File::open(&file.path)?;
     let mmap = unsafe { MmapOptions::new().map(&file_handle)? };
 
     let file_size = mmap.len();
     let mut offset = 0;
+    let mut chunk_index = 0;
 
     // Find the start of data (skip header)
     while offset < file_size {
@@ -450,16 +483,22 @@ fn process_uncompressed_file(
             human_bytes((current_usage + chunk_size) as f64)
         );
 
+        let is_last = end >= file_size;
+
         send_chunk(
             Chunk {
                 data: chunk_data,
                 chromosome: file.chromosome.clone(),
+                file_index,
+                chunk_index,
+                is_last_chunk: is_last,
             },
             &chunk_sender,
             &chromosome_progress,
             &progress_bars,
         )?;
         offset = end;
+        chunk_index += 1;
     }
 
     Ok(())
@@ -473,10 +512,13 @@ fn process_compressed_file(
     chunk_sender: Sender<Chunk>,
     chromosome_progress: Arc<Mutex<HashMap<String, ChromosomeProgress>>>,
     progress_bars: Arc<Mutex<HashMap<String, ProgressBar>>>,
+    file_index: usize,
 ) -> Result<(), VcfError> {
     println!("Starting to process compressed file: {:?}", file.path);
     let mut reader = create_reader(&file.path)?;
     println!("Reader created for file: {:?}", file.path);
+
+    let mut chunk_index = 0;
 
     // Skip header
     loop {
@@ -494,6 +536,9 @@ fn process_compressed_file(
                 &Chunk {
                     data: line_bytes,
                     chromosome: file.chromosome.clone(),
+                    file_index,
+                    chunk_index,
+                    is_last_chunk: false, // Assume there is more
                 },
                 &chunk_sender,
                 &chromosome_progress,
@@ -501,6 +546,7 @@ fn process_compressed_file(
                 &memory_usage,
                 max_memory_usage,
             )?;
+            chunk_index += 1;
             break;
         }
     }
@@ -524,6 +570,11 @@ fn process_compressed_file(
                     &Chunk {
                         data: line_buffer.split_off(0),
                         chromosome: file.chromosome.clone(),
+                        file_index,
+                        chunk_index,
+                        is_last_chunk: false, // Assume more coming or check below?
+                        // For streaming gzip, we don't know if it's last until read returns 0.
+                        // But we are sending here inside the loop.
                     },
                     &chunk_sender,
                     &chromosome_progress,
@@ -531,6 +582,7 @@ fn process_compressed_file(
                     &memory_usage,
                     max_memory_usage,
                 )?;
+                chunk_index += 1;
 
                 start = end + 1;
             }
@@ -545,10 +597,14 @@ fn process_compressed_file(
         }
     }
 
+    // Send remaining buffer as last chunk
     send_chunk_with_backpressure(
         &Chunk {
             data: line_buffer,
             chromosome: file.chromosome.clone(),
+            file_index,
+            chunk_index,
+            is_last_chunk: true,
         },
         &chunk_sender,
         &chromosome_progress,
@@ -654,36 +710,61 @@ fn chunk_writer(
         }
     });
 
+    let mut buffer = BinaryHeap::new();
+    let mut next_file = 0;
+    let mut next_chunk = 0;
+
     while let Ok(chunk) = chunk_receiver.recv() {
-        let chunk_size = chunk.data.len();
-        {
-            let mut output = output_file
-                .lock()
-                .map_err(|e| VcfError::Parse(e.to_string()))?;
-            output.write_all(&chunk.data)?;
-            output.flush()?;
-        }
+        buffer.push(ChunkWrapper(chunk));
 
-        total_bytes_written += chunk_size;
-        memory_usage.fetch_sub(chunk_size, Ordering::SeqCst);
+        while let Some(wrapper) = buffer.peek() {
+            let c = &wrapper.0;
+            if c.file_index == next_file && c.chunk_index == next_chunk {
+                // We found the next expected chunk
+                let ChunkWrapper(chunk) = buffer.pop().unwrap();
+                let chunk_size = chunk.data.len();
 
-        // Update chromosome progress
-        {
-            let mut progress = chromosome_progress.lock().unwrap();
-            if let Some(chr_progress) = progress.get_mut(&chunk.chromosome) {
-                chr_progress.processed_bytes += chunk_size as u64;
+                {
+                    let mut output = output_file
+                        .lock()
+                        .map_err(|e| VcfError::Parse(e.to_string()))?;
+                    output.write_all(&chunk.data)?;
+                    output.flush()?;
+                }
+
+                total_bytes_written += chunk_size;
+                memory_usage.fetch_sub(chunk_size, Ordering::SeqCst);
+
+                // Update chromosome progress
+                {
+                    let mut progress = chromosome_progress.lock().unwrap();
+                    if let Some(chr_progress) = progress.get_mut(&chunk.chromosome) {
+                        chr_progress.processed_bytes += chunk_size as u64;
+                    }
+                }
+
+                // Advance counters
+                if chunk.is_last_chunk {
+                    next_file += 1;
+                    next_chunk = 0;
+                } else {
+                    next_chunk += 1;
+                }
+
+                // Update overall progress
+                sys.refresh_process(Pid::from(std::process::id() as usize));
+                if let Some(process) = sys.process(Pid::from(std::process::id() as usize)) {
+                    let used_ram = process.memory();
+                    overall_pb.set_message(format!(
+                        "Overall Progress: {} processed. RAM usage: {}",
+                        human_bytes(total_bytes_written as f64),
+                        human_bytes(used_ram as f64)
+                    ));
+                }
+            } else {
+                // Next chunk not available yet
+                break;
             }
-        }
-
-        // Update overall progress
-        sys.refresh_process(Pid::from(std::process::id() as usize));
-        if let Some(process) = sys.process(Pid::from(std::process::id() as usize)) {
-            let used_ram = process.memory();
-            overall_pb.set_message(format!(
-                "Overall Progress: {} processed. RAM usage: {}",
-                human_bytes(total_bytes_written as f64),
-                human_bytes(used_ram as f64)
-            ));
         }
     }
 
