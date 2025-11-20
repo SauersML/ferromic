@@ -14,16 +14,42 @@ except ImportError:
     sys.exit(1)
 
 def scan_regions():
-    """Scans for combined_inversion_*.phy files and extracts identifiers."""
+    """
+    Scans for combined_inversion_*.phy files.
+    Filters them to ensure they match an entry in data/inv_properties.tsv.
+    """
     files = glob.glob('combined_inversion_*.phy')
     regions = []
+
+    # Convert pipeline_lib allowed list to a set for fast lookup
+    # allowed entries are tuples: (chrom, start, end)
+    allowed_set = set(lib.ALLOWED_REGIONS)
+
+    print(f"Filtering found files against {len(allowed_set)} allowed regions from inv_properties.tsv", file=sys.stderr)
+
     for f in files:
         try:
             info = lib.parse_region_filename(f)
-            regions.append(info['label'])
+
+            # Create key from filename info to match whitelist format
+            # pipeline_lib.parse_region_filename returns 'chrom' like 'chr1', and ints for start/end
+            file_key = (info['chrom'], info['start'], info['end'])
+
+            if file_key in allowed_set:
+                regions.append(info['label'])
+            else:
+                # Optional: logic to handle mismatched coordinates
+                # (e.g. if filename is 1-based vs 0-based diffs, though usually they match exactly)
+                pass
+
         except Exception as e:
             print(f"Warning: Skipping file {f} due to parse error: {e}", file=sys.stderr)
-    return sorted(list(set(regions)))
+
+    # Sort and dedup
+    final_regions = sorted(list(set(regions)))
+    print(f"Total regions scheduled for analysis: {len(final_regions)}", file=sys.stderr)
+
+    return final_regions
 
 def scan_genes_and_batch(batch_size=4):
     """Scans for gene files, filters them, and groups them into batches."""
