@@ -35,6 +35,8 @@ jobs:
           unzip -o '*.zip' || echo "No nested zip files found"
           rm -f '*.zip'
           ls -R
+      - name: Decompress Gzipped PHY files
+        run: gzip -d *.phy.gz || echo "No .phy.gz files to decompress."
       - name: Run AXT to PHY
         run: |
           python3 cds/axt_to_phy.py
