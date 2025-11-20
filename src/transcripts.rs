@@ -363,6 +363,10 @@ pub fn apply_variants_to_transcripts(
 ) -> Result<(), VcfError> {
     // The reference sequence passed to make_sequences is the entire chromosome.
     // We rely on ZeroBasedHalfOpen externally, so we do not manually slice here.
+
+    // Lock the map once before iterating over variants to avoid excessive locking overhead
+    let map = position_allele_map.lock();
+
     for variant in variants {
         if !extended_region.contains(ZeroBasedPosition(variant.position)) {
             continue;
@@ -389,9 +393,6 @@ pub fn apply_variants_to_transcripts(
                 // The length of pos_in_seq is also relative to the beginning of the extended region,
                 // Because we subtracted the extended_start value from it above.
                 if pos_in_seq < seq_vec.len() {
-                    // Lock the position_allele_map to get the reference and alternate alleles at this position
-                    let map = position_allele_map.lock();
-
                     // Get the reference and alternate alleles from the map, if available
                     if let Some(&(ref_allele, alt_allele)) = map.get(&variant.position) {
                         // Determine the allele to use based on the genotype
