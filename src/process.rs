@@ -44,8 +44,6 @@ use std::thread;
 use std::time::Duration;
 use tempfile::TempDir;
 
-pub static TEMP_DIR: Lazy<Mutex<Option<TempDir>>> = Lazy::new(|| Mutex::new(None));
-
 pub fn create_temp_dir() -> Result<TempDir, VcfError> {
     let ramdisk_path = std::env::var("RAMDISK_PATH").unwrap_or_else(|_| "/dev/shm".to_string());
     let temp_dir = match TempDir::new_in(&ramdisk_path) {
@@ -780,6 +778,7 @@ pub fn process_variants(
     cds_regions: &[TranscriptAnnotationCDS],
     filtered_positions: &HashSet<i64>,
     mask_intervals: Option<&[(i64, i64)]>,
+    temp_path: &Path,
 ) -> Result<Option<(usize, f64, f64, usize, Vec<SiteDiversity>)>, VcfError> {
     set_stage(ProcessingStage::VariantAnalysis);
 
@@ -1092,6 +1091,7 @@ pub fn process_variants(
             position_allele_map.clone(),
             &chromosome,
             inversion_interval,
+            temp_path,
         ) {
             log(
                 LogLevel::Warning,
@@ -1226,25 +1226,15 @@ pub fn process_config_entries(
     allow: Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     args: &Args,
     exclusion_set: &HashSet<String>,
+    temp_path: &Path,
 ) -> Result<(), VcfError> {
-    // Create a temp directory and save it to TEMP_DIR
-    let temp_dir_path = {
-        let temp_dir = create_temp_dir()?;
-        let temp_path = temp_dir.path().to_path_buf();
-
-        let mut locked_opt = TEMP_DIR.lock();
-        *locked_opt = Some(temp_dir);
-
-        temp_path
-    };
-
     // For PCA, collect filtered variants across chromosomes
     let global_filtered_variants: Arc<Mutex<HashMap<String, Vec<Variant>>>> =
         Arc::new(Mutex::new(HashMap::new()));
     let global_sample_names: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
 
     // Create CSV writer and write the header once in the temporary directory
-    let temp_output_file = temp_dir_path.join(output_file.file_name().unwrap());
+    let temp_output_file = temp_path.join(output_file.file_name().unwrap());
     let mut writer = create_and_setup_csv_writer(&temp_output_file)?;
     write_csv_header(&mut writer)?;
     // Ensure the header is written to disk immediately before any row data.
@@ -1347,6 +1337,7 @@ pub fn process_config_entries(
                     None
                 },
                 parsed_csv_populations_arc.clone(), // Pass the Arc'd map
+                temp_path,
             ) {
                 Ok(data_tuple_for_chr) => Some(data_tuple_for_chr),
                 Err(e) => {
@@ -1368,13 +1359,13 @@ pub fn process_config_entries(
             write_csv_row(&mut writer, &csv_row)?; // CSV (temp) immediate
 
             append_diversity_falsta(
-                &temp_dir_path.join("per_site_diversity_output.falsta.gz"),
+                &temp_path.join("per_site_diversity_output.falsta.gz"),
                 &csv_row,
                 &per_site_diversity_vec,
             )?;
 
             append_fst_falsta(
-                &temp_dir_path.join("per_site_fst_output.falsta.gz"),
+                &temp_path.join("per_site_fst_output.falsta.gz"),
                 &csv_row,
                 &fst_data_wc,
                 &fst_data_hudson,
@@ -1405,27 +1396,15 @@ pub fn process_config_entries(
         output_file
     );
 
-    // Copy files from temporary directory to final destinations
-    let temp_dir_path = {
-        let locked_opt = TEMP_DIR.lock();
-        if let Some(dir) = locked_opt.as_ref() {
-            dir.path().to_path_buf()
-        } else {
-            return Err(VcfError::Parse(
-                "Failed to access temporary directory".to_string(),
-            ));
-        }
-    };
-
     // Copy CSV file
-    let temp_csv = temp_dir_path.join(output_file.file_name().unwrap());
+    let temp_csv = temp_path.join(output_file.file_name().unwrap());
     if let Some(parent) = output_file.parent() {
         std::fs::create_dir_all(parent)?;
     }
     std::fs::copy(&temp_csv, output_file)?;
 
     // Copy FASTA files
-    let temp_fasta = temp_dir_path.join("per_site_diversity_output.falsta.gz");
+    let temp_fasta = temp_path.join("per_site_diversity_output.falsta.gz");
     if temp_fasta.exists() {
         std::fs::copy(
             &temp_fasta,
@@ -1433,7 +1412,7 @@ pub fn process_config_entries(
         )?;
     }
 
-    let temp_fst_fasta = temp_dir_path.join("per_site_fst_output.falsta.gz");
+    let temp_fst_fasta = temp_path.join("per_site_fst_output.falsta.gz");
     if temp_fst_fasta.exists() {
         std::fs::copy(
             &temp_fst_fasta,
@@ -1442,7 +1421,7 @@ pub fn process_config_entries(
     }
 
     // Copy PHYLIP files
-    for entry in std::fs::read_dir(&temp_dir_path)? {
+    for entry in std::fs::read_dir(&temp_path)? {
         let entry = entry?;
         let path = entry.path();
         if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
@@ -1454,7 +1433,7 @@ pub fn process_config_entries(
 
     // Copy log files
     for log_file in ["cds_validation.log", "transcript_overlap.log"] {
-        let temp_log = temp_dir_path.join(log_file);
+        let temp_log = temp_path.join(log_file);
         if temp_log.exists() {
             std::fs::copy(&temp_log, std::path::Path::new(".").join(log_file))?;
         }
@@ -1669,6 +1648,7 @@ fn process_chromosome_entries(
     // Arc containing the parsed population definitions from the CSV file, if provided.
     // Key: Population Name (String), Value: List of Sample IDs (String) in that population.
     parsed_csv_populations_arc: Option<Arc<HashMap<String, Vec<String>>>>,
+    temp_path: &Path,
 ) -> Result<
     (
         Vec<(
@@ -1856,6 +1836,7 @@ fn process_chromosome_entries(
             exclusion_set,
             pca_storage.as_ref(),
             parsed_csv_populations_arc.clone(), // Pass down the Arc<HashMap<String, Vec<String>>>
+            temp_path,
         );
 
         match result {
@@ -2025,6 +2006,7 @@ fn generate_full_region_alignment(
     mask: &Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     allow: &Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     vcf_sample_id_to_index: &HashMap<String, usize>,
+    temp_path: &Path,
 ) -> Result<(), VcfError> {
     let group_haps = get_haplotype_indices_for_group(
         haplotype_group,
@@ -2113,7 +2095,7 @@ fn generate_full_region_alignment(
         haplotype_group, entry.seqname, start_1based, end_1based
     );
 
-    write_phylip_file(&filename, &seq_map, &filename)?;
+    write_phylip_file(&filename, &seq_map, &filename, temp_path)?;
     Ok(())
 }
 
@@ -2140,6 +2122,7 @@ fn process_single_config_entry(
     // Arc containing the parsed population definitions from the CSV file, if provided.
     // Key: Population Name (String), Value: List of Sample IDs (String) in that population.
     parsed_csv_populations_arc: Option<Arc<HashMap<String, Vec<String>>>>,
+    temp_path: &Path,
 ) -> Result<
     Option<(
         CsvRowData, // Data for the main CSV output (W&C FST, diversity stats, etc.)
@@ -2166,6 +2149,7 @@ fn process_single_config_entry(
     let local_cds = filter_and_log_transcripts(
         cds_regions.to_vec(),
         entry.interval.to_zero_based_inclusive().into(),
+        temp_path,
     );
 
     log(
@@ -2618,6 +2602,7 @@ fn process_single_config_entry(
             &local_cds,
             call.filtered_positions,
             mask_intervals_slice,
+            temp_path,
         )?;
 
         if let Some(x) = stats_opt {
@@ -2930,6 +2915,7 @@ fn process_single_config_entry(
             mask,
             allow,
             &vcf_sample_id_to_index,
+            temp_path,
         )?;
     }
 

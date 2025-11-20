@@ -1,6 +1,6 @@
 use crate::process::{
-    HaplotypeSide, QueryRegion, TEMP_DIR, Variant, VcfError, ZeroBasedHalfOpen, ZeroBasedPosition,
-    create_temp_dir, get_haplotype_indices_for_group, map_sample_names_to_indices,
+    HaplotypeSide, QueryRegion, Variant, VcfError, ZeroBasedHalfOpen, ZeroBasedPosition,
+    get_haplotype_indices_for_group, map_sample_names_to_indices,
 };
 
 use crate::progress::{
@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::{self, BufWriter, Write};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::SystemTime;
 
@@ -72,20 +73,9 @@ impl CdsSeq {
     /// checks for empty input, making sure all nucleotides are valid,
     /// starts with ATG, and contains no internal stop codons.
     /// A log file named cds_validation.log is appended with the validation result.
-    pub fn new(seq: Vec<u8>) -> Result<Self, String> {
+    pub fn new(seq: Vec<u8>, temp_path: &Path) -> Result<Self, String> {
         let now = SystemTime::now();
-        let log_file_path = {
-            let mut locked_opt = TEMP_DIR.lock();
-            if locked_opt.is_none() {
-                *locked_opt =
-                    Some(create_temp_dir().expect("Failed to create temporary directory"));
-            }
-            if let Some(dir) = locked_opt.as_ref() {
-                dir.path().join("cds_validation.log")
-            } else {
-                return Err("Failed to access temporary directory".to_string());
-            }
-        };
+        let log_file_path = temp_path.join("cds_validation.log");
 
         let mut log_file = OpenOptions::new()
             .create(true)
@@ -216,6 +206,7 @@ pub fn make_sequences(
     position_allele_map: Arc<Mutex<HashMap<i64, (char, char)>>>,
     chromosome: &str,
     inversion_interval: ZeroBasedHalfOpen,
+    temp_path: &Path,
 ) -> Result<(), VcfError> {
     set_stage(ProcessingStage::CdsProcessing);
     log(
@@ -298,6 +289,7 @@ pub fn make_sequences(
         chromosome,
         extended_region,
         inversion_interval,
+        temp_path,
     )?;
 
     finish_step_progress(&format!(
@@ -567,6 +559,7 @@ pub fn prepare_to_write_cds(
     chromosome: &str,
     hap_region: ZeroBasedHalfOpen,
     inversion_interval: ZeroBasedHalfOpen,
+    temp_path: &Path,
 ) -> Result<(), VcfError> {
     log(
         LogLevel::Info,
@@ -635,7 +628,7 @@ pub fn prepare_to_write_cds(
                     }
                 }
             }
-            match CdsSeq::new(spliced_sequence) {
+            match CdsSeq::new(spliced_sequence, temp_path) {
                 Ok(valid_cds) => {
                     final_cds_map.insert(sample_name.clone(), valid_cds.data);
                 }
@@ -808,7 +801,7 @@ pub fn prepare_to_write_cds(
             .map_err(|e| VcfError::Parse(format!("Failed to write metadata record: {}", e)))?;
         // --- END OF NEW LOGIC ---
 
-        write_phylip_file(&filename, &filtered_map, &cds.transcript_id)?;
+        write_phylip_file(&filename, &filtered_map, &cds.transcript_id, temp_path)?;
     }
     Ok(())
 }
@@ -817,20 +810,14 @@ pub fn prepare_to_write_cds(
 pub fn filter_and_log_transcripts(
     transcripts: Vec<TranscriptAnnotationCDS>,
     query: QueryRegion,
+    temp_path: &Path,
 ) -> Vec<TranscriptAnnotationCDS> {
     use colored::Colorize;
     use std::fs::OpenOptions;
     use std::io::{BufWriter, Write};
 
     // Open or create a log file once per call in the temporary directory
-    let log_file_path = {
-        let locked_opt = TEMP_DIR.lock();
-        if let Some(dir) = locked_opt.as_ref() {
-            dir.path().join("transcript_overlap.log")
-        } else {
-            return Vec::new(); // Return empty vector if temp dir not available
-        }
-    };
+    let log_file_path = temp_path.join("transcript_overlap.log");
 
     let log_file = OpenOptions::new()
         .create(true)
@@ -1266,22 +1253,11 @@ pub fn write_phylip_file(
     output_file: &str,
     hap_sequences: &HashMap<String, Vec<char>>,
     transcript_id: &str,
+    temp_path: &Path,
 ) -> Result<(), VcfError> {
     let output_file_gz = format!("{}.gz", output_file);
-    // Acquire or create the TempDir in a single scope.
-    let temp_output_file = {
-        let mut locked_opt = TEMP_DIR.lock();
-        if locked_opt.is_none() {
-            *locked_opt = Some(create_temp_dir().expect("Failed to create temporary directory"));
-        }
-        if let Some(dir) = locked_opt.as_ref() {
-            dir.path().join(&output_file_gz)
-        } else {
-            return Err(VcfError::Parse(
-                "Failed to access temporary directory".to_string(),
-            ));
-        }
-    };
+    // Use passed temp_path
+    let temp_output_file = temp_path.join(&output_file_gz);
 
     let spinner = create_spinner(&format!("Writing PHYLIP for {}", transcript_id));
     let file = File::create(&temp_output_file).map_err(|e| {
