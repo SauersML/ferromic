@@ -2,10 +2,12 @@ use clap::Parser;
 use ferromic::parse::{
     find_vcf_file, open_vcf_reader, parse_config_file, parse_region, parse_regions_file,
 };
-use ferromic::process::{process_config_entries, Args, ConfigEntry, VcfError, ZeroBasedHalfOpen};
+use ferromic::process::{
+    create_temp_dir, process_config_entries, Args, ConfigEntry, VcfError, ZeroBasedHalfOpen,
+};
 use ferromic::progress::{
-    display_status_box, finish_all, init_global_progress, log, update_global_progress, LogLevel,
-    StatusBox,
+    display_status_box, finish_all, force_flush_all, init_global_progress, log,
+    update_global_progress, LogLevel, StatusBox,
 };
 use ferromic::transcripts;
 use rayon::ThreadPoolBuilder;
@@ -43,6 +45,17 @@ fn read_sample_names_from_vcf(vcf_path: &Path) -> Result<Vec<String>, VcfError> 
 }
 
 fn main() -> Result<(), VcfError> {
+    // Register panic hook
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        // 1. Flush logs to save critical crash info
+        force_flush_all();
+        // 2. Also flush the metadata writer in transcripts.rs
+        let _ = transcripts::flush_metadata();
+        // 3. Call the default hook to print the error to stderr
+        default_hook(info);
+    }));
+
     let args = Args::parse();
     let exclusion_set: HashSet<String> = args
         .exclude
@@ -120,6 +133,10 @@ fn main() -> Result<(), VcfError> {
 
     log(LogLevel::Info, "Starting VCF analysis with ferromic...");
 
+    // Create temp directory
+    let _temp_dir_guard = create_temp_dir()?;
+    let temp_path = _temp_dir_guard.path();
+
     // ------------------------------------------------------------------------
     // CASE 1: A config file is provided
     // ------------------------------------------------------------------------
@@ -161,6 +178,7 @@ fn main() -> Result<(), VcfError> {
             allow_regions.clone(),
             &args,
             &exclusion_set,
+            temp_path,
         )?;
 
     // ------------------------------------------------------------------------
@@ -236,6 +254,7 @@ fn main() -> Result<(), VcfError> {
             allow_regions.clone(),
             &args,
             &exclusion_set,
+            temp_path,
         )?;
     } else {
         // Neither a config file nor a chromosome was specified
