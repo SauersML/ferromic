@@ -719,12 +719,14 @@ mod tests {
         // VCF line with one genotype below the GQ threshold
         let variant_line = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:20\t0|1:40";
         let region = ZeroBasedHalfOpen { start: 999, end: 2000 };
+        let indices = vec![9, 10];
         let result = process_variant(
             variant_line,
             "1",
             region,
             &mut missing_data_info,
             &sample_names,
+            &indices,
             min_gq,
             &mut filtering_stats,
             None,
@@ -751,12 +753,14 @@ mod tests {
 
         let valid_variant_line = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:35\t0|1:40";
         let region = ZeroBasedHalfOpen { start: 999, end: 2000 };
+        let indices = vec![9, 10];
         let result = process_variant(
             valid_variant_line,
             "1",
             region,
             &mut missing_data_info,
             &sample_names,
+            &indices,
             min_gq,
             &mut _filtering_stats,
             None,
@@ -970,6 +974,7 @@ mod tests {
             "chr1\t3000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|1:35\t1|1:40\t0|0:45",
         ];
     
+        let indices = vec![9, 10, 11];
         // Parse each VCF line to populate `position_allele_map`
         for line in &vcf_lines {
             let mut missing_data_info = MissingDataInfo::default();
@@ -981,6 +986,7 @@ mod tests {
                 region,
                 &mut missing_data_info,
                 &sample_names,
+                &indices,
                 30,
                 &mut filtering_stats,
                 None,
@@ -1744,9 +1750,11 @@ mod tests {
             pca_output: "pca_results.tsv".to_string(),
             enable_fst: true,
             fst_populations: None,
+            exclude: None,
         };
 
         let output_csv = temp_dir.path().join("results.csv");
+        let exclusion_set = HashSet::new();
         process_config_entries(
             &config_entries,
             &args.vcf_folder,
@@ -1755,6 +1763,7 @@ mod tests {
             None,
             None,
             &args,
+            &exclusion_set,
         )
         .expect("process_config_entries failed");
 
