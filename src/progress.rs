@@ -713,6 +713,22 @@ impl ProgressTracker {
         self.inplace_print(&final_box);
     }
 
+    /// Explicitly flush all log files.
+    pub fn flush_logs(&mut self) {
+        if let Some(writer) = &mut self.processing_log {
+            let _ = writer.flush();
+        }
+        if let Some(writer) = &mut self.variants_log {
+            let _ = writer.flush();
+        }
+        if let Some(writer) = &mut self.transcripts_log {
+            let _ = writer.flush();
+        }
+        if let Some(writer) = &mut self.stats_log {
+            let _ = writer.flush();
+        }
+    }
+
     /// Finish all progress bars and flush logs
     pub fn finish_all(&mut self) {
         if let Some(bar) = &self.variant_bar {
@@ -735,19 +751,7 @@ impl ProgressTracker {
             ));
         }
 
-        // Flush all log files
-        if let Some(writer) = &mut self.processing_log {
-            let _ = writer.flush();
-        }
-        if let Some(writer) = &mut self.variants_log {
-            let _ = writer.flush();
-        }
-        if let Some(writer) = &mut self.transcripts_log {
-            let _ = writer.flush();
-        }
-        if let Some(writer) = &mut self.stats_log {
-            let _ = writer.flush();
-        }
+        self.flush_logs();
 
         // Print completion message in-place
         let completion_str = format!("\n{}\n", "Analysis complete.".green().bold());
@@ -945,4 +949,11 @@ pub fn finish_all() {
     }
     let mut tracker = PROGRESS_TRACKER.lock();
     tracker.finish_all();
+}
+
+/// Force flush all log files. Designed to be called from a panic hook.
+pub fn force_flush_all() {
+    // Acquire lock - will block if another thread holds it, but that's acceptable for a panic hook
+    let mut tracker = PROGRESS_TRACKER.lock();
+    tracker.flush_logs();
 }
