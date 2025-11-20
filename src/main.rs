@@ -89,7 +89,7 @@ fn discover_and_sort_vcf_files(dir: &str) -> Result<Vec<VcfFile>> {
                             // Skip empty/header-only files silently or with a debug log if we had one
                             None
                         }
-                        Err(e) => {
+                        Err(_) => {
                             // If error (e.g. IO), we skip or return error?
                             // Original code used `ok()?` which effectively skipped the file.
                             // We'll preserve that behavior but maybe log it?
@@ -268,7 +268,7 @@ fn validate_headers(vcf_files: &[VcfFile]) -> Result<()> {
 
     // Using rayon for parallel validation might be good if many files, but sequential is safer for now to avoid borrow issues or complex code.
     // Headers are small, so reading sequential is fine.
-    for (i, file) in vcf_files.iter().enumerate().skip(1) {
+    for file in vcf_files.iter().skip(1) {
         let cols = extract_header_columns(file)?;
         if cols != first_header_cols {
             bail!("Header mismatch in file {}: expected columns {:?}, found {:?}", file.path.display(), first_header_cols, cols);
