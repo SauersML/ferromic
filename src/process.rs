@@ -1630,6 +1630,33 @@ fn group_config_entries_by_chr(
     regions_per_chr
 }
 
+fn find_n_regions(seq: &[u8], start_offset: i64) -> Vec<(i64, i64)> {
+    let mut regions = Vec::new();
+    let mut in_n = false;
+    let mut start_n = 0;
+
+    for (i, &b) in seq.iter().enumerate() {
+        let is_n = matches!(b, b'N' | b'n');
+        if is_n && !in_n {
+            in_n = true;
+            start_n = i;
+        } else if !is_n && in_n {
+            in_n = false;
+            // 0-based half-open interval [start, end)
+            regions.push((start_offset + start_n as i64, start_offset + i as i64));
+        }
+    }
+
+    if in_n {
+        regions.push((
+            start_offset + start_n as i64,
+            start_offset + seq.len() as i64,
+        ));
+    }
+
+    regions
+}
+
 /// Loads the reference sequence, transcripts, finds the VCF, then processes
 /// each config entry for that chromosome. Returns a Vec of row data for each entry.
 fn process_chromosome_entries(
@@ -2188,6 +2215,36 @@ fn process_single_config_entry(
 
     let position_allele_map = Arc::new(Mutex::new(HashMap::<i64, (char, char)>::new()));
 
+    // Gatekeeper Rule: Scan reference for 'N' blocks and add them to the mask.
+    // This ensures that:
+    // 1. process_vcf discards variants in 'N' regions.
+    // 2. calculate_adjusted_sequence_length subtracts 'N' regions from the denominator.
+    let extended_start = extended_region.start;
+    let extended_end = extended_region.end.min(ref_sequence.len());
+    let ref_slice = &ref_sequence[extended_start..extended_end];
+    let n_regions = find_n_regions(ref_slice, extended_start as i64);
+
+    if !n_regions.is_empty() {
+        log(
+            LogLevel::Info,
+            &format!(
+                "Identified {} N-regions in reference for {}, adding to mask.",
+                n_regions.len(),
+                region_desc
+            ),
+        );
+    }
+
+    let mut local_mask_map = mask
+        .as_ref()
+        .map(|m| m.as_ref().clone())
+        .unwrap_or_default();
+    local_mask_map
+        .entry(chr.to_string())
+        .or_default()
+        .extend(n_regions);
+    let local_mask_arc = Some(Arc::new(local_mask_map));
+
     set_stage(ProcessingStage::VcfProcessing);
     init_step_progress(&format!("Processing VCF for {}", region_desc), 2);
 
@@ -2209,7 +2266,7 @@ fn process_single_config_entry(
         chr.to_string(),
         extended_region,
         min_gq,
-        mask.clone(),
+        local_mask_arc.clone(),
         allow.clone(),
         exclusion_set,
         position_allele_map.clone(),
@@ -2245,7 +2302,8 @@ fn process_single_config_entry(
         .collect();
 
     let allow_regions_chr = allow.as_ref().and_then(|a| a.get(chr));
-    let mask_regions_chr = mask.as_ref().and_then(|m| m.get(chr));
+    // Use the local_mask_arc which includes 'N' regions from the reference
+    let mask_regions_chr = local_mask_arc.as_ref().and_then(|m| m.get(chr));
     let mask_intervals_slice = mask_regions_chr.map(|regions| regions.as_slice());
 
     // Track callable sites that failed quality filters within the region.
@@ -3343,7 +3401,7 @@ fn append_hudson_tsv(
         ])
         .map_err(|e| VcfError::Io(e.into()))?;
     }
-    w.flush().map_err(|e| VcfError::Io(e.into()))
+    w.flush().map_err(VcfError::Io)
 }
 
 /// Retrieves VCF sample indices and HaplotypeSides for samples belonging to a specified population
