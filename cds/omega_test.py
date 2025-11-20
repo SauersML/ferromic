@@ -16,6 +16,9 @@ from concurrent.futures.process import BrokenProcessPool
 from collections import deque
 import threading
 import time
+import urllib.request
+import tarfile
+import stat
 
 # --- Scientific Computing Imports ---
 import numpy as np
@@ -260,6 +263,97 @@ os.environ.setdefault("MKL_NUM_THREADS", "1")
 # ==============================================================================
 # === GENERIC HELPER FUNCTIONS =================================================
 # ==============================================================================
+
+def setup_external_tools():
+    """
+    Checks for PAML and IQ-TREE dependencies in the parent directory.
+    Downloads and extracts them if missing.
+    """
+    # Current directory is assumed to be 'cds/' so parent is '..'
+    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+
+    paml_dir = os.path.join(base_dir, 'paml')
+    paml_bin = os.path.join(paml_dir, 'bin', 'codeml')
+
+    iqtree_dir = os.path.join(base_dir, 'iqtree-3.0.1-Linux')
+    iqtree_bin = os.path.join(iqtree_dir, 'bin', 'iqtree3')
+
+    # Setup PAML
+    if not os.path.exists(paml_bin):
+        logging.info("PAML not found. Downloading...")
+        url = "https://github.com/abacus-gene/paml/releases/download/v4.10.9/paml-4.10.9-linux-x86_64.tar.gz"
+        tar_path = os.path.join(base_dir, "paml.tar.gz")
+        try:
+            urllib.request.urlretrieve(url, tar_path)
+            logging.info("Extracting PAML...")
+            with tarfile.open(tar_path, "r:gz") as tar:
+                tar.extractall(path=base_dir)
+
+            # Rename extracted folder to 'paml'
+            # We inspect the tarball to find the root folder name, usually 'paml-4.10.9'
+            root_folder = None
+            with tarfile.open(tar_path, "r:gz") as tar:
+                 # Look for the top-level directory
+                 for member in tar.getmembers():
+                     if member.isdir() and '/' not in member.name.strip('/'):
+                         root_folder = member.name
+                         break
+
+            if root_folder:
+                extracted_folder = os.path.join(base_dir, root_folder)
+                if os.path.exists(extracted_folder):
+                    if os.path.exists(paml_dir):
+                        shutil.rmtree(paml_dir)
+                    os.rename(extracted_folder, paml_dir)
+                else:
+                    # Fallback if extraction name didn't match expectation or flat extraction
+                    logging.warning(f"Expected extracted folder '{extracted_folder}' not found.")
+            else:
+                 logging.warning("Could not determine root folder from PAML tarball.")
+
+            if os.path.exists(tar_path):
+                os.remove(tar_path)
+
+            # Make executable just in case
+            if os.path.exists(paml_bin):
+                st = os.stat(paml_bin)
+                os.chmod(paml_bin, st.st_mode | stat.S_IEXEC)
+                logging.info(f"PAML setup complete at {paml_dir}")
+            else:
+                logging.warning(f"PAML extracted but binary not found at {paml_bin}")
+
+        except Exception as e:
+            logging.error(f"Error setting up PAML: {e}")
+
+    else:
+        logging.info(f"PAML found at {paml_dir}")
+
+    # Setup IQ-TREE
+    if not os.path.exists(iqtree_bin):
+        logging.info("IQ-TREE not found. Downloading...")
+        url = "https://github.com/iqtree/iqtree3/releases/download/v3.0.1/iqtree-3.0.1-Linux.tar.gz"
+        tar_path = os.path.join(base_dir, "iqtree.tar.gz")
+        try:
+            urllib.request.urlretrieve(url, tar_path)
+            logging.info("Extracting IQ-TREE...")
+            with tarfile.open(tar_path, "r:gz") as tar:
+                tar.extractall(path=base_dir)
+
+            os.remove(tar_path)
+
+            # Make executable just in case
+            if os.path.exists(iqtree_bin):
+                st = os.stat(iqtree_bin)
+                os.chmod(iqtree_bin, st.st_mode | stat.S_IEXEC)
+                logging.info(f"IQ-TREE setup complete at {iqtree_dir}")
+            else:
+                 logging.warning(f"IQ-TREE extracted but binary not found at {iqtree_bin}")
+
+        except Exception as e:
+             logging.error(f"Error setting up IQ-TREE: {e}")
+
+    else:
+        logging.info(f"IQ-TREE found at {iqtree_dir}")
 
 def run_command(command_list, work_dir, timeout=None, env=None, input_data=None):
     try:
@@ -2015,6 +2109,8 @@ def main():
     root = logging.getLogger()
     root.handlers[:] = [QueueHandler(log_q)]
     root.setLevel(logging.INFO)
+
+    setup_external_tools()
 
     status_dict = {}
     stop_event = threading.Event()
