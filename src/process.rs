@@ -27,7 +27,6 @@ use crossbeam_channel::bounded;
 use csv::WriterBuilder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
-use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use prettytable::{Table, row};
 use rayon::prelude::*;
