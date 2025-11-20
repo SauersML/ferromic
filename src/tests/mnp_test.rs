@@ -3,7 +3,6 @@ mod tests {
     use crate::process::{
         FilteringStats, MissingDataInfo, process_variant, ZeroBasedHalfOpen,
     };
-    use std::collections::HashSet;
 
     #[test]
     fn test_mnp_filtering_mixed_snp_mnp() {
@@ -36,6 +35,6 @@ mod tests {
 
         // Expect None because it contains an MNP
         assert!(variant_opt.is_none(), "Expected mixed SNP/MNP variant to be filtered out");
-        assert_eq!(filtering_stats.multi_allelic_variants, 1);
+        assert_eq!(filtering_stats.mnp_variants, 1);
     }
 }
