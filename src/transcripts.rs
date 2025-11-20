@@ -17,7 +17,6 @@ use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufWriter, Write};
 use std::path::Path;
-use std::sync::Arc;
 use std::time::SystemTime;
 
 // A simple struct to hold the data for one row of our TSV file.
@@ -196,13 +195,13 @@ pub struct TranscriptAnnotationCDS {
 /// This enforces consistent intervals and may call for final phylip output.
 pub fn make_sequences(
     variants: &[Variant],
+    allele_infos: &[Option<(char, Vec<char>)>],
     sample_names: &[String],
     haplotype_group: u8,
     sample_filter: &HashMap<String, (u8, u8)>,
     extended_region: ZeroBasedHalfOpen,
     reference_sequence: &[u8],
     cds_regions: &[TranscriptAnnotationCDS],
-    position_allele_map: Arc<Mutex<HashMap<i64, (char, Vec<char>)>>>,
     chromosome: &str,
     inversion_interval: ZeroBasedHalfOpen,
     temp_path: &Path,
@@ -265,9 +264,9 @@ pub fn make_sequences(
     update_step_progress(2, "Applying variants");
     apply_variants_to_transcripts(
         variants,
+        allele_infos,
         &haplotype_indices,
         extended_region,
-        position_allele_map.clone(),
         &mut hap_sequences,
         &sample_names,
     )?;
@@ -361,19 +360,16 @@ pub fn initialize_hap_sequences(
 
 pub fn apply_variants_to_transcripts(
     variants: &[Variant],
+    allele_infos: &[Option<(char, Vec<char>)>],
     haplotype_indices: &[(usize, HaplotypeSide)],
     extended_region: ZeroBasedHalfOpen,
-    position_allele_map: Arc<Mutex<HashMap<i64, (char, Vec<char>)>>>,
     hap_sequences: &mut HashMap<String, Vec<u8>>,
     sample_names: &[String],
 ) -> Result<(), VcfError> {
     // The reference sequence passed to make_sequences is the entire chromosome.
     // We rely on ZeroBasedHalfOpen externally, so we do not manually slice here.
 
-    // Lock the map once before iterating over variants to avoid excessive locking overhead
-    let map = position_allele_map.lock();
-
-    for variant in variants {
+    for (variant, allele_info) in variants.iter().zip(allele_infos.iter()) {
         if !extended_region.contains(ZeroBasedPosition(variant.position)) {
             continue;
         }
@@ -399,8 +395,8 @@ pub fn apply_variants_to_transcripts(
                 // The length of pos_in_seq is also relative to the beginning of the extended region,
                 // Because we subtracted the extended_start value from it above.
                 if pos_in_seq < seq_vec.len() {
-                    // Get the reference and alternate alleles from the map, if available
-                    if let Some((ref_allele, alt_alleles)) = map.get(&variant.position) {
+                    // Get the reference and alternate alleles from the sidecar vector
+                    if let Some((ref_allele, alt_alleles)) = allele_info {
                         // Determine the allele to use based on the genotype
                         let allele_to_use = if let Some(genotype) =
                             variant.genotypes.get(sample_idx)
