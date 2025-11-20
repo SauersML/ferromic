@@ -252,7 +252,8 @@ jobs:
             --mask_file ../hardmask.hg38.v4_acroANDsdOnly.over99.bed \
             --reference ../hg38.no_alt.fa \
             --gtf ../gencode.v47.basic.annotation.gtf \
-            --fst
+            --fst \
+            --exclude HG00514, HG00733, NA19240
           echo "[Run pipeline] Finished cargo run"
 
       - name: Archive PHY files
