@@ -584,6 +584,7 @@ mod tests {
         }
 
         let empty_filtered_positions = HashSet::new();
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
         let invalid_group = process_variants(
             &variants,
             &sample_names,
@@ -599,7 +600,7 @@ mod tests {
             &vec![], // Empty TranscriptAnnotationCDS for test
             &empty_filtered_positions,
             None,
-            &PathBuf::from("."),
+            temp_dir.path(),
         );
         assert!(invalid_group.unwrap_or(None).is_none(), "Expected None for invalid haplotype group");
     }
@@ -1019,6 +1020,7 @@ mod tests {
         }
     
         let empty_filtered_positions = HashSet::new();
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
         let result = process_variants(
             &variants,
             &sample_names,
@@ -1034,7 +1036,7 @@ mod tests {
             &vec![], // Empty TranscriptAnnotationCDS for test
             &empty_filtered_positions,
             None,
-            &PathBuf::from("."),
+            temp_dir.path(),
         ).unwrap();
     
         // Calculate allele frequency globally
@@ -1077,6 +1079,7 @@ mod tests {
         }
     
         let empty_filtered_positions = HashSet::new();
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
         let _result_group1 = process_variants(
             &variants,
             &sample_names,
@@ -1092,7 +1095,7 @@ mod tests {
             &vec![], // Empty TranscriptAnnotationCDS for test
             &empty_filtered_positions,
             None,
-            &PathBuf::from("."),
+            temp_dir.path(),
         ).unwrap();
     
         let (_segsites, _w_theta, _pi, n_hap, _site_diversity) = match _result_group1 {
@@ -1144,6 +1147,7 @@ mod tests {
         }
     
         let empty_filtered_positions = HashSet::new();
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
         let _result_group1 = process_variants(
             &variants,
             &sample_names,
@@ -1159,7 +1163,7 @@ mod tests {
             &vec![], // Empty TranscriptAnnotationCDS for test
             &empty_filtered_positions,
             None,
-            &PathBuf::from("."),
+            temp_dir.path(),
         ).unwrap();
 
         // Correctly unwrap the Option to access the inner tuple
@@ -1214,6 +1218,7 @@ mod tests {
         }
     
        let empty_filtered_positions = HashSet::new();
+       let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
        let result = process_variants(
            &variants,
            &sample_names,
@@ -1229,7 +1234,7 @@ mod tests {
            &vec![], // Empty TranscriptAnnotationCDS for test
            &empty_filtered_positions,
             None,
-           &PathBuf::from("."),
+           temp_dir.path(),
        ).unwrap();
     
        let (segsites, w_theta, _pi, n_hap, _site_diversity) = match result {
@@ -1267,6 +1272,7 @@ mod tests {
         }
     
         let empty_filtered_positions = HashSet::new();
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
         let _result_group1 = process_variants(
             &variants,
             &sample_names,
@@ -1282,7 +1288,7 @@ mod tests {
             &vec![], // Empty TranscriptAnnotationCDS for test
             &empty_filtered_positions,
             None,
-            &PathBuf::from("."),
+            temp_dir.path(),
         ).unwrap();
     
         // Correctly unwrap the Option to access the inner tuple
@@ -1328,6 +1334,7 @@ mod tests {
         }
 
         let empty_filtered_positions = HashSet::new();
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
         let result = process_variants(
             &variants,
             &sample_names,
@@ -1343,7 +1350,7 @@ mod tests {
             &vec![], // Empty TranscriptAnnotationCDS for test
             &empty_filtered_positions,
             None,
-            &PathBuf::from("."),
+            temp_dir.path(),
         ).unwrap();
 
         // Calculate global allele frequency
@@ -1388,6 +1395,7 @@ mod tests {
         }
     
         let empty_filtered_positions = HashSet::new();
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
         let _result_group1 = process_variants(
             &variants,
             &sample_names,
@@ -1403,7 +1411,7 @@ mod tests {
             &vec![], // Empty TranscriptAnnotationCDS for test
             &empty_filtered_positions,
             None,
-            &PathBuf::from("."),
+            temp_dir.path(),
         ).unwrap();
     
         let (_segsites, _w_theta, _pi, n_hap, _site_diversity) = match _result_group1 {
@@ -1446,6 +1454,7 @@ mod tests {
         }
     
         let empty_filtered_positions = HashSet::new();
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
         let _result_group1 = process_variants(
             &variants,
             &sample_names,
@@ -1461,7 +1470,7 @@ mod tests {
             &vec![], // Empty TranscriptAnnotationCDS for test
             &empty_filtered_positions,
             None,
-            &PathBuf::from("."),
+            temp_dir.path(),
         ).unwrap();
     
         // Correctly unwrap the Option to access the inner tuple
@@ -1504,6 +1513,7 @@ mod tests {
         }
     
         let empty_filtered_positions = HashSet::new();
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
         let _result_group1 = process_variants(
             &variants,
             &sample_names,
@@ -1519,7 +1529,7 @@ mod tests {
             &vec![], // Empty TranscriptAnnotationCDS for test
             &empty_filtered_positions,
             None,
-            &PathBuf::from("."),
+            temp_dir.path(),
         ).unwrap();
     
         // Correctly unwrap the Option to access the inner tuple
@@ -1618,6 +1628,7 @@ mod tests {
     
         // Process variants for haplotype_group=1 (Group 1)
         let empty_filtered_positions = HashSet::new();
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
         let _result_group1 = process_variants(
             &variants,
             &sample_names,
@@ -1633,7 +1644,7 @@ mod tests {
             &vec![], // Empty TranscriptAnnotationCDS for test
             &empty_filtered_positions,
             None,
-            &PathBuf::from("."),
+            temp_dir.path(),
         ).expect("Failed to process variants");
     
         // Calculate global allele frequency using the revised function (no haplotype_group parameter)
@@ -1775,7 +1786,7 @@ mod tests {
             None,
             &args,
             &exclusion_set,
-            &temp_dir.path(),
+            temp_dir.path(),
         )
         .expect("process_config_entries failed");
 
