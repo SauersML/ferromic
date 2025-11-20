@@ -63,7 +63,7 @@ mod tests {
 }
 
 /// Rich description of an FST estimate, exposed as ``ferromic.FstEstimate``.
-#[pyclass(module = "ferromic", name = "FstEstimate")]
+#[pyclass(module = "ferromic", name = "FstEstimate", freelist = 20)]
 #[derive(Clone)]
 struct FstEstimateInfo {
     #[pyo3(get)]
@@ -155,7 +155,7 @@ impl FstEstimateInfo {
 }
 
 /// Difference counts between two samples.
-#[pyclass(module = "ferromic")]
+#[pyclass(module = "ferromic", freelist = 20)]
 #[derive(Clone)]
 struct PairwiseDifference {
     #[pyo3(get)]
@@ -243,7 +243,7 @@ impl ChromosomePcaResult {
 }
 
 /// Per-site diversity summary containing π and Watterson's θ.
-#[pyclass(module = "ferromic")]
+#[pyclass(module = "ferromic", freelist = 20)]
 #[derive(Clone)]
 struct DiversitySite {
     #[pyo3(get)]
@@ -265,7 +265,7 @@ impl DiversitySite {
 }
 
 /// Result of Hudson's Dxy statistic, exposed as ``ferromic.HudsonDxyResult``.
-#[pyclass(module = "ferromic", name = "HudsonDxyResult")]
+#[pyclass(module = "ferromic", name = "HudsonDxyResult", freelist = 20)]
 #[derive(Clone)]
 struct HudsonDxyResultPy {
     #[pyo3(get)]
@@ -289,7 +289,7 @@ impl HudsonDxyResultPy {
 }
 
 /// Per-site Hudson FST values and supporting components, exposed as ``ferromic.HudsonFstSite``.
-#[pyclass(module = "ferromic", name = "HudsonFstSite")]
+#[pyclass(module = "ferromic", name = "HudsonFstSite", freelist = 20)]
 #[derive(Clone)]
 struct HudsonFstSitePy {
     #[pyo3(get)]
@@ -348,7 +348,7 @@ impl HudsonFstSitePy {
 }
 
 /// Aggregated Hudson FST result with friendly labels, exposed as ``ferromic.HudsonFstResult``.
-#[pyclass(module = "ferromic", name = "HudsonFstResult")]
+#[pyclass(module = "ferromic", name = "HudsonFstResult", freelist = 20)]
 #[derive(Clone)]
 struct HudsonFstResultPy {
     #[pyo3(get)]
@@ -422,7 +422,7 @@ impl HudsonFstResultPy {
 }
 
 /// Per-site Weir & Cockerham FST summary, exposed as ``ferromic.WcFstSite``.
-#[pyclass(module = "ferromic", name = "WcFstSite")]
+#[pyclass(module = "ferromic", name = "WcFstSite", freelist = 20)]
 #[derive(Clone)]
 struct WcFstSitePy {
     #[pyo3(get)]
@@ -484,7 +484,7 @@ impl WcFstSitePy {
 }
 
 /// Aggregated Weir & Cockerham FST result, exposed as ``ferromic.WcFstResult``.
-#[pyclass(module = "ferromic", name = "WcFstResult")]
+#[pyclass(module = "ferromic", name = "WcFstResult", freelist = 20)]
 #[derive(Clone)]
 struct WcFstResultPy {
     #[pyo3(get)]
