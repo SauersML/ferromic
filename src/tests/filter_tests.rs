@@ -20,12 +20,14 @@ fn test_variant_filtering_unit() -> Result<(), Box<dyn std::error::Error>> {
 
     // Test variant with high GQ values (should pass)
     let high_gq_variant = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:50\t0|1:60";
+    let indices = vec![9, 10];
     let result_high = process_variant(
         high_gq_variant,
         "1",
         region,
         &mut missing_data_info,
         &sample_names,
+        &indices,
         30, // min_gq threshold
         &mut filtering_stats,
         None,
@@ -48,6 +50,7 @@ fn test_variant_filtering_unit() -> Result<(), Box<dyn std::error::Error>> {
         region,
         &mut missing_data_info,
         &sample_names,
+        &indices,
         30, // min_gq threshold
         &mut filtering_stats,
         None,
