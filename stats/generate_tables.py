@@ -915,7 +915,7 @@ def build_workbook(output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with pd.ExcelWriter(output_path, engine="xlsxwriter") as writer:
         workbook = writer.book
-        readme_ws = workbook.add_worksheet("Read me")
+        readme_ws = workbook.add_worksheet("Information")
 
         header_fmt = workbook.add_format({"bold": True, "font_size": 14, "bottom": 1})
         desc_fmt = workbook.add_format({"italic": True, "text_wrap": True})
@@ -949,9 +949,10 @@ def build_workbook(output_path: Path) -> None:
             row += 2
 
         for i, (sheet_info, df) in enumerate(zip(sheet_infos, sheet_frames), start=1):
-            df.to_excel(writer, index=False, sheet_name=sheet_info.name, startrow=2, header=False)
+            sheet_name = f"Table S{i}"
+            df.to_excel(writer, index=False, sheet_name=sheet_name, startrow=2, header=False)
 
-            worksheet = writer.sheets[sheet_info.name]
+            worksheet = writer.sheets[sheet_name]
             num_cols = max(len(df.columns), 1)
 
             if num_cols > 1:
