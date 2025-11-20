@@ -2811,39 +2811,20 @@ pub fn calculate_hudson_fst_per_site(
         );
     }
 
-    let mut sites = Vec::with_capacity(region.len() as usize);
-    let mut variant_iter = pop1_context.variants.iter().peekable();
+    let estimated_count = pop1_context
+        .variants
+        .iter()
+        .filter(|v| region.contains(v.position))
+        .count();
+    let mut sites = Vec::with_capacity(estimated_count);
+
     let pop1_mem = HapMembership::build(pop1_context.sample_names.len(), &pop1_context.haplotypes);
     let pop2_mem = HapMembership::build(pop2_context.sample_names.len(), &pop2_context.haplotypes);
 
-    for pos in region.start..=region.end {
-        while let Some(next_variant) = variant_iter.peek() {
-            if next_variant.position < pos {
-                variant_iter.next();
-            } else {
-                break;
-            }
+    for variant in pop1_context.variants {
+        if region.contains(variant.position) {
+            sites.push(hudson_site_from_variant(variant, &pop1_mem, &pop2_mem));
         }
-
-        if let Some(next_variant) = variant_iter.peek() {
-            if next_variant.position == pos {
-                let variant = variant_iter.next().expect("peeked variant must exist");
-                sites.push(hudson_site_from_variant(variant, &pop1_mem, &pop2_mem));
-                continue;
-            }
-        }
-
-        sites.push(SiteFstHudson {
-            position: ZeroBasedPosition(pos).to_one_based(),
-            fst: None,
-            d_xy: None,
-            pi_pop1: None,
-            pi_pop2: None,
-            n1_called: 0,
-            n2_called: 0,
-            num_component: None,
-            den_component: None,
-        });
     }
 
     sites
