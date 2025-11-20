@@ -3963,6 +3963,31 @@ pub fn process_variant(
         );
     }
 
+    // --- START LENGTH GUARD ---
+    // Move alt_alleles split up
+    let alt_alleles: Vec<&str> = fields[4].split(',').collect();
+
+    // Check REF length
+    if fields[3].len() != 1 {
+        filtering_stats._filtered_variants += 1;
+        filtering_stats
+            .filtered_positions
+            .insert(zero_based_position);
+        filtering_stats.add_example(format!("{}: Filtered due to REF INDEL", line.trim()));
+        return Ok(None);
+    }
+
+    // Check ALT length (any of them)
+    if alt_alleles.iter().any(|a| a.len() != 1) {
+        filtering_stats._filtered_variants += 1;
+        filtering_stats
+            .filtered_positions
+            .insert(zero_based_position);
+        filtering_stats.add_example(format!("{}: Filtered due to ALT INDEL/MNP", line.trim()));
+        return Ok(None);
+    }
+    // --- END LENGTH GUARD ---
+
     // Capture reference and alternate alleles for downstream sequence rendering.
     let allele_info = if !fields[3].is_empty() && !fields[4].is_empty() {
         let ref_allele = match fields[3].chars().next().unwrap_or('N') {
@@ -3988,7 +4013,6 @@ pub fn process_variant(
     };
 
     let alt_alleles: Vec<&str> = fields[4].split(',').collect();
-    // Removed multiallelic filter here.
     // We still filter MNPs (Multi-Nucleotide Polymorphisms) below.
     // Ensure ALL alt alleles are single nucleotides.
     if alt_alleles.iter().any(|s| s.len() > 1) {
