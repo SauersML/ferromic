@@ -134,6 +134,12 @@ def find_and_combine_phy_files():
     For gene trios, the sequences must all have identical lengths and be divisible by 3.
     For region pairs, the sequences must all have identical lengths (no multiple-of-3 requirement).
     """
+    cwd = os.getcwd()
+    print(f"Current working directory: {cwd}")
+    all_files = os.listdir('.')
+    print(f"Total files in directory: {len(all_files)}")
+    print(f"First 10 files: {all_files[:10]}")
+
     # Regex to extract key parts from filenames, handling the optional ENSG ID. (Gene files)
     pattern_gene = re.compile(
         r"^(group0|group1|outgroup)_([A-Za-z0-9\._-]+?)_(?:ENSG[0-9\.]+_)?(ENST[0-9\.]+)_(chr.+)\.phy$"
@@ -148,13 +154,16 @@ def find_and_combine_phy_files():
     region_groups = defaultdict(dict)   # identifier -> {'group0': file, 'group1': file}
 
     # Discover files and group by identifier
-    for filename in os.listdir('.'):
+    print("Scanning files...")
+    for filename in all_files:
+        print(f"Testing filename: {filename}")
         m_gene = pattern_gene.match(filename)
         if m_gene:
             group_type, gene_name, enst_id, coords = m_gene.groups()
             gene_name_norm = gene_name.upper()  # normalize case so names match
             identifier = f"{gene_name_norm}_{enst_id}"  # drop coords from the join key
             gene_groups[identifier][group_type] = filename
+            print(f"  -> MATCH GENE: {identifier} ({group_type})")
             continue
 
         m_region = pattern_region.match(filename)
@@ -162,7 +171,12 @@ def find_and_combine_phy_files():
             group_type, chrom, start, end = m_region.groups()
             identifier = f"inversion_{chrom}_start{start}_end{end}"
             region_groups[identifier][group_type] = filename
+            print(f"  -> MATCH REGION: {identifier} ({group_type})")
             continue
+
+        # If not matched, print failure for debugging
+        if filename.endswith(".phy"):
+            print(f"  -> Regex Mismatch: {filename}")
 
     if not gene_groups and not region_groups:
         print("No files matching gene (group0_|group1_|outgroup_) or region (inversion_group0_|inversion_group1_) patterns were found.", file=sys.stderr)
@@ -171,8 +185,14 @@ def find_and_combine_phy_files():
     print(f"Found {len(gene_groups)} gene identifiers and {len(region_groups)} region identifiers.")
 
     # ---------- PRE-RUN SUMMARY (exact-match only) ----------
+    print(f"Total Gene Groups Found: {len(gene_groups)}")
+    if len(gene_groups) > 0:
+        print(f"Gene Groups Keys (sample): {list(gene_groups.keys())[:5]}")
+
     gene_pair_ids = [i for i,d in gene_groups.items() if ('group0' in d and 'group1' in d)]
     gene_trio_ids = [i for i in gene_pair_ids if 'outgroup' in gene_groups[i]]
+
+    print(f"Total Groups with ALL 3 files (G0, G1, Outgroup): {len(gene_trio_ids)}")
 
     gene_cached = sum(os.path.exists(f"combined_{i}.phy") for i in gene_trio_ids)
     gene_to_make = len(gene_trio_ids) - gene_cached
