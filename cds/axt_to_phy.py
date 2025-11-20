@@ -539,6 +539,9 @@ def parse_transcript_metadata():
     seen = set()
     processed = 0
 
+    # Print metadata file path
+    print_always(f"Opening METADATA_FILE: {os.path.abspath(METADATA_FILE)}")
+
     with open(METADATA_FILE, 'r') as f:
         next(f, None)  # skip header
         for line_num, line in enumerate(f, 2):
@@ -591,6 +594,10 @@ def parse_transcript_metadata():
 
             g0_exists = os.path.exists(g0_fname)
             g1_exists = os.path.exists(g1_fname)
+
+            # Debug first 5 entries
+            if processed <= 5:
+                print_always(f"[DEBUG] Entry {processed}: g0='{g0_fname}' (exists={g0_exists}), g1='{g1_fname}' (exists={g1_exists})")
 
             if not g0_exists or not g1_exists:
                 if not g0_exists:
@@ -667,7 +674,10 @@ def find_region_sets():
     Returns list of dicts similar to transcripts.
     """
     print_always("Scanning for inversion region PHYLIP files...")
-    files = glob.glob('inversion_group[01]_*_start*_end*.phy')
+    glob_pattern = 'inversion_group[01]_*_start*_end*.phy'
+    print_always(f"Using glob pattern: {glob_pattern}")
+    files = glob.glob(glob_pattern)
+    print_always(f"Glob found {len(files)} files: {files[:5]} ...")
     groups = defaultdict(dict)  # key: (chrom, start, end) -> {'group0': path, 'group1': path}
 
     for path in files:
@@ -1144,6 +1154,7 @@ def build_outgroups_and_filter(transcripts, regions):
             if seq_list is None:
                 logger.add("No Alignment Found", f"No chimp alignment found for {t_id}.")
                 print_always(f"[TX][{t_id}] ERROR: chimp scaffold missing.")
+                print_always(f"Skipping {t_id} because: No Chimp Align (seq_list is None)")
                 log_detail(
                     "CDS",
                     t_id,
@@ -1156,6 +1167,10 @@ def build_outgroups_and_filter(transcripts, regions):
                 )
                 progress_bar("[TX write]", i, total_tx)
                 continue
+            else:
+                # Calculate divergence even if filtered later, for debug
+                pass
+
             final_seq = "".join(seq_list)
             seq_stats = summarise_sequence(final_seq)
             span_label = (
@@ -1171,6 +1186,7 @@ def build_outgroups_and_filter(transcripts, regions):
 
             if seq_stats['covered'] == 0:
                 logger.add("No Alignment Found", f"No chimp alignment found for {t_id}.")
+                print_always(f"Skipping {t_id} because: No Chimp Align (0 bp covered)")
                 log_detail(
                     "CDS",
                     t_id,
@@ -1190,6 +1206,7 @@ def build_outgroups_and_filter(transcripts, regions):
             if not human_seqs:
                 logger.add("Human File Missing for QC", f"Could not read human seqs from {g0_fname} for divergence check on {t_id}.")
                 print_always(f"[TX][{t_id}] QC SKIP: missing human reference ({g0_fname}).")
+                print_always(f"Skipping {t_id} because: Missing Human Ref ({g0_fname})")
                 log_detail(
                     "CDS",
                     t_id,
@@ -1208,6 +1225,9 @@ def build_outgroups_and_filter(transcripts, regions):
             metrics = compute_alignment_metrics(human_ref, final_seq)
             divergence = metrics["misaligned_fraction"] * 100
 
+            # Always print divergence for debugging
+            print_always(f"[TX][{t_id}] Divergence: {divergence:.4f}%")
+
             outname = f"outgroup_{gene}_{t_id}_{chrom_label}_start{start}_end{end}.phy"
             if divergence > DIVERGENCE_THRESHOLD:
                 logger.add("QC Filter: High Divergence", f"'{gene} ({t_id})' removed. Divergence vs chimp: {divergence:.2f}% (> {DIVERGENCE_THRESHOLD}%).")
@@ -1219,6 +1239,7 @@ def build_outgroups_and_filter(transcripts, regions):
                 print_always(
                     f"[TX][{t_id}] FAIL divergence {divergence:.2f}% (threshold {DIVERGENCE_THRESHOLD:.2f}%) — file removed."
                 )
+                print_always(f"Skipping {t_id} because: High Divergence ({divergence:.2f}%)")
                 log_detail(
                     "CDS",
                     t_id,

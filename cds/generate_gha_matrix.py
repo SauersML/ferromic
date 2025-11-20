@@ -27,7 +27,14 @@ def scan_regions():
 
 def scan_genes_and_batch(batch_size=4):
     """Scans for gene files, filters them, and groups them into batches."""
-    files = [f for f in glob.glob('combined_*.phy') if 'inversion' not in os.path.basename(f)]
+    glob_pattern = 'combined_*.phy'
+    print(f"Scanning genes with glob: {glob_pattern}", file=sys.stderr)
+    all_combined = glob.glob(glob_pattern)
+    print(f"Total combined files found: {len(all_combined)}", file=sys.stderr)
+
+    files = [f for f in all_combined if 'inversion' not in os.path.basename(f)]
+    print(f"Gene files (excluding inversion): {len(files)}", file=sys.stderr)
+
     metadata = lib.load_gene_metadata()
 
     valid_genes = []
