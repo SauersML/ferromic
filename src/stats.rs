@@ -8,7 +8,7 @@ use crate::progress::{
 use rayon::prelude::*;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 use std::fmt;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -692,7 +692,6 @@ pub fn calculate_fst_wc_haplotype_groups(
 
     let haplotype_to_group = map_samples_to_haplotype_groups(sample_names, sample_to_group_map);
     let membership = SubpopulationMembership::from_map(sample_names.len(), &haplotype_to_group);
-    let mut workspace = WcSiteWorkspace::new(membership.group_count());
 
     let total_variants = variants
         .par_iter()
@@ -719,7 +718,7 @@ pub fn calculate_fst_wc_haplotype_groups(
                 let (overall_fst, pairwise_fst, var_comps, pop_sizes, pairwise_var_comps) =
                     calculate_fst_wc_at_site_with_membership(variant, &membership, workspace);
 
-                let idx = progress_counter.fetch_add(1, Ordering::Relaxed);
+                let idx = progress_counter.fetch_add(1, AtomicOrdering::Relaxed);
                 if idx % 1000 == 0 || idx + 1 == total_variants {
                     update_step_progress(
                         idx as u64,
@@ -836,7 +835,6 @@ pub fn calculate_fst_wc_csv_populations(
     let population_assignments = parse_population_csv(csv_path)?;
     let sample_to_pop = map_samples_to_populations(sample_names, &population_assignments);
     let membership = SubpopulationMembership::from_map(sample_names.len(), &sample_to_pop);
-    let mut workspace = WcSiteWorkspace::new(membership.group_count());
 
     let total_variants = variants
         .par_iter()
@@ -863,7 +861,7 @@ pub fn calculate_fst_wc_csv_populations(
                 let (overall_fst, pairwise_fst, var_comps, pop_sizes, pairwise_var_comps) =
                     calculate_fst_wc_at_site_with_membership(variant, &membership, workspace);
 
-                let idx = progress_counter.fetch_add(1, Ordering::Relaxed);
+                let idx = progress_counter.fetch_add(1, AtomicOrdering::Relaxed);
                 if idx % 1000 == 0 || idx + 1 == total_variants {
                     update_step_progress(
                         idx as u64,
