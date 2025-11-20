@@ -894,6 +894,12 @@ def run_iqtree_task(region_info, iqtree_bin, threads, output_dir, timeout=7200, 
     start_time = datetime.now()
     logging.info(f"[{label}] START IQ-TREE with {threads} threads")
     try:
+        os.makedirs(output_dir, exist_ok=True)
+        cached_tree = os.path.join(output_dir, f"{label}.treefile")
+        if os.path.exists(cached_tree):
+            logging.info(f"[{label}] Using cached tree")
+            return (label, cached_tree, None)
+
         taxa = read_taxa_from_phy(path)
         chimp = next((t for t in taxa if 'pantro' in t.lower() or 'pan_troglodytes' in t.lower()), None)
 
@@ -913,12 +919,6 @@ def run_iqtree_task(region_info, iqtree_bin, threads, output_dir, timeout=7200, 
             reason = "; ".join(reasons) + f". [Diagnostics: {diag_summary}]"
             logging.warning(f"[{label}] Skipping region: {reason}")
             return (label, None, reason)
-
-        os.makedirs(output_dir, exist_ok=True)
-        cached_tree = os.path.join(output_dir, f"{label}.treefile")
-        if os.path.exists(cached_tree):
-            logging.info(f"[{label}] Using cached tree")
-            return (label, cached_tree, None)
 
         temp_dir_base = '/dev/shm' if os.path.exists('/dev/shm') and os.access('/dev/shm', os.W_OK) else None
         temp_dir = tempfile.mkdtemp(prefix=f"iqtree_{label}_", dir=temp_dir_base)
