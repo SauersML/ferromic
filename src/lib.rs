@@ -58,6 +58,7 @@ mod tests {
     mod filter_tests;
     mod hudson_fst_tests;
     mod interval_tests;
+    mod stats_tests;
 }
 
 /// Rich description of an FST estimate, exposed as ``ferromic.FstEstimate``.
