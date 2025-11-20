@@ -30,9 +30,13 @@ jobs:
           key: axt-file-v1
 
       - name: Unzip PHY files
-        run: unzip -o data/phy_outputs.zip
+        run: |
+          unzip -o data/phy_outputs.zip
+          ls -R
       - name: Run AXT to PHY
-        run: python3 cds/axt_to_phy.py
+        run: |
+          python3 cds/axt_to_phy.py
+          ls outgroup_* || echo "No outgroup files found in root"
         env:
           AXT_WORKERS: 4
 
