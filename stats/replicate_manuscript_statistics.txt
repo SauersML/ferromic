@@ -12,40 +12,40 @@ Sample sizes for diversity analyses:
 DIVERSITY
 Nucleotide diversity (π) by orientation and recurrence:
   Total loci with finite π estimates: 69.
-  Across all loci: mean π(inverted) = 0.000274, mean π(direct) = 0.000384.
-    Two-sided paired t-test comparing orientations: t = -2.825, p = 6.193e-03.
-  Single-event inversions: median π(inverted) = 0.000013, median π(direct) = 0.000233.
-  Recurrent inversions: median π(inverted) = 0.000359, median π(direct) = 0.000442.
-  Within inverted haplotypes: recurrent median π = 0.000359; single-event median π = 0.000013.
+  Across all loci: mean π(inverted) = 0.000277, mean π(direct) = 0.000387.
+    Two-sided paired t-test comparing orientations: t = -2.823, p = 6.241e-03.
+  Single-event inversions: median π(inverted) = 0.000013, median π(direct) = 0.000236.
+  Recurrent inversions: median π(inverted) = 0.000364, median π(direct) = 0.000446.
+  Within inverted haplotypes: recurrent median π = 0.000364; single-event median π = 0.000013.
 
 PI STRUCTURE
 First, nucleotide diversity was compared between 10 thousand base pairs (10 kbp) breakpoint-flanking regions at each end within the inversion and the 20 kbp middle segment, which requires inversions with at least 40 kbp in total length.
 In what: The 63 group_0 (orientation-0) entries in the filtered-π FALSTA with ≥40 kbp of per-site filtered π estimates, spanning 63 unique inversion intervals.
-Where: Specifically within the filtered π regions, the combined breakpoint-flanking mean is 4.197e-04 and the middle-segment mean is 5.077e-04.
+Where: Specifically within the filtered π regions, the combined breakpoint-flanking mean is 4.220e-04 and the middle-segment mean is 5.100e-04.
 Internal decay: 63 qualifying entries cover at least 40 kbp and support the Spearman’s correlation (ρ = 0.055) between nucleotide diversity (20 × 2 kbp windows across the first 40 kbp) and distance from the sequence start.
 
 LINEAR MODEL
 Orientation × recurrence linear models (replicated strict logic):
   Detection floor applied before logs: ε = 6.465000e-06.
   [Model A] Basic interaction (Δ-logπ ~ Recurrence):
-    Single-event: Inverted vs Direct: fold-change = 0.302 (95% CI 0.168–0.544), p = 6.583e-05.
-    Recurrent: Inverted vs Direct: fold-change = 1.099 (95% CI 0.905–1.336), p = 0.341.
-    Interaction (difference between those two): fold-change = 3.635 (95% CI 1.958–6.748), p = 4.359e-05.
-    Overall inversion effect (pooled Δ-logπ): fold-change = 0.550 (95% CI 0.385–0.787), p = 1.081e-03.
+    Single-event: Inverted vs Direct: fold-change = 0.304 (95% CI 0.169–0.548), p = 7.514e-05.
+    Recurrent: Inverted vs Direct: fold-change = 1.108 (95% CI 0.917–1.340), p = 0.289.
+    Interaction (difference between those two): fold-change = 3.645 (95% CI 1.962–6.770), p = 4.243e-05.
+    Overall inversion effect (pooled Δ-logπ): fold-change = 0.554 (95% CI 0.387–0.793), p = 1.246e-03.
   [Model B] Fixed-effects validation (Cluster-robust):
-    Single-event: Inverted vs Direct: fold-change = 0.302 (95% CI 0.133–0.689), p = 4.405e-03.
-    Recurrent: Inverted vs Direct: fold-change = 1.099 (95% CI 0.838–1.443), p = 0.495.
-    Interaction (difference between those two): fold-change = 3.635 (95% CI 1.527–8.648), p = 3.525e-03.
+    Single-event: Inverted vs Direct: fold-change = 0.304 (95% CI 0.133–0.694), p = 4.726e-03.
+    Recurrent: Inverted vs Direct: fold-change = 1.108 (95% CI 0.850–1.444), p = 0.447.
+    Interaction (difference between those two): fold-change = 3.645 (95% CI 1.531–8.678), p = 3.475e-03.
   [Model C] Covariate-adjusted (Recurrence + formation/size/AF):
-    Single-event: Inverted vs Direct (adjusted): fold-change = 0.406 (95% CI 0.251–0.656), p = 2.276e-04.
-    Recurrent: Inverted vs Direct (adjusted): fold-change = 0.432 (95% CI 0.207–0.901), p = 0.025.
-    Interaction (difference between those two): fold-change = 1.063 (95% CI 0.448–2.522), p = 0.889.
-    Covariate: Number_recurrent_events (ln1p, z): fold-change = 0.533 (95% CI 0.237–1.199), p = 0.128.
-    Covariate: Size_.kbp. (ln, z): fold-change = 1.411 (95% CI 0.976–2.040), p = 0.067.
-    Covariate: Inverted_AF (z): fold-change = 1.741 (95% CI 1.030–2.944), p = 0.038.
-    Covariate: Formation_rate_per_generation (ln, z): fold-change = 2.737 (95% CI 0.948–7.899), p = 0.063.
+    Single-event: Inverted vs Direct (adjusted): fold-change = 0.411 (95% CI 0.253–0.667), p = 3.226e-04.
+    Recurrent: Inverted vs Direct (adjusted): fold-change = 0.429 (95% CI 0.205–0.899), p = 0.025.
+    Interaction (difference between those two): fold-change = 1.045 (95% CI 0.435–2.507), p = 0.922.
+    Covariate: Number_recurrent_events (ln1p, z): fold-change = 0.528 (95% CI 0.234–1.190), p = 0.124.
+    Covariate: Size_.kbp. (ln, z): fold-change = 1.404 (95% CI 0.970–2.032), p = 0.072.
+    Covariate: Inverted_AF (z): fold-change = 1.725 (95% CI 1.017–2.927), p = 0.043.
+    Covariate: Formation_rate_per_generation (ln, z): fold-change = 2.811 (95% CI 0.967–8.174), p = 0.058.
   [Permutation] Model A interaction (n=10000):
-    Observed Δ(mean log-ratio) = 1.2905, p = 2.9997e-04.
+    Observed Δ(mean log-ratio) = 1.2933, p = 2.9997e-04.
 
 CDS CONSERVATION
 CDS conservation GLM (proportion of identical CDS pairs):
@@ -56,9 +56,9 @@ CDS conservation GLM (proportion of identical CDS pairs):
 
 DIFFERENTIATION
 Differentiation between orientations (Hudson's FST):
-  Single-event: median FST = 0.275 (n = 30).
-  Recurrent: median FST = 0.070 (n = 32).
-  Mann–Whitney U test (single-event vs recurrent): U = 649.000, p = 0.017.
+  Single-event: median FST = 0.273 (n = 30).
+  Recurrent: median FST = 0.069 (n = 32).
+  Mann–Whitney U test (single-event vs recurrent): U = 648.000, p = 0.018.
   Highly differentiated loci: 26 with FST > 0.2 and 10 with FST > 0.5.
 
 BREAKPOINT FRF
@@ -131,6 +131,10 @@ Selected inversion–phenotype associations (logistic regression with LRT p-valu
     Interaction (Ancestry × Dosage): p = 5.670e-05.
   [MAIN IMPUTED] chr17-45585160-INV-706887 vs Benign neoplasm of the skin: OR = 0.919 (95% CI 0.895–0.944), BH-adjusted p ≈ 2.970e-06 (raw p = 9.680e-10).
     Interaction (Ancestry × Dosage): p = 0.010.
+  [MAIN IMPUTED] chr17-45585160-INV-706887 vs Diastolic Heart Failure: OR = 1.116 (95% CI 1.061–1.128), BH-adjusted p ≈ 0.040 (raw p = 1.778e-04).
+    Interaction (Ancestry × Dosage): p = 0.414.
+  [MAIN IMPUTED] chr17-45585160-INV-706887 vs Breast Cancer (Malignant neoplasm): OR = 0.901 (95% CI 0.880–0.949), BH-adjusted p ≈ 0.046 (raw p = 2.989e-04).
+    Interaction (Ancestry × Dosage): p = 0.127.
   [TAG SNP] chr17-45974480-INV-29218 vs Morbid obesity (Tag SNP): OR = 1.054 (95% CI 1.031–1.078), BH-adjusted p ≈ 8.151e-04 (raw p = 3.650e-06).
   [TAG SNP] chr17-45974480-INV-29218 vs Breast lump or abnormal exam (Tag SNP): OR = 0.956 (95% CI 0.936–0.977), BH-adjusted p ≈ 6.375e-03 (raw p = 4.280e-05).
   [TAG SNP] chr17-45974480-INV-29218 vs Abnormal mammogram (Tag SNP): OR = 0.939 (95% CI 0.910–0.969), BH-adjusted p ≈ 7.326e-03 (raw p = 6.870e-05).
