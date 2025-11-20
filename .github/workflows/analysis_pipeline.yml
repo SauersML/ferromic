@@ -14,6 +14,7 @@ jobs:
     outputs:
       regions: ${{ steps.set-matrix.outputs.regions }}
       gene_batches: ${{ steps.set-matrix.outputs.gene_batches }}
+      cache_key: ${{ steps.calc-key.outputs.key }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -23,6 +24,12 @@ jobs:
       - name: Create LFS file list
         run: git lfs ls-files -l | cut -d' ' -f1 | sort > .lfs-assets-id
 
+      - name: Calculate Cache Key
+        id: calc-key
+        env:
+          THE_KEY: prep-results-v1-${{ runner.os }}-${{ hashFiles('cds/*.py', 'data/*.tsv', '.lfs-assets-id') }}
+        run: echo "key=$THE_KEY" >> $GITHUB_OUTPUT
+
       - name: Check Output Cache
         id: prep-cache
         uses: actions/cache@v4
@@ -30,7 +37,7 @@ jobs:
           path: |
             combined_*.phy
             outgroup_*.phy
-          key: prep-results-v1-${{ runner.os }}-${{ hashFiles('cds/*.py', 'data/*.tsv', '.lfs-assets-id') }}
+          key: ${{ steps.calc-key.outputs.key }}
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -187,6 +194,7 @@ jobs:
           path: tools.zip
 
       - name: Upload Combined PHY Artifacts
+        if: steps.prep-cache.outputs.cache-hit != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: combined-phy-files
@@ -222,10 +230,14 @@ jobs:
       - name: Unzip Tools
         run: unzip tools.zip
 
-      - name: Download PHY Files
-        uses: actions/download-artifact@v4
+      - name: Restore PHY Cache
+        uses: actions/cache/restore@v4
         with:
-          name: combined-phy-files
+          path: |
+            combined_*.phy
+            outgroup_*.phy
+          key: ${{ needs.prep-and-matrix.outputs.cache_key }}
+          fail-on-cache-miss: true
 
       - name: Calculate Input Hash
         id: calc-hash
@@ -308,10 +320,14 @@ jobs:
       - name: Unzip Tools
         run: unzip tools.zip
 
-      - name: Download PHY Files
-        uses: actions/download-artifact@v4
+      - name: Restore PHY Cache
+        uses: actions/cache/restore@v4
         with:
-          name: combined-phy-files
+          path: |
+            combined_*.phy
+            outgroup_*.phy
+          key: ${{ needs.prep-and-matrix.outputs.cache_key }}
+          fail-on-cache-miss: true
 
       - name: Download All Region Trees
         uses: actions/download-artifact@v4
