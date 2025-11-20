@@ -288,6 +288,16 @@ def find_and_combine_phy_files():
             if m_id:
                 chrom_label, start, end = m_id.groups()
                 outgroup_filename = f"outgroup_inversion_{chrom_label}_start{start}_end{end}.phy"
+
+                # Fix for filename mismatch: Rust strips 'chr', but axt_to_phy.py adds it back.
+                # If the default filename (without chr) isn't found, try looking for the version with 'chr'.
+                if not os.path.exists(outgroup_filename):
+                    # If chrom_label doesn't already start with chr, try adding it.
+                    if not chrom_label.startswith("chr"):
+                        alt_outgroup_filename = f"outgroup_inversion_chr{chrom_label}_start{start}_end{end}.phy"
+                        if os.path.exists(alt_outgroup_filename):
+                            outgroup_filename = alt_outgroup_filename
+
                 if os.path.exists(outgroup_filename):
                     print(f"  - Parsing '{outgroup_filename}' with 'outgroup' rules...")
                     out_seqs = parse_specific_phy_file(outgroup_filename, 'outgroup')
