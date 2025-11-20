@@ -22,6 +22,10 @@ def main():
         logging.error("Environment variable TARGET_REGION is not set.")
         sys.exit(1)
 
+    if target_region == "EMPTY_REGION":
+        logging.info("Received EMPTY_REGION. Skipping IQ-TREE run.")
+        sys.exit(0)
+
     logging.info(f"Starting IQ-TREE Runner for Region: {target_region}")
 
     # 2. Setup Tools (Expect them to be present/unzipped)
