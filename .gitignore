@@ -38,3 +38,9 @@ out/
 web/figures-site/.turbo/
 per_site_diversity_output.falsta
 per_site_fst_output.falsta
+iqtree-3.0.1-Linux/
+paml/
+pipeline_run_*.log
+region_trees/
+tree_figures/
+annotated_tree_figures/
