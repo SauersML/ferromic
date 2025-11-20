@@ -686,7 +686,7 @@ def parse_transcript_metadata():
 # =========================
 
 REGION_REGEX = re.compile(
-    r'^inversion_(group(?P<grp>[01]))_(?P<chrom>[^_]+)_start(?P<start>\d+)_end(?P<end>\d+)\.phy$'
+    r'^inversion_(group(?P<grp>[01]))_(?P<chrom>[^_]+)_start(?P<start>\d+)_end(?P<end>\d+)\.phy(\.gz)?$'
 )
 
 def find_region_sets():
@@ -695,9 +695,10 @@ def find_region_sets():
     Returns list of dicts similar to transcripts.
     """
     print_always("Scanning for inversion region PHYLIP files...")
-    glob_pattern = 'inversion_group[01]_*_start*_end*.phy'
-    print_always(f"Using glob pattern: {glob_pattern}")
-    files = glob.glob(glob_pattern)
+    # Look for both compressed and uncompressed PHY files
+    files = glob.glob('inversion_group[01]_*_start*_end*.phy') + \
+            glob.glob('inversion_group[01]_*_start*_end*.phy.gz')
+
     print_always(f"Glob found {len(files)} files: {files[:5]} ...")
     groups = defaultdict(dict)  # key: (chrom, start, end) -> {'group0': path, 'group1': path}
 
@@ -754,8 +755,14 @@ def find_region_sets():
             log_detail("INVERSION", region_id, "QC_WARNING", "Neither group0 nor group1 file present for QC header check.")
         else:
             try:
-                with open(qc_fname, 'r') as f:
-                    first = f.readline().strip()
+                # Use transparent open to handle .gz or text
+                if qc_fname.endswith('.gz'):
+                    with gzip.open(qc_fname, 'rt') as f:
+                        first = f.readline().strip()
+                else:
+                    with open(qc_fname, 'r') as f:
+                        first = f.readline().strip()
+
                 mlen = re.match(r'\s*\d+\s+(\d+)\s*$', first)
                 if not mlen:
                     logger.add("Region QC Warning", f"{region_id}: could not parse header length in {os.path.basename(qc_fname)}.")
@@ -1637,19 +1644,19 @@ def calculate_and_print_differences_transcripts(transcripts):
 
 def calculate_and_print_differences_regions():
     print_always("--- Final Difference Calculation & Statistics (Regions) ---")
-    # Match inversion group files
-    inv_regex = re.compile(r"^inversion_group(?P<grp>[01])_(?P<chrom>[^_]+)_start(?P<start>\d+)_end(?P<end>\d+)\.phy$")
+    # Match inversion group files (Reusing global REGION_REGEX)
+
     # Outgroup for region files
-    out_regex = re.compile(r"^outgroup_inversion_(?P<chrom>[^_]+)_start(?P<start>\d+)_end(?P<end>\d+)\.phy$")
+    out_regex = re.compile(r"^outgroup_inversion_(?P<chrom>[^_]+)_start(?P<start>\d+)_end(?P<end>\d+)\.phy(\.gz)?$")
 
     groups = defaultdict(dict)  # key: (chrom,start,end) -> dict of role->file
-    all_phys = glob.glob('*.phy')
+    all_phys = glob.glob('*.phy') + glob.glob('*.phy.gz')
 
     # Scan files with progress
     total_files = len(all_phys)
     for i, fpath in enumerate(all_phys, 1):
         base = os.path.basename(fpath)
-        m = inv_regex.match(base)
+        m = REGION_REGEX.match(base)
         if m:
             chrom_norm = normalize_chromosome(m.group('chrom'))
             if not chrom_norm:
