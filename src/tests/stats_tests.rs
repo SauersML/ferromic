@@ -1671,6 +1671,37 @@ mod tests {
     }
 
     #[test]
+    fn test_calculate_adjusted_sequence_length_mask_coordinate_system_fix() {
+        // Scenario:
+        // Region: 100..200 (1-based inclusive). Length = 101.
+        // Mask (BED): 100 101 (0-based half-open). Masks base 100 (0-based) which is base 101 (1-based).
+        // Expected Result: Mask removes exactly 1 base (101).
+        // Remaining bases: 100 (100..100), 102..200 (99 bases). Total 100.
+        // Prior Bug: Subtraction logic was using raw integers (100) and (101).
+        //  Start (100) matched mask start (100) -> Left part (100..100) was excluded (start > start logic).
+        //  Result was 99.
+        // This test ensures the fix (converting 0-based masks to 1-based inclusive) is working.
+
+        let region_start = 100;
+        let region_end = 200;
+        let mask_regions = vec![(100, 101)]; // 0-based [100, 101) -> 1-based [101, 101]
+
+        use crate::stats::calculate_adjusted_sequence_length;
+        let adjusted_len = calculate_adjusted_sequence_length(
+            region_start,
+            region_end,
+            None,
+            Some(&mask_regions),
+        );
+
+        assert_eq!(
+            adjusted_len, 100,
+            "Adjusted length should be 100 (101 - 1). Found {}.",
+            adjusted_len
+        );
+    }
+
+    #[test]
     fn test_per_site_falsta_includes_hudson_components() {
         struct DirGuard {
             original: PathBuf,
