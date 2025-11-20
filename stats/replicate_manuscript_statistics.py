@@ -143,26 +143,32 @@ def _stage_cds_inputs() -> list[Path]:
 
     extracted_any = False
     for archive_path in zip_archives:
-        with zipfile.ZipFile(archive_path) as archive:
-            members = [
-                name
-                for name in archive.namelist()
-                if name.endswith(".phy") or name.endswith(".phy.gz")
-            ]
-            if not members:
-                continue
-            extracted_any = True
-            for member in members:
-                target_name = Path(member).name
-                target_path = Path(target_name)
-                with archive.open(member) as zipped_member:
-                    if member.endswith(".gz"):
-                        with gzip.open(zipped_member) as gz_member:
-                            data = gz_member.read()
-                    else:
-                        data = zipped_member.read()
-                target_path.write_bytes(data)
-                staged_paths.append(target_path)
+        try:
+            with zipfile.ZipFile(archive_path) as archive:
+                members = [
+                    name
+                    for name in archive.namelist()
+                    if name.endswith(".phy") or name.endswith(".phy.gz")
+                ]
+                if not members:
+                    continue
+                extracted_any = True
+                for member in members:
+                    target_name = Path(member).name
+                    target_path = Path(target_name)
+                    with archive.open(member) as zipped_member:
+                        if member.endswith(".gz"):
+                            with gzip.open(zipped_member) as gz_member:
+                                data = gz_member.read()
+                        else:
+                            data = zipped_member.read()
+                    target_path.write_bytes(data)
+                    staged_paths.append(target_path)
+        except zipfile.BadZipFile:
+            print(
+                f"WARNING: Skipping invalid zip file: {archive_path} (possible LFS pointer?)"
+            )
+            continue
 
     if not extracted_any:
         raise FileNotFoundError(
@@ -218,6 +224,14 @@ def run_fresh_cds_pipeline():
                 sys.exit(1)
 
             print("\n>>> PIPELINE: GENERATION COMPLETE. Proceeding to manuscript report...\n")
+
+        except (FileNotFoundError, zipfile.BadZipFile) as e:
+            print(
+                f"WARNING: Skipping fresh CDS generation due to missing input data: {e}"
+            )
+            print("... Will proceed with pre-existing summary tables if available ...")
+            return
+
         finally:
             if staged_paths:
                 print("... Cleaning staged metadata and PHYLIP files ...")
