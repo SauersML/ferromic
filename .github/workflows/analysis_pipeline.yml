@@ -23,7 +23,25 @@ jobs:
       - name: Create LFS file list
         run: git lfs ls-files -l | cut -d' ' -f1 | sort > .lfs-assets-id
 
+      - name: Check Output Cache
+        id: prep-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            combined_*.phy
+            outgroup_*.phy
+          key: prep-results-v1-${{ runner.os }}-${{ hashFiles('cds/*.py', 'data/*.tsv', '.lfs-assets-id') }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: pip install numpy pandas scipy statsmodels ete3 lxml requests tqdm
+
       - name: Cache LFS
+        if: steps.prep-cache.outputs.cache-hit != 'true'
         uses: actions/cache@v4
         with:
           path: .git/lfs
@@ -32,6 +50,7 @@ jobs:
             ${{ runner.os }}-lfs-
 
       - name: Pull LFS or Download Artifact
+        if: steps.prep-cache.outputs.cache-hit != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -99,21 +118,15 @@ jobs:
             rm artifact.zip
           fi
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.9'
-
-      - name: Install dependencies
-        run: pip install numpy pandas scipy statsmodels ete3 lxml requests tqdm
-
       - name: Cache AXT file
+        if: steps.prep-cache.outputs.cache-hit != 'true'
         uses: actions/cache@v4
         with:
           path: hg38.panTro6.net.axt.gz
           key: axt-file-v1
 
       - name: Unzip PHY files
+        if: steps.prep-cache.outputs.cache-hit != 'true'
         run: |
           unzip -o data/phy_outputs.zip
           rm data/phy_outputs.zip
@@ -121,8 +134,10 @@ jobs:
           rm -f '*.zip'
           ls -R
       - name: Decompress Gzipped PHY files
+        if: steps.prep-cache.outputs.cache-hit != 'true'
         run: gzip -d *.phy.gz || echo "No .phy.gz files to decompress."
       - name: Run AXT to PHY
+        if: steps.prep-cache.outputs.cache-hit != 'true'
         run: |
           python3 cds/axt_to_phy.py
           ls outgroup_* || echo "No outgroup files found in root"
@@ -130,6 +145,7 @@ jobs:
           AXT_WORKERS: 4
 
       - name: Run Combine PHY
+        if: steps.prep-cache.outputs.cache-hit != 'true'
         run: python3 cds/combine_phy.py
 
       - name: Prepare Tools (Download & Zip)
