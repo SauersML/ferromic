@@ -301,3 +301,11 @@ jobs:
           name: run-vcf-hudson-fst
           path: hudson_fst_results.tsv.gz
           if-no-files-found: error
+
+      - name: Upload Metadata Artifact
+        if: hashFiles('phy_metadata.tsv') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-vcf-metadata
+          path: phy_metadata.tsv
+          if-no-files-found: error
