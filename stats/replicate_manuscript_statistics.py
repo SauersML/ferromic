@@ -165,9 +165,24 @@ def _stage_cds_inputs() -> list[Path]:
                     target_path.write_bytes(data)
                     staged_paths.append(target_path)
         except zipfile.BadZipFile:
-            print(
-                f"WARNING: Skipping invalid zip file: {archive_path} (possible LFS pointer?)"
-            )
+
+            # Check if this is a Git LFS pointer file
+            is_lfs = False
+            try:
+                with open(archive_path, "r", encoding="utf-8", errors="ignore") as f:
+                    header = f.read(100)
+                    if header.startswith("version https://git-lfs.github.com/spec/v1"):
+                        is_lfs = True
+            except Exception:
+                pass
+
+            if is_lfs:
+                print(
+                    f"WARNING: '{archive_path.name}' appears to be a Git LFS pointer, "
+                    "not a real zip file. Skipping."
+                )
+            else:
+                print(f"WARNING: '{archive_path.name}' is not a valid zip file. Skipping.")
             continue
 
     if not extracted_any:
@@ -203,7 +218,12 @@ def run_fresh_cds_pipeline():
         try:
             # 2. Stage required inputs for cds_differences.py
             print("... Staging metadata and PHYLIP archives from data/ ...")
-            staged_paths = _stage_cds_inputs()
+            try:
+                staged_paths = _stage_cds_inputs()
+            except FileNotFoundError as e:
+                print(f"SKIPPING REGENERATION: {e}")
+                print("Proceeding with existing cached statistics if available.")
+                return
 
             # 3. Run the Raw Processor (equivalent to running stats/cds_differences.py)
             # This reads *.phy and inv_info.tsv -> outputs cds_identical_proportions.tsv
@@ -1588,4 +1608,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
