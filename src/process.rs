@@ -1243,8 +1243,12 @@ pub fn process_config_entries(
     let grouped = group_config_entries_by_chr(config_entries);
 
     // Log the count of entries per chromosome
+    let mut sorted_chromosomes: Vec<_> = grouped.keys().collect();
+    sorted_chromosomes.sort();
+
     log(LogLevel::Info, "STATISTICS: Input regions by chromosome:");
-    for (chr, entries) in &grouped {
+    for chr in &sorted_chromosomes {
+        let entries = &grouped[*chr];
         log(
             LogLevel::Info,
             &format!("  - {}: {} regions", chr, entries.len()),
@@ -1307,6 +1311,7 @@ pub fn process_config_entries(
 
     // The map operation collects results per chromosome.
     // Each result is a tuple: (main_csv_data_for_this_chr, hudson_data_for_this_chr)
+    // We iterate over sorted chromosomes to ensure deterministic order of results collection
     let per_chromosome_collected_results: Vec<(
         Vec<(
             CsvRowData,
@@ -1315,9 +1320,10 @@ pub fn process_config_entries(
             Vec<(i64, f64, f64, f64)>,
         )>,
         Vec<RegionalHudsonFSTOutcome>,
-    )> = grouped
+    )> = sorted_chromosomes
         .par_iter()
-        .map(|(chr, chr_entries)| {
+        .map(|&chr| {
+            let chr_entries = &grouped[chr];
             match process_chromosome_entries(
                 chr,
                 chr_entries,
@@ -3775,7 +3781,49 @@ pub fn process_vcf(
         .into_inner();
 
     // sort the (variant, pass) tuples by genomic position while preserving their filter status
-    final_all_with_flags.sort_by_key(|(variant, _)| variant.position);
+    final_all_with_flags.sort_by(|(a, _), (b, _)| {
+        match a.position.cmp(&b.position) {
+            std::cmp::Ordering::Equal => {
+                // Tie-breaker for variants at the same position
+                // Use genotypes byte representation for stable sorting
+                // Note: CompressedGenotypes doesn't expose raw bytes easily or derive Ord,
+                // but we can access internal data if exposed or use other properties.
+                // Since Variant.genotypes.data is Arc<[u8]>, we can compare that.
+                // However, accessing private fields is not allowed if they are private.
+                // Let's check Variant definition. It is pub struct with pub genotypes.
+                // CompressedGenotypes fields are private.
+                // But CompressedGenotypes implements PartialEq.
+                // Wait, the user request said: "Modify the sort key to include a secondary tie-breaker (like the REF/ALT alleles or the original line content)".
+                // We don't have REF/ALT here easily available in `final_all_with_flags` (Vec<(Variant, bool)>).
+                // But we do have `position_allele_map` which stores alleles for positions.
+                // But position_allele_map is keyed by position. If multiple variants have same position, they might share the same entry?
+                // If so, REF/ALT tie breaker is useless.
+                // However, usually multiple variants at same pos are multiallelics split or distinct variants.
+                // If they are split multiallelics, they might have different ALTs but same REF?
+                // Or if they are just duplicates.
+                // If we can't access REF/ALT, we can try to use genotypes content.
+                // Since we cannot easily access `CompressedGenotypes` internals (private),
+                // and we don't have line content.
+                // Wait, `Variant` derives `Debug`. We can use `format!("{:?}", a)` as a last resort, but it's slow.
+                // Let's try to rely on stability of parallel collection? No, parallel is unstable.
+                // We MUST have a tie breaker.
+                //
+                // Actually, let's look at how `CompressedGenotypes` is defined.
+                // In `src/process.rs`:
+                // pub struct CompressedGenotypes { data: Arc<[u8]>, ... }
+                // The fields are private.
+                // But `CompressedGenotypes` implements `PartialEq`.
+                // If they are equal, order doesn't matter.
+                // If they are not equal, we need an order.
+                //
+                // Let's add a public method to `CompressedGenotypes` to expose data for sorting?
+                // Or just format! which is slow but correct.
+                // Optimization: Access private fields directly since we are in the same module
+                a.genotypes.data.cmp(&b.genotypes.data)
+            }
+            other => other,
+        }
+    });
 
     let mut final_all = Vec::with_capacity(final_all_with_flags.len());
     let mut final_filtered_idxs = Vec::new();

@@ -1150,6 +1150,9 @@ pub fn parse_gtf_file(
         chr
     ));
 
+    // Sort transcripts by transcript_id for deterministic processing
+    transcripts_vec.sort_by(|a, b| a.transcript_id.cmp(&b.transcript_id));
+
     // Return only the best transcript for each gene
     Ok(transcripts_vec)
 }

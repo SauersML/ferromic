@@ -1312,7 +1312,12 @@ pub fn write_phylip_file(
         ))
     })?;
 
-    for (sample_name, seq_chars) in hap_sequences {
+    // Sort sample names for deterministic output order
+    let mut sorted_sample_names: Vec<_> = hap_sequences.keys().collect();
+    sorted_sample_names.sort();
+
+    for sample_name in sorted_sample_names {
+        let seq_chars = &hap_sequences[sample_name];
         let padded_name = format!("{:<10}", sample_name);
         let sequence: String = seq_chars.iter().collect();
         writeln!(writer, "{}{}", padded_name, sequence).map_err(|e| {
