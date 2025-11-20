@@ -1,0 +1,211 @@
+name: Analysis Pipeline
+
+on:
+  workflow_dispatch:
+
+jobs:
+  prep-and-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      regions: ${{ steps.set-matrix.outputs.regions }}
+      gene_batches: ${{ steps.set-matrix.outputs.gene_batches }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: pip install numpy pandas scipy statsmodels ete3 lxml requests tqdm
+
+      - name: Cache AXT file
+        uses: actions/cache@v4
+        with:
+          path: hg38.PanTro6.net.axt.gz
+          key: axt-file-v1
+
+      - name: Run AXT to PHY
+        run: python3 cds/axt_to_phy.py
+        env:
+          AXT_WORKERS: 4
+
+      - name: Run Combine PHY
+        run: python3 cds/combine_phy.py
+
+      - name: Prepare Tools (Download & Zip)
+        run: |
+          # Create a temp python script to reuse pipeline_lib logic
+          cat <<EOF > prepare_tools.py
+          import os, sys
+          sys.path.append('cds')
+          import pipeline_lib as lib
+          lib.setup_external_tools(os.getcwd())
+          EOF
+          python3 prepare_tools.py
+
+          # Zip them up
+          zip -r tools.zip paml/ iqtree-3.0.1-Linux/
+
+      - name: Generate GHA Matrix
+        id: set-matrix
+        run: |
+          # Run the generator and capture JSON output
+          JSON=$(python3 cds/generate_gha_matrix.py --batch-size 4)
+
+          # Parse JSON to get regions and batches
+          REGIONS=$(echo "$JSON" | python3 -c "import sys, json; print(json.dumps(json.load(sys.stdin)['regions']))")
+          BATCHES=$(echo "$JSON" | python3 -c "import sys, json; print(json.dumps(json.load(sys.stdin)['gene_batches']))")
+
+          # Output to GHA environment
+          echo "regions=$REGIONS" >> $GITHUB_OUTPUT
+          echo "gene_batches=$BATCHES" >> $GITHUB_OUTPUT
+
+      - name: Upload Tools Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tools-zip
+          path: tools.zip
+
+      - name: Upload Combined PHY Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: combined-phy-files
+          path: |
+            combined_*.phy
+            outgroup_*.phy
+
+  iqtree-phase:
+    needs: prep-and-matrix
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        region: ${{ fromJson(needs.prep-and-matrix.outputs.regions) }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: pip install numpy pandas scipy statsmodels ete3 lxml requests tqdm
+
+      - name: Download Tools
+        uses: actions/download-artifact@v4
+        with:
+          name: tools-zip
+
+      - name: Unzip Tools
+        run: unzip tools.zip
+
+      - name: Download PHY Files
+        uses: actions/download-artifact@v4
+        with:
+          name: combined-phy-files
+
+      - name: Run IQ-TREE
+        run: python3 cds/iqtree_runner.py
+        env:
+          TARGET_REGION: ${{ matrix.region }}
+
+      - name: Upload Region Tree
+        uses: actions/upload-artifact@v4
+        with:
+          name: region-tree-${{ matrix.region }}
+          path: |
+            region_trees/${{ matrix.region }}.treefile
+            region_trees/${{ matrix.region }}.FAILED
+          if-no-files-found: ignore
+
+  paml-phase:
+    needs: [prep-and-matrix, iqtree-phase]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        batch: ${{ fromJson(needs.prep-and-matrix.outputs.gene_batches) }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: pip install numpy pandas scipy statsmodels ete3 lxml requests tqdm
+
+      - name: Download Tools
+        uses: actions/download-artifact@v4
+        with:
+          name: tools-zip
+
+      - name: Unzip Tools
+        run: unzip tools.zip
+
+      - name: Download PHY Files
+        uses: actions/download-artifact@v4
+        with:
+          name: combined-phy-files
+
+      - name: Download All Region Trees
+        uses: actions/download-artifact@v4
+        with:
+          pattern: region-tree-*
+          merge-multiple: true
+          path: region_trees
+
+      - name: Run PAML (Batch)
+        run: python3 cds/codeml_runner.py
+        env:
+          GENE_BATCH: ${{ matrix.batch }}
+          # Optional: configure timeouts etc
+          PAML_TIMEOUT: 3600
+
+      - name: Upload Partial Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: paml-results-${{ strategy.job-index }}
+          path: partial_results_*.tsv
+
+  finalize-phase:
+    needs: paml-phase
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: pip install numpy pandas scipy statsmodels ete3 lxml requests tqdm
+
+      - name: Download Partial Results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: paml-results-*
+          merge-multiple: true
+
+      - name: Run Final Stats
+        run: python3 cds/finalize_results.py
+
+      - name: Upload Final Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-paml-results
+          path: |
+            full_paml_results_*.tsv
