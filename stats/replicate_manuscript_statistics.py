@@ -13,7 +13,10 @@ import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, List, Tuple
+import tempfile
 
+import shutil
+import requests
 import numpy as np
 import pandas as pd
 from scipy import stats
@@ -122,6 +125,129 @@ def _temporary_workdir(path: Path):
         os.chdir(prev)
 
 
+def download_latest_artifacts():
+    """
+    Automatically downloads the required artifacts from the latest successful
+    'Manual Run VCF Pipeline' (manual_run_vcf.yml) execution.
+    """
+    print("\n" + "=" * 80)
+    print(">>> ARTIFACT RETRIEVAL: FETCHING LATEST DATA FROM GITHUB ACTIONS <<<")
+    print("=" * 80)
+
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    repo = os.environ.get("GITHUB_REPOSITORY")
+    if not token or not repo:
+        print("WARNING: GITHUB_TOKEN or GITHUB_REPOSITORY not set. Skipping auto-download.")
+        print("Ensure you have manually placed the required files in data/ if running locally.")
+        return
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    api_root = "https://api.github.com"
+    workflow_file = "manual_run_vcf.yml"
+
+    # 1. Find latest successful run
+    print(f"Finding latest successful run of {workflow_file}...")
+    try:
+        url = f"{api_root}/repos/{repo}/actions/workflows/{workflow_file}/runs"
+        params = {"status": "success", "per_page": 1, "exclude_pull_requests": "true"}
+        resp = requests.get(url, headers=headers, params=params)
+        resp.raise_for_status()
+        runs = resp.json().get("workflow_runs", [])
+        if not runs:
+            print("No successful runs found. Skipping download.")
+            return
+        run_id = runs[0]["id"]
+        print(f"Found Run ID: {run_id}")
+    except Exception as e:
+        print(f"Error fetching runs: {e}")
+        return
+
+    # 2. List artifacts
+    print("Listing artifacts...")
+    try:
+        url = f"{api_root}/repos/{repo}/actions/runs/{run_id}/artifacts"
+        resp = requests.get(url, headers=headers)
+        resp.raise_for_status()
+        artifacts = resp.json().get("artifacts", [])
+    except Exception as e:
+        print(f"Error fetching artifacts: {e}")
+        return
+
+    # Define mapping: Artifact Name -> (Target Filename in data/, Unzip Logic)
+    # Logic: 'extract_zip' (unzip contents), 'extract_gz' (unzip specific gz), 'rename' (just rename)
+    # Since GHA artifacts are ALWAYS zip files, we download the zip and then process.
+    artifact_map = {
+        "run-vcf-phy-outputs": {"target": "phy_outputs.zip", "action": "copy_inner_zip"},
+        "run-vcf-falsta": {"target": "per_site_diversity_output.falsta.gz", "action": "extract_file"},
+        "run-vcf-hudson-fst": {"target": "FST_data.tsv.gz", "action": "extract_renamed"},
+        "run-vcf-metadata": {"target": "inv_properties.tsv", "action": "extract_renamed"},
+        "run-vcf-output-csv": {"target": "output.csv", "action": "extract_file"},
+    }
+
+    # Specific internal filenames expected inside the artifacts
+    internal_names = {
+        "run-vcf-falsta": "per_site_diversity_output.falsta.gz",
+        "run-vcf-hudson-fst": "hudson_fst_results.tsv.gz",
+        "run-vcf-metadata": "phy_metadata.tsv",
+        "run-vcf-output-csv": "output.csv",
+        "run-vcf-phy-outputs": "phy_outputs.zip"
+    }
+
+    # Ensure DATA_DIR is defined and exists (using global variable defined at module level)
+    DATA_DIR.mkdir(exist_ok=True)
+
+    for artifact in artifacts:
+        name = artifact["name"]
+        if name not in artifact_map:
+            continue
+
+        spec = artifact_map[name]
+        target_path = DATA_DIR / spec["target"]
+        download_url = artifact["archive_download_url"]
+
+        print(f"Downloading {name} -> {target_path.name}...")
+        try:
+            # Stream download to a temporary file to avoid memory issues with large artifacts
+            with tempfile.TemporaryFile() as tmp_file:
+                with requests.get(download_url, headers=headers, stream=True) as r:
+                    r.raise_for_status()
+                    for chunk in r.iter_content(chunk_size=8192):
+                        tmp_file.write(chunk)
+
+                tmp_file.seek(0)
+                with zipfile.ZipFile(tmp_file) as z:
+                    # Perform action
+                    if spec["action"] == "copy_inner_zip":
+                        # The artifact contains a zip file (e.g. phy_outputs.zip)
+                        # We extract that inner zip to data/
+                        inner_name = internal_names[name]
+                        with z.open(inner_name) as src, open(target_path, "wb") as dst:
+                            shutil.copyfileobj(src, dst)
+
+                    elif spec["action"] == "extract_file":
+                        # Extract specific file as is
+                        inner_name = internal_names[name]
+                        with z.open(inner_name) as src, open(target_path, "wb") as dst:
+                            shutil.copyfileobj(src, dst)
+
+                    elif spec["action"] == "extract_renamed":
+                        # Extract file but rename it (e.g. phy_metadata.tsv -> inv_properties.tsv)
+                        # Also used for FST_data.tsv.gz (from hudson_fst_results.tsv.gz)
+                        inner_name = internal_names[name]
+                        with z.open(inner_name) as src, open(target_path, "wb") as dst:
+                            shutil.copyfileobj(src, dst)
+
+            print(f"  Success: {target_path.name} updated.")
+
+        except Exception as e:
+            print(f"  FAILED to process {name}: {e}")
+            # We don't exit here, try to get other files
+
+
 def _stage_cds_inputs() -> list[Path]:
     """Prepare required inputs for cds_differences in the working directory."""
 
@@ -165,24 +291,7 @@ def _stage_cds_inputs() -> list[Path]:
                     target_path.write_bytes(data)
                     staged_paths.append(target_path)
         except zipfile.BadZipFile:
-
-            # Check if this is a Git LFS pointer file
-            is_lfs = False
-            try:
-                with open(archive_path, "r", encoding="utf-8", errors="ignore") as f:
-                    header = f.read(100)
-                    if header.startswith("version https://git-lfs.github.com/spec/v1"):
-                        is_lfs = True
-            except Exception:
-                pass
-
-            if is_lfs:
-                print(
-                    f"WARNING: '{archive_path.name}' appears to be a Git LFS pointer, "
-                    "not a real zip file. Skipping."
-                )
-            else:
-                print(f"WARNING: '{archive_path.name}' is not a valid zip file. Skipping.")
+            print(f"WARNING: '{archive_path.name}' is not a valid zip file. Skipping.")
             continue
 
     if not extracted_any:
@@ -196,8 +305,6 @@ def _stage_cds_inputs() -> list[Path]:
 def run_fresh_cds_pipeline():
     """
     Force regeneration of CDS statistics from raw .phy files.
-
-    This replaces the need for pre-existing .tsv summary files.
     """
 
     print("\n" + "=" * 80)
@@ -218,15 +325,9 @@ def run_fresh_cds_pipeline():
         try:
             # 2. Stage required inputs for cds_differences.py
             print("... Staging metadata and PHYLIP archives from data/ ...")
-            try:
-                staged_paths = _stage_cds_inputs()
-            except FileNotFoundError as e:
-                print(f"SKIPPING REGENERATION: {e}")
-                print("Proceeding with existing cached statistics if available.")
-                return
+            staged_paths = _stage_cds_inputs()
 
             # 3. Run the Raw Processor (equivalent to running stats/cds_differences.py)
-            # This reads *.phy and inv_info.tsv -> outputs cds_identical_proportions.tsv
             print("\n[Step 1/2] Parsing raw PHYLIP files (cds_differences.py)...")
             try:
                 cds_differences.main()
@@ -235,7 +336,6 @@ def run_fresh_cds_pipeline():
                 sys.exit(1)
 
             # 4. Run the Jackknife Analysis (equivalent to stats/per_gene_cds_differences_jackknife.py)
-            # This reads the file created in Step 1 -> outputs gene_inversion_direct_inverted.tsv
             print("\n[Step 2/2] Running Jackknife statistics (per_gene_cds_differences_jackknife.py)...")
             try:
                 per_gene_cds_differences_jackknife.main()
@@ -245,12 +345,9 @@ def run_fresh_cds_pipeline():
 
             print("\n>>> PIPELINE: GENERATION COMPLETE. Proceeding to manuscript report...\n")
 
-        except (FileNotFoundError, zipfile.BadZipFile) as e:
-            print(
-                f"WARNING: Skipping fresh CDS generation due to missing input data: {e}"
-            )
-            print("... Will proceed with pre-existing summary tables if available ...")
-            return
+        except Exception as e:
+            print(f"FATAL: CDS generation pipeline failed: {e}")
+            sys.exit(1)
 
         finally:
             if staged_paths:
@@ -744,37 +841,32 @@ def summarize_cds_conservation_glm() -> List[str]:
     source_label: str | None = None
     errors: List[str] = []
 
-    cds_input = _resolve_repo_artifact("cds_identical_proportions.tsv")
-    if cds_input is not None:
+    # Enforce usage of fresh data (cds_identical_proportions.tsv)
+    # This file should have been generated by run_fresh_cds_pipeline() in the current directory (REPO_ROOT)
+    cds_input = REPO_ROOT / "cds_identical_proportions.tsv"
+
+    if cds_input.exists():
         try:
-            with _temporary_workdir(cds_input.parent):
+            with _temporary_workdir(REPO_ROOT):
                 cds_df = CDS_identical_model.load_data()
                 res = CDS_identical_model.fit_glm_binom(cds_df, include_covariates=True)
                 _, pairwise_df = CDS_identical_model.emms_and_pairs(
                     res, cds_df, include_covariates=True
                 )
-            source_label = "recomputed from cds_identical_proportions.tsv"
-        except SystemExit as exc:  # stats/CDS_identical_model exits on missing inputs
+            source_label = "freshly computed from cds_identical_proportions.tsv"
+        except SystemExit as exc:
             errors.append(f"CDS GLM exited early: {exc}")
-        except FileNotFoundError as exc:
-            errors.append(f"Missing CDS supporting file: {exc}")
-        except Exception as exc:  # pragma: no cover - defensive
-            errors.append(f"Failed to recompute GLM: {exc}")
-
-    if pairwise_df is None:
-        pairwise_path = _resolve_repo_artifact("cds_pairwise_adjusted.tsv")
-        if pairwise_path is not None:
-            try:
-                pairwise_df = pd.read_csv(pairwise_path, sep="\t", low_memory=False)
-                source_label = f"loaded from {_relative_to_repo(pairwise_path)}"
-            except Exception as exc:  # pragma: no cover - defensive
-                errors.append(f"Unable to read {pairwise_path}: {exc}")
+        except Exception as exc:
+            errors.append(f"Failed to compute GLM: {exc}")
+    else:
+         errors.append("cds_identical_proportions.tsv not found (Pipeline failure?)")
 
     if pairwise_df is None:
         lines.append(
-            "  CDS GLM inputs unavailable (expected cds_identical_proportions.tsv or cds_pairwise_adjusted.tsv)."
+            "  FATAL: CDS GLM inputs unavailable. The pipeline should have generated cds_identical_proportions.tsv."
         )
         lines.extend(f"  {msg}" for msg in errors)
+        # Return lines but likely this indicates a critical failure
         return lines
 
     if source_label:
@@ -1687,6 +1779,7 @@ def build_report() -> List[str]:
 
 
 def main() -> None:
+    download_latest_artifacts()
     run_fresh_cds_pipeline()
     lines = build_report()
     text = "\n".join(lines).strip() + "\n"

@@ -32,6 +32,8 @@ jobs:
           pip install numpy pandas scipy statsmodels requests tqdm
 
       - name: Generate manuscript statistics
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python stats/replicate_manuscript_statistics.py
 
       - name: Upload manuscript statistics artifact
