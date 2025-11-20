@@ -451,6 +451,31 @@ def read_taxa_from_phy(phy_path):
                 taxa.append(parts[0])
     return taxa
 
+def _summarize_taxa_diagnostics(taxa):
+    """Helper to generate a diagnostic string about taxa composition."""
+    n = len(taxa)
+    direct = [t for t in taxa if t.startswith('0')]
+    inverted = [t for t in taxa if t.startswith('1')]
+    chimp = next((t for t in taxa if 'pantro' in t.lower() or 'pan_troglodytes' in t.lower()), None)
+
+    # Attempt to summarize populations if they follow the convention 0_POP_ID
+    # e.g. 0_AFR_HG00000
+    pop_counts = {}
+    for t in taxa:
+        m = re.search(r'[01]_([A-Z]{3})_', t)
+        if m:
+            pop = m.group(1)
+            pop_counts[pop] = pop_counts.get(pop, 0) + 1
+
+    pop_str = ", ".join([f"{k}:{v}" for k,v in pop_counts.items()]) if pop_counts else "N/A"
+
+    return (f"Total={n}. "
+            f"Direct={len(direct)} (needs >=1), "
+            f"Inverted={len(inverted)} (needs >=1), "
+            f"Chimp={chimp if chimp else 'MISSING'}. "
+            f"Populations: [{pop_str}]. "
+            f"Taxa List: {taxa[:10]}{'...' if n > 10 else ''}")
+
 # ==============================================================================
 # 4. Quality Control & Tree Operations
 # ==============================================================================
@@ -477,7 +502,14 @@ def perform_qc(phy_file_path):
     chimp_name = next((name for name in sequences if 'pantro' in name.lower() or 'pan_troglodytes' in name.lower()), None)
 
     if not human_seqs or not chimp_name:
-        return False, "Could not find both human and chimp sequences."
+        missing = []
+        if not human_seqs: missing.append("human sequences (starting with 0 or 1)")
+        if not chimp_name: missing.append("chimp sequence (pantro/pan_troglodytes)")
+        msg = f"Missing required sequences: {', '.join(missing)}."
+        if not human_seqs and not chimp_name:
+            msg += f" Found taxa: {list(sequences.keys())[:10]}"
+        return False, msg
+
     chimp_seq = sequences[chimp_name]
 
     divergences = []
@@ -864,8 +896,21 @@ def run_iqtree_task(region_info, iqtree_bin, threads, output_dir, timeout=7200, 
     try:
         taxa = read_taxa_from_phy(path)
         chimp = next((t for t in taxa if 'pantro' in t.lower() or 'pan_troglodytes' in t.lower()), None)
-        if not chimp or len(taxa) < 6 or not any(t.startswith('0') for t in taxa) or not any(t.startswith('1') for t in taxa):
-            reason = 'missing chimp or insufficient taxa/diversity'
+
+        # Check individual requirements to build a specific error message
+        reasons = []
+        if not chimp:
+            reasons.append("missing chimp outgroup")
+        if len(taxa) < 6:
+            reasons.append(f"insufficient taxa (found {len(taxa)}, need >= 6)")
+        if not any(t.startswith('0') for t in taxa):
+            reasons.append("missing direct orientation samples (starts with '0')")
+        if not any(t.startswith('1') for t in taxa):
+            reasons.append("missing inverted orientation samples (starts with '1')")
+
+        if reasons:
+            diag_summary = _summarize_taxa_diagnostics(taxa)
+            reason = "; ".join(reasons) + f". [Diagnostics: {diag_summary}]"
             logging.warning(f"[{label}] Skipping region: {reason}")
             return (label, None, reason)
 
