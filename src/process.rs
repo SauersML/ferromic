@@ -1401,23 +1401,24 @@ pub fn process_config_entries(
     if let Some(parent) = output_file.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::copy(&temp_csv, output_file)?;
+    if temp_csv != output_file {
+        std::fs::copy(&temp_csv, output_file)?;
+    }
+
+    // Determine the directory for sidecar files based on the output file location
+    let output_dir = output_file.parent().unwrap_or(Path::new("."));
 
     // Copy FASTA files
     let temp_fasta = temp_path.join("per_site_diversity_output.falsta.gz");
-    if temp_fasta.exists() {
-        std::fs::copy(
-            &temp_fasta,
-            std::path::Path::new("per_site_diversity_output.falsta.gz"),
-        )?;
+    let dest_fasta = output_dir.join("per_site_diversity_output.falsta.gz");
+    if temp_fasta.exists() && temp_fasta != dest_fasta {
+        std::fs::copy(&temp_fasta, &dest_fasta)?;
     }
 
     let temp_fst_fasta = temp_path.join("per_site_fst_output.falsta.gz");
-    if temp_fst_fasta.exists() {
-        std::fs::copy(
-            &temp_fst_fasta,
-            std::path::Path::new("per_site_fst_output.falsta.gz"),
-        )?;
+    let dest_fst_fasta = output_dir.join("per_site_fst_output.falsta.gz");
+    if temp_fst_fasta.exists() && temp_fst_fasta != dest_fst_fasta {
+        std::fs::copy(&temp_fst_fasta, &dest_fst_fasta)?;
     }
 
     // Copy PHYLIP files
@@ -1426,7 +1427,10 @@ pub fn process_config_entries(
         let path = entry.path();
         if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
             if file_name.ends_with(".phy.gz") {
-                std::fs::copy(&path, std::path::Path::new(".").join(file_name))?;
+                let dest_path = output_dir.join(file_name);
+                if path != dest_path {
+                    std::fs::copy(&path, &dest_path)?;
+                }
             }
         }
     }
@@ -1434,8 +1438,9 @@ pub fn process_config_entries(
     // Copy log files
     for log_file in ["cds_validation.log", "transcript_overlap.log"] {
         let temp_log = temp_path.join(log_file);
-        if temp_log.exists() {
-            std::fs::copy(&temp_log, std::path::Path::new(".").join(log_file))?;
+        let dest_log = output_dir.join(log_file);
+        if temp_log.exists() && temp_log != dest_log {
+            std::fs::copy(&temp_log, &dest_log)?;
         }
     }
 
@@ -3247,7 +3252,11 @@ fn append_diversity_falsta<P: AsRef<std::path::Path>>(
             }
         }
     }
-    w.flush().map_err(VcfError::Io)
+    w.flush().map_err(VcfError::Io)?;
+    let encoder = w
+        .into_inner()
+        .map_err(|e| VcfError::Io(e.into_error()))?;
+    encoder.finish().map_err(VcfError::Io).map(|_| ())
 }
 
 // per-site WC FST: (pos_1based, overall_wc, pairwise_0v1_wc)
@@ -3368,7 +3377,11 @@ fn append_fst_falsta<P: AsRef<std::path::Path>>(
         writeln!(w, "{}", denominators.join(",")).map_err(VcfError::Io)?;
     }
 
-    w.flush().map_err(VcfError::Io)
+    w.flush().map_err(VcfError::Io)?;
+    let encoder = w
+        .into_inner()
+        .map_err(|e| VcfError::Io(e.into_error()))?;
+    encoder.finish().map_err(VcfError::Io).map(|_| ())
 }
 
 // write Hudson TSV rows (the “regional outcomes”)
@@ -3401,7 +3414,12 @@ fn append_hudson_tsv(
         ])
         .map_err(|e| VcfError::Io(e.into()))?;
     }
-    w.flush().map_err(VcfError::Io)
+    w.flush().map_err(VcfError::Io)?;
+    let buf_writer = w.into_inner().map_err(|e| VcfError::Io(e.into_error()))?;
+    let encoder = buf_writer
+        .into_inner()
+        .map_err(|e| VcfError::Io(e.into_error()))?;
+    encoder.finish().map_err(VcfError::Io).map(|_| ())
 }
 
 /// Retrieves VCF sample indices and HaplotypeSides for samples belonging to a specified population
