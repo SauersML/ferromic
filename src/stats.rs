@@ -12,7 +12,7 @@ use std::fmt;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::Arc;
 
 /// Epsilon threshold for numerical stability in FST calculations.
 /// Used consistently across per-site and aggregation functions to handle
@@ -3969,24 +3969,13 @@ pub fn calculate_pairwise_differences(
     result
 }
 
-static HARMONIC_CACHE: OnceLock<Mutex<Vec<f64>>> = OnceLock::new();
-
-fn harmonic_cached(n: usize) -> f64 {
-    let cache = HARMONIC_CACHE.get_or_init(|| Mutex::new(vec![0.0]));
-    let mut values = cache.lock().expect("harmonic cache poisoned");
-    if n >= values.len() {
-        let mut last = *values.last().unwrap();
-        for k in values.len()..=n {
-            last += 1.0 / k as f64;
-            values.push(last);
-        }
-    }
-    values[n]
-}
-
 // Calculate the harmonic number H_n = sum_{k=1}^n 1/k
 pub fn harmonic(n: usize) -> f64 {
-    harmonic_cached(n)
+    let mut sum = 0.0;
+    for k in 1..=n {
+        sum += 1.0 / k as f64;
+    }
+    sum
 }
 
 // Calculate Watterson's theta (θ_w), a measure of genetic diversity
@@ -4031,30 +4020,19 @@ pub fn calculate_watterson_theta(seg_sites: usize, n: usize, seq_length: i64) ->
     // Calculate the harmonic number H_{n-1}, used as the denominator factor a_n.
     // Since n > 1 at this point, n-1 >= 1, so harmonic(n-1) will be > 0.
     let harmonic_value = harmonic(n - 1);
-    // The check for harmonic_value == 0.0 below should ideally not be strictly necessary now
-    // if n > 1, as harmonic(k) for k>=1 is always positive.
-    // However, keeping it as a safeguard for extreme float precision issues, though unlikely.
-    if harmonic_value <= 1e-9 {
-        // Using an epsilon for safety with float comparison
-        // This case should be rare if n > 1.
-        log(
-            LogLevel::Error,
-            &format!(
-                // Error because this indicates an unexpected issue if n > 1
-                "Harmonic value (a_n) is unexpectedly near zero ({}) for Watterson's theta calculation with n={}. S={}, L={}",
-                harmonic_value, n, seg_sites, seq_length
-            ),
-        );
-        if seg_sites == 0 {
-            return f64::NAN;
-        } else {
-            return f64::INFINITY;
-        }
-    }
 
     // Watterson's theta formula: θ_w = S / (a_n * L)
     // S = number of segregating sites, a_n = H_{n-1}, L = sequence length
-    let theta = seg_sites as f64 / harmonic_value / seq_length as f64;
+    let theta = if harmonic_value > 0.0 {
+        seg_sites as f64 / harmonic_value / seq_length as f64
+    } else {
+        // Should be unreachable for n > 1, but safe fallback
+        if seg_sites == 0 {
+            f64::NAN
+        } else {
+            f64::INFINITY
+        }
+    };
 
     log(
         LogLevel::Debug,
@@ -4479,7 +4457,7 @@ pub fn calculate_per_site_diversity(
         } else {
             let distinct_alleles = metrics.distinct_alleles;
             let watterson_value = if distinct_alleles > 1 {
-                let denom = harmonic_cached(total_called - 1);
+                let denom = harmonic(total_called - 1);
                 if denom > 0.0 { 1.0 / denom } else { 0.0 }
             } else {
                 0.0

@@ -47,7 +47,30 @@ except Exception as exc:
 def _load_inversion_whitelist():
     """
     Parses data/inv_properties.tsv to build the ALLOWED_REGIONS whitelist.
-    Expected columns: Chromosome (0), Start (1), End (2)
+    Filters by '0_single_1_recur_consensus' column.
+    """
+    whitelist = []
+    # Look for file in likely locations
+    candidates = [
+        "data/inv_properties.tsv",
+        os.path.join(os.path.dirname(__file__), "../data/inv_properties.tsv")
+    ]
+
+    tsv_path = None
+    for c in candidates:
+        if os.path.exists(c):
+            tsv_path = c
+            break
+
+    if not tsv_path:
+        # Fallback or empty if file not found (prevents import crash, but will log warning)
+        print("WARNING: data/inv_properties.tsv not found. ALLOWED_REGIONS will be empty.", file=sys.stderr)
+        return []
+
+def _load_inversion_whitelist():
+    """
+    Parses data/inv_properties.tsv to build the ALLOWED_REGIONS whitelist.
+    Filters by '0_single_1_recur_consensus' column.
     """
     whitelist = []
     # Look for file in likely locations
@@ -72,9 +95,25 @@ def _load_inversion_whitelist():
             # Skip Header
             header = f.readline()
 
+            # Dynamically find the index of the consensus column for robustness
+            try:
+                consensus_idx = header.strip().split('\t').index('0_single_1_recur_consensus')
+            except ValueError:
+                print("ERROR: Could not find '0_single_1_recur_consensus' in inv_properties.tsv header.", file=sys.stderr)
+                return []
+
+
             for line in f:
                 if not line.strip(): continue
-                parts = line.split('\t')
+                parts = line.strip().split('\t')
+
+                if len(parts) <= consensus_idx: continue
+
+                # New criteria: only include if 0_single_1_recur_consensus is 0 or 1
+                consensus_val = parts[consensus_idx].strip()
+                if consensus_val not in ["0", "1"]:
+                    continue
+
                 if len(parts) < 3: continue
 
                 # Parse Columns
@@ -82,7 +121,7 @@ def _load_inversion_whitelist():
                 try:
                     start = int(parts[1].strip())
                     end = int(parts[2].strip())
-                except ValueError:
+                except (ValueError, IndexError):
                     continue # Skip malformed lines
 
                 # Normalize Chromosome (ensure chr prefix)
