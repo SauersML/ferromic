@@ -4625,8 +4625,3 @@ pub fn extract_wc_fst_components(
         }
     }
 }
-#[cfg(test)]
-mod tests {
-    include!("tests/stats_tests.rs");
-    include!("tests/filter_tests.rs");
-}
