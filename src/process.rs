@@ -770,7 +770,7 @@ pub fn process_variants(
     inversion_interval: ZeroBasedHalfOpen,
     extended_region: ZeroBasedHalfOpen,
     adjusted_sequence_length: Option<i64>,
-    position_allele_map: Arc<Mutex<HashMap<i64, (char, Vec<char>)>>>,
+    allele_infos: &[Option<(char, Vec<char>)>],
     chromosome: String,
     is_filtered_set: bool,
     reference_sequence: &[u8],
@@ -1096,13 +1096,13 @@ pub fn process_variants(
 
         if let Err(e) = make_sequences(
             variants,
+            allele_infos,
             sample_names,
             haplotype_group,
             sample_filter,
             extended_region,
             reference_sequence,
             cds_regions,
-            position_allele_map.clone(),
             &chromosome,
             inversion_interval,
             temp_path,
@@ -2052,9 +2052,9 @@ fn generate_full_region_alignment(
     entry: &ConfigEntry,
     haplotype_group: u8,
     region_variants: &[Variant],
+    allele_infos: &[Option<(char, Vec<char>)>],
     sample_names: &[String],
     full_ref_sequence: &[u8],
-    position_allele_map: &Arc<Mutex<HashMap<i64, (char, Vec<char>)>>>,
     mask: &Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     allow: &Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     vcf_sample_id_to_index: &HashMap<String, usize>,
@@ -2081,7 +2081,6 @@ fn generate_full_region_alignment(
     let region_end = entry.interval.end as usize;
     let reference_slice = &full_ref_sequence[region_start..region_end];
 
-    let pos_map = position_allele_map.lock();
     let mask_map = mask.as_ref().map(|m| m.as_ref());
     let allow_map = allow.as_ref().map(|a| a.as_ref());
 
@@ -2089,7 +2088,7 @@ fn generate_full_region_alignment(
 
     for (sample_idx, side) in group_haps {
         let mut seq = reference_slice.to_vec();
-        for variant in region_variants {
+        for (variant, allele_info) in region_variants.iter().zip(allele_infos.iter()) {
             if let Some(genotype_vec) = variant.genotypes.get(sample_idx) {
                 let allele_opt = match side {
                     HaplotypeSide::Left => genotype_vec.get(0),
@@ -2097,7 +2096,7 @@ fn generate_full_region_alignment(
                 };
                 if let Some(&allele_idx) = allele_opt {
                     if allele_idx > 0 {
-                        if let Some((_ref_allele, alt_alleles)) = pos_map.get(&variant.position) {
+                        if let Some((_ref_allele, alt_alleles)) = allele_info {
                             let rel = (variant.position - entry.interval.start as i64) as usize;
                             if rel < seq.len() {
                                 // allele_idx is 1-based index into alt_alleles (1 => 0th element)
@@ -2243,8 +2242,6 @@ fn process_single_config_entry(
         extended_region.get_1based_inclusive_end_coord()
     ));
 
-    let position_allele_map = Arc::new(Mutex::new(HashMap::<i64, (char, Vec<char>)>::new()));
-
     // Gatekeeper Rule: Scan reference for 'N' blocks and add them to the mask.
     // This ensures that:
     // 1. process_vcf discards variants in 'N' regions.
@@ -2290,7 +2287,7 @@ fn process_single_config_entry(
         ),
     );
 
-    let (all_variants, filtered_idxs, sample_names, _, _, filtering_stats) = match process_vcf(
+    let (all_variants, all_allele_infos, filtered_idxs, sample_names, _, _, filtering_stats) = match process_vcf(
         vcf_file,
         Path::new(&args.reference_path),
         chr.to_string(),
@@ -2299,7 +2296,6 @@ fn process_single_config_entry(
         local_mask_arc.clone(),
         allow.clone(),
         exclusion_set,
-        position_allele_map.clone(),
     ) {
         Ok(data) => data,
         Err(e) => {
@@ -2316,20 +2312,21 @@ fn process_single_config_entry(
 
     update_step_progress(1, "Analyzing variant statistics");
 
-    // UNFILTERED (unchanged behavior)
-    let region_variants_unfiltered: Vec<Variant> = all_variants
+    // UNFILTERED
+    let (region_variants_unfiltered, region_allele_infos_unfiltered): (Vec<Variant>, Vec<Option<(char, Vec<char>)>>) = all_variants
         .iter()
-        .filter(|v| entry.interval.contains(ZeroBasedPosition(v.position)))
-        .cloned()
-        .collect();
+        .zip(all_allele_infos.iter())
+        .filter(|(v, _)| entry.interval.contains(ZeroBasedPosition(v.position)))
+        .map(|(v, a)| (v.clone(), a.clone()))
+        .unzip();
 
-    // FILTERED (new): project indices -> variants, then restrict to region
-    let region_variants_filtered: Vec<Variant> = filtered_idxs
+    // FILTERED
+    let (region_variants_filtered, region_allele_infos_filtered): (Vec<Variant>, Vec<Option<(char, Vec<char>)>>) = filtered_idxs
         .iter()
-        .map(|&i| &all_variants[i])
-        .filter(|v| entry.interval.contains(ZeroBasedPosition(v.position)))
-        .cloned()
-        .collect();
+        .map(|&i| (&all_variants[i], &all_allele_infos[i]))
+        .filter(|(v, _)| entry.interval.contains(ZeroBasedPosition(v.position)))
+        .map(|(v, a)| (v.clone(), a.clone()))
+        .unzip();
 
     let dense_unfiltered =
         DenseGenotypeMatrix::from_variants(&region_variants_unfiltered, sample_names.len());
@@ -2620,10 +2617,10 @@ fn process_single_config_entry(
         group_id: u8,
         is_filtered: bool,
         variants: &'a [Variant],
+        allele_infos: &'a [Option<(char, Vec<char>)>],
         sample_filter: &'a HashMap<String, (u8, u8)>,
         maybe_adjusted_len: Option<i64>,
         filtered_positions: &'a HashSet<i64>,
-        position_allele_map: Arc<Mutex<HashMap<i64, (char, Vec<char>)>>>,
         dense_matrix: Option<&'a DenseGenotypeMatrix>,
     }
 
@@ -2638,40 +2635,40 @@ fn process_single_config_entry(
             group_id: 0,
             is_filtered: true,
             variants: &region_variants_filtered,
+            allele_infos: &region_allele_infos_filtered,
             sample_filter: &entry.samples_filtered,
             maybe_adjusted_len: Some(filtered_adjusted_sequence_length),
             filtered_positions: &filtered_positions_in_region,
-            position_allele_map: position_allele_map.clone(),
             dense_matrix: dense_filtered.as_ref(),
         },
         VariantInvocation {
             group_id: 1,
             is_filtered: true,
             variants: &region_variants_filtered,
+            allele_infos: &region_allele_infos_filtered,
             sample_filter: &entry.samples_filtered,
             maybe_adjusted_len: Some(filtered_adjusted_sequence_length),
             filtered_positions: &filtered_positions_in_region,
-            position_allele_map: position_allele_map.clone(),
             dense_matrix: dense_filtered.as_ref(),
         },
         VariantInvocation {
             group_id: 0,
             is_filtered: false,
             variants: &region_variants_unfiltered,
+            allele_infos: &region_allele_infos_unfiltered,
             sample_filter: &entry.samples_unfiltered,
             maybe_adjusted_len: Some(adjusted_sequence_length),
             filtered_positions: &empty_filtered_positions,
-            position_allele_map: position_allele_map.clone(),
             dense_matrix: dense_unfiltered.as_ref(),
         },
         VariantInvocation {
             group_id: 1,
             is_filtered: false,
             variants: &region_variants_unfiltered,
+            allele_infos: &region_allele_infos_unfiltered,
             sample_filter: &entry.samples_unfiltered,
             maybe_adjusted_len: Some(adjusted_sequence_length),
             filtered_positions: &empty_filtered_positions,
-            position_allele_map: position_allele_map.clone(),
             dense_matrix: dense_unfiltered.as_ref(),
         },
     ];
@@ -2698,7 +2695,7 @@ fn process_single_config_entry(
             entry.interval,
             extended_region,
             call.maybe_adjusted_len,
-            call.position_allele_map.clone(),
+            call.allele_infos,
             entry.seqname.clone(),
             call.is_filtered,
             ref_sequence,
@@ -3013,9 +3010,9 @@ fn process_single_config_entry(
             &entry,
             haplotype_group,
             &region_variants_filtered,
+            &region_allele_infos_filtered,
             &sample_names,
             ref_sequence,
-            &position_allele_map,
             mask,
             allow,
             &vcf_sample_id_to_index,
@@ -3521,10 +3518,10 @@ pub fn process_vcf(
     mask_regions: Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     allow_regions: Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     exclusion_set: &HashSet<String>,
-    position_allele_map: Arc<Mutex<HashMap<i64, (char, Vec<char>)>>>,
 ) -> Result<
     (
         Vec<Variant>,
+        Vec<Option<(char, Vec<char>)>>,
         Vec<usize>,
         Vec<String>,
         i64,
@@ -3568,7 +3565,7 @@ pub fn process_vcf(
     );
 
     // Small vectors to hold variants in batches, limiting memory usage
-    let all_variants = Arc::new(Mutex::new(Vec::<(Variant, bool)>::with_capacity(10000)));
+    let all_variants = Arc::new(Mutex::new(Vec::<(Variant, bool, Option<(char, Vec<char>)>)>::with_capacity(10000)));
 
     // Shared stats
     let missing_data_info = Arc::new(Mutex::new(MissingDataInfo::default()));
@@ -3676,8 +3673,7 @@ pub fn process_vcf(
         let arc_mask = mask_regions.clone();
         let arc_allow = allow_regions.clone();
         let chr_copy = chr.to_string();
-        consumers.push(thread::spawn(move || -> Result<HashMap<i64, (char, Vec<char>)>, VcfError> {
-            let mut local_allele_map: HashMap<i64, (char, Vec<char>)> = HashMap::new();
+        consumers.push(thread::spawn(move || -> Result<(), VcfError> {
             while let Ok(line) = line_receiver.recv() {
                 let mut single_line_miss_info = MissingDataInfo::default();
                 let mut single_line_filt_stats = FilteringStats::default();
@@ -3703,10 +3699,8 @@ pub fn process_vcf(
                     Ok(variant_opt) => {
                         let variant_for_channel = match variant_opt {
                             Some((variant, passes, allele_info)) => {
-                                if let Some((pos, ref_allele, alt_alleles)) = allele_info {
-                                    local_allele_map.insert(pos, (ref_allele, alt_alleles));
-                                }
-                                Some((variant, passes))
+                                let stripped_info = allele_info.map(|(_, r, a)| (r, a));
+                                Some((variant, passes, stripped_info))
                             }
                             None => None,
                         };
@@ -3722,7 +3716,7 @@ pub fn process_vcf(
                     }
                 }
             }
-            Ok(local_allele_map)
+            Ok(())
         }));
     }
 
@@ -3734,9 +3728,9 @@ pub fn process_vcf(
         move || -> Result<(), VcfError> {
             while let Ok(msg) = result_receiver.recv() {
                 match msg {
-                    Ok((Some((variant, passes)), local_miss, mut local_stats)) => {
+                    Ok((Some((variant, passes, allele_info)), local_miss, mut local_stats)) => {
                         let mut u = all_variants.lock();
-                        u.push((variant, passes)); // single owner of the heavy genotypes
+                        u.push((variant, passes, allele_info)); // single owner of the heavy genotypes
 
                         {
                             let mut global_miss = missing_data_info.lock();
@@ -3796,10 +3790,9 @@ pub fn process_vcf(
     // Wait for consumers.
     drop(line_receiver);
     drop(result_sender);
-    let mut merged_local_maps: Vec<HashMap<i64, (char, Vec<char>)>> = Vec::with_capacity(num_threads);
     for c in consumers {
         match c.join() {
-            Ok(Ok(local_map)) => merged_local_maps.push(local_map),
+            Ok(Ok(())) => {}
             Ok(Err(e)) => return Err(e),
             Err(_) => {
                 return Err(VcfError::Parse(
@@ -3808,12 +3801,7 @@ pub fn process_vcf(
             }
         }
     }
-    {
-        let mut global_map = position_allele_map.lock();
-        for local_map in merged_local_maps {
-            global_map.extend(local_map);
-        }
-    }
+
     // Signal done, wait for collector.
     processing_complete.store(true, Ordering::Relaxed);
     collector_thread
@@ -3826,45 +3814,11 @@ pub fn process_vcf(
         .map_err(|_| VcfError::Parse("Variants still have multiple owners".to_string()))?
         .into_inner();
 
-    // sort the (variant, pass) tuples by genomic position while preserving their filter status
-    final_all_with_flags.sort_by(|(a, _), (b, _)| {
+    // sort the (variant, pass, allele_info) tuples by genomic position
+    final_all_with_flags.sort_by(|(a, _, _), (b, _, _)| {
         match a.position.cmp(&b.position) {
             std::cmp::Ordering::Equal => {
-                // Tie-breaker for variants at the same position
-                // Use genotypes byte representation for stable sorting
-                // Note: CompressedGenotypes doesn't expose raw bytes easily or derive Ord,
-                // but we can access internal data if exposed or use other properties.
-                // Since Variant.genotypes.data is Arc<[u8]>, we can compare that.
-                // However, accessing private fields is not allowed if they are private.
-                // Let's check Variant definition. It is pub struct with pub genotypes.
-                // CompressedGenotypes fields are private.
-                // But CompressedGenotypes implements PartialEq.
-                // Wait, the user request said: "Modify the sort key to include a secondary tie-breaker (like the REF/ALT alleles or the original line content)".
-                // We don't have REF/ALT here easily available in `final_all_with_flags` (Vec<(Variant, bool)>).
-                // But we do have `position_allele_map` which stores alleles for positions.
-                // But position_allele_map is keyed by position. If multiple variants have same position, they might share the same entry?
-                // If so, REF/ALT tie breaker is useless.
-                // However, usually multiple variants at same pos are multiallelics split or distinct variants.
-                // If they are split multiallelics, they might have different ALTs but same REF?
-                // Or if they are just duplicates.
-                // If we can't access REF/ALT, we can try to use genotypes content.
-                // Since we cannot easily access `CompressedGenotypes` internals (private),
-                // and we don't have line content.
-                // Wait, `Variant` derives `Debug`. We can use `format!("{:?}", a)` as a last resort, but it's slow.
-                // Let's try to rely on stability of parallel collection? No, parallel is unstable.
-                // We MUST have a tie breaker.
-                //
-                // Actually, let's look at how `CompressedGenotypes` is defined.
-                // In `src/process.rs`:
-                // pub struct CompressedGenotypes { data: Arc<[u8]>, ... }
-                // The fields are private.
-                // But `CompressedGenotypes` implements `PartialEq`.
-                // If they are equal, order doesn't matter.
-                // If they are not equal, we need an order.
-                //
-                // Let's add a public method to `CompressedGenotypes` to expose data for sorting?
-                // Or just format! which is slow but correct.
-                // Optimization: Access private fields directly since we are in the same module
+                // Tie-breaker using genotypes data (private field access allowed in same module)
                 a.genotypes.data.cmp(&b.genotypes.data)
             }
             other => other,
@@ -3872,9 +3826,11 @@ pub fn process_vcf(
     });
 
     let mut final_all = Vec::with_capacity(final_all_with_flags.len());
+    let mut final_allele_infos = Vec::with_capacity(final_all_with_flags.len());
     let mut final_filtered_idxs = Vec::new();
-    for (idx, (variant, passes)) in final_all_with_flags.into_iter().enumerate() {
+    for (idx, (variant, passes, allele_info)) in final_all_with_flags.into_iter().enumerate() {
         final_all.push(variant);
+        final_allele_infos.push(allele_info);
         if passes {
             final_filtered_idxs.push(idx);
         }
@@ -3926,6 +3882,7 @@ pub fn process_vcf(
 
     Ok((
         final_all,
+        final_allele_infos,
         final_filtered_idxs,
         final_names,
         chr_length,
