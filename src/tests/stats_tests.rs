@@ -5,7 +5,7 @@ mod tests {
     use std::collections::{HashMap, HashSet};
     use std::io::{Read, Write};
     use parking_lot::Mutex;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::sync::Arc;
     use flate2::read::GzDecoder;
 
@@ -599,6 +599,7 @@ mod tests {
             &vec![], // Empty TranscriptAnnotationCDS for test
             &empty_filtered_positions,
             None,
+            Path::new("/tmp"),
         );
         assert!(invalid_group.unwrap_or(None).is_none(), "Expected None for invalid haplotype group");
     }
@@ -1033,6 +1034,7 @@ mod tests {
             &vec![], // Empty TranscriptAnnotationCDS for test
             &empty_filtered_positions,
             None,
+            Path::new("/tmp"),
         ).unwrap();
     
         // Calculate allele frequency globally
@@ -1090,6 +1092,7 @@ mod tests {
             &vec![], // Empty TranscriptAnnotationCDS for test
             &empty_filtered_positions,
             None,
+            Path::new("/tmp"),
         ).unwrap();
     
         let (_segsites, _w_theta, _pi, n_hap, _site_diversity) = match _result_group1 {
@@ -1156,6 +1159,7 @@ mod tests {
             &vec![], // Empty TranscriptAnnotationCDS for test
             &empty_filtered_positions,
             None,
+            Path::new("/tmp"),
         ).unwrap();
 
         // Correctly unwrap the Option to access the inner tuple
@@ -1225,6 +1229,7 @@ mod tests {
            &vec![], // Empty TranscriptAnnotationCDS for test
            &empty_filtered_positions,
             None,
+            Path::new("/tmp"),
        ).unwrap();
     
        let (segsites, w_theta, _pi, n_hap, _site_diversity) = match result {
@@ -1277,6 +1282,7 @@ mod tests {
             &vec![], // Empty TranscriptAnnotationCDS for test
             &empty_filtered_positions,
             None,
+            Path::new("/tmp"),
         ).unwrap();
     
         // Correctly unwrap the Option to access the inner tuple
@@ -1337,6 +1343,7 @@ mod tests {
             &vec![], // Empty TranscriptAnnotationCDS for test
             &empty_filtered_positions,
             None,
+            Path::new("/tmp"),
         ).unwrap();
 
         // Calculate global allele frequency
@@ -1396,6 +1403,7 @@ mod tests {
             &vec![], // Empty TranscriptAnnotationCDS for test
             &empty_filtered_positions,
             None,
+            Path::new("/tmp"),
         ).unwrap();
     
         let (_segsites, _w_theta, _pi, n_hap, _site_diversity) = match _result_group1 {
@@ -1453,6 +1461,7 @@ mod tests {
             &vec![], // Empty TranscriptAnnotationCDS for test
             &empty_filtered_positions,
             None,
+            Path::new("/tmp"),
         ).unwrap();
     
         // Correctly unwrap the Option to access the inner tuple
@@ -1510,6 +1519,7 @@ mod tests {
             &vec![], // Empty TranscriptAnnotationCDS for test
             &empty_filtered_positions,
             None,
+            Path::new("/tmp"),
         ).unwrap();
     
         // Correctly unwrap the Option to access the inner tuple
@@ -1623,6 +1633,7 @@ mod tests {
             &vec![], // Empty TranscriptAnnotationCDS for test
             &empty_filtered_positions,
             None,
+            Path::new("/tmp"),
         ).expect("Failed to process variants");
     
         // Calculate global allele frequency using the revised function (no haplotype_group parameter)
@@ -1764,6 +1775,7 @@ mod tests {
             None,
             &args,
             &exclusion_set,
+            temp_dir.path(),
         )
         .expect("process_config_entries failed");
 
