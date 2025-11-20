@@ -437,6 +437,7 @@ def read_phy_sequences(filename):
     if filename.endswith(".phy.gz"):
         decompressed_path = _decompress_phy_gz(filename)
         if not decompressed_path:
+            logger.add("PHYLIP Format Error", f"Could not decompress file: {filename}")
             _PHY_CACHE[filename] = []
             return []
         filename = decompressed_path
@@ -448,18 +449,66 @@ def read_phy_sequences(filename):
     sequences = []
     try:
         with open(filename, 'r') as f:
-            lines = f.readlines()
-            if len(lines) < 2:
+            lines = [line.strip() for line in f if line.strip()]
+
+        if len(lines) < 2:
+            logger.add("PHYLIP Format Error", f"File is empty or has no sequences: {filename}")
+            _PHY_CACHE[filename] = []
+            return []
+
+        header = lines[0]
+        header_parts = header.split()
+        if len(header_parts) != 2:
+            logger.add("PHYLIP Format Error", f"Invalid header format in {filename}. Expected 2 numbers, got: '{header}'")
+            _PHY_CACHE[filename] = []
+            return []
+
+        try:
+            expected_num_seqs = int(header_parts[0])
+            expected_seq_len = int(header_parts[1])
+        except ValueError:
+            logger.add("PHYLIP Format Error", f"Header in {filename} does not contain two valid integers: '{header}'")
+            _PHY_CACHE[filename] = []
+            return []
+
+        for line in lines[1:]:
+            parts = line.split()
+            if len(parts) >= 2:
+                sequence_part = parts[-1]
+                if re.fullmatch(r'[ACGTN-]+', sequence_part, re.IGNORECASE):
+                    sequences.append(sequence_part.upper())
+                else:
+                    logger.add("PHYLIP Format Warning", f"Skipping malformed sequence line in {filename}: '{line}'")
+
+        if not sequences:
+            logger.add("PHYLIP Format Error", f"No valid sequence lines found after header in: {filename}")
+            _PHY_CACHE[filename] = []
+            return []
+
+        actual_num_seqs = len(sequences)
+        if actual_num_seqs != expected_num_seqs:
+            logger.add("PHYLIP Format Error", f"Header in {filename} expects {expected_num_seqs} sequences, but found {actual_num_seqs}.")
+            _PHY_CACHE[filename] = []
+            return []
+
+        actual_seq_len = len(sequences[0])
+        for i, seq in enumerate(sequences[1:], 1):
+            if len(seq) != actual_seq_len:
+                logger.add("PHYLIP Format Error", f"Inconsistent sequence lengths in {filename}. Sequence 1 has length {actual_seq_len}, but sequence {i + 1} has length {len(seq)}.")
                 _PHY_CACHE[filename] = []
                 return []
-            for line in lines[1:]:
-                line = line.strip()
-                if not line:
-                    continue
-                m = re.search(r'[ACGTN-]+$', line, re.IGNORECASE)
-                if m:
-                    sequences.append(m.group(0).upper())
-    except Exception:
+
+        if actual_seq_len != expected_seq_len:
+            logger.add("PHYLIP Format Error", f"Sequence length mismatch in {filename}. Header expects length {expected_seq_len}, but sequences have length {actual_seq_len}.")
+            _PHY_CACHE[filename] = []
+            return []
+
+    except FileNotFoundError:
+        logger.add("Missing Input File", f"File not found during read: {filename}")
+        _PHY_CACHE[filename] = []
+        return []
+    except Exception as e:
+        logger.add("PHYLIP Read Error", f"An unexpected error occurred while reading {filename}: {e}")
         _PHY_CACHE[filename] = []
         return []
 
@@ -540,13 +589,26 @@ def parse_transcript_metadata():
                 log_detail("CDS", t_id, "SKIP_MISSING_GROUP_PAIR", f"Unable to infer group0/group1 partner from '{base}'.", line=line_num)
                 continue
 
+            g0_exists = os.path.exists(g0_fname)
+            g1_exists = os.path.exists(g1_fname)
+
+            if not g0_exists or not g1_exists:
+                if not g0_exists:
+                    logger.add("Missing Input File", f"{t_id}: group0 file not found: {g0_fname}")
+                if not g1_exists:
+                    logger.add("Missing Input File", f"{t_id}: group1 file not found: {g1_fname}")
+                log_detail("CDS", t_id, "SKIP_MISSING_PHY", "group0 or group1 file not found.", group0=g0_fname, group1=g1_fname)
+                continue
+
             g0_seqs = read_phy_sequences(g0_fname)
             g1_seqs = read_phy_sequences(g1_fname)
 
             if not g0_seqs or not g1_seqs:
-                logger.add("Missing Input File", f"{t_id}: group0 or group1 .phy not found or empty.")
-                log_detail("CDS", t_id, "SKIP_MISSING_PHY", "Either group0 or group1 .phy file missing/empty.",
-                           group0=g0_fname, group1=g1_fname)
+                if not g0_seqs:
+                    logger.add("Empty Input File", f"{t_id}: group0 file is empty: {g0_fname}")
+                if not g1_seqs:
+                    logger.add("Empty Input File", f"{t_id}: group1 file is empty: {g1_fname}")
+                log_detail("CDS", t_id, "SKIP_EMPTY_PHY", "group0 or group1 file is empty.", group0=g0_fname, group1=g1_fname)
                 continue
 
             if not all(len(s) == expected_len for s in g0_seqs):

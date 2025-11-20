@@ -29,6 +29,8 @@ jobs:
           path: hg38.PanTro6.net.axt.gz
           key: axt-file-v1
 
+      - name: Unzip PHY files
+        run: unzip -o data/phy_outputs.zip
       - name: Run AXT to PHY
         run: python3 cds/axt_to_phy.py
         env:
