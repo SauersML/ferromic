@@ -109,6 +109,11 @@ async fn process_vcf_files(args: &Args) -> Result<(), VcfError> {
         vcf_files.len()
     );
 
+    // Validate headers consistency
+    info!("Validating headers consistency across all files...");
+    validate_headers(&vcf_files)?;
+    info!("Headers are consistent.");
+
     let mut sys = System::new_all();
     sys.refresh_all();
 
@@ -256,11 +261,18 @@ fn discover_and_sort_vcf_files(dir: &str) -> Result<Vec<VcfFile>, VcfError> {
                 let extension = path.extension()?.to_str()?;
                 if extension == "vcf" || extension == "gz" {
                     progress_bar.inc(1);
-                    Some(Ok(VcfFile {
-                        path: path.clone(),
-                        chromosome: get_chromosome(&path).ok()?,
-                        is_compressed: extension == "gz",
-                    }))
+                    let chrom_result = get_chromosome(&path);
+                    match chrom_result {
+                        Ok(Some(chrom)) => {
+                            Some(Ok(VcfFile {
+                                path: path.clone(),
+                                chromosome: chrom,
+                                is_compressed: extension == "gz",
+                            }))
+                        }
+                        Ok(None) => None, // Skip empty/header-only files
+                        Err(_) => None,   // Skip files with errors
+                    }
                 } else {
                     None
                 }
@@ -290,7 +302,7 @@ fn custom_chromosome_sort(a: &str, b: &str) -> std::cmp::Ordering {
     a_pos.cmp(&b_pos)
 }
 
-fn get_chromosome(path: &Path) -> Result<String, VcfError> {
+fn get_chromosome(path: &Path) -> Result<Option<String>, VcfError> {
     let file = File::open(path)?;
     let mut reader: Box<dyn BufRead> =
         if path.extension().and_then(|ext| ext.to_str()) == Some("gz") {
@@ -299,32 +311,36 @@ fn get_chromosome(path: &Path) -> Result<String, VcfError> {
             Box::new(BufReader::new(file))
         };
 
-    let mut line = String::new();
+    let mut first_data_line = String::new();
+
     loop {
-        line.clear();
-        if reader.read_line(&mut line)? == 0 {
-            return Err(VcfError::Parse(
-                "No data lines found in VCF file".to_string(),
-            ));
+        let mut line = String::new();
+        let bytes_read = reader.read_line(&mut line)?;
+        if bytes_read == 0 {
+            break;
         }
         if !line.starts_with('#') {
-            // This is the first data line
+            first_data_line = line;
             break;
         }
     }
 
-    line.split('\t')
+    if first_data_line.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(first_data_line
+        .split('\t')
         .next()
-        .map(|s| s.trim_start_matches("chr").to_string())
-        .ok_or_else(|| VcfError::Parse("Failed to extract chromosome from VCF file".to_string()))
+        .map(|s| s.trim_start_matches("chr").to_string()))
 }
 
 fn extract_header(file: &VcfFile) -> Result<String, VcfError> {
     let mut header = String::new();
     let reader = create_reader(&file.path)?;
-    let buf_reader = BufReader::new(reader);
+    // reader is already Box<dyn BufRead>
 
-    for line in buf_reader.lines() {
+    for line in reader.lines() {
         let line = line?;
         if line.starts_with('#') {
             header.push_str(&line);
@@ -345,6 +361,37 @@ fn extract_header(file: &VcfFile) -> Result<String, VcfError> {
     Ok(header)
 }
 
+fn extract_header_columns(file: &VcfFile) -> Result<Vec<String>, VcfError> {
+    let reader = create_reader(&file.path)?;
+    // reader is already Box<dyn BufRead>
+
+    for line in reader.lines() {
+        let line = line?;
+        if line.starts_with("#CHROM") {
+            // This is the column definition line
+            let cols: Vec<String> = line.split('\t').map(|s| s.to_string()).collect();
+            return Ok(cols);
+        }
+    }
+    Err(VcfError::Parse(format!("File {} has no #CHROM header line", file.path.display())))
+}
+
+fn validate_headers(vcf_files: &[VcfFile]) -> Result<(), VcfError> {
+    if vcf_files.is_empty() {
+        return Ok(());
+    }
+
+    let first_header_cols = extract_header_columns(&vcf_files[0])?;
+
+    for file in vcf_files.iter().skip(1) {
+        let cols = extract_header_columns(file)?;
+        if cols != first_header_cols {
+            return Err(VcfError::Parse(format!("Header mismatch in file {}: expected columns {:?}, found {:?}", file.path.display(), first_header_cols, cols)));
+        }
+    }
+    Ok(())
+}
+
 fn process_uncompressed_file(
     file: &VcfFile,
     chunk_size: usize,
@@ -356,8 +403,31 @@ fn process_uncompressed_file(
     let file_handle = File::open(&file.path)?;
     let mmap = unsafe { MmapOptions::new().map(&file_handle)? };
 
-    let mut offset = 0;
     let file_size = mmap.len();
+    let mut offset = 0;
+
+    // Find the start of data (skip header)
+    while offset < file_size {
+        // Check if current line starts with #
+        if mmap[offset] == b'#' {
+            // Skip to next line
+            if let Some(newline_pos) = mmap[offset..].iter().position(|&b| b == b'\n') {
+                offset += newline_pos + 1;
+            } else {
+                // End of file in header
+                offset = file_size;
+                break;
+            }
+        } else {
+            // Found start of data
+            break;
+        }
+    }
+
+    if offset >= file_size {
+        // Only header or empty
+        return Ok(());
+    }
 
     while offset < file_size {
         let mut end = std::cmp::min(offset + chunk_size, file_size);
@@ -407,6 +477,35 @@ fn process_compressed_file(
     println!("Starting to process compressed file: {:?}", file.path);
     let mut reader = create_reader(&file.path)?;
     println!("Reader created for file: {:?}", file.path);
+
+    // Skip header
+    loop {
+        let mut line = String::new();
+        let bytes_read = reader.read_line(&mut line)?;
+        if bytes_read == 0 {
+            return Ok(()); // EOF
+        }
+        if !line.starts_with('#') {
+            // Found data. We need to process this line first.
+            let line_bytes = line.into_bytes();
+
+            // Send first line as a chunk
+             send_chunk_with_backpressure(
+                &Chunk {
+                    data: line_bytes,
+                    chromosome: file.chromosome.clone(),
+                },
+                &chunk_sender,
+                &chromosome_progress,
+                &progress_bars,
+                &memory_usage,
+                max_memory_usage,
+            )?;
+            break;
+        }
+    }
+
+    // Now process the rest
     let mut buffer = vec![0; chunk_size];
     let mut line_buffer = Vec::new();
 

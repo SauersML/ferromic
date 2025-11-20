@@ -44,40 +44,65 @@ except Exception as exc:
 # 1. Constants & Configuration
 # ==============================================================================
 
-ALLOWED_REGIONS = [
-    ("chr1", 13104252, 13122521),
-    ("chr10", 46983451, 47468232),
-    ("chr11", 50154999, 50324102),
-    ("chr15", 30618103, 32153204),
-    ("chr15", 84373375, 84416696),
-    ("chr16", 16721273, 18073542),
-    ("chr16", 28471892, 28637651),
-    ("chr2", 91832040, 92012663),
-    ("chr2", 95800191, 96024403),
-    ("chr3", 195749463, 195980207),
-    ("chr7", 5989046, 6735643),
-    ("chr7", 60911891, 61578023),
-    ("chr7", 65219157, 65531823),
-    ("chr7", 73113989, 74799029),
-    ("chr7", 74869950, 75058098),
-    ("chr8", 2343351, 2378385),
-    ("chr8", 7301024, 12598379),
-    ("chrX", 103989434, 104049428),
-    ("chrX", 149599490, 149655967),
-    ("chrX", 149681035, 149722249),
-    ("chrX", 153149748, 153250226),
-    ("chrX", 154347246, 154384867),
-    ("chrX", 154591327, 154613096),
-    ("chrX", 155386727, 155453982),
-    ("chrX", 52077120, 52176974),
-    ("chrX", 72997772, 73077479),
-    ("chr1", 108310642, 108383736),
-    ("chr11", 89920623, 89923848),
-    ("chr16", 14954790, 15100859),
-    ("chr7", 62290674, 62363143),
-    ("chr7", 62408486, 62456444),
-    ("chrX", 152729753, 152738707),
-]
+def _load_inversion_whitelist():
+    """
+    Parses data/inv_properties.tsv to build the ALLOWED_REGIONS whitelist.
+    Expected columns: Chromosome (0), Start (1), End (2)
+    """
+    whitelist = []
+    # Look for file in likely locations
+    candidates = [
+        "data/inv_properties.tsv",
+        os.path.join(os.path.dirname(__file__), "../data/inv_properties.tsv")
+    ]
+
+    tsv_path = None
+    for c in candidates:
+        if os.path.exists(c):
+            tsv_path = c
+            break
+
+    if not tsv_path:
+        # Fallback or empty if file not found (prevents import crash, but will log warning)
+        print("WARNING: data/inv_properties.tsv not found. ALLOWED_REGIONS will be empty.", file=sys.stderr)
+        return []
+
+    try:
+        with open(tsv_path, 'r') as f:
+            # Skip Header
+            header = f.readline()
+
+            for line in f:
+                if not line.strip(): continue
+                parts = line.split('\t')
+                if len(parts) < 3: continue
+
+                # Parse Columns
+                chrom_raw = parts[0].strip()
+                try:
+                    start = int(parts[1].strip())
+                    end = int(parts[2].strip())
+                except ValueError:
+                    continue # Skip malformed lines
+
+                # Normalize Chromosome (ensure chr prefix)
+                # The file has 'chr1', but just in case
+                if not chrom_raw.lower().startswith('chr'):
+                    chrom = f"chr{chrom_raw}"
+                else:
+                    chrom = chrom_raw
+
+                # Ensure standard tuple format
+                whitelist.append((chrom, start, end))
+
+    except Exception as e:
+        print(f"Error parsing inversion whitelist: {e}", file=sys.stderr)
+        return []
+
+    return whitelist
+
+# Dynamically populate the constant
+ALLOWED_REGIONS = _load_inversion_whitelist()
 
 POP_COLORS = {
     'AFR': '#F05031', 'EUR': '#3173F0', 'EAS': '#35A83A',
@@ -104,9 +129,8 @@ KEEP_PAML_OUT = bool(int(os.environ.get("KEEP_PAML_OUT", "0")))
 PAML_OUT_DIR  = os.environ.get("PAML_OUT_DIR", "paml_runs")
 PAML_CACHE_DIR = os.environ.get("PAML_CACHE_DIR", "paml_cache")
 
-ENABLE_PAML_TIMEOUT = False
 IQTREE_TIMEOUT = int(os.environ.get("IQTREE_TIMEOUT", "7200"))
-PAML_TIMEOUT   = int(os.environ.get("PAML_TIMEOUT", "3600")) if ENABLE_PAML_TIMEOUT else None
+PAML_TIMEOUT   = int(os.environ.get("PAML_TIMEOUT", "3600"))
 
 RUN_BRANCH_MODEL_TEST = False
 RUN_CLADE_MODEL_TEST = True
