@@ -296,6 +296,26 @@ def chromosome_to_bare(chrom):
         return None
     return normalized[len(CHR_PREFIX):]
 
+def resolve_phy_filename(fname):
+    """
+    Check if fname exists. If not, and it ends with .gz, check if the version without .gz exists.
+    If it doesn't end with .gz, check if the version with .gz exists.
+    Returns the existing filename, or None.
+    """
+    if os.path.exists(fname):
+        return fname
+
+    if fname.endswith('.gz'):
+        uncompressed = fname[:-3]
+        if os.path.exists(uncompressed):
+            return uncompressed
+    else:
+        compressed = fname + '.gz'
+        if os.path.exists(compressed):
+            return compressed
+
+    return None
+
 def progress_bar(label, done, total, width=40):
     if total <= 0:
         bar = "-" * width
@@ -581,30 +601,31 @@ def parse_transcript_metadata():
 
             # Find group0 and group1 filenames
             if "group0_" in phy_fname:
-                g0_fname = phy_fname
-                g1_fname = phy_fname.replace("group0_", "group1_")
+                g0_fname_raw = phy_fname
+                g1_fname_raw = phy_fname.replace("group0_", "group1_")
             elif "group1_" in phy_fname:
-                g1_fname = phy_fname
-                g0_fname = phy_fname.replace("group1_", "group0_")
+                g1_fname_raw = phy_fname
+                g0_fname_raw = phy_fname.replace("group1_", "group0_")
             else:
                 base = os.path.basename(phy_fname)
                 logger.add("Missing Input File", f"L{line_num}: Cannot infer group0/group1 for {t_id} from '{base}'.")
                 log_detail("CDS", t_id, "SKIP_MISSING_GROUP_PAIR", f"Unable to infer group0/group1 partner from '{base}'.", line=line_num)
                 continue
 
-            g0_exists = os.path.exists(g0_fname)
-            g1_exists = os.path.exists(g1_fname)
+            # Resolve potentially mismatched filenames (e.g. .gz in metadata but not on disk)
+            g0_fname = resolve_phy_filename(g0_fname_raw)
+            g1_fname = resolve_phy_filename(g1_fname_raw)
 
             # Debug first 5 entries
             if processed <= 5:
-                print_always(f"[DEBUG] Entry {processed}: g0='{g0_fname}' (exists={g0_exists}), g1='{g1_fname}' (exists={g1_exists})")
+                print_always(f"[DEBUG] Entry {processed}: g0='{g0_fname_raw}' -> '{g0_fname}', g1='{g1_fname_raw}' -> '{g1_fname}'")
 
-            if not g0_exists or not g1_exists:
-                if not g0_exists:
-                    logger.add("Missing Input File", f"{t_id}: group0 file not found: {g0_fname}")
-                if not g1_exists:
-                    logger.add("Missing Input File", f"{t_id}: group1 file not found: {g1_fname}")
-                log_detail("CDS", t_id, "SKIP_MISSING_PHY", "group0 or group1 file not found.", group0=g0_fname, group1=g1_fname)
+            if not g0_fname or not g1_fname:
+                if not g0_fname:
+                    logger.add("Missing Input File", f"{t_id}: group0 file not found: {g0_fname_raw}")
+                if not g1_fname:
+                    logger.add("Missing Input File", f"{t_id}: group1 file not found: {g1_fname_raw}")
+                log_detail("CDS", t_id, "SKIP_MISSING_PHY", "group0 or group1 file not found.", group0=g0_fname_raw, group1=g1_fname_raw)
                 continue
 
             g0_seqs = read_phy_sequences(g0_fname)
