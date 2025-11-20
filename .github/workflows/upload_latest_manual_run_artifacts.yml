@@ -98,16 +98,6 @@ jobs:
 
             if [[ "$name" == "run-vcf-phy-outputs" ]]; then
               mv "$zip_path" "data/phy_outputs.zip"
-              dest="data/phy_outputs"
-              rm -rf "$dest"
-              mkdir -p "$dest"
-              unzip -q "data/phy_outputs.zip" -d "$dest"
-              src="$dest/phy_metadata.tsv"
-              if [[ -f "$src" ]]; then
-                cp "$src" data/phy_metadata.tsv
-                echo "Updated data/phy_metadata.tsv from phy_outputs.zip"
-              fi
-              rm -rf "$dest"
               continue
             elif [[ "$name" == "run-vcf-falsta" ]]; then
               dest="data/run-vcf-falsta"
@@ -122,6 +112,21 @@ jobs:
                 echo "Synced $base"
               done
               shopt -u nullglob
+              rm -rf "$dest"
+              continue
+            elif [[ "$name" == "run-vcf-metadata" ]]; then
+              dest="data/run-vcf-metadata-unzipped"
+              rm -rf "$dest"
+              mkdir -p "$dest"
+              unzip -q "$zip_path" -d "$dest"
+              rm -f "$zip_path"
+              src="$dest/phy_metadata.tsv"
+              if [[ ! -f "$src" ]]; then
+                echo "Missing phy_metadata.tsv at $src" >&2
+                exit 1
+              fi
+              cp "$src" data/phy_metadata.tsv
+              echo "Updated data/phy_metadata.tsv"
               rm -rf "$dest"
               continue
             fi
