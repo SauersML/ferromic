@@ -20,7 +20,10 @@ def normalize_region_override(override_str):
     Returns: (label, chrom, start, end)
              label format: chr22_100_200
     """
-    m = re.match(r"^(chr[0-9a-zA-Z]+):(\d+)-(\d+)$", override_str)
+    # Clean up potentially accidental surrounding characters like parentheses or brackets
+    clean_str = override_str.strip().strip("()[]'\"")
+
+    m = re.match(r"^(chr[0-9a-zA-Z]+):(\d+)-(\d+)$", clean_str)
     if not m:
         raise ValueError(f"Invalid region override format: {override_str}. Expected chr:start-end")
 
