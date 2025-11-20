@@ -254,18 +254,6 @@ On startup Ferromic prints a status box summarising version, CPU threads, and ti
 
 The concatenation and merge utilities (`ferromic`, `vcf_merge`) share `--input <dir>` and `--output <file>` flags and are optimised for large cohorts through Rayon parallelism and Tokio-based async writers. The analysis driver `run_vcf` exposes the richer CLI documented in [Running analyses with `run_vcf`](#running-analyses-with-run_vcf).
 
-## Phenome-wide association (PheWAS) pipeline
-
-The `phewas/` directory ships a batteries-included association testing stack that mirrors the production workflow used to scan inversion calls against thousands of phenotypes:
-
-- **Orchestration (`run.py`)** – coordinates Google BigQuery cohort pulls (optional), phenotype preprocessing, and stage-1 logistic score/LRT tests. A system monitor thread reports container CPU/RAM budgets while a global exception hook surfaces worker crashes immediately.
-- **Resource governance (`pipes.py`)** – manages shared-memory budgets across multiprocessing pools, honours cgroup limits, exposes progress snapshots, and caches intermediate fit metadata to avoid redundant recalculations.
-- **Modelling (`models.py`)** – implements penalised logistic and linear models with automatic fallbacks (ridge, Firth bias correction, bootstrap score tests) plus sequential stopping rules for rare traits.
-- **Phenotype engineering (`pheno.py`, `categories.py`)** – loads callset metadata, derives case/control cohorts, and encodes ancestry-aware covariates and phenotype groupings.
-- **Automation utilities (`run.py`, `testing.py`, `tests.py`, `test_setup.sh`)** – provide harnesses for dry-run validation, regression testing, and continuous-integration smoke checks.
-
-Configuration is driven by a context dictionary (`ctx`) that records cache directories, population filters, minimum case/control thresholds per ancestry, and bootstrap budgets. Cached JSON manifests ensure that stale intermediate results are automatically invalidated when the cohort, cache tag, or inversion target changes.
-
 ## Project layout and helper scripts
 
 - `src/` – Rust crate providing parsing, progress reporting, statistics, transcript handling, and CLI entry points.
