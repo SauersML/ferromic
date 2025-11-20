@@ -1145,7 +1145,7 @@ def build_outgroups_and_filter(transcripts, regions):
             t_id = info['transcript_id']
             gene = info['gene_name']
             chrom = info['chromosome']
-            chrom_label = chromosome_to_bare(chrom) or chrom
+            chrom_label = chrom
             start = info['start']
             end = info['end']
             g0_fname = info['g0_fname']
@@ -1296,7 +1296,7 @@ def build_outgroups_and_filter(transcripts, regions):
         for i, r in enumerate(regions, 1):
             info = r['info']
             r_id = info['region_id']              # inv_<chrom>_<start>_<end>
-            chrom_label = chromosome_to_bare(info['chromosome']) or info['chromosome']
+            chrom_label = info['chromosome']
             start = info['start']
             end = info['end']
             g0_fname = info['g0_fname'] or info['g1_fname']
@@ -1462,7 +1462,7 @@ def calculate_and_print_differences_transcripts(transcripts):
         end = info['end']
         gene = info['gene_name']
         
-        chrom_bare = chromosome_to_bare(chrom) or chrom
+        chrom_bare = chrom
         key = (t_id, chrom, start, end)
         
         # Build expected outgroup filename
