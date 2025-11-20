@@ -243,6 +243,11 @@ def find_and_combine_phy_files():
 
         if _write_combined_output(output_filename, collected, alignment_length):
             trios_processed_count += 1
+            # AGGRESSIVE CLEANUP
+            print(f" -> Cleaning up source files for {identifier}...")
+            for fpath in files_dict.values():
+                if os.path.exists(fpath):
+                    os.remove(fpath)
 
     # ---- Process REGION PAIRS ----
     for identifier, files_dict in sorted(region_groups.items()):
@@ -293,6 +298,14 @@ def find_and_combine_phy_files():
 
         if _write_combined_output(output_filename, collected, alignment_length):
             pairs_processed_count += 1
+            # AGGRESSIVE CLEANUP
+            print(f" -> Cleaning up source files for {identifier}...")
+            for fpath in files_dict.values():
+                if os.path.exists(fpath):
+                    os.remove(fpath)
+            # Clean up outgroup if we found one separately
+            if 'outgroup_filename' in locals() and os.path.exists(outgroup_filename):
+                os.remove(outgroup_filename)
 
     total = trios_processed_count + pairs_processed_count
     print("-" * 20)

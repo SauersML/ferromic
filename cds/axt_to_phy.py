@@ -1782,6 +1782,11 @@ def main():
     else:
         with time_block("Build outgroups + filter + write"):
             build_outgroups_and_filter(transcripts, regions)
+
+        print_always("Cleaning up massive AXT file to free disk space...")
+        if os.path.exists(AXT_FILENAME):
+            os.remove(AXT_FILENAME)
+
         # Stats for each domain
         with time_block("Compute TX stats"):
             calculate_and_print_differences_transcripts(transcripts)
