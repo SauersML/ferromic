@@ -13,9 +13,8 @@ use flate2::write::GzEncoder;
 use flate2::Compression;
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
-use std::collections::HashMap;
-use std::fs::File;
-use std::fs::OpenOptions;
+use std::collections::{HashMap, HashSet};
+use std::fs::{File, OpenOptions};
 use std::io::{self, BufWriter, Write};
 use std::path::Path;
 use std::sync::Arc;
@@ -570,6 +569,11 @@ pub fn generate_batch_statistics(hap_sequences: &HashMap<String, Vec<u8>>) -> Re
     Ok(())
 }
 
+/// Sanitizes a string for use in a filename, allowing alphanumeric characters and dots.
+fn sanitize_id(id: &str) -> String {
+    id.replace(|c: char| !c.is_alphanumeric() && c != '.', "")
+}
+
 pub fn prepare_to_write_cds(
     haplotype_group: u8,
     cds_regions: &[TranscriptAnnotationCDS],
@@ -694,7 +698,11 @@ pub fn prepare_to_write_cds(
         };
 
         // Create a filename-safe version of gene name
+        // Also sanitize other ID fields used in filenames
         let safe_gene_name = cds.gene_name.replace(|c: char| !c.is_alphanumeric(), "");
+        let safe_gene_id = sanitize_id(&cds.gene_id);
+        let safe_transcript_id = sanitize_id(&cds.transcript_id);
+        let safe_chromosome = sanitize_id(chromosome);
 
         /*
          * CDS SEGMENT COLLECTION:
@@ -764,15 +772,19 @@ pub fn prepare_to_write_cds(
             "group{}_{}_{}_{}_chr{}_cds_start{}_cds_end{}_inv_start{}_inv_end{}.phy",
             haplotype_group,
             safe_gene_name,
-            cds.gene_id,
-            cds.transcript_id,
-            chromosome,
+            safe_gene_id,
+            safe_transcript_id,
+            safe_chromosome,
             cds_start, // This is the gene's CDS start
             cds_end,   // This is the gene's CDS end
             inv_start_1based,
             inv_end_1based
         );
         let gz_filename = format!("{}.gz", filename);
+
+        // First try to write the PHYLIP file.
+        // If this fails, we do NOT write metadata, ensuring consistency.
+        write_phylip_file(&filename, &filtered_map, &cds.transcript_id, temp_path)?;
 
         // --- NEW METADATA LOGIC ---
         let segment_coords_str = cds
@@ -818,8 +830,6 @@ pub fn prepare_to_write_cds(
             ])
             .map_err(|e| VcfError::Parse(format!("Failed to write metadata record: {}", e)))?;
         // --- END OF NEW LOGIC ---
-
-        write_phylip_file(&filename, &filtered_map, &cds.transcript_id, temp_path)?;
     }
     Ok(())
 }
