@@ -125,6 +125,12 @@ Selected inversion–phenotype associations (logistic regression with LRT p-valu
     Interaction (Ancestry × Dosage): p = 0.013.
     [EUR] p = 4.998e-04, OR = 0.854 (95% CI 0.786–0.925).
     [AMR] p = 0.012, OR = 0.736 (95% CI 0.564–0.944).
+  [MAIN IMPUTED] chr17-45585160-INV-706887 vs Abnormal Papanicolaou smear: OR = 0.898 (95% CI 0.879–0.943), BH-adjusted p ≈ 0.032 (raw p = 1.094e-04).
+    Interaction (Ancestry × Dosage): p = 0.174.
+  [MAIN IMPUTED] chr17-45585160-INV-706887 vs Melanocytic nevi: OR = 0.898 (95% CI 0.870–0.928), BH-adjusted p ≈ 3.480e-07 (raw p = 5.670e-11).
+    Interaction (Ancestry × Dosage): p = 5.670e-05.
+  [MAIN IMPUTED] chr17-45585160-INV-706887 vs Benign neoplasm of the skin: OR = 0.919 (95% CI 0.895–0.944), BH-adjusted p ≈ 2.970e-06 (raw p = 9.680e-10).
+    Interaction (Ancestry × Dosage): p = 0.010.
   [TAG SNP] chr17-45974480-INV-29218 vs Morbid obesity (Tag SNP): OR = 1.054 (95% CI 1.031–1.078), BH-adjusted p ≈ 8.151e-04 (raw p = 3.650e-06).
   [TAG SNP] chr17-45974480-INV-29218 vs Breast lump or abnormal exam (Tag SNP): OR = 0.956 (95% CI 0.936–0.977), BH-adjusted p ≈ 6.375e-03 (raw p = 4.280e-05).
   [TAG SNP] chr17-45974480-INV-29218 vs Abnormal mammogram (Tag SNP): OR = 0.939 (95% CI 0.910–0.969), BH-adjusted p ≈ 7.326e-03 (raw p = 6.870e-05).
@@ -139,6 +145,15 @@ PGS CONTROLS
 [PGS CONTROL] Sensitivity of PheWAS associations to regional PGS covariates:
   Source table: PGS_controls.tsv.
   Largest p-value inflation: inversion chr17-45585160-INV-706887 × Morbid_obesity (p_nominal = 7.940e-09, p_with_pgs = 8.476e-03, fold-change = 1.068e+06).
+  Specific disease statistics:
+    Morbid_obesity: p_nominal = 7.940e-09 -> p_with_pgs = 8.476e-03 (fold-change = 1.068e+06)
+    Diastolic_heart_failure: p_nominal = 3.820e-05 -> p_with_pgs = 0.038 (fold-change = 997.523)
+    Obesity: p_nominal = 1.240e-06 -> p_with_pgs = 5.093e-04 (fold-change = 410.744)
+    Overweight_and_obesity: p_nominal = 9.660e-07 -> p_with_pgs = 3.265e-04 (fold-change = 337.975)
+    Mild_cognitive_impairment: p_nominal = 2.087e-04 -> p_with_pgs = 0.012 (fold-change = 58.628)
+    Malignant_neoplasm_of_the_breast: p_nominal = 3.666e-03 -> p_with_pgs = 0.095 (fold-change = 25.843)
+    Alzheimers_disease: p_nominal = 0.415 -> p_with_pgs = 0.743 (fold-change = 1.793)
+    Lump_or_mass_in_breast_or_nonspecific_abnormal_breast_exam: p_nominal = 1.151e-04 -> p_with_pgs = 6.380e-05 (fold-change = 0.554)
 
 FAMILY HISTORY
 Family History Validation (Family-based PheWAS):
