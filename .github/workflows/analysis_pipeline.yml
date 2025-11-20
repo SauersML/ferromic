@@ -202,6 +202,44 @@ jobs:
         with:
           name: combined-phy-files
 
+      - name: Calculate Input Hash
+        id: calc-hash
+        run: |
+          python3 -c "
+          import sys, glob, hashlib, os
+          sys.path.append('cds')
+          import pipeline_lib as lib
+
+          target_region = '${{ matrix.region }}'
+          files = glob.glob('combined_inversion_*.phy')
+          found = None
+          for f in files:
+              try:
+                  if lib.parse_region_filename(f)['label'] == target_region:
+                      found = f
+                      break
+              except:
+                  continue
+
+          if found:
+              print(f'Found file: {found}')
+              with open(found, 'rb') as f:
+                  h = hashlib.sha256(f.read()).hexdigest()
+                  print(f'Hash: {h}')
+                  with open(os.environ['GITHUB_OUTPUT'], 'a') as fh:
+                      fh.write(f'hash={h}\n')
+          else:
+              print(f'Error: Could not find file for region {target_region}')
+              sys.exit(1)
+          "
+
+      - name: Restore IQ-TREE Cache
+        uses: actions/cache@v4
+        id: iqtree-cache
+        with:
+          path: region_trees
+          key: iqtree-v1-${{ matrix.region }}-${{ steps.calc-hash.outputs.hash }}
+
       - name: Run IQ-TREE
         run: python3 cds/iqtree_runner.py
         env:
