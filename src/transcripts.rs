@@ -203,7 +203,7 @@ pub fn make_sequences(
     extended_region: ZeroBasedHalfOpen,
     reference_sequence: &[u8],
     cds_regions: &[TranscriptAnnotationCDS],
-    position_allele_map: Arc<Mutex<HashMap<i64, (char, char)>>>,
+    position_allele_map: Arc<Mutex<HashMap<i64, (char, Vec<char>)>>>,
     chromosome: &str,
     inversion_interval: ZeroBasedHalfOpen,
     temp_path: &Path,
@@ -357,7 +357,7 @@ pub fn apply_variants_to_transcripts(
     variants: &[Variant],
     haplotype_indices: &[(usize, HaplotypeSide)],
     extended_region: ZeroBasedHalfOpen,
-    position_allele_map: Arc<Mutex<HashMap<i64, (char, char)>>>,
+    position_allele_map: Arc<Mutex<HashMap<i64, (char, Vec<char>)>>>,
     hap_sequences: &mut HashMap<String, Vec<u8>>,
     sample_names: &[String],
 ) -> Result<(), VcfError> {
@@ -394,21 +394,31 @@ pub fn apply_variants_to_transcripts(
                 // Because we subtracted the extended_start value from it above.
                 if pos_in_seq < seq_vec.len() {
                     // Get the reference and alternate alleles from the map, if available
-                    if let Some(&(ref_allele, alt_allele)) = map.get(&variant.position) {
+                    if let Some((ref_allele, alt_alleles)) = map.get(&variant.position) {
                         // Determine the allele to use based on the genotype
-                        let allele_to_use =
-                            if let Some(genotype) = variant.genotypes.get(sample_idx) {
-                                if genotype.get(hap_idx as usize).copied().unwrap_or(0) == 0 {
-                                    // If the genotype is 0 (reference allele), use the reference allele
-                                    ref_allele as u8
-                                } else {
-                                    // If the genotype is 1 (alternate allele), use the alternate allele
-                                    alt_allele as u8
-                                }
+                        let allele_to_use = if let Some(genotype) =
+                            variant.genotypes.get(sample_idx)
+                        {
+                            let allele_code = genotype.get(hap_idx as usize).copied().unwrap_or(0);
+                            if allele_code == 0 {
+                                *ref_allele as u8
                             } else {
-                                // If genotype is missing, use reference allele
-                                ref_allele as u8
-                            };
+                                // allele_code is 1-based index into alt alleles
+                                // e.g., 1 => alt_alleles[0], 2 => alt_alleles[1]
+                                if let Some(alt_char) =
+                                    alt_alleles.get((allele_code - 1) as usize)
+                                {
+                                    *alt_char as u8
+                                } else {
+                                    // Fallback if VCF refers to an allele index not in ALT list
+                                    // This shouldn't happen for well-formed VCFs
+                                    b'N'
+                                }
+                            }
+                        } else {
+                            // If genotype is missing, use reference allele
+                            *ref_allele as u8
+                        };
 
                         // Update the sequence at the calculated position with the determined allele
                         seq_vec[pos_in_seq] = allele_to_use;
