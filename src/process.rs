@@ -1,9 +1,9 @@
 use crate::stats::{
-    HudsonFSTOutcome, PopulationContext, PopulationId, SiteDiversity,
+    DenseGenotypeMatrix, HudsonFSTOutcome, PopulationContext, PopulationId, SiteDiversity,
     calculate_adjusted_sequence_length, calculate_fst_wc_csv_populations,
     calculate_fst_wc_haplotype_groups, calculate_hudson_fst_for_pair_with_sites,
     calculate_inversion_allele_frequency, calculate_per_site_diversity, calculate_pi,
-    calculate_watterson_theta,
+    calculate_pi_for_population, calculate_watterson_theta,
 };
 
 use crate::parse::{
@@ -778,6 +778,7 @@ pub fn process_variants(
     filtered_positions: &HashSet<i64>,
     mask_intervals: Option<&[(i64, i64)]>,
     temp_path: &Path,
+    dense_matrix: Option<&DenseGenotypeMatrix>,
 ) -> Result<Option<(usize, f64, f64, usize, Vec<SiteDiversity>)>, VcfError> {
     set_stage(ProcessingStage::VariantAnalysis);
 
@@ -941,7 +942,21 @@ pub fn process_variants(
 
     let final_theta =
         calculate_watterson_theta(region_segsites, region_hap_count, length_for_overall_stats);
-    let final_pi = calculate_pi(&variants_in_region, &group_haps, length_for_overall_stats);
+
+    let final_pi = if let Some(matrix) = dense_matrix {
+        let ctx = PopulationContext {
+            id: PopulationId::HaplotypeGroup(haplotype_group),
+            haplotypes: group_haps.clone(),
+            variants: &variants_in_region,
+            sample_names,
+            sequence_length: length_for_overall_stats,
+            dense_genotypes: Some(matrix),
+            dense_summary: None,
+        };
+        calculate_pi_for_population(&ctx)
+    } else {
+        calculate_pi(&variants_in_region, &group_haps, length_for_overall_stats)
+    };
 
     log(
         LogLevel::Info,
@@ -2316,6 +2331,18 @@ fn process_single_config_entry(
         .cloned()
         .collect();
 
+    let dense_unfiltered =
+        DenseGenotypeMatrix::from_variants(&region_variants_unfiltered, sample_names.len());
+    let dense_filtered =
+        DenseGenotypeMatrix::from_variants(&region_variants_filtered, sample_names.len());
+
+    if dense_unfiltered.is_some() {
+        log(LogLevel::Debug, "Created dense matrix for unfiltered variants");
+    }
+    if dense_filtered.is_some() {
+        log(LogLevel::Debug, "Created dense matrix for filtered variants");
+    }
+
     let allow_regions_chr = allow.as_ref().and_then(|a| a.get(chr));
     // Use the local_mask_arc which includes 'N' regions from the reference
     let mask_regions_chr = local_mask_arc.as_ref().and_then(|m| m.get(chr));
@@ -2597,6 +2624,7 @@ fn process_single_config_entry(
         maybe_adjusted_len: Option<i64>,
         filtered_positions: &'a HashSet<i64>,
         position_allele_map: Arc<Mutex<HashMap<i64, (char, Vec<char>)>>>,
+        dense_matrix: Option<&'a DenseGenotypeMatrix>,
     }
 
     // Set up the four analysis invocations (filtered/unfiltered × group 0/1)
@@ -2614,6 +2642,7 @@ fn process_single_config_entry(
             maybe_adjusted_len: Some(filtered_adjusted_sequence_length),
             filtered_positions: &filtered_positions_in_region,
             position_allele_map: position_allele_map.clone(),
+            dense_matrix: dense_filtered.as_ref(),
         },
         VariantInvocation {
             group_id: 1,
@@ -2623,6 +2652,7 @@ fn process_single_config_entry(
             maybe_adjusted_len: Some(filtered_adjusted_sequence_length),
             filtered_positions: &filtered_positions_in_region,
             position_allele_map: position_allele_map.clone(),
+            dense_matrix: dense_filtered.as_ref(),
         },
         VariantInvocation {
             group_id: 0,
@@ -2632,6 +2662,7 @@ fn process_single_config_entry(
             maybe_adjusted_len: Some(adjusted_sequence_length),
             filtered_positions: &empty_filtered_positions,
             position_allele_map: position_allele_map.clone(),
+            dense_matrix: dense_unfiltered.as_ref(),
         },
         VariantInvocation {
             group_id: 1,
@@ -2641,6 +2672,7 @@ fn process_single_config_entry(
             maybe_adjusted_len: Some(adjusted_sequence_length),
             filtered_positions: &empty_filtered_positions,
             position_allele_map: position_allele_map.clone(),
+            dense_matrix: dense_unfiltered.as_ref(),
         },
     ];
 
@@ -2674,6 +2706,7 @@ fn process_single_config_entry(
             call.filtered_positions,
             mask_intervals_slice,
             temp_path,
+            call.dense_matrix,
         )?;
 
         if let Some(x) = stats_opt {
@@ -2805,7 +2838,7 @@ fn process_single_config_entry(
                     variants: variants_for_hudson_slice, // Use the correctly scoped variant slice
                     sample_names: &sample_names,
                     sequence_length: filtered_adjusted_sequence_length,
-                    dense_genotypes: None,
+                    dense_genotypes: dense_filtered.as_ref(),
                     dense_summary: None,
                 };
                 let pop1_context = PopulationContext {
@@ -2814,7 +2847,7 @@ fn process_single_config_entry(
                     variants: variants_for_hudson_slice, // Use the correctly scoped variant slice
                     sample_names: &sample_names,
                     sequence_length: filtered_adjusted_sequence_length,
-                    dense_genotypes: None,
+                    dense_genotypes: dense_filtered.as_ref(),
                     dense_summary: None,
                 };
 
@@ -2919,7 +2952,7 @@ fn process_single_config_entry(
                             variants: variants_for_hudson_slice, // Use the correctly scoped variant slice
                             sample_names: &sample_names,
                             sequence_length: filtered_adjusted_sequence_length,
-                            dense_genotypes: None,
+                            dense_genotypes: dense_filtered.as_ref(),
                             dense_summary: None,
                         };
                         let pop_b_context_csv = PopulationContext {
@@ -2928,7 +2961,7 @@ fn process_single_config_entry(
                             variants: variants_for_hudson_slice, // Use the correctly scoped variant slice
                             sample_names: &sample_names,
                             sequence_length: filtered_adjusted_sequence_length,
-                            dense_genotypes: None,
+                            dense_genotypes: dense_filtered.as_ref(),
                             dense_summary: None,
                         };
 
