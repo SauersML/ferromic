@@ -1135,6 +1135,18 @@ def summarize_key_associations() -> List[str]:
             table_name="phewas_results.tsv",
         ),
         AssocSpec(
+            "chr17-45585160-INV-706887",
+            "Diastolic Heart Failure",
+            ("diastolic", "heart", "failure"),
+            table_name="phewas_results.tsv",
+        ),
+        AssocSpec(
+            "chr17-45585160-INV-706887",
+            "Breast Cancer (Malignant neoplasm)",
+            ("malignant", "neoplasm", "breast"),
+            table_name="phewas_results.tsv",
+        ),
+        AssocSpec(
             "chr17-45974480-INV-29218",
             "Morbid obesity (Tag SNP)",
             ("morbid", "obesity"),
