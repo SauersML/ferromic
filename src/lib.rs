@@ -58,6 +58,7 @@ mod tests {
     mod filter_tests;
     mod hudson_fst_tests;
     mod interval_tests;
+    mod mnp_test;
     mod stats_tests;
 }
 

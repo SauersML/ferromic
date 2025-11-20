@@ -1658,65 +1658,170 @@ fn calculate_fst_wc_at_site_with_membership(
     HashMap<String, usize>,
     HashMap<String, (f64, f64)>,
 ) {
-    workspace.ensure_capacity(membership.group_count());
-    workspace.reset();
+    // 1. Identify all unique alleles present at this site
+    let mut alleles_present = std::collections::HashSet::new();
+    for genotype_opt in variant.genotypes.iter() {
+        if let Some(genotype) = genotype_opt {
+            for allele in genotype {
+                alleles_present.insert(allele);
+            }
+        }
+    }
 
-    for (sample_idx, genotype_opt) in variant.genotypes.iter().enumerate() {
-        let Some(genotype) = genotype_opt else {
+    // Sort unique alleles for consistent processing (0, 1, 2...)
+    let mut unique_alleles: Vec<u8> = alleles_present.into_iter().collect();
+    unique_alleles.sort();
+
+    // We sum variance components across alleles
+    let mut sum_site_a = 0.0;
+    let mut sum_site_b = 0.0;
+    let mut sum_pairwise_components: HashMap<String, (f64, f64)> = HashMap::new();
+
+    // Track population sizes (sample sizes don't change per allele)
+    // We populate this in the first pass (usually allele 0, or whatever is first)
+    let mut pop_sizes = HashMap::new();
+    let mut pop_sizes_populated = false;
+
+    // For each unique allele u, treat u as "target" and "not u" as "other".
+    // Calculate variance components a_u and b_u.
+    // Total FST components A = sum(a_u), B = sum(b_u).
+    // Note: For Biallelic sites, doing this for both 0 and 1 doubles the components but the ratio stays same.
+    // Actually, standard W&C is often formulated on one allele p. For multiallelic, summing components is correct.
+    // However, if we sum for ALL alleles, we count the variance twice compared to "ref vs alt".
+    // But mathematically FST = sum(sigma_p^2) / sum(p_bar(1-p_bar)).
+    // The components 'a' and 'b' from calculate_variance_components are scaled versions of these variances.
+    // Summing them over all alleles is the standard multiallelic extension (Weir 1996).
+
+    for &target_allele in &unique_alleles {
+        workspace.ensure_capacity(membership.group_count());
+        workspace.reset();
+
+        // Tally counts where 'alt' means 'allele == target_allele'
+        for (sample_idx, genotype_opt) in variant.genotypes.iter().enumerate() {
+            let Some(genotype) = genotype_opt else {
+                continue;
+            };
+
+            if !genotype.is_empty() {
+                let allele = genotype[0];
+                let group = membership
+                    .left
+                    .get(sample_idx)
+                    .copied()
+                    .unwrap_or(INVALID_GROUP);
+                if group != INVALID_GROUP {
+                    let idx = group as usize;
+                    workspace.total_counts[idx] += 1;
+                    if allele == target_allele {
+                        workspace.alt_counts[idx] += 1;
+                    }
+                }
+            }
+
+            if genotype.len() > 1 {
+                let allele = genotype[1];
+                let group = membership
+                    .right
+                    .get(sample_idx)
+                    .copied()
+                    .unwrap_or(INVALID_GROUP);
+                if group != INVALID_GROUP {
+                    let idx = group as usize;
+                    workspace.total_counts[idx] += 1;
+                    if allele == target_allele {
+                        workspace.alt_counts[idx] += 1;
+                    }
+                }
+            }
+        }
+
+        // Collect stats for this allele
+        let mut total_called = 0usize;
+        let mut total_target = 0usize;
+        let mut valid_groups = 0;
+
+        for idx in 0..membership.group_count() {
+            let total = workspace.total_counts[idx];
+            if total == 0 {
+                continue;
+            }
+            valid_groups += 1;
+            let target_count = workspace.alt_counts[idx];
+            total_called += total;
+            total_target += target_count;
+            let freq = target_count as f64 / total as f64;
+            workspace.stats.push(PopSiteStat { total, freq });
+
+            if !pop_sizes_populated {
+                pop_sizes.insert(membership.label(idx).to_string(), total);
+            }
+        }
+        pop_sizes_populated = true;
+
+        if valid_groups < 2 {
+            // Cannot calculate FST for this allele (need at least 2 pops)
+            // If this happens for ALL alleles, we return InsufficientData
+            workspace.stats.clear();
             continue;
+        }
+
+        let global_freq = if total_called > 0 {
+            total_target as f64 / total_called as f64
+        } else {
+            0.0
         };
 
-        if !genotype.is_empty() {
-            let allele = genotype[0];
-            let group = membership
-                .left
-                .get(sample_idx)
-                .copied()
-                .unwrap_or(INVALID_GROUP);
-            if group != INVALID_GROUP {
-                let idx = group as usize;
-                workspace.total_counts[idx] += 1;
-                if allele != 0 {
-                    workspace.alt_counts[idx] += 1;
-                }
+        let (comp_a, comp_b) = calculate_variance_components(&workspace.stats, global_freq);
+        sum_site_a += comp_a;
+        sum_site_b += comp_b;
+
+        // Pairwise for this allele
+        for descriptor in &membership.pair_keys {
+            let idx_a = descriptor.left as usize;
+            let idx_b = descriptor.right as usize;
+            let total_a = workspace.total_counts[idx_a];
+            let total_b = workspace.total_counts[idx_b];
+            let key = &descriptor.key;
+
+            if total_a == 0 || total_b == 0 {
+                continue; // One pop missing data for this pair
             }
+
+            let target_a = workspace.alt_counts[idx_a];
+            let target_b = workspace.alt_counts[idx_b];
+            let freq_a = target_a as f64 / total_a as f64;
+            let freq_b = target_b as f64 / total_b as f64;
+            let pair_total = total_a + total_b;
+            let pair_global = if pair_total > 0 {
+                (target_a + target_b) as f64 / pair_total as f64
+            } else {
+                0.0
+            };
+
+            let pair_stats = [
+                PopSiteStat {
+                    total: total_a,
+                    freq: freq_a,
+                },
+                PopSiteStat {
+                    total: total_b,
+                    freq: freq_b,
+                },
+            ];
+
+            let (pw_a, pw_b) = calculate_variance_components(&pair_stats, pair_global);
+            let entry = sum_pairwise_components
+                .entry(key.clone())
+                .or_insert((0.0, 0.0));
+            entry.0 += pw_a;
+            entry.1 += pw_b;
         }
 
-        if genotype.len() > 1 {
-            let allele = genotype[1];
-            let group = membership
-                .right
-                .get(sample_idx)
-                .copied()
-                .unwrap_or(INVALID_GROUP);
-            if group != INVALID_GROUP {
-                let idx = group as usize;
-                workspace.total_counts[idx] += 1;
-                if allele != 0 {
-                    workspace.alt_counts[idx] += 1;
-                }
-            }
-        }
+        workspace.stats.clear();
     }
 
-    let mut pop_sizes = HashMap::new();
-    let mut total_called = 0usize;
-    let mut total_alt = 0usize;
-
-    for idx in 0..membership.group_count() {
-        let total = workspace.total_counts[idx];
-        if total == 0 {
-            continue;
-        }
-        let alt = workspace.alt_counts[idx];
-        total_called += total;
-        total_alt += alt;
-        let freq = alt as f64 / total as f64;
-        workspace.stats.push(PopSiteStat { total, freq });
-        pop_sizes.insert(membership.label(idx).to_string(), total);
-    }
-
-    if workspace.stats.len() < 2 {
+    if !pop_sizes_populated {
+        // This means we never successfully iterated groups for any allele.
         let insufficient_data_estimate = FstEstimate::InsufficientDataForEstimation {
             sum_a: 0.0,
             sum_b: 0.0,
@@ -1731,75 +1836,34 @@ fn calculate_fst_wc_at_site_with_membership(
         );
     }
 
-    let global_freq = if total_called > 0 {
-        total_alt as f64 / total_called as f64
-    } else {
-        0.0
-    };
-
-    let (site_a, site_b) = calculate_variance_components(&workspace.stats, global_freq);
-    let overall_fst_at_site = fst_estimate_from_components(site_a, site_b);
+    let overall_fst_at_site = fst_estimate_from_components(sum_site_a, sum_site_b);
 
     let mut pairwise_fst_estimate_map = HashMap::new();
-    let mut pairwise_variance_components_map = HashMap::new();
-
+    // Ensure every pair key exists in the output, even if InsufficientData
     for descriptor in &membership.pair_keys {
-        let idx_a = descriptor.left as usize;
-        let idx_b = descriptor.right as usize;
-        let total_a = workspace.total_counts[idx_a];
-        let total_b = workspace.total_counts[idx_b];
-        let key = descriptor.key.clone();
-
-        if total_a == 0 || total_b == 0 {
-            pairwise_variance_components_map.insert(key.clone(), (0.0, 0.0));
+        let key = &descriptor.key;
+        if let Some(&(pw_a, pw_b)) = sum_pairwise_components.get(key) {
+            let est = fst_estimate_from_components(pw_a, pw_b);
+            pairwise_fst_estimate_map.insert(key.clone(), est);
+        } else {
             pairwise_fst_estimate_map.insert(
-                key,
+                key.clone(),
                 FstEstimate::InsufficientDataForEstimation {
                     sum_a: 0.0,
                     sum_b: 0.0,
                     sites_attempted: 1,
                 },
             );
-            continue;
+            sum_pairwise_components.insert(key.clone(), (0.0, 0.0));
         }
-
-        let alt_a = workspace.alt_counts[idx_a];
-        let alt_b = workspace.alt_counts[idx_b];
-        let freq_a = alt_a as f64 / total_a as f64;
-        let freq_b = alt_b as f64 / total_b as f64;
-        let pair_total = total_a + total_b;
-        let pair_global = if pair_total > 0 {
-            (alt_a + alt_b) as f64 / pair_total as f64
-        } else {
-            0.0
-        };
-
-        let pair_stats = [
-            PopSiteStat {
-                total: total_a,
-                freq: freq_a,
-            },
-            PopSiteStat {
-                total: total_b,
-                freq: freq_b,
-            },
-        ];
-
-        let (pairwise_a_xy, pairwise_b_xy) =
-            calculate_variance_components(&pair_stats, pair_global);
-        let pairwise_fst_val = fst_estimate_from_components(pairwise_a_xy, pairwise_b_xy);
-        pairwise_variance_components_map.insert(key.clone(), (pairwise_a_xy, pairwise_b_xy));
-        pairwise_fst_estimate_map.insert(key, pairwise_fst_val);
     }
-
-    workspace.stats.clear();
 
     (
         overall_fst_at_site,
         pairwise_fst_estimate_map,
-        (site_a, site_b),
+        (sum_site_a, sum_site_b),
         pop_sizes,
-        pairwise_variance_components_map,
+        sum_pairwise_components,
     )
 }
 

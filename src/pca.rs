@@ -96,6 +96,26 @@ pub fn compute_chromosome_pca(
 
         complete_count += 1;
 
+        // Check if site is multiallelic (max allele index > 1)
+        let mut is_multiallelic = false;
+        for genotype in variant.genotypes.iter() {
+            if let Some(alleles) = genotype {
+                for allele in alleles {
+                    if allele > 1 {
+                        is_multiallelic = true;
+                        break;
+                    }
+                }
+            }
+            if is_multiallelic {
+                break;
+            }
+        }
+
+        if is_multiallelic {
+            continue;
+        }
+
         let allele_freq = allele_sum as f64 / n_haplotypes as f64;
         let maf = allele_freq.min(1.0 - allele_freq);
         if maf >= 0.05 {
@@ -249,6 +269,18 @@ pub fn compute_chromosome_pca_from_dense(
             }
 
             complete_count += 1;
+            // Dense storage check for multiallelics
+            let mut is_multiallelic = false;
+            for &value in chunk {
+                if value > 1 {
+                    is_multiallelic = true;
+                    break;
+                }
+            }
+            if is_multiallelic {
+                continue;
+            }
+
             let allele_freq = allele_sum as f64 / n_haplotypes as f64;
             let maf = allele_freq.min(1.0 - allele_freq);
             if maf >= 0.05 {
@@ -260,16 +292,23 @@ pub fn compute_chromosome_pca_from_dense(
         for variant_idx in 0..variant_count {
             let mut allele_sum = 0usize;
             let mut complete = true;
+            let mut is_multiallelic = false;
             for sample_idx in 0..sample_count {
                 let left = genotypes[(variant_idx, sample_idx, 0)];
                 let right = genotypes[(variant_idx, sample_idx, 1)];
-                if left < 0 || right < 0 || left > 1 || right > 1 {
+                if left < 0 || right < 0 { // Only check missing/invalid
                     complete = false;
                     break;
                 }
+                if left > 1 || right > 1 {
+                   is_multiallelic = true;
+                   // Don't break here, we need to finish checking completeness if we wanted to count it as complete but skipped?
+                   // Actually if it's multiallelic we just skip it entirely for PCA.
+                   break;
+                }
                 allele_sum += (left + right) as usize;
             }
-            if !complete {
+            if !complete || is_multiallelic {
                 continue;
             }
 
