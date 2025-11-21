@@ -429,12 +429,6 @@ def main():
     print(f"    CDS files parsed: {len(cds_files)}")
     print(f"    Region files parsed: {len(region_files)}")
 
-    cds_by_filename = {d["filename"]: d for d in cds_files}
-    region_by_filename = {d["filename"]: d for d in region_files}
-
-    # Gene-name anomaly tracking
-    gene_name_anomalies = [d for d in cds_files if d["_gene_name_anom"] or d["_bad_gene_id"] or d["_bad_tx_id"]]
-
     # Detect multiple CDS alignments for the same (gene, inversion, group)
     # early, before any downstream aggregation. These duplicates typically
     # arise when multiple transcript alignments exist for the same gene and
@@ -448,11 +442,12 @@ def main():
         dup_tracker[key].append(rec)
 
     dup_examples = [(k, v) for k, v in dup_tracker.items() if len(v) > 1]
+    cds_dedup_dropped: List[Dict] = []
     if dup_examples:
         msg_lines = [
-            "FATAL: Multiple CDS alignments detected for the same (gene, inversion, group).",
-            "This usually means multiple transcript alignments exist for the same locus.",
-            "Examples (up to 10):",
+            "WARNING: Multiple CDS alignments detected for the same (gene, inversion, group).",
+            "  A single alignment will be retained per key (longest CDS span; ties by transcript_id, filename).",
+            "Examples (up to 10 before deduplication):",
         ]
         for (g, inv, grp), recs in dup_examples[:10]:
             txs = ", ".join(sorted({r["transcript_id"] for r in recs}))
@@ -462,9 +457,36 @@ def main():
             )
             msg_lines.append(f"    transcripts: {txs}")
             msg_lines.append(f"    files      : {fns}")
-        msg_lines.append("Please deduplicate upstream so only one alignment remains per key.")
         print("\n".join(msg_lines))
-        sys.exit(1)
+
+        def _priority(rec: Dict[str, object]) -> Tuple[int, str, str]:
+            span = rec.get("cds_end", 0) - rec.get("cds_start", 0)
+            return (-int(span), str(rec.get("transcript_id", "")), str(rec.get("filename", "")))
+
+        deduped: Dict[Tuple[str, str, int], Dict] = {}
+        for key, recs in dup_tracker.items():
+            prioritized = sorted(recs, key=_priority)
+            keep = prioritized[0]
+            deduped[key] = keep
+            for drop in prioritized[1:]:
+                cds_dedup_dropped.append({
+                    "key": key,
+                    "kept": keep,
+                    "dropped": drop,
+                })
+
+        if cds_dedup_dropped:
+            print(
+                f"  Deduplicated {len(cds_dedup_dropped)} CDS files across {len(dup_examples)} duplicate keys; "
+                "kept one representative per key."
+            )
+        cds_files = list(deduped.values())
+
+    cds_by_filename = {d["filename"]: d for d in cds_files}
+    region_by_filename = {d["filename"]: d for d in region_files}
+
+    # Gene-name anomaly tracking
+    gene_name_anomalies = [d for d in cds_files if d["_gene_name_anom"] or d["_bad_gene_id"] or d["_bad_tx_id"]]
 
     # Categories
     categories = defaultdict(set)  # (dataset, consensus, group) -> set(filenames)
@@ -484,6 +506,17 @@ def main():
             "reason": reason,
             "detail": detail,
         })
+
+    # Log CDS gene×inversion×group deduplication decisions (metadata-only stage)
+    if cds_dedup_dropped:
+        for entry in cds_dedup_dropped:
+            (g, inv_id, grp) = entry["key"]
+            kept_fn = entry["kept"].get("filename", "")
+            drop = entry["dropped"]
+            record_skip(
+                "CDS", None, grp, drop.get("filename", ""), "CDS_DUP_GENE_INV_GROUP",
+                f"Duplicate key (gene={g}, inv={inv_id}, group={'Inverted' if grp==1 else 'Direct'}); kept {kept_fn}"
+            )
 
     # Map CDS by CDS overlap
     print(">>> Mapping CDS files to consensus categories (by CDS overlap) ...")
