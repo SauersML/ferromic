@@ -1512,7 +1512,7 @@ fn calculate_pi_from_summary_with_precomputed(
                 seq_length, uncallable_sites
             ),
         );
-        return 0.0;
+        return f64::NAN;
     }
 
     let sum_pi = precomputed.unwrap_or_else(|| summary.cached_pi_sum());
@@ -4319,7 +4319,7 @@ pub fn calculate_pi(
                 seq_length, skipped_sites
             ),
         );
-        return 0.0;
+        return f64::NAN;
     }
 
     // Final π = sum of per-site π values divided by callable sequence length
@@ -4432,7 +4432,7 @@ fn calculate_pi_dense_biallelic(
 
     let effective_length = seq_length.saturating_sub(skipped_sites as i64);
     if effective_length == 0 {
-        return 0.0;
+        return f64::NAN;
     }
 
     sum_pi / effective_length as f64
@@ -4497,7 +4497,7 @@ fn calculate_pi_dense(
 
     let effective_length = seq_length.saturating_sub(skipped_sites as i64);
     if effective_length == 0 {
-        return 0.0;
+        return f64::NAN;
     }
 
     sum_pi / effective_length as f64
