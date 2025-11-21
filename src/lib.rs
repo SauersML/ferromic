@@ -63,6 +63,7 @@ pub mod transcripts;
 #[cfg(test)]
 mod tests {
     mod filter_tests;
+    mod full_integration_test;
     mod hudson_fst_tests;
     mod interval_tests;
     mod mnp_test;
