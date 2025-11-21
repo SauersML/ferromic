@@ -67,29 +67,6 @@ def _load_inversion_whitelist():
         print("WARNING: data/inv_properties.tsv not found. ALLOWED_REGIONS will be empty.", file=sys.stderr)
         return []
 
-def _load_inversion_whitelist():
-    """
-    Parses data/inv_properties.tsv to build the ALLOWED_REGIONS whitelist.
-    Filters by '0_single_1_recur_consensus' column.
-    """
-    whitelist = []
-    # Look for file in likely locations
-    candidates = [
-        "data/inv_properties.tsv",
-        os.path.join(os.path.dirname(__file__), "../data/inv_properties.tsv")
-    ]
-
-    tsv_path = None
-    for c in candidates:
-        if os.path.exists(c):
-            tsv_path = c
-            break
-
-    if not tsv_path:
-        # Fallback or empty if file not found (prevents import crash, but will log warning)
-        print("WARNING: data/inv_properties.tsv not found. ALLOWED_REGIONS will be empty.", file=sys.stderr)
-        return []
-
     try:
         with open(tsv_path, 'r') as f:
             # Skip Header
