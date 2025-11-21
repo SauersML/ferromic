@@ -1542,7 +1542,9 @@ def calculate_and_print_differences_transcripts(transcripts):
     print_always("Analyzing each comparable transcript set (passed QC)...")
     for idx, (identifier, files) in enumerate(keys, 1):
         required_roles = {'group0', 'group1', 'outgroup'}
-        missing_roles = required_roles.difference(files.keys())
+        # Check for missing keys OR None values
+        missing_roles = [r for r in required_roles if r not in files or files[r] is None]
+
         if missing_roles:
             skip_details["Missing required PHYLIP roles"].append(
                 f"{identifier[0]} missing roles: {', '.join(sorted(missing_roles))}"
