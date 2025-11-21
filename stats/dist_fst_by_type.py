@@ -36,7 +36,7 @@ FLANK_SIZE = 100_000
 
 # File paths
 FST_DATA_FILE = 'per_site_fst_output.falsta'
-INVERSION_FILE = 'inv_info.tsv'
+INVERSION_FILE = 'inv_properties.tsv'
 OUTPUT_PLOT = 'fst_flanking_regions_bar_plot.png'
 
 # Adjusted category mapping to only include relevant categories
@@ -103,7 +103,7 @@ def _find_column(df, candidates, label):
     for col in candidates:
         if col in df.columns:
             return col
-    raise KeyError(f"inv_info.tsv missing required column for {label}; looked for {candidates}")
+    raise KeyError(f"inv_properties.tsv missing required column for {label}; looked for {candidates}")
 
 
 def map_regions_to_inversions(inversion_df):
@@ -115,7 +115,7 @@ def map_regions_to_inversions(inversion_df):
     scheme.  The original implementation only supported the ``chr``/``region``
     convention which caused a ``KeyError`` when the consensus columns were
     provided.  We reconcile the differences here so the script behaves the same
-    regardless of which version of ``inv_info.tsv`` is present.
+    regardless of which version of ``inv_properties.tsv`` is present.
     """
 
     chrom_col = _find_column(
@@ -135,7 +135,7 @@ def map_regions_to_inversions(inversion_df):
     )
     recur_col = _find_column(
         inversion_df,
-        ['0_single_1_recur', '0_single_1_recur_consensus', 'RecurrenceCode'],
+        ['0_single_1_recur_consensus', 'RecurrenceCode'],
         'recurrence flag',
     )
 

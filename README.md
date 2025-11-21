@@ -259,7 +259,8 @@ The concatenation and merge utilities (`ferromic`, `vcf_merge`) share `--input <
 - `src/` – Rust crate providing parsing, progress reporting, statistics, transcript handling, and CLI entry points.
 - `scripts/` – Python utilities for downstream tasks (e.g., deduplication, dN/dS calculations, PHYLIP conversions).
 - `stats/` – Exploratory analysis notebooks and plotting scripts for diversity, FST, PCA, and inversion studies.
-- `data/` – Example metadata including `callset.tsv`, significant phenotypes, and support files for tutorials.
+- `data/` – Example metadata including `callset.tsv`, significant phenotypes, `inv_properties.tsv` (the current inversion metadata
+  filename; legacy `inv_info.tsv` is no longer used), and support files for tutorials.
 - `phewas/` – PheWAS modelling pipeline with helper modules and automation scripts.
 
 ## Development

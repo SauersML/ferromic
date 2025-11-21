@@ -137,7 +137,7 @@ def ensure_output_dir(spec: WindowSpec) -> Path:
 PERMUTATIONS = 10_000
 
 PI_DATA_FILE = "per_site_diversity_output.falsta"
-INVERSION_FILE = "inv_info.tsv"
+INVERSION_FILE = "inv_properties.tsv"
 OUTPUT_BASE_DIR = Path("pi_analysis_results_exact_mf_quadrants")
 OUTPUT_BASE_DIR.mkdir(parents=True, exist_ok=True)
 

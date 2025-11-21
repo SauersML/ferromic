@@ -172,7 +172,7 @@ def read_and_preprocess_data(file_path):
     print(f"Unique chromosomes found: {df['chromosome'].nunique()}")
 
     # Load the inversion info TSV
-    inv_info_df = pd.read_csv('inv_info.tsv', sep='\t')
+    inv_info_df = pd.read_csv('inv_properties.tsv', sep='\t')
 
 
     # Summarize comparison counts by the new grouping scheme

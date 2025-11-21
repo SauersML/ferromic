@@ -25,7 +25,7 @@ warnings.filterwarnings('ignore', category=pd.errors.PerformanceWarning)
 RESULTS_DIR = Path("results")
 PLOTS_DIR = Path("plots")
 RAW_DATA_FILE = 'all_pairwise_results.csv'
-INV_INFO_FILE = 'inv_info.tsv'
+INV_INFO_FILE = 'inv_properties.tsv'
 
 # Analysis Parameters
 MIN_SAMPLES_FOR_TEST = 5  # Minimum data points per group for statistical tests
@@ -133,7 +133,7 @@ def load_and_prepare_data() -> Optional[pd.DataFrame]:
         inv_df.dropna(subset=['chr', 'inv_start', 'inv_end'], inplace=True)
         inv_lookup = defaultdict(list)
         for _, row in inv_df.iterrows():
-            inv_lookup[row['chr']].append((row['inv_start'], row['inv_end'], row['0_single_1_recur']))
+            inv_lookup[row['chr']].append((row['inv_start'], row['inv_end'], row['0_single_1_recur_consensus']))
         print(f"  Loaded and processed {len(inv_df)} inversion entries.")
 
         # Load and process raw pairwise data

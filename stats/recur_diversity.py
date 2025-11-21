@@ -8,7 +8,7 @@ warnings.filterwarnings('ignore')
 
 # Load both data files
 output_path = 'output.csv'
-inv_info_path = 'inv_info.tsv'
+inv_info_path = 'inv_properties.tsv'
 
 # Load output.csv
 output_data = pd.read_csv(output_path)
@@ -16,9 +16,9 @@ print(f"Loaded {len(output_data)} rows from output.csv")
 print("Output data chromosome format examples:")
 print(output_data['chr'].head().tolist())
 
-# Load inv_info.tsv
+# Load inv_properties.tsv
 inv_info = pd.read_csv(inv_info_path, sep='\t')
-print(f"Loaded {len(inv_info)} rows from inv_info.tsv")
+print(f"Loaded {len(inv_info)} rows from inv_properties.tsv")
 
 # Rename columns to match expected format
 inv_info = inv_info.rename(columns={
@@ -26,6 +26,14 @@ inv_info = inv_info.rename(columns={
     'Start': 'region_start',
     'End': 'region_end'
 })
+
+# Ensure recurrence indicator is available
+if '0_single_1_recur' not in inv_info.columns:
+    for alt in ['0_single_1_recur_consensus', 'RecurrenceCode']:
+        if alt in inv_info.columns:
+            inv_info['0_single_1_recur'] = inv_info[alt]
+            print(f"\nInjected missing '0_single_1_recur' column from '{alt}'.")
+            break
 
 print("Inv_info data chromosome format examples:")
 print(inv_info['chr'].head().tolist())
@@ -44,10 +52,10 @@ print("\nOutput data columns:", output_data.columns.tolist())
 print("Inv_info data columns:", inv_info.columns.tolist())
 
 # Check for recurrence column in inv_info
-if '0_single_1_recur' in inv_info.columns:
-    print(f"\nRecurrence column found. Values: {inv_info['0_single_1_recur'].value_counts().to_dict()}")
+if '0_single_1_recur_consensus' in inv_info.columns:
+    print(f"\nRecurrence column found. Values: {inv_info['0_single_1_recur_consensus'].value_counts().to_dict()}")
 else:
-    print("\nNo recurrence column ('0_single_1_recur') found in inv_info!")
+    print("\nNo recurrence column ('0_single_1_recur_consensus') found in inv_info!")
 
 # Perform the merge with more diagnostics
 print("\nPerforming merge on chr, region_start, region_end...")
@@ -74,7 +82,7 @@ output_data['orig_index'] = np.arange(len(output_data))
 # First, merge on 'chr' only
 merged_temp = pd.merge(
     output_data,
-    inv_info[['orig_inv_index', 'chr', 'region_start', 'region_end', '0_single_1_recur']],
+    inv_info[['orig_inv_index', 'chr', 'region_start', 'region_end', '0_single_1_recur_consensus']],
     on='chr',
     how='inner',
     suffixes=('_out', '_inv')
@@ -103,7 +111,7 @@ if duplicate_matches.any():
         for _, match in matches.iterrows():
             print(f"    inv_info index: {match['orig_inv_index']}, chr: {match['chr']}, " +
                   f"region: {match['region_start_inv']}-{match['region_end_inv']}, " +
-                  f"recurrence: {match['0_single_1_recur']}")
+                  f"recurrence: {match['0_single_1_recur_consensus']}")
 
 if len(merged) == 0:
     raise ValueError("ERROR: No key overlap found allowing a one-off difference for region_start and region_end between datasets.")
@@ -118,8 +126,8 @@ merged.drop(columns=['region_start_inv', 'region_end_inv'], inplace=True)
 data = merged
 
 # Check for NaN values in recurrence column after merge
-if '0_single_1_recur' in data.columns:
-    na_count = data['0_single_1_recur'].isna().sum()
+if '0_single_1_recur_consensus' in data.columns:
+    na_count = data['0_single_1_recur_consensus'].isna().sum()
     print(f"Rows with NaN in recurrence column after merge: {na_count} ({na_count/len(data)*100:.1f}%)")
 else:
     print("ERROR: Recurrence column not found after merge!")
@@ -136,8 +144,8 @@ for col in ['0_pi_filtered', '1_pi_filtered']:
     data[col] = data[col].apply(replace_inf)
 
 # Split data into recurrent and non-recurrent
-recurrent = data[data['0_single_1_recur'] == 1]
-non_recurrent = data[data['0_single_1_recur'] == 0]
+recurrent = data[data['0_single_1_recur_consensus'] == 1]
+non_recurrent = data[data['0_single_1_recur_consensus'] == 0]
 
 # Check if any entries appear in both categories
 recurrent_indices = set(recurrent['orig_index'])
@@ -331,7 +339,7 @@ plt.tight_layout()
 plt.savefig('inversion_pi_violins.png', dpi=300)
 
 # Ensure each inversion maps to a single recurrence label
-uniq_recur_counts = data.groupby('orig_index')['0_single_1_recur'].nunique()
+uniq_recur_counts = data.groupby('orig_index')['0_single_1_recur_consensus'].nunique()
 valid_indices = uniq_recur_counts[uniq_recur_counts == 1].index
 inter_df = data[data['orig_index'].isin(valid_indices)].copy()
 
@@ -341,19 +349,19 @@ inter_df['pi_inverted'] = pd.to_numeric(inter_df['1_pi_filtered'], errors='coerc
 inter_df.replace([np.inf, -np.inf], np.nan, inplace=True)
 inter_df.loc[inter_df['pi_direct'] >= 1000000000, 'pi_direct'] = np.nan
 inter_df.loc[inter_df['pi_inverted'] >= 1000000000, 'pi_inverted'] = np.nan
-inter_df = inter_df.dropna(subset=['pi_direct', 'pi_inverted', '0_single_1_recur'])
+inter_df = inter_df.dropna(subset=['pi_direct', 'pi_inverted', '0_single_1_recur_consensus'])
 
 # Log transform for variance stabilization
 inter_df['log_pi_direct'] = np.log1p(inter_df['pi_direct'])
 inter_df['log_pi_inverted'] = np.log1p(inter_df['pi_inverted'])
 
 # Compute within-inversion paired differences on the log scale
-paired = inter_df[['orig_index', '0_single_1_recur', 'log_pi_direct', 'log_pi_inverted']].dropna()
+paired = inter_df[['orig_index', '0_single_1_recur_consensus', 'log_pi_direct', 'log_pi_inverted']].dropna()
 paired['delta_log_pi'] = paired['log_pi_inverted'] - paired['log_pi_direct']
 
 # Split deltas by recurrence group
-delta_rec = paired.loc[paired['0_single_1_recur'] == 1, 'delta_log_pi'].dropna()
-delta_nonrec = paired.loc[paired['0_single_1_recur'] == 0, 'delta_log_pi'].dropna()
+delta_rec = paired.loc[paired['0_single_1_recur_consensus'] == 1, 'delta_log_pi'].dropna()
+delta_nonrec = paired.loc[paired['0_single_1_recur_consensus'] == 0, 'delta_log_pi'].dropna()
 
 print("\nPaired within-inversion tests on log-transformed pi:")
 if len(delta_rec) > 0 and not np.allclose(delta_rec.values, 0.0):

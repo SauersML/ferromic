@@ -17,7 +17,7 @@ SCIPY_OK = True
 # Configuration / aesthetics
 # -----------------------------------------------------------------------------
 OUTPUT_CSV = Path("./output.csv")
-INVINFO_TSV = Path("./inv_info.tsv")
+INVINFO_TSV = Path("./inv_properties.tsv")
 
 rng = np.random.default_rng(2025)  # reproducible jitter
 
@@ -123,12 +123,12 @@ def _load_and_match(output_csv: Path, invinfo_tsv: Path) -> pd.DataFrame:
 
     # Recurrence column (consensus preferred, fallback alternate)
     recur_col = None
-    for c in ["0_single_1_recur_consensus", "0_single_1_recur"]:
+    for c in ["0_single_1_recur_consensus", "0_single_1_recur_consensus"]:
         if c in inv.columns:
             recur_col = c
             break
     if recur_col is None:
-        raise KeyError("inv_info.tsv lacks '0_single_1_recur_consensus' and '0_single_1_recur'.")
+        raise KeyError("inv_properties.tsv lacks '0_single_1_recur_consensus' and '0_single_1_recur_consensus'.")
 
     inv_small = inv[["chr_std", "Start", "End", recur_col]].copy()
     merged = df_cand.merge(inv_small, on=["chr_std", "Start", "End"], how="left")

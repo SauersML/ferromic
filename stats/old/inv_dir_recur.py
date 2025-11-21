@@ -25,7 +25,7 @@ from scipy.stats import wilcoxon, mannwhitneyu
 # Contains pi values per orientation (e.g., 0_pi_filtered, 1_pi_filtered)
 OUTPUT_PI_PATH = 'output.csv'
 # Contains recurrence info per region (e.g., 0_single_1_recur)
-INV_INFO_PATH = 'inv_info.tsv'
+INV_INFO_PATH = 'inv_properties.tsv'
 # Contains phased genotypes (e.g., 0|1) for inversions per sample
 GENOTYPE_FILE = 'variants_freeze4inv_sv_inv_hg38_processed_arbigent_filtered_manualDotplot_filtered_PAVgenAdded_withInvCategs_syncWithWH.fixedPH.simpleINV.mod.tsv'
 # Folder containing PCA results per chromosome
@@ -242,7 +242,7 @@ output_df['region_end'] = pd.to_numeric(output_df['region_end'], errors='coerce'
 output_df.dropna(subset=['chr', 'region_start', 'region_end'], inplace=True)
 
 
-# B. Standardize Inversion Info Data ('inv_info.tsv')
+# B. Standardize Inversion Info Data ('inv_properties.tsv')
 recur_col = None
 coord_cols_inv = []
 chr_col_inv = None
@@ -259,7 +259,7 @@ if 'End' in inv_info_df.columns: coord_cols_inv.append('End')
 elif 'region_end' in inv_info_df.columns: coord_cols_inv.append('region_end')
 else: raise ValueError(f"End coordinate column not found in {INV_INFO_PATH}")
 
-if '0_single_1_recur' in inv_info_df.columns: recur_col = '0_single_1_recur'
+if '0_single_1_recur_consensus' in inv_info_df.columns: recur_col = '0_single_1_recur_consensus'
 elif 'RecurrenceCode' in inv_info_df.columns: recur_col = 'RecurrenceCode'
 else: raise ValueError(f"Recurrence column not found in {INV_INFO_PATH}")
 

@@ -1207,6 +1207,15 @@ pub fn map_sample_names_to_indices(sample_names: &[String]) -> HashMap<String, u
                 }
             }
         }
+        // Convert to String so the HashMap owns its keys.
+        // 1) Store the core ID (last underscore-delimited token) to match config TSV entries
+        //    such as "HG12345" when the VCF contains "AFR_ACB_HG12345".
+        //let core_id = name.rsplit('_').next().unwrap_or(name).to_string();
+        //vcf_sample_id_to_index.entry(core_id).or_insert(i);
+
+        // 2) Also store the full VCF sample name to support direct lookups using the exact label
+        //    provided in the VCF header.
+        //vcf_sample_id_to_index.entry(name.clone()).or_insert(i);
     }
 
     for (alias, target) in alias_candidates {

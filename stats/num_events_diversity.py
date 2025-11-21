@@ -19,7 +19,7 @@ framework under these specific N=1 conditions can be hard to interpret.
 
 # --- Configuration ---
 PI_DATA_PATH = 'output.csv'        # Pi values per orientation (0_pi_filtered, 1_pi_filtered)
-INV_INFO_PATH = 'inv_info.tsv'     # Inversion info (Recurrence, Num events string, coords)
+INV_INFO_PATH = 'inv_properties.tsv'     # Inversion info (Recurrence, Num events string, coords)
 OUTPUT_DIR = 'recurrent_events_analysis_separate_v2' # Directory for analysis results
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -75,9 +75,18 @@ def main():
     # Rename columns for clarity and consistency
     inv_info = inv_info.rename(columns={
         'Chromosome': 'chr', 'Start': 'region_start_info', 'End': 'region_end_info',
-        '0_single_1_recur': 'RecurrenceCode',
+        '0_single_1_recur_consensus': 'RecurrenceCode',
         'Number_recurrent_events_.95..C.I..': 'NumRecurrentEventsStr'
     })
+
+    # Ensure recurrence code is present
+    if '0_single_1_recur' in inv_info.columns:
+        inv_info = inv_info.rename(columns={'0_single_1_recur': 'RecurrenceCode'})
+    elif '0_single_1_recur_consensus' in inv_info.columns:
+        inv_info['RecurrenceCode'] = inv_info['0_single_1_recur_consensus']
+    elif 'RecurrenceCode' not in inv_info.columns:
+        print("ERROR: Missing recurrence indicator column in inversion info.")
+        exit(1)
 
     # Check for required columns
     required_pi_cols = ['chr', 'region_start', 'region_end', '0_pi_filtered', '1_pi_filtered']

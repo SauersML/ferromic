@@ -8,7 +8,7 @@ from typing import Dict
 
 import pandas as pd
 
-INV_INFO_PATH = "inv_info.tsv"
+INV_INFO_PATH = "inv_properties.tsv"
 
 
 def _to_int(value) -> int | None:
@@ -27,7 +27,7 @@ def _to_int(value) -> int | None:
 
 @lru_cache(maxsize=1)
 def load_inv_region_map(inv_info_path: str = INV_INFO_PATH) -> Dict[str, str]:
-    """Return a mapping {OrigID -> chr:start-end} using ``inv_info.tsv``."""
+    """Return a mapping {OrigID -> chr:start-end} using ``inv_properties.tsv``."""
     if not os.path.exists(inv_info_path):
         return {}
     try:

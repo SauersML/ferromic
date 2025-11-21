@@ -6,6 +6,7 @@ import traceback
 import pandas as pd
 import time
 import re
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # Ensure pipeline_lib is importable
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -17,6 +18,56 @@ except ImportError:
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+
+def _execute_task(args):
+    gene_info, region_label, paml_bin = args
+    gene_name = gene_info['label']
+
+    tree_file = os.path.join(lib.REGION_TREE_DIR, f"{region_label}.treefile")
+    failed_marker = os.path.join(lib.REGION_TREE_DIR, f"{region_label}.FAILED")
+
+    if os.path.exists(failed_marker):
+        logging.info(f"[{gene_name}] Skipping because region {region_label} FAILED topology check.")
+        return {
+            'gene': gene_name,
+            'region': region_label,
+            'status': 'skipped_region_failed',
+            'reason': 'Region topology check failed (FAILED file found)'
+        }
+
+    if not os.path.exists(tree_file):
+        logging.info(f"[{gene_name}] Skipping because region tree {region_label}.treefile not found.")
+        return {
+            'gene': gene_name,
+            'region': region_label,
+            'status': 'skipped_no_tree',
+            'reason': 'Region tree file missing'
+        }
+
+    try:
+        return lib.analyze_single_gene(
+            gene_info,
+            tree_file,
+            region_label,
+            paml_bin,
+            lib.PAML_CACHE_DIR,
+            timeout=lib.PAML_TIMEOUT,
+            run_branch_model=lib.RUN_BRANCH_MODEL_TEST,
+            run_clade_model=lib.RUN_CLADE_MODEL_TEST,
+            proceed_on_terminal_only=lib.PROCEED_ON_TERMINAL_ONLY,
+            keep_paml_out=lib.KEEP_PAML_OUT,
+            paml_out_dir=lib.PAML_OUT_DIR,
+            make_figures=False  # No figures for batch runs usually, or maybe yes? prompt said "And logs."
+        )
+    except Exception as e:
+        logging.error(f"[{gene_name}] Unexpected error: {e}")
+        return {
+            'gene': gene_name,
+            'region': region_label,
+            'status': 'runtime_error',
+            'reason': str(e)
+        }
 
 def main():
     # 1. Get Gene Batch from Env Var
@@ -161,59 +212,27 @@ def main():
 
     logging.info(f"Mapped {len(gene_labels)} genes to {len(tasks)} gene-region pairs.")
 
-    # 5. Execute
-    for gene_info, region_label in tasks:
-        gene_name = gene_info['label']
+    # 5. Execute (run up to four jobs in parallel)
+    with ProcessPoolExecutor(max_workers=4) as executor:
+        future_to_task = {
+            executor.submit(_execute_task, (gene_info, region_label, paml_bin)): (gene_info, region_label)
+            for gene_info, region_label in tasks
+        }
 
-        # Check for Region Tree
-        tree_file = os.path.join(lib.REGION_TREE_DIR, f"{region_label}.treefile")
-        failed_marker = os.path.join(lib.REGION_TREE_DIR, f"{region_label}.FAILED")
-
-        if os.path.exists(failed_marker):
-            logging.info(f"[{gene_name}] Skipping because region {region_label} FAILED topology check.")
-            results.append({
-                'gene': gene_name,
-                'region': region_label,
-                'status': 'skipped_region_failed',
-                'reason': 'Region topology check failed (FAILED file found)'
-            })
-            continue
-
-        if not os.path.exists(tree_file):
-            logging.info(f"[{gene_name}] Skipping because region tree {region_label}.treefile not found.")
-            results.append({
-                'gene': gene_name,
-                'region': region_label,
-                'status': 'skipped_no_tree',
-                'reason': 'Region tree file missing'
-            })
-            continue
-
-        # Run PAML
-        try:
-            res = lib.analyze_single_gene(
-                gene_info,
-                tree_file,
-                region_label,
-                paml_bin,
-                lib.PAML_CACHE_DIR,
-                timeout=lib.PAML_TIMEOUT,
-                run_branch_model=lib.RUN_BRANCH_MODEL_TEST,
-                run_clade_model=lib.RUN_CLADE_MODEL_TEST,
-                proceed_on_terminal_only=lib.PROCEED_ON_TERMINAL_ONLY,
-                keep_paml_out=lib.KEEP_PAML_OUT,
-                paml_out_dir=lib.PAML_OUT_DIR,
-                make_figures=False # No figures for batch runs usually, or maybe yes? prompt said "And logs."
-            )
-            results.append(res)
-        except Exception as e:
-            logging.error(f"[{gene_name}] Unexpected error: {e}")
-            results.append({
-                'gene': gene_name,
-                'region': region_label,
-                'status': 'runtime_error',
-                'reason': str(e)
-            })
+        for future in as_completed(future_to_task):
+            gene_info, region_label = future_to_task[future]
+            gene_name = gene_info['label']
+            try:
+                res = future.result()
+                results.append(res)
+            except Exception as e:
+                logging.error(f"[{gene_name}] Worker crashed: {e}")
+                results.append({
+                    'gene': gene_name,
+                    'region': region_label,
+                    'status': 'runtime_error',
+                    'reason': f'Worker failure: {e}'
+                })
 
     # 6. Save Results
     if results:

@@ -181,11 +181,11 @@ def consensus_label(c: int) -> str:
     return "Recurrent" if c == 1 else "Single-event"
 
 # ===========================
-# Load inv_info.tsv (exact triplets w/ consensus in {0,1})
+# Load inv_properties.tsv (exact triplets w/ consensus in {0,1})
 # ===========================
 def load_inv_info_exact(path: str):
     if not os.path.exists(path):
-        sys.exit(f"ERROR: inv_info.tsv not found at {path}")
+        sys.exit(f"ERROR: inv_properties.tsv not found at {path}")
 
     with open(path, "r", newline="") as f:
         reader = csv.DictReader(f, delimiter="\t")
@@ -203,7 +203,7 @@ def load_inv_info_exact(path: str):
         col_cons = find_col("0_single_1_recur_consensus")
 
         if not all([col_chr, col_start, col_end, col_cons]):
-            sys.exit("ERROR: inv_info.tsv missing required columns. Found: " + ", ".join(header))
+            sys.exit("ERROR: inv_properties.tsv missing required columns. Found: " + ", ".join(header))
 
         triplet_to_cons: Dict[Tuple[str,int,int], int] = {}
         rows_used = 0
@@ -233,7 +233,7 @@ def load_inv_info_exact(path: str):
             rows_used += 1
 
     if rows_used == 0:
-        sys.exit("ERROR: No (chr,start,end) rows with consensus ∈ {0,1} in inv_info.tsv.")
+        sys.exit("ERROR: No (chr,start,end) rows with consensus ∈ {0,1} in inv_properties.tsv.")
     return triplet_to_cons
 
 # ===========================
@@ -307,7 +307,7 @@ def fixed_differences_between_groups(seqs_dir: List[str], seqs_inv: List[str]) -
 # Main
 # ===========================
 def main():
-    inv_info_path = "inv_info.tsv"
+    inv_info_path = "inv_properties.tsv"
     triplet_to_cons = load_inv_info_exact(inv_info_path)
 
     # Discover .phy CDS files
@@ -323,7 +323,7 @@ def main():
         print("No CDS .phy files matched the strict filename pattern; nothing to do.")
         return 0
 
-    # Keep only CDS with EXACT (chr, inv_start, inv_end) present in inv_info.tsv & consensus in {0,1}
+    # Keep only CDS with EXACT (chr, inv_start, inv_end) present in inv_properties.tsv & consensus in {0,1}
     kept: List[Dict] = []
     for rec in parsed:
         key = (rec["chr"], rec["inv_start"], rec["inv_end"])
@@ -332,7 +332,7 @@ def main():
             kept.append(rec)
 
     if not kept:
-        print("No CDS .phy files matched an exact (chr,start,end) present in inv_info.tsv with consensus ∈ {0,1}.")
+        print("No CDS .phy files matched an exact (chr,start,end) present in inv_properties.tsv with consensus ∈ {0,1}.")
         return 0
 
     # Index by (gene_name, inv_id, group) and enforce single file per side
