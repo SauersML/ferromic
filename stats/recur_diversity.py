@@ -27,6 +27,14 @@ inv_info = inv_info.rename(columns={
     'End': 'region_end'
 })
 
+# Ensure recurrence indicator is available
+if '0_single_1_recur' not in inv_info.columns:
+    for alt in ['0_single_1_recur_consensus', 'RecurrenceCode']:
+        if alt in inv_info.columns:
+            inv_info['0_single_1_recur'] = inv_info[alt]
+            print(f"\nInjected missing '0_single_1_recur' column from '{alt}'.")
+            break
+
 print("Inv_info data chromosome format examples:")
 print(inv_info['chr'].head().tolist())
 inv_info['orig_inv_index'] = inv_info.index
