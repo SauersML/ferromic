@@ -970,6 +970,28 @@ def summarize_linear_model() -> List[str]:
     )
 
     lines = ["Orientation × recurrence linear models (replicated strict logic):"]
+    lines.append(
+        "  Model definitions (mirroring stats/inv_dir_recur_model.py):"
+    )
+    lines.append(
+        "    [Model A] Outcome Δlogπ = log(π_inverted+ε) − log(π_direct+ε); "
+        "predictor is a Recurrent indicator (Single-event baseline); HC3 "
+        "robust SEs; contrasts report single-event, recurrent, interaction, "
+        "and pooled inversion effects."
+    )
+    lines.append(
+        "    [Model B] Rows duplicated per orientation with outcome log(π+ε); "
+        "OLS with design log_pi ~ Inverted + Inverted:Recurrent + C(region_id); "
+        "cluster-robust by region_id; recurrence main effect absorbed by "
+        "fixed effects; contrasts compare orientation within recurrence "
+        "groups and their interaction."
+    )
+    lines.append(
+        "    [Model C] Outcome Δlogπ as in Model A with predictors Recurrent "
+        "+ z-scored covariates ln1p(Number_recurrent_events), ln(Size_kbp), "
+        "Inverted_AF (raw z), ln(Formation_rate_per_generation); HC3 robust "
+        "SEs; rows with missing covariates are dropped and effects are per +1 SD."
+    )
     lines.append(f"  Detection floor applied before logs: ε = {_fmt(eps, 6)}.")
 
     # Model A (Basic)
@@ -1028,7 +1050,13 @@ def summarize_linear_model() -> List[str]:
 
 def summarize_cds_conservation_glm() -> List[str]:
     lines: List[str] = [
-        "CDS conservation GLM (proportion of identical CDS pairs):"
+        "CDS conservation GLM (proportion of identical CDS pairs):",
+        "  Model definition: Binomial GLM with logit link and frequency weights = n_pairs, "
+        "cluster-robust by inversion; formula prop ~ C(consensus) * C(phy_group) + "
+        "log_m + log_L + log_k (log of n_sites, inversion length, and n_sequences).",
+        "  Categories use Single/Recurrent × Direct/Inverted encoding; estimated marginal "
+        "means are standardized with equal inversion weight and covariates set to their "
+        "weighted means before pairwise contrasts.",
     ]
 
     pairwise_df: pd.DataFrame | None = None
