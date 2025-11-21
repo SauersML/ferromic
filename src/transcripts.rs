@@ -783,9 +783,12 @@ pub fn prepare_to_write_cds(
         write_phylip_file(&filename, &filtered_map, &cds.transcript_id, temp_path)?;
 
         // --- NEW METADATA LOGIC ---
+        // Use intersected segments to match the PHYLIP file content exactly.
+        // This prevents length mismatch errors in downstream tools like axt_to_phy.py.
         let segment_coords_str = cds
             .segments
             .iter()
+            .filter_map(|seg| seg.intersect(&hap_region))
             .map(|seg| {
                 format!(
                     "{}-{}",
