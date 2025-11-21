@@ -197,6 +197,45 @@ jobs:
             echo "replicate_figures.py exited with status $status but continuing to allow artifact upload."
           fi
 
+      - name: Copy CDS GLM outputs to data directory
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p data
+          for f in cds_emm_adjusted.tsv cds_emm_nocov.tsv cds_pairwise_nocov.tsv; do
+            if [[ -f "$f" ]]; then
+              cp "$f" "data/$f"
+              echo "Copied $f to data/$f"
+            else
+              echo "Missing $f; skipping copy"
+            fi
+          done
+
+      - name: Commit and push data updates
+        if: always()
+        env:
+          PUSH_TOKEN: ${{ secrets.WRITE_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add data/cds_emm_adjusted.tsv || true
+          git add data/cds_emm_nocov.tsv || true
+          git add data/cds_pairwise_nocov.tsv || true
+
+          if git diff --staged --quiet; then
+            echo "No CDS GLM data changes to commit"
+            exit 0
+          fi
+
+          git commit -m "Update CDS GLM outputs from run-analysis workflow"
+          git pull https://${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git main --rebase --autostash --strategy=recursive -X ours
+          git push https://${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git HEAD:main
+
       - name: Post-run diagnostics
         if: always()
         shell: bash
