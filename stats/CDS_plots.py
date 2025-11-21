@@ -496,6 +496,8 @@ def build_pairs_and_phy_index(cds_summary: pd.DataFrame) -> pd.DataFrame:
         ".",                           # Current directory
         "analysis_downloads",          # replicate_figures.py download location
         "../analysis_downloads",       # If running from stats/
+        "analysis_downloads/public_internet",  # Subdirectory where replicate_figures.py puts some files
+        "../analysis_downloads/public_internet",
     ]
     
     for fn in files:
