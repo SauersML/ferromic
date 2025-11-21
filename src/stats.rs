@@ -4041,6 +4041,7 @@ fn count_segregating_sites_dense_biallelic(
 /// # Arguments
 /// * variants - A slice of Variant structs containing genotype data for all samples
 /// * number_of_samples - The total number of samples to compare
+/// * sequence_length - Total length of the genomic region being compared (in base pairs)
 ///
 /// # Returns
 /// A vector of tuples, each containing:
@@ -4050,8 +4051,35 @@ fn count_segregating_sites_dense_biallelic(
 pub fn calculate_pairwise_differences(
     variants: &[Variant],
     number_of_samples: usize,
+    sequence_length: i64,
 ) -> Vec<((usize, usize), usize, usize)> {
     set_stage(ProcessingStage::StatsCalculation);
+
+    if sequence_length <= 0 {
+        log(
+            LogLevel::Warning,
+            "Pairwise differences requested with non-positive sequence length; returning empty result.",
+        );
+        return Vec::new();
+    }
+
+    // Pre-compute haplotype counts for each sample so we can treat the invariant genome as comparable by default.
+    // VCFs omit monomorphic sites entirely, so we assume reference agreement everywhere unless a genotype is missing
+    // at a variant position (in which case we subtract that site from the comparable set for the affected pair).
+    let mut haplotype_counts: Vec<Option<usize>> = vec![None; number_of_samples];
+    for variant in variants.iter() {
+        for (idx, genotype_opt) in variant.genotypes.iter().enumerate().take(number_of_samples) {
+            if haplotype_counts[idx].is_none() {
+                if let Some(genotype) = genotype_opt {
+                    haplotype_counts[idx] = Some(genotype.len());
+                }
+            }
+        }
+
+        if haplotype_counts.iter().all(|c| c.is_some()) {
+            break;
+        }
+    }
 
     let total_pairs = (number_of_samples * (number_of_samples - 1)) / 2;
     log(
@@ -4067,39 +4095,63 @@ pub fn calculate_pairwise_differences(
         number_of_samples
     ));
 
-    // Wrap variants in an Arc for thread-safe sharing across parallel threads
+    // Wrap variants and haplotype counts in Arcs for thread-safe sharing across parallel threads
     let variants_shared = Arc::new(variants);
+    let haplotype_counts = Arc::new(haplotype_counts);
+    let base_sites = sequence_length as usize;
 
     let result: Vec<((usize, usize), usize, usize)> = (0..number_of_samples)
         .into_par_iter() // Convert range into a parallel iterator
         .flat_map(|sample_idx_i| {
             // Clone the Arc for each thread to safely access the variants data
             let variants_local = Arc::clone(&variants_shared);
+            let haplotype_counts = Arc::clone(&haplotype_counts);
             // Parallel iteration over second sample indices (i+1 to n-1) to avoid duplicate pairs
             (sample_idx_i + 1..number_of_samples)
                 .into_par_iter()
                 .map(move |sample_idx_j| {
+                    let haplotypes_i = haplotype_counts[sample_idx_i].unwrap_or(0);
+                    let haplotypes_j = haplotype_counts[sample_idx_j].unwrap_or(0);
+
+                    if haplotypes_i == 0 || haplotypes_j == 0 {
+                        log(
+                            LogLevel::Warning,
+                            &format!(
+                                "No genotype data found to determine ploidy for samples {} or {}; skipping comparison.",
+                                sample_idx_i, sample_idx_j
+                            ),
+                        );
+                        return ((sample_idx_i, sample_idx_j), 0, 0);
+                    }
+
+                    let haplotype_product = haplotypes_i * haplotypes_j;
                     let mut difference_count = 0; // Number of sites where genotypes differ
-                    let mut comparable_site_count = 0; // Number of sites with data for both samples
+                    // Treat every base pair across all haplotype comparisons as comparable by default.
+                    let mut comparable_site_count = base_sites * haplotype_product; // Number of sites with data for both samples
 
                     // Iterate over all variants to compare this pair's haplotypes
                     for variant in variants_local.iter() {
-                        if let (Some(genotype_i), Some(genotype_j)) = (
+                        match (
                             variant.genotypes.get(sample_idx_i),
                             variant.genotypes.get(sample_idx_j),
                         ) {
-                            // Compare all haplotype pairs (truly per-haplotype analysis)
-                            // Each haplotype is treated as completely independent
-                            for a in 0..genotype_i.len() {
-                                for b in 0..genotype_j.len() {
-                                    comparable_site_count += 1;
-                                    if genotype_i[a] != genotype_j[b] {
-                                        difference_count += 1;
+                            (Some(genotype_i), Some(genotype_j)) => {
+                                // Compare all haplotype pairs (truly per-haplotype analysis)
+                                // Each haplotype is treated as completely independent
+                                for a in 0..genotype_i.len() {
+                                    for b in 0..genotype_j.len() {
+                                        if genotype_i[a] != genotype_j[b] {
+                                            difference_count += 1;
+                                        }
                                     }
                                 }
                             }
+                            // If either genotype is missing, this base pair cannot be compared; subtract it.
+                            _ => {
+                                comparable_site_count = comparable_site_count
+                                    .saturating_sub(haplotype_product);
+                            }
                         }
-                        // If either genotype is None, skip this site (missing data)
                     }
 
                     // Return the pair's indices and their comparison metrics
