@@ -1421,7 +1421,7 @@ def summarize_frf() -> List[str]:
         return lines
 
     weights = per_inversion_breakpoint_metric.compute_meta_weights_from_s2(s2)
-    n_perm = 1_000_000
+    n_perm = 20_000_000
     n_workers = os.cpu_count() or 1
 
     # Weighted Median
