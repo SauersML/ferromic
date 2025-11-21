@@ -341,11 +341,31 @@ def run_fresh_cds_pipeline():
     for filename in expected_outputs:
         root_path = REPO_ROOT / filename
         data_path = DATA_DIR / filename
-        if root_path.exists():
-            continue
-        if data_path.exists():
-            print(f"... {filename} found in data/, using cached copy ...")
-            continue
+
+        # Special check for cds_identical_proportions.tsv: must have 'n_sites'
+        if filename == "cds_identical_proportions.tsv":
+            valid = False
+            for candidate in (root_path, data_path):
+                if candidate.exists():
+                    try:
+                        with open(candidate, "r") as f:
+                            header = f.readline()
+                        if "n_sites" in header:
+                            valid = True
+                            break
+                        else:
+                            print(f"Note: {candidate} exists but lacks 'n_sites' column. Regeneration forced.")
+                    except Exception:
+                        pass
+            if valid:
+                print(f"... {filename} found (and valid), using cached copy ...")
+                continue
+        else:
+            if root_path.exists():
+                continue
+            if data_path.exists():
+                print(f"... {filename} found in data/, using cached copy ...")
+                continue
         missing_outputs.append(filename)
 
     if not missing_outputs:

@@ -116,9 +116,20 @@ def load_data() -> pd.DataFrame:
     df["log_L"] = np.log(df["inv_len"])
     df["log_k"] = np.log(df["n_sequences"].astype(int))
 
-    # n_sites from per-file pairs
-    ns = [read_first_n_sites_from_pairs(str(row["filename"])) for _, row in df.iterrows()]
-    df["n_sites"] = ns
+    # n_sites: prefer column in TSV, fallback to per-file pairs
+    if "n_sites" in df.columns:
+        df["n_sites"] = pd.to_numeric(df["n_sites"], errors="coerce")
+        if df["n_sites"].isna().any():
+             mask = df["n_sites"].isna()
+             print(f"Warning: recovering n_sites from files for {mask.sum()} rows...")
+             df.loc[mask, "n_sites"] = [
+                 read_first_n_sites_from_pairs(str(row["filename"]))
+                 for _, row in df[mask].iterrows()
+             ]
+    else:
+        ns = [read_first_n_sites_from_pairs(str(row["filename"])) for _, row in df.iterrows()]
+        df["n_sites"] = ns
+
     df["log_m"] = np.log(df["n_sites"].astype(int))
 
     return df
