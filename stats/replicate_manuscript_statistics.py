@@ -645,16 +645,8 @@ def _calc_pi_structure_metrics() -> PiStructureMetrics:
         if values.size == 0 or not np.isfinite(values).any():
             return
 
-        # Filter Logic:
-        # Must have finite bases check?
-        # Original code used `finite_bases < 40_000` as a hard reject for everything.
-        # Now we have two thresholds.
-        # Let's check finite bases relative to thresholds.
-        finite_mask = np.isfinite(values)
-        finite_bases = int(finite_mask.sum())
-
         # --- Logic for Edge/Middle (Threshold 40kb) ---
-        if finite_bases >= 40_000 and values.size >= 40_000:
+        if values.size >= 40_000:
             qualifying_regions.add(region)
             hap_counts = hap_map.get(region, (None, None)) if "hap_map" in locals() else (None, None)
             hap_count = hap_counts[group_id] if hap_counts else None
@@ -669,7 +661,7 @@ def _calc_pi_structure_metrics() -> PiStructureMetrics:
 
         # --- Logic for Spearman (Threshold 100kb) ---
         # "first 100 kbp ... total length greater than 100 kbp"
-        if finite_bases >= 100_000 and values.size >= 100_000:
+        if values.size >= 100_000:
             first_100k = values[:100_000]
             # Reshape to 2kb windows (100,000 / 2,000 = 50 windows)
             reshaped = first_100k.reshape(50, 2_000)
