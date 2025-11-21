@@ -242,7 +242,7 @@ pub fn make_sequences(
     init_step_progress("Sequence generation", 4); // 4 major steps
 
     update_step_progress(0, "Mapping samples and haplotypes");
-    let vcf_sample_id_to_index = map_sample_names_to_indices(sample_names)?;
+    let vcf_sample_id_to_index = map_sample_names_to_indices(sample_names);
 
     let haplotype_indices =
         get_haplotype_indices_for_group(haplotype_group, sample_filter, &vcf_sample_id_to_index)?;
