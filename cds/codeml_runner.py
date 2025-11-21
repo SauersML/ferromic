@@ -252,5 +252,13 @@ def main():
     else:
         logging.warning("No results generated for this batch.")
 
+import multiprocessing
+
 if __name__ == "__main__":
+    # FIX: Force 'spawn' to prevent deadlocks with ete3/Qt and logging locks
+    try:
+        multiprocessing.set_start_method('spawn', force=True)
+    except RuntimeError:
+        pass  # Context might already be set
+
     main()
