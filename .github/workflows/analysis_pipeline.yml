@@ -341,7 +341,7 @@ jobs:
         env:
           GENE_BATCH: ${{ matrix.batch }}
           # Optional: configure timeouts etc
-          PAML_TIMEOUT: 3600
+          PAML_TIMEOUT: 21600
           REGION_OVERRIDE_FILTER: ${{ inputs.region_override }}
 
       - name: Upload Partial Results
