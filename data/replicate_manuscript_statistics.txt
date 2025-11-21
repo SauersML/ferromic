@@ -62,10 +62,10 @@ Orientation × recurrence linear models (replicated strict logic):
 
 CDS CONSERVATION
 CDS conservation GLM (proportion of identical CDS pairs):
-  Source: freshly computed from cds_identical_proportions.tsv.
-  Single/Inverted vs Single/Direct: Δlogit = 6.389, Δp = 0.251, p = 7.355e-08, BH q = 4.413e-07.
-  Single/Inverted vs Recurrent/Inverted: Δlogit = 6.521, Δp = 0.277, p = 3.253e-07, BH q = 6.505e-07.
-  Single/Inverted vs Recurrent/Direct: Δlogit = 6.526, Δp = 0.278, p = 2.927e-07, BH q = 6.505e-07.
+  Source: loaded from data/cds_identical_proportions.tsv.
+  Single/Inverted vs Single/Direct: Δlogit = 6.812, Δp = 0.274, p = 1.967e-08, BH q = 1.180e-07.
+  Single/Inverted vs Recurrent/Inverted: Δlogit = 6.852, Δp = 0.282, p = 3.995e-07, BH q = 7.990e-07.
+  Single/Inverted vs Recurrent/Direct: Δlogit = 6.856, Δp = 0.282, p = 3.582e-07, BH q = 7.990e-07.
 
 DIFFERENTIATION
 Differentiation between orientations (Hudson's FST):
@@ -88,7 +88,7 @@ Breakpoint enrichment (Flat–Ramp–Flat Model):
 
   [Precision-Weighted Meta-Analysis]
     Weighted Median Delta: Single=0.176, Recurrent=-0.028, Diff=0.205.
-    Median P-value (Two-sided): 3.0000e-06.
+    Median P-value (Two-sided): 1.0000e-06.
     Weighted Mean Delta:   Single=0.067, Recurrent=-0.024, Diff=0.091.
     Mean P-value (Two-sided):   0.0111.
 
