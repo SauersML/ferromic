@@ -18,6 +18,8 @@ DIVERSITY
 Nucleotide diversity (π) by orientation and recurrence:
   Total loci with finite π estimates: 62.
   Across all loci: mean π(inverted) = 0.000307, mean π(direct) = 0.000415.
+    Median π(inverted) = 0.000238, median π(direct) = 0.000364.
+    Median π(inverted) is 1.529-fold lower than median π(direct).
     Two-sided paired t-test comparing orientations: t = -2.581, p = 0.012.
   Single-event inversions: median π(inverted) = 0.000021, median π(direct) = 0.000313.
   Recurrent inversions: median π(inverted) = 0.000356, median π(direct) = 0.000447.
@@ -99,7 +101,7 @@ Breakpoint enrichment (Flat–Ramp–Flat Model):
 
   [Precision-Weighted Meta-Analysis]
     Weighted Median Delta: Single=0.176, Recurrent=-0.028, Diff=0.205.
-    Median P-value (Two-sided): 3.0000e-06.
+    Median P-value (Two-sided): 1.0000e-06.
     Weighted Mean Delta:   Single=0.067, Recurrent=-0.024, Diff=0.091.
     Mean P-value (Two-sided):   0.0111.
 

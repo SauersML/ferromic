@@ -974,11 +974,31 @@ def summarize_diversity() -> List[str]:
 
     inv_mean = df["1_pi_filtered"].mean()
     dir_mean = df["0_pi_filtered"].mean()
+    inv_median = _safe_median(df["1_pi_filtered"])
+    dir_median = _safe_median(df["0_pi_filtered"])
+    fold_lower = None
+    if inv_median not in (None, 0) and dir_median is not None:
+        fold_lower = dir_median / inv_median
     ttest = stats.ttest_rel(df["1_pi_filtered"], df["0_pi_filtered"])
     lines.append(
         "  Across all loci: mean π(inverted) = "
         f"{_fmt(inv_mean, 6)}, mean π(direct) = {_fmt(dir_mean, 6)}."
     )
+    lines.append(
+        "    Median π(inverted) = "
+        f"{_fmt(inv_median, 6)}, median π(direct) = {_fmt(dir_median, 6)}."
+    )
+    if fold_lower is not None:
+        if fold_lower >= 1:
+            lines.append(
+                "    Median π(inverted) is "
+                f"{_fmt(fold_lower, 3)}-fold lower than median π(direct)."
+            )
+        else:
+            lines.append(
+                "    Median π(inverted) is "
+                f"{_fmt(1 / fold_lower, 3)}-fold higher than median π(direct)."
+            )
     lines.append(
         "    Two-sided paired t-test comparing orientations: "
         f"t = {_fmt(ttest.statistic, 3)}, p = {_fmt(ttest.pvalue, 3)}."
