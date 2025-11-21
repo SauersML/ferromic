@@ -117,17 +117,7 @@ def load_data() -> pd.DataFrame:
     df["log_k"] = np.log(df["n_sequences"].astype(int))
 
     # n_sites from per-file pairs
-    ns = []
-    for _, row in df.iterrows():
-        fn = str(row["filename"])
-        try:
-            ns.append(read_first_n_sites_from_pairs(fn))
-        except FileNotFoundError:
-            fallback = int(row["n_pairs"])
-            print(
-                f"WARNING: pairs_CDS__{fn}.tsv missing; using n_pairs ({fallback}) as n_sites proxy."
-            )
-            ns.append(fallback)
+    ns = [read_first_n_sites_from_pairs(str(row["filename"])) for _, row in df.iterrows()]
     df["n_sites"] = ns
     df["log_m"] = np.log(df["n_sites"].astype(int))
 
