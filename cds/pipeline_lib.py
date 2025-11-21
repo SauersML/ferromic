@@ -603,8 +603,9 @@ def create_paml_tree_files(tree_path, work_dir, gene_name):
                 node.add_feature("group_status", "both")
 
     if direct_leaves < 3 or inverted_leaves < 3:
-        logging.warning(f"[{gene_name}] Skipping due to insufficient samples in a group (direct: {direct_leaves}, inverted: {inverted_leaves}).")
-        return None, None, False, t
+        msg = f"Insufficient samples in a group (direct: {direct_leaves}, inverted: {inverted_leaves})"
+        logging.warning(f"[{gene_name}] Skipping: {msg}.")
+        return None, None, False, t, msg
 
     internal_direct_count = 0
     internal_inverted_count = 0
@@ -617,8 +618,10 @@ def create_paml_tree_files(tree_path, work_dir, gene_name):
                 internal_inverted_count += 1
 
     analysis_is_informative = (internal_direct_count > 0 and internal_inverted_count > 0)
+    reason = None
     if not analysis_is_informative:
         logging.warning(f"[{gene_name}] Topology is uninformative for internal branch analysis.")
+        reason = "No pure internal branches found for both direct and inverted groups."
 
     t_h1 = t.copy()
     for node in t_h1.traverse():
@@ -631,8 +634,10 @@ def create_paml_tree_files(tree_path, work_dir, gene_name):
     h1_newick = t_h1.write(format=1, features=["paml_mark"])
     h1_paml_str = re.sub(r"\[&&NHX:paml_mark=(#\d+)\]", r" \1", h1_newick)
     if (" #1" not in h1_paml_str) and (" #2" not in h1_paml_str):
-        logging.warning(f"[{gene_name}] H1 tree has no labeled branches; treating as uninformative.")
-        return None, None, False, t
+        msg = "H1 tree has no labeled branches"
+        logging.warning(f"[{gene_name}] {msg}; treating as uninformative.")
+        return None, None, False, t, msg
+
     _validate_internal_branch_labels(h1_paml_str, t_h1, ['#1', '#2'])
     h1_tree_path = os.path.join(work_dir, f"{gene_name}_H1.tree")
     with open(h1_tree_path, 'w') as f:
@@ -651,7 +656,7 @@ def create_paml_tree_files(tree_path, work_dir, gene_name):
     with open(h0_tree_path, 'w') as f:
         f.write("1\n" + h0_paml_str + "\n")
 
-    return h1_tree_path, h0_tree_path, analysis_is_informative, t
+    return h1_tree_path, h0_tree_path, analysis_is_informative, t, reason
 
 def _tree_layout(node):
     if node.is_leaf():
@@ -1229,12 +1234,12 @@ def analyze_single_gene(gene_info, region_tree_path, region_label, paml_bin, cac
             final_result.update({'status': 'uninformative_topology', 'reason': 'Fewer than four taxa after pruning'})
             return final_result
 
-        h1_tree, h0_tree, informative, status_tree = create_paml_tree_files(pruned_tree, temp_dir, gene_name)
+        h1_tree, h0_tree, informative, status_tree, reason = create_paml_tree_files(pruned_tree, temp_dir, gene_name)
         if not informative:
             if proceed_on_terminal_only:
                 logging.warning(f"[{gene_name}] No pure internal branches in both clades; proceeding as PROCEED_ON_TERMINAL_ONLY is True (lower power).")
             else:
-                final_result.update({'status': 'uninformative_topology', 'reason': 'No pure internal branches found for both direct and inverted groups.'})
+                final_result.update({'status': 'uninformative_topology', 'reason': reason or 'No pure internal branches found for both direct and inverted groups.'})
                 return final_result
 
         phy_abs = os.path.abspath(gene_info['path'])
