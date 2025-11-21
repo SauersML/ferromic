@@ -108,7 +108,7 @@ Breakpoint enrichment (Flat–Ramp–Flat Model):
 
   [Precision-Weighted Meta-Analysis]
     Weighted Median Delta: Single=0.176, Recurrent=-0.028, Diff=0.205.
-    Median P-value (Two-sided): 1.7500e-06.
+    Median P-value (Two-sided): 1.3500e-06.
     Weighted Mean Delta:   Single=0.067, Recurrent=-0.024, Diff=0.091.
     Mean P-value (Two-sided):   0.0113.
 
