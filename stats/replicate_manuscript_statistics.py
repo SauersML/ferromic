@@ -345,6 +345,20 @@ def run_fresh_cds_pipeline():
                 print(f"FATAL: Jackknife analysis failed: {e}")
                 sys.exit(1)
 
+            print("... Copying generated TSV files to data/ ...")
+            for filename in [
+                "cds_identical_proportions.tsv",
+                "gene_inversion_direct_inverted.tsv",
+                "region_identical_proportions.tsv",
+                "skipped_details.tsv",
+            ]:
+                src = Path(filename)
+                if src.exists():
+                    shutil.copy2(src, DATA_DIR / filename)
+                    print(f"  Copied {filename} to data/")
+                else:
+                    print(f"  WARNING: {filename} not found, skipping copy.")
+
             print("\n>>> PIPELINE: GENERATION COMPLETE. Proceeding to manuscript report...\n")
 
         except Exception as e:
@@ -1788,6 +1802,8 @@ def main() -> None:
     print(text)
     REPORT_PATH.write_text(text)
     print(f"\nSaved report to {REPORT_PATH.relative_to(Path.cwd())}")
+    shutil.copy2(REPORT_PATH, DATA_DIR / "replicate_manuscript_statistics.txt")
+    print(f"Copied report to {DATA_DIR / 'replicate_manuscript_statistics.txt'}")
 
 
 if __name__ == "__main__":
