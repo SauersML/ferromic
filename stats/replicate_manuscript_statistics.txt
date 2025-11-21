@@ -26,13 +26,13 @@ Nucleotide diversity (π) by orientation and recurrence:
 PI STRUCTURE
 Nucleotide diversity structure (Edge vs Middle and Internal Decay), filtered by consensus inversion status:
   Qualifying regions (≥40kbp): 44 unique inversions.
-  [Edge vs Middle] Direct/Group 0 (n=44, haplotypes=2747): Flank Mean = 4.685e-04, Middle Mean = 5.303e-04.
-  [Edge vs Middle] Inverted/Group 1 (n=32, haplotypes=583): Flank Mean = 2.491e-04, Middle Mean = 3.042e-04.
-  [Edge vs Middle] Overall (n=76, haplotypes=3330): Flank Mean = 3.761e-04, Middle Mean = 4.356e-04.
-    - Single-event Inverted (Group 1, Recurrence 0): n=10, haplotypes=85, Flank Mean = 8.202e-05, Middle Mean = 1.462e-04.
-    - Recurrent Direct (Group 0, Recurrence 1): n=22, haplotypes=1062, Flank Mean = 3.263e-04, Middle Mean = 4.120e-04.
-    - Single-event Direct (Group 0, Recurrence 0): n=22, haplotypes=1685, Flank Mean = 6.108e-04, Middle Mean = 6.433e-04.
-    - Recurrent Inverted (Group 1, Recurrence 1): n=22, haplotypes=498, Flank Mean = 3.250e-04, Middle Mean = 3.795e-04.
+  [Edge vs Middle] Direct/Group 0: n=44 regions. Haplotypes (N): Total=2747, Mean=62.4 [Min 16, Max 81]. Flank Mean = 4.685e-04, Middle Mean = 5.303e-04.
+  [Edge vs Middle] Inverted/Group 1: n=32 regions. Haplotypes (N): Total=583, Mean=18.2 [Min 2, Max 58]. Flank Mean = 2.491e-04, Middle Mean = 3.042e-04.
+  [Edge vs Middle] Overall: n=76 regions. Haplotypes (N): Total=3330, Mean=43.8 [Min 2, Max 81]. Flank Mean = 3.761e-04, Middle Mean = 4.356e-04.
+    - Single-event Inverted (Group 1, Recurrence 0): n=10 regions. Haplotypes (N): Total=85, Mean=8.5 [Min 2, Max 52]. Flank Mean = 8.202e-05, Middle Mean = 1.462e-04.
+    - Recurrent Direct (Group 0, Recurrence 1): n=22 regions. Haplotypes (N): Total=1062, Mean=48.3 [Min 16, Max 77]. Flank Mean = 3.263e-04, Middle Mean = 4.120e-04.
+    - Single-event Direct (Group 0, Recurrence 0): n=22 regions. Haplotypes (N): Total=1685, Mean=76.6 [Min 30, Max 81]. Flank Mean = 6.108e-04, Middle Mean = 6.433e-04.
+    - Recurrent Inverted (Group 1, Recurrence 1): n=22 regions. Haplotypes (N): Total=498, Mean=22.6 [Min 2, Max 58]. Flank Mean = 3.250e-04, Middle Mean = 3.795e-04.
 
 Internal decay (Spearman's ρ of diversity vs distance from start for first 100kb, loci ≥100kb):
   Overall (All Consensus 0+1): ρ = 0.171 (p = 1.009e-14, n = 45).
