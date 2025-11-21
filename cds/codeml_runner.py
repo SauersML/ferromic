@@ -1,6 +1,7 @@
 import os
 import sys
 import logging
+import multiprocessing
 import glob
 import traceback
 import pandas as pd
@@ -254,8 +255,6 @@ def main():
         logging.info(f"Saved {len(results)} results to {out_name}")
     else:
         logging.warning("No results generated for this batch.")
-
-import multiprocessing
 
 if __name__ == "__main__":
     # FIX: Force 'spawn' to prevent deadlocks with ete3/Qt and logging locks
