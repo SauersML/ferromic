@@ -1735,7 +1735,7 @@ fn dense_fst_components_from_biallelic(
             } else {
                 let pi_avg = 0.5 * (p1 + p2);
                 if pi_avg.abs() <= FST_EPSILON {
-                    (Some(0.0), Some(0.0), Some(0.0))
+                    (None, Some(0.0), Some(0.0))
                 } else {
                     (None, None, None)
                 }
@@ -2982,7 +2982,7 @@ fn hudson_site_from_variant(
                 let pi_avg = 0.5 * (p1 + p2);
                 if pi_avg.abs() <= FST_EPSILON {
                     // Both D_xy and average π are effectively zero - monomorphic site
-                    (Some(0.0), Some(0.0), Some(0.0))
+                    (None, Some(0.0), Some(0.0))
                 } else {
                     // D_xy ≈ 0 but π > 0 - undefined FST
                     (None, None, None)
@@ -3140,7 +3140,7 @@ fn dense_hudson_sites_general(
                 } else {
                     let pi_avg = 0.5 * (p1 + p2);
                     if pi_avg.abs() <= FST_EPSILON {
-                        (Some(0.0), Some(0.0), Some(0.0))
+                        (None, Some(0.0), Some(0.0))
                     } else {
                         (None, None, None)
                     }
@@ -3302,11 +3302,7 @@ pub fn aggregate_hudson_from_sites(sites: &[SiteFstHudson]) -> Option<f64> {
     let (num_sum, den_sum) = hudson_component_sums(sites);
     if den_sum > FST_EPSILON {
         Some(num_sum / den_sum)
-    } else if num_sum.abs() <= FST_EPSILON {
-        // Both numerator and denominator sums are effectively zero
-        Some(0.0)
     } else {
-        // Denominator is zero but numerator is not - undefined FST
         None
     }
 }
@@ -3364,10 +3360,6 @@ pub fn compute_hudson_fst_outcome(
             if dxy_val > FST_EPSILON {
                 // Use FST_EPSILON to avoid division by effective zero
                 outcome.fst = Some((dxy_val - pi_xy_avg_val) / dxy_val);
-            } else if dxy_val >= 0.0 && (dxy_val - pi_xy_avg_val).abs() < FST_EPSILON {
-                // Case: Dxy is ~0 and Pi_xy_avg is also ~0 (or Dxy approx equals Pi_xy_avg)
-                // This implies no differentiation and possibly no variation. FST is 0.
-                outcome.fst = Some(0.0);
             } else {
                 // Dxy is effectively zero or negative, but Pi_xy_avg is substantially different,
                 // or Dxy is non-finite.
@@ -3504,8 +3496,6 @@ fn calculate_hudson_fst_for_pair_core<'a>(
 
     let regional_fst = if den_sum > FST_EPSILON {
         Some(num_sum / den_sum)
-    } else if num_sum.abs() <= FST_EPSILON {
-        Some(0.0)
     } else {
         None
     };
