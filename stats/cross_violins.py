@@ -17,7 +17,7 @@ logger = logging.getLogger('inversion_omega_analysis')
 
 # --- File Paths & Constants ---
 PAIRWISE_FILE = Path('all_pairwise_results.csv')
-INVERSION_FILE = Path('inv_info.tsv')
+INVERSION_FILE = Path('inv_properties.tsv')
 OUTPUT_PLOT_PATH = Path('inversion_omega_analysis_plot_median_only.png')
 
 # --- Plotting Style ---
@@ -54,7 +54,7 @@ def load_and_prepare_data():
         logger.error(f"Input file not found. Ensure '{PAIRWISE_FILE}' and '{INVERSION_FILE}' exist.")
         return None
 
-    inversion_df.rename(columns={'0_single_1_recur': 'InversionClass'}, inplace=True)
+    inversion_df.rename(columns={'0_single_1_recur_consensus': 'InversionClass'}, inplace=True)
     inversion_df['Chromosome'] = inversion_df['Chromosome'].astype(str).str.lower()
     for col in ['Start', 'End', 'InversionClass']:
         inversion_df[col] = pd.to_numeric(inversion_df[col], errors='coerce')

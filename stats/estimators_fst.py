@@ -11,7 +11,7 @@ import seaborn as sns
 
 # Input Files
 SUMMARY_STATS_FILE = 'output.csv'
-INVERSION_FILE = 'inv_info.tsv'
+INVERSION_FILE = 'inv_properties.tsv'
 
 # Output Files
 FST_SCATTER_PLOT_FILENAME = 'fst_wc_vs_hudson_colored_by_inversion_type.png'
@@ -27,8 +27,8 @@ HAP_BETWEEN_POP_VARIANCE_WC_COL = 'haplotype_between_pop_variance_wc'
 HUDSON_DXY_COL = 'hudson_dxy_hap_group_0v1'
 
 SUMMARY_STATS_COORDINATE_COLUMNS = {'chr': 'chr', 'start': 'region_start', 'end': 'region_end'}
-INVERSION_FILE_COLUMNS = ['Chromosome', 'Start', 'End', '0_single_1_recur']
-INV_CATEGORY_COL_ORIGINAL = '0_single_1_recur'
+INVERSION_FILE_COLUMNS = ['Chromosome', 'Start', 'End', '0_single_1_recur_consensus']
+INV_CATEGORY_COL_ORIGINAL = '0_single_1_recur_consensus'
 INVERSION_TYPE_COL = 'inversion_type'
 
 INVERSION_CATEGORY_MAPPING = {

@@ -6,7 +6,7 @@ from scipy import stats
 import pingouin as pg
 
 FNAME = "output.csv"
-INVINFO = "inv_info.tsv"
+INVINFO = "inv_properties.tsv"
 ALTERNATIVE = "two-sided"  # fixed
 
 # ----------------------------- Utilities -----------------------------
@@ -136,7 +136,7 @@ if not dup_keys.empty:
     )
     if not probe.empty:
         examples = probe[["chr_key", "Start", "End"]].drop_duplicates().head(5).to_dict(orient="records")
-        print("ERROR: Multiple rows in inv_info.tsv share the same (chr,Start,End) that match CSV regions. Examples:", examples)
+        print("ERROR: Multiple rows in inv_properties.tsv share the same (chr,Start,End) that match CSV regions. Examples:", examples)
         sys.exit(1)
 
 # ----------------------------- Intersect by exact coordinates -----------------------------
@@ -214,7 +214,7 @@ dz = float(pg.compute_effsize(x, y, paired=True, eftype="cohen"))
 
 sep = "=" * 72
 print(sep)
-print("Paired tests on filtered π (inverted − direct) — RESTRICTED to inv_info.tsv consensus ∈ {0,1}")
+print("Paired tests on filtered π (inverted − direct) — RESTRICTED to inv_properties.tsv consensus ∈ {0,1}")
 print(sep)
 print(f"file_stats_csv: {FNAME}")
 print(f"file_invinfo_tsv: {INVINFO}")

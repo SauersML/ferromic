@@ -20,7 +20,7 @@ from scipy.stats import (
 # ------------------------- FILE PATHS -------------------------
 
 OUTPUT_CSV  = "./output.csv"
-INVINFO_TSV = "./inv_info.tsv"
+INVINFO_TSV = "./inv_properties.tsv"
 
 # ------------------------- OUTPUT ARTIFACTS -------------------
 
@@ -173,7 +173,7 @@ def load_and_match(output_csv: str, invinfo_tsv: str) -> pd.DataFrame:
       - output.csv must contain: 'chr','region_start','region_end',
                                  '0_pi_filtered','1_pi_filtered',
                                  'hudson_fst_hap_group_0v1'
-      - inv_info.tsv must contain: 'Chromosome','Start','End','0_single_1_recur_consensus',
+      - inv_properties.tsv must contain: 'Chromosome','Start','End','0_single_1_recur_consensus',
                                    'Number_recurrent_events','Formation_rate_per_generation_.95..C.I..'
       - Build ±1 bp candidate (Start,End) and select a UNIQUE inv row per region at minimal priority.
       - DROP rows with non-finite π in either arm (remove NaN and ±Inf).
@@ -200,7 +200,7 @@ def load_and_match(output_csv: str, invinfo_tsv: str) -> pd.DataFrame:
 
     # Check duplicates in inv keys
     dup_keys = inv.duplicated(subset=["chr_std", "Start", "End"], keep=False)
-    assert not dup_keys.any(), "inv_info.tsv contains duplicate (chr,Start,End) keys."
+    assert not dup_keys.any(), "inv_properties.tsv contains duplicate (chr,Start,End) keys."
 
     # Compact df
     df_small = df[["chr_std", "region_start", "region_end",
