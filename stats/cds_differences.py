@@ -210,6 +210,7 @@ def read_nonstandard_phylip(path: str, n: int, m: int) -> List[Tuple[str,str]]:
         name = mobj.group("name")
         seq = mobj.group("seq").upper()
         if len(seq) != m:
+            _debug_dump_sequences([name], [seq], expected_len=m)
             raise PhylipParseError(f"Sequence length mismatch: expected {m}, got {len(seq)} for {name}")
         out.append((name, seq))
     if len(out) != n:
@@ -270,6 +271,7 @@ def read_standard_phylip(path: str, n: int, m: int) -> List[Tuple[str,str]]:
             seqs[i] += seq_chunk
     for i in range(n):
         if len(seqs[i]) != m:
+            _debug_dump_sequences(names, seqs, expected_len=m)
             raise PhylipParseError(f"Length mismatch for '{names[i]}': expected {m}, got {len(seqs[i])}")
     return list(zip(names, seqs))
 
@@ -841,3 +843,24 @@ def main():
 
 if __name__ == "__main__":
     main()
+# ===========================
+# Debug helpers
+# ===========================
+def _debug_dump_sequences(names: List[str], seqs: List[str], expected_len: int, head: int = 100, max_entries: int = 5) -> None:
+    """
+    Emit short diagnostics for a set of sequences to stderr.  Intended for
+    debugging parse failures; errors while printing are swallowed to avoid
+    masking the original exception.
+    """
+    try:
+        print("[DEBUG] PHYLIP sequence snapshot (showing up to {}/{} entries)".format(min(len(seqs), max_entries), len(seqs)), file=sys.stderr)
+        for idx, (name, seq) in enumerate(zip(names, seqs)):
+            if idx >= max_entries:
+                break
+            print(
+                f"  [{idx}] name='{name}' len={len(seq)} expected={expected_len} head='{seq[:head]}'",
+                file=sys.stderr,
+            )
+    except Exception:
+        pass
+
