@@ -80,12 +80,12 @@ def load_data() -> pd.DataFrame:
     df["inv_id"] = df.apply(format_inv_id, axis=1)
 
     # exact-only
-    df = df[df["inv_exact_match"] == 1].copy()
+    # df = df[df["inv_exact_match"] == 1].copy()
 
     # keep informative
     df = df[(df["n_pairs"] > 0) & (df["n_identical_pairs"].notna()) & (df["n_sequences"] >= 2)]
     if df.empty:
-        sys.exit("No rows after exact-only & n_pairs>0 filter.")
+        sys.exit("No rows after n_pairs>0 filter.")
 
     # Ensure fair orientation comparisons: keep a CDS only when both orientations are present
     orient_counts = (
