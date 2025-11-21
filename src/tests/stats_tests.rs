@@ -596,7 +596,7 @@ mod tests {
             &empty_filtered_positions,
             None,
             temp_dir.path(),
-            None,
+            None, None, None,
         );
         assert!(invalid_group.unwrap_or(None).is_none(), "Expected None for invalid haplotype group");
     }
@@ -1023,7 +1023,7 @@ mod tests {
             &empty_filtered_positions,
             None,
             temp_dir.path(),
-            None,
+            None, None, None,
         ).unwrap();
     
         // Calculate allele frequency globally
@@ -1080,7 +1080,7 @@ mod tests {
             &empty_filtered_positions,
             None,
             temp_dir.path(),
-            None,
+            None, None, None,
         ).unwrap();
     
         let (_segsites, _w_theta, _pi, n_hap, _site_diversity) = match _result_group1 {
@@ -1146,7 +1146,7 @@ mod tests {
             &empty_filtered_positions,
             None,
             temp_dir.path(),
-            None,
+            None, None, None,
         ).unwrap();
 
         // Correctly unwrap the Option to access the inner tuple
@@ -1213,7 +1213,7 @@ mod tests {
            &empty_filtered_positions,
             None,
            temp_dir.path(),
-           None,
+           None, None, None,
        ).unwrap();
     
        let (segsites, w_theta, _pi, n_hap, _site_diversity) = match result {
@@ -1265,7 +1265,7 @@ mod tests {
             &empty_filtered_positions,
             None,
             temp_dir.path(),
-            None,
+            None, None, None,
         ).unwrap();
     
         // Correctly unwrap the Option to access the inner tuple
@@ -1325,7 +1325,7 @@ mod tests {
             &empty_filtered_positions,
             None,
             temp_dir.path(),
-            None,
+            None, None, None,
         ).unwrap();
 
         // Calculate global allele frequency
@@ -1384,7 +1384,7 @@ mod tests {
             &empty_filtered_positions,
             None,
             temp_dir.path(),
-            None,
+            None, None, None,
         ).unwrap();
     
         let (_segsites, _w_theta, _pi, n_hap, _site_diversity) = match _result_group1 {
@@ -1441,7 +1441,7 @@ mod tests {
             &empty_filtered_positions,
             None,
             temp_dir.path(),
-            None,
+            None, None, None,
         ).unwrap();
     
         // Correctly unwrap the Option to access the inner tuple
@@ -1498,7 +1498,7 @@ mod tests {
             &empty_filtered_positions,
             None,
             temp_dir.path(),
-            None,
+            None, None, None,
         ).unwrap();
     
         // Correctly unwrap the Option to access the inner tuple
@@ -1611,7 +1611,7 @@ mod tests {
             &empty_filtered_positions,
             None,
             temp_dir.path(),
-            None,
+            None, None, None,
         ).expect("Failed to process variants");
     
         // Calculate global allele frequency using the revised function (no haplotype_group parameter)
