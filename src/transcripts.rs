@@ -1331,9 +1331,8 @@ pub fn write_phylip_file(
 
     for sample_name in sorted_sample_names {
         let seq_chars = &hap_sequences[sample_name];
-        let padded_name = format!("{:<10}", sample_name);
         let sequence: String = seq_chars.iter().collect();
-        writeln!(writer, "{}{}", padded_name, sequence).map_err(|e| {
+        writeln!(writer, "{}  {}", sample_name, sequence).map_err(|e| {
             VcfError::Io(io::Error::new(
                 io::ErrorKind::Other,
                 format!(
