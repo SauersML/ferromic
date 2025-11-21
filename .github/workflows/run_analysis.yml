@@ -29,39 +29,9 @@ jobs:
           base='https://sharedspace.s3.msi.umn.edu'
 
           mapfile -t URLS <<'EOF'
-          https://sharedspace.s3.msi.umn.edu/public_internet/variants_freeze4inv_sv_inv_hg38_processed_arbigent_filtered_manualDotplot_filtered_PAVgenAdded_withInvCategs_syncWithWH.fixedPH.simpleINV.mod.tsv
-          https://sharedspace.s3.msi.umn.edu/public_internet/pairwise_glm_contrasts_fdr.tsv
-          https://sharedspace.s3.msi.umn.edu/public_internet/pairwise_results_fdr.tsv
           https://sharedspace.s3.msi.umn.edu/public_internet/paml_results.checkpoint.tsv
-          https://sharedspace.s3.msi.umn.edu/public_internet/perm_identical_pairs.tsv
-          https://sharedspace.s3.msi.umn.edu/public_internet/perm_pairwise_identity.tsv
-          https://sharedspace.s3.msi.umn.edu/public_internet/phy_metadata.tsv
-          https://sharedspace.s3.msi.umn.edu/public_internet/region_identical_proportions.tsv
-          https://sharedspace.s3.msi.umn.edu/public_internet/category_means_at_mean_covariates.tsv
-          https://sharedspace.s3.msi.umn.edu/public_internet/category_summary.tsv
-          https://sharedspace.s3.msi.umn.edu/public_internet/cds_emm.tsv
-          https://sharedspace.s3.msi.umn.edu/public_internet/cds_emm_adjusted.tsv
-          https://sharedspace.s3.msi.umn.edu/public_internet/cds_emm_nocov.tsv
-          https://sharedspace.s3.msi.umn.edu/public_internet/cds_identical_proportions.tsv
-          https://sharedspace.s3.msi.umn.edu/public_internet/cds_pairwise.tsv
-          https://sharedspace.s3.msi.umn.edu/public_internet/cds_pairwise_adjusted.tsv
-          https://sharedspace.s3.msi.umn.edu/public_internet/cds_pairwise_nocov.tsv
-          https://sharedspace.s3.msi.umn.edu/public_internet/fixed_diff_summary.tsv
-          https://sharedspace.s3.msi.umn.edu/public_internet/gene_direct_inverted.tsv
-          https://sharedspace.s3.msi.umn.edu/public_internet/gene_inversion_direct_inverted.tsv
-          https://sharedspace.s3.msi.umn.edu/public_internet/gene_inversion_fixed_differences.tsv
-          https://sharedspace.s3.msi.umn.edu/public_internet/gene_inversion_permutation.tsv
-          https://sharedspace.s3.msi.umn.edu/public_internet/glm_category_coefs.tsv
-          https://sharedspace.s3.msi.umn.edu/public_internet/inv_info.tsv
           https://sharedspace.s3.msi.umn.edu/public_internet/inversion_fst_estimates.tsv
-          https://sharedspace.s3.msi.umn.edu/public_internet/inversion_level_counts.tsv
-          https://sharedspace.s3.msi.umn.edu/public_internet/inversion_level_medians.tsv
-          https://sharedspace.s3.msi.umn.edu/public_internet/kruskal_result.tsv
-          https://sharedspace.s3.msi.umn.edu/public_internet/fst_tests_summary.csv
-          https://sharedspace.s3.msi.umn.edu/public_internet/inversion_statistical_results.csv
           https://sharedspace.s3.msi.umn.edu/public_internet/inv_info.csv
-          https://sharedspace.s3.msi.umn.edu/public_internet/phewas_results.tsv
-          https://sharedspace.s3.msi.umn.edu/public_internet/all_pairwise_results.csv
           EOF
 
           mkdir -p analysis_downloads
