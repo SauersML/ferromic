@@ -21,6 +21,9 @@ PAIRS_PREFIX = "pairs_CDS__"   # actual filename: f"{PAIRS_PREFIX}{summary_filen
 # jackknife estimates require at least three haplotypes.
 MIN_HAPLOTYPES_PER_GROUP = 3
 
+# Where duplicate transcript resolutions are recorded before jackknife.
+DUPLICATE_LOG = "cds_duplicate_resolutions.tsv"
+
 def cat_label(cons: int, grp: int) -> str:
     return f"{'Recurrent' if cons==1 else 'Single'}/{ 'Inverted' if grp==1 else 'Direct'}"
 
@@ -120,6 +123,83 @@ def compute_alignment_stats(pairs_path: str) -> Tuple[float, float, int, int, Se
         raise ValueError(f"SE is not finite for {pairs_path}")
 
     return p_full, se, k, n_sites, H, y, n, dict(ident_counts)
+
+
+def deduplicate_alignments(aln: pd.DataFrame, log_path: str) -> pd.DataFrame:
+    """Collapse duplicate gene×inversion×group alignments before jackknife."""
+
+    columns = [
+        "gene_name",
+        "inv_id",
+        "phy_group",
+        "transcript_id",
+        "filename",
+        "k",
+        "n_sites",
+        "y",
+        "n",
+        "p",
+        "se",
+        "decision",
+        "decision_basis",
+    ]
+
+    if aln.empty:
+        pd.DataFrame(columns=columns).to_csv(log_path, sep="\t", index=False)
+        return aln
+
+    keep_indices = set()
+    log_rows = []
+    dup_keys = 0
+
+    for key, sub in aln.groupby(["gene_name", "inv_id", "phy_group"]):
+        if len(sub) == 1:
+            keep_indices.update(sub.index)
+            continue
+
+        dup_keys += 1
+        prioritized = sub.sort_values(
+            by=["k", "n_sites", "y", "p", "transcript_id"],
+            ascending=[False, False, False, False, True],
+        )
+        keep_idx = int(prioritized.index[0])
+
+        for idx, row in prioritized.iterrows():
+            log_rows.append(
+                {
+                    "gene_name": row["gene_name"],
+                    "inv_id": row["inv_id"],
+                    "phy_group": int(row["phy_group"]),
+                    "transcript_id": row["transcript_id"],
+                    "filename": row["filename"],
+                    "k": int(row["k"]),
+                    "n_sites": int(row["n_sites"]),
+                    "y": int(row["y"]),
+                    "n": int(row["n"]),
+                    "p": float(row["p"]),
+                    "se": float(row["se"]),
+                    "decision": "kept" if idx == keep_idx else "dropped",
+                    "decision_basis": "k_desc,n_sites_desc,y_desc,p_desc,transcript_id_asc",
+                }
+            )
+
+        keep_indices.add(keep_idx)
+
+    dedup_log = pd.DataFrame(log_rows, columns=columns)
+    dedup_log.to_csv(log_path, sep="\t", index=False)
+
+    kept = aln.loc[sorted(keep_indices)].reset_index(drop=True)
+
+    if dup_keys > 0:
+        dropped = (dedup_log["decision"] == "dropped").sum()
+        print(
+            f"    Resolved {dup_keys} duplicate gene×inversion×group keys; "
+            f"dropped {dropped} transcripts (details in {log_path})."
+        )
+    else:
+        print("    No duplicate gene×inversion×group alignments detected.")
+
+    return kept
 
 # Recompute alignment p when dropping haplotype h
 def alignment_p_minus_h(k: int, y: int, p: float, ident_counts: Dict[str,int], h: str) -> float:
@@ -244,6 +324,12 @@ def main():
         return
 
     aln = pd.DataFrame(alignment_rows)
+
+    # -------------------------
+    # Resolve transcript duplicates within each gene×inversion×group key
+    # -------------------------
+    print("\n>>> Resolving duplicate gene×inversion×group alignments ...")
+    aln = deduplicate_alignments(aln, DUPLICATE_LOG)
 
     # -------------------------
     # Per-inversion REGION medians and median-of-medians (diagnostic)
