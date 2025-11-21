@@ -427,22 +427,36 @@ class SpearmanResult:
 
 
 @dataclass
+class EdgeMiddleStats:
+    flank_mean: float | None
+    middle_mean: float | None
+    entries: int
+    haplotypes: int
+
+
+@dataclass
 class PiStructureMetrics:
     # Edge vs Middle Metrics (≥40kb)
     # Direct (Group 0)
     dir_flank_mean: float | None
     dir_middle_mean: float | None
     dir_entries: int
+    dir_haplotypes: int
 
     # Inverted (Group 1)
     inv_flank_mean: float | None
     inv_middle_mean: float | None
     inv_entries: int
+    inv_haplotypes: int
 
     # Overall (Group 0 + 1)
     all_flank_mean: float | None
     all_middle_mean: float | None
     all_entries: int
+    all_haplotypes: int
+
+    # Edge/Middle subgroup breakdown (group, recurrence)
+    subgroup_edge_middle: dict[tuple[int, int], EdgeMiddleStats]
 
     # Spearman Decay Metrics (≥100kb, first 100kb)
     spearman_overall: SpearmanResult
@@ -459,8 +473,9 @@ class _MetricAccumulator:
     def __init__(self):
         self.flank_means: list[float] = []
         self.middle_means: list[float] = []
+        self.haplotype_counts: list[int] = []
 
-    def add_edge_middle(self, values: np.ndarray) -> None:
+    def add_edge_middle(self, values: np.ndarray, hap_count: int | None = None) -> None:
         # Expects values length >= 40,000 checked by caller
         flanks = np.r_[values[:10_000], values[-10_000:]]
         flank_mean = float(np.nanmean(flanks))
@@ -473,6 +488,9 @@ class _MetricAccumulator:
             middle_mean = float(np.nanmean(middle_slice))
             if np.isfinite(middle_mean):
                 self.middle_means.append(middle_mean)
+
+        if hap_count is not None:
+            self.haplotype_counts.append(int(hap_count))
 
 
 def _calc_spearman(window_data: list[np.ndarray]) -> SpearmanResult:
@@ -512,7 +530,7 @@ def _calc_pi_structure_metrics() -> PiStructureMetrics:
             "Missing per-site diversity FALSTA: per_site_diversity_output.falsta(.gz)"
         )
 
-    # Load inversion whitelist and recurrence mapping
+    # Load inversion whitelist, recurrence mapping, and haplotype counts
     try:
         inv_df = _load_inv_properties()
         # Map (chrom, start, end) -> recurrence_flag
@@ -520,12 +538,37 @@ def _calc_pi_structure_metrics() -> PiStructureMetrics:
             (str(row.chromosome), int(row.start), int(row.end)): int(row.recurrence_flag)
             for row in inv_df.itertuples(index=False)
         }
+
+        pi_df = _load_pi_summary(drop_na_pi=False)
+        pi_df["chr"] = pi_df["chr"].astype(str).str.replace("^chr", "", regex=True)
+        hap_map: dict[tuple[str, int, int], tuple[int | None, int | None]] = {}
+        for _, row in pi_df.iterrows():
+            region = (str(row["chr"]), int(row["region_start"]), int(row["region_end"]))
+
+            def _safe_int(val):
+                try:
+                    return int(val) if pd.notna(val) else None
+                except Exception:
+                    return None
+
+            hap_map[region] = (
+                _safe_int(row.get("0_num_hap_filter")),
+                _safe_int(row.get("1_num_hap_filter")),
+            )
     except Exception:
         raise
 
     # Edge/Middle Accumulators (Group 0, Group 1)
     acc_em_0 = _MetricAccumulator()
     acc_em_1 = _MetricAccumulator()
+
+    # Edge/Middle Accumulators by subgroup (group, recurrence)
+    acc_em_subgroup: dict[tuple[int, int], _MetricAccumulator] = {
+        (0, 0): _MetricAccumulator(),
+        (0, 1): _MetricAccumulator(),
+        (1, 0): _MetricAccumulator(),
+        (1, 1): _MetricAccumulator(),
+    }
 
     # Spearman Accumulators (Group, Recurrence) -> list of window arrays
     # Keys: (0, 0), (0, 1), (1, 0), (1, 1)
@@ -592,10 +635,16 @@ def _calc_pi_structure_metrics() -> PiStructureMetrics:
         # --- Logic for Edge/Middle (Threshold 40kb) ---
         if finite_bases >= 40_000 and values.size >= 40_000:
             qualifying_regions.add(region)
+            hap_counts = hap_map.get(region, (None, None)) if "hap_map" in locals() else (None, None)
+            hap_count = hap_counts[group_id] if hap_counts else None
             if group_id == 0:
-                acc_em_0.add_edge_middle(values)
+                acc_em_0.add_edge_middle(values, hap_count=hap_count)
             else:
-                acc_em_1.add_edge_middle(values)
+                acc_em_1.add_edge_middle(values, hap_count=hap_count)
+
+            subgroup_acc = acc_em_subgroup.get((group_id, recur_flag))
+            if subgroup_acc is not None:
+                subgroup_acc.add_edge_middle(values, hap_count=hap_count)
 
         # --- Logic for Spearman (Threshold 100kb) ---
         # "first 100 kbp ... total length greater than 100 kbp"
@@ -634,16 +683,28 @@ def _calc_pi_structure_metrics() -> PiStructureMetrics:
         fm = float(np.mean(acc.flank_means)) if acc.flank_means else None
         mm = float(np.mean(acc.middle_means)) if acc.middle_means else None
         n = len(acc.flank_means)
-        return fm, mm, n
+        hap_total = int(np.sum(acc.haplotype_counts)) if acc.haplotype_counts else 0
+        return fm, mm, n, hap_total
 
-    d_fm, d_mm, d_n = _em_stats(acc_em_0)
-    i_fm, i_mm, i_n = _em_stats(acc_em_1)
+    d_fm, d_mm, d_n, d_h = _em_stats(acc_em_0)
+    i_fm, i_mm, i_n, i_h = _em_stats(acc_em_1)
 
     # Overall Edge/Middle
     acc_em_all = _MetricAccumulator()
     acc_em_all.flank_means = acc_em_0.flank_means + acc_em_1.flank_means
     acc_em_all.middle_means = acc_em_0.middle_means + acc_em_1.middle_means
-    a_fm, a_mm, a_n = _em_stats(acc_em_all)
+    acc_em_all.haplotype_counts = acc_em_0.haplotype_counts + acc_em_1.haplotype_counts
+    a_fm, a_mm, a_n, a_h = _em_stats(acc_em_all)
+
+    subgroup_stats: dict[tuple[int, int], EdgeMiddleStats] = {}
+    for key, acc in acc_em_subgroup.items():
+        s_fm, s_mm, s_n, s_h = _em_stats(acc)
+        subgroup_stats[key] = EdgeMiddleStats(
+            flank_mean=s_fm,
+            middle_mean=s_mm,
+            entries=s_n,
+            haplotypes=s_h,
+        )
 
     # --- Compile Spearman Metrics ---
     # 1. Overall (All 4 subgroups)
@@ -669,14 +730,19 @@ def _calc_pi_structure_metrics() -> PiStructureMetrics:
         dir_flank_mean=d_fm,
         dir_middle_mean=d_mm,
         dir_entries=d_n,
+        dir_haplotypes=d_h,
 
         inv_flank_mean=i_fm,
         inv_middle_mean=i_mm,
         inv_entries=i_n,
+        inv_haplotypes=i_h,
 
         all_flank_mean=a_fm,
         all_middle_mean=a_mm,
         all_entries=a_n,
+        all_haplotypes=a_h,
+
+        subgroup_edge_middle=subgroup_stats,
 
         spearman_overall=res_overall,
         spearman_single_inv=res_single_inv,
@@ -927,21 +993,36 @@ def summarize_pi_structure() -> List[str]:
 
     # Direct
     lines.append(
-        f"  [Edge vs Middle] Direct/Group 0 (n={metrics.dir_entries}): "
+        f"  [Edge vs Middle] Direct/Group 0 (n={metrics.dir_entries}, haplotypes={metrics.dir_haplotypes}): "
         f"Flank Mean = {_fmt(metrics.dir_flank_mean)}, Middle Mean = {_fmt(metrics.dir_middle_mean)}."
     )
 
     # Inverted
     lines.append(
-        f"  [Edge vs Middle] Inverted/Group 1 (n={metrics.inv_entries}): "
+        f"  [Edge vs Middle] Inverted/Group 1 (n={metrics.inv_entries}, haplotypes={metrics.inv_haplotypes}): "
         f"Flank Mean = {_fmt(metrics.inv_flank_mean)}, Middle Mean = {_fmt(metrics.inv_middle_mean)}."
     )
 
     # Overall
     lines.append(
-        f"  [Edge vs Middle] Overall (n={metrics.all_entries}): "
+        f"  [Edge vs Middle] Overall (n={metrics.all_entries}, haplotypes={metrics.all_haplotypes}): "
         f"Flank Mean = {_fmt(metrics.all_flank_mean)}, Middle Mean = {_fmt(metrics.all_middle_mean)}."
     )
+
+    subgroup_labels = {
+        (1, 0): "Single-event Inverted (Group 1, Recurrence 0)",
+        (0, 1): "Recurrent Direct (Group 0, Recurrence 1)",
+        (0, 0): "Single-event Direct (Group 0, Recurrence 0)",
+        (1, 1): "Recurrent Inverted (Group 1, Recurrence 1)",
+    }
+    for key, label in subgroup_labels.items():
+        stats = metrics.subgroup_edge_middle.get(key)
+        if stats is None:
+            continue
+        lines.append(
+            f"    - {label}: n={stats.entries}, haplotypes={stats.haplotypes}, "
+            f"Flank Mean = {_fmt(stats.flank_mean)}, Middle Mean = {_fmt(stats.middle_mean)}."
+        )
 
     # Spearman Decay
     lines.append("")
