@@ -334,7 +334,7 @@ jobs:
         with:
           pattern: region-tree-*
           merge-multiple: true
-          path: .
+          path: region_trees
 
       - name: Run PAML (Batch)
         run: python3 cds/codeml_runner.py
