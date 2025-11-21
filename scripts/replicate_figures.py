@@ -282,6 +282,7 @@ FIGURE_TASKS: Sequence[FigureTask] = (
             Path("length_norm_trend_fast/fst_vs_inversion_edge_proportion_grouped_pooled.pdf"),
             Path("length_norm_trend_fast/fst_vs_inversion_edge_proportion_grouped_median.pdf"),
             Path("length_norm_trend_fast/fst_vs_inversion_edge_bp_cap100kb_grouped_pooled.pdf"),
+            Path("length_norm_trend_fast/fst_vs_inversion_edge_bp_cap40kb_grouped_pooled.pdf"),
             Path("length_norm_trend_fast/fst_vs_inversion_edge_bp_cap100kb_grouped_median.pdf"),
         ),
         dependencies=(
