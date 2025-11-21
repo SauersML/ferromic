@@ -877,7 +877,12 @@ pub fn process_variants(
             ),
         );
         finish_step_progress("No variants to analyze");
-        return Ok(Some((0, 0.0, 0.0, region_hap_count, Vec::new())));
+        let (theta, pi) = if region_hap_count < 2 {
+            (f64::NAN, f64::NAN)
+        } else {
+            (0.0, 0.0)
+        };
+        return Ok(Some((0, theta, pi, region_hap_count, Vec::new())));
     }
 
     let variants_in_region: Vec<Variant> = variants
@@ -4067,9 +4072,23 @@ pub fn process_variant(
         }
     }
 
-    let vcf_chr = fields[0].trim().trim_start_matches("chr");
+    // Normalize chromosome names by removing 'chr', 'Chr', 'CHR' prefixes to ensure robust comparison
+    fn normalize_chr_prefix(c: &str) -> &str {
+        if let Some(stripped) = c.strip_prefix("chr") {
+            stripped
+        } else if let Some(stripped) = c.strip_prefix("Chr") {
+            stripped
+        } else if let Some(stripped) = c.strip_prefix("CHR") {
+            stripped
+        } else {
+            c
+        }
+    }
 
-    if vcf_chr != chr.trim_start_matches("chr") {
+    let vcf_chr = normalize_chr_prefix(fields[0].trim());
+    let target_chr = normalize_chr_prefix(chr.trim());
+
+    if vcf_chr != target_chr {
         return Ok(None);
     }
 
