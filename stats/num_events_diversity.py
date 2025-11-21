@@ -79,6 +79,15 @@ def main():
         'Number_recurrent_events_.95..C.I..': 'NumRecurrentEventsStr'
     })
 
+    # Ensure recurrence code is present
+    if '0_single_1_recur' in inv_info.columns:
+        inv_info = inv_info.rename(columns={'0_single_1_recur': 'RecurrenceCode'})
+    elif '0_single_1_recur_consensus' in inv_info.columns:
+        inv_info['RecurrenceCode'] = inv_info['0_single_1_recur_consensus']
+    elif 'RecurrenceCode' not in inv_info.columns:
+        print("ERROR: Missing recurrence indicator column in inversion info.")
+        exit(1)
+
     # Check for required columns
     required_pi_cols = ['chr', 'region_start', 'region_end', '0_pi_filtered', '1_pi_filtered']
     required_info_cols = ['chr', 'region_start_info', 'region_end_info', 'RecurrenceCode', 'NumRecurrentEventsStr']
