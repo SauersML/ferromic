@@ -178,12 +178,16 @@ def download_latest_artifacts():
         return
 
     # Define mapping: Artifact Name -> (Target Filename in data/, Unzip Logic)
-    # Logic: 'extract_zip' (unzip contents), 'extract_gz' (unzip specific gz), 'rename' (just rename)
+    # Logic options:
+    #   - 'copy_inner_zip': copy nested zip archive as-is
+    #   - 'extract_file': extract specific file unchanged
+    #   - 'extract_renamed': extract and rename
+    #   - 'extract_and_gunzip': extract gzipped file and store decompressed contents
     # Since GHA artifacts are ALWAYS zip files, we download the zip and then process.
     artifact_map = {
         "run-vcf-phy-outputs": {"target": "phy_outputs.zip", "action": "copy_inner_zip"},
         "run-vcf-falsta": {"target": "per_site_diversity_output.falsta.gz", "action": "extract_file"},
-        "run-vcf-hudson-fst": {"target": "FST_data.tsv.gz", "action": "extract_renamed"},
+        "run-vcf-hudson-fst": {"target": "FST_data.tsv", "action": "extract_and_gunzip"},
         # IMPORTANT: Do NOT download run-vcf-metadata to inv_properties.tsv.
         # run-vcf-metadata contains phy_metadata.tsv, which is different from inv_properties.tsv.
         "run-vcf-metadata": {"target": "phy_metadata.tsv", "action": "extract_renamed"},
@@ -238,10 +242,17 @@ def download_latest_artifacts():
 
                     elif spec["action"] == "extract_renamed":
                         # Extract file but rename it (e.g. phy_metadata.tsv -> inv_properties.tsv)
-                        # Also used for FST_data.tsv.gz (from hudson_fst_results.tsv.gz)
                         inner_name = internal_names[name]
                         with z.open(inner_name) as src, open(target_path, "wb") as dst:
                             shutil.copyfileobj(src, dst)
+
+                    elif spec["action"] == "extract_and_gunzip":
+                        # Extract gzipped file, decompress it, and save the decompressed payload
+                        inner_name = internal_names[name]
+                        with z.open(inner_name) as src:
+                            with gzip.open(src) as gz_src:
+                                data = gz_src.read()
+                        target_path.write_bytes(data)
 
             print(f"  Success: {target_path.name} updated.")
 
