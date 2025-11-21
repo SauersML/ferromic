@@ -909,10 +909,14 @@ def run_iqtree_task(region_info, iqtree_bin, threads, output_dir, timeout=7200, 
             reasons.append("missing chimp outgroup")
         if len(taxa) < 6:
             reasons.append(f"insufficient taxa (found {len(taxa)}, need >= 6)")
-        if not any(t.startswith('0') for t in taxa):
-            reasons.append("missing direct orientation samples (starts with '0')")
-        if not any(t.startswith('1') for t in taxa):
-            reasons.append("missing inverted orientation samples (starts with '1')")
+
+        direct_count = sum(1 for t in taxa if t.startswith('0'))
+        inverted_count = sum(1 for t in taxa if t.startswith('1'))
+
+        if direct_count < 3:
+            reasons.append(f"insufficient direct orientation samples (found {direct_count}, need >= 3)")
+        if inverted_count < 3:
+            reasons.append(f"insufficient inverted orientation samples (found {inverted_count}, need >= 3)")
 
         if reasons:
             diag_summary = _summarize_taxa_diagnostics(taxa)
