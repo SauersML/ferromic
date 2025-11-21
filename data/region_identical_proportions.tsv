@@ -1,0 +1,184 @@
+dataset	consensus	consensus_label	phy_group	group_label	filename	chr	start	end	n_sequences	n_pairs	n_identical_pairs	prop_identical_pairs
+REGION	1	Recurrent	0	Direct	inversion_group0_10_start46983451_end47468232.phy	10	46983451	47468232	75	2775	0	0.000000
+REGION	1	Recurrent	0	Direct	inversion_group0_11_start50154999_end50324102.phy	11	50154999	50324102	51	1275	0	0.000000
+REGION	1	Recurrent	0	Direct	inversion_group0_11_start89920623_end89923848.phy	11	89920623	89923848	31	465	98	0.210753
+REGION	1	Recurrent	0	Direct	inversion_group0_15_start30618103_end32153204.phy	15	30618103	32153204	72	2556	0	0.000000
+REGION	1	Recurrent	0	Direct	inversion_group0_15_start84373375_end84416696.phy	15	84373375	84416696	38	703	13	0.018492
+REGION	1	Recurrent	0	Direct	inversion_group0_16_start14954790_end15100859.phy	16	14954790	15100859	16	120	0	0.000000
+REGION	1	Recurrent	0	Direct	inversion_group0_16_start16721273_end18073542.phy	16	16721273	18073542	75	2775	0	0.000000
+REGION	1	Recurrent	0	Direct	inversion_group0_16_start28471892_end28637651.phy	16	28471892	28637651	52	1326	22	0.016591
+REGION	1	Recurrent	0	Direct	inversion_group0_1_start108310642_end108383736.phy	1	108310642	108383736	34	561	561	1.000000
+REGION	1	Recurrent	0	Direct	inversion_group0_1_start13104252_end13122521.phy	1	13104252	13122521	20	190	190	1.000000
+REGION	1	Recurrent	0	Direct	inversion_group0_2_start91832040_end92012663.phy	2	91832040	92012663	48	1128	1128	1.000000
+REGION	1	Recurrent	0	Direct	inversion_group0_2_start95800191_end96024403.phy	2	95800191	96024403	77	2926	2926	1.000000
+REGION	1	Recurrent	0	Direct	inversion_group0_3_start195749463_end195980207.phy	3	195749463	195980207	60	1770	0	0.000000
+REGION	1	Recurrent	0	Direct	inversion_group0_7_start5989046_end6735643.phy	7	5989046	6735643	73	2628	0	0.000000
+REGION	1	Recurrent	0	Direct	inversion_group0_7_start60911891_end61578023.phy	7	60911891	61578023	40	780	0	0.000000
+REGION	1	Recurrent	0	Direct	inversion_group0_7_start62290674_end62363143.phy	7	62290674	62363143	44	946	127	0.134249
+REGION	1	Recurrent	0	Direct	inversion_group0_7_start62408486_end62456444.phy	7	62408486	62456444	33	528	8	0.015152
+REGION	1	Recurrent	0	Direct	inversion_group0_7_start65219157_end65531823.phy	7	65219157	65531823	54	1431	1	0.000699
+REGION	1	Recurrent	0	Direct	inversion_group0_7_start73113989_end74799029.phy	7	73113989	74799029	77	2926	0	0.000000
+REGION	1	Recurrent	0	Direct	inversion_group0_7_start74869950_end75058098.phy	7	74869950	75058098	72	2556	129	0.050469
+REGION	1	Recurrent	0	Direct	inversion_group0_8_start2343351_end2378385.phy	8	2343351	2378385	40	780	19	0.024359
+REGION	1	Recurrent	0	Direct	inversion_group0_8_start7301024_end12598379.phy	8	7301024	12598379	41	820	0	0.000000
+REGION	1	Recurrent	0	Direct	inversion_group0_X_start103989434_end104049428.phy	X	103989434	104049428	22	231	38	0.164502
+REGION	1	Recurrent	0	Direct	inversion_group0_X_start149599490_end149655967.phy	X	149599490	149655967	48	1128	37	0.032801
+REGION	1	Recurrent	0	Direct	inversion_group0_X_start149681035_end149722249.phy	X	149681035	149722249	20	190	7	0.036842
+REGION	1	Recurrent	0	Direct	inversion_group0_X_start152729753_end152738707.phy	X	152729753	152738707	24	276	95	0.344203
+REGION	1	Recurrent	0	Direct	inversion_group0_X_start153149748_end153250226.phy	X	153149748	153250226	23	253	4	0.015810
+REGION	1	Recurrent	0	Direct	inversion_group0_X_start154347246_end154384867.phy	X	154347246	154384867	29	406	99	0.243842
+REGION	1	Recurrent	0	Direct	inversion_group0_X_start154591327_end154613096.phy	X	154591327	154613096	33	528	276	0.522727
+REGION	1	Recurrent	0	Direct	inversion_group0_X_start155386727_end155453982.phy	X	155386727	155453982	43	903	54	0.059801
+REGION	1	Recurrent	0	Direct	inversion_group0_X_start52077120_end52176974.phy	X	52077120	52176974	29	406	3	0.007389
+REGION	1	Recurrent	0	Direct	inversion_group0_X_start72997772_end73077479.phy	X	72997772	73077479	42	861	7	0.008130
+REGION	1	Recurrent	1	Inverted	inversion_group1_10_start46983451_end47468232.phy	10	46983451	47468232	7	21	0	0.000000
+REGION	1	Recurrent	1	Inverted	inversion_group1_11_start50154999_end50324102.phy	11	50154999	50324102	31	465	2	0.004301
+REGION	1	Recurrent	1	Inverted	inversion_group1_11_start89920623_end89923848.phy	11	89920623	89923848	39	741	155	0.209177
+REGION	1	Recurrent	1	Inverted	inversion_group1_15_start30618103_end32153204.phy	15	30618103	32153204	10	45	0	0.000000
+REGION	1	Recurrent	1	Inverted	inversion_group1_15_start84373375_end84416696.phy	15	84373375	84416696	44	946	18	0.019027
+REGION	1	Recurrent	1	Inverted	inversion_group1_16_start14954790_end15100859.phy	16	14954790	15100859	58	1653	3	0.001815
+REGION	1	Recurrent	1	Inverted	inversion_group1_16_start16721273_end18073542.phy	16	16721273	18073542	7	21	0	0.000000
+REGION	1	Recurrent	1	Inverted	inversion_group1_16_start28471892_end28637651.phy	16	28471892	28637651	30	435	2	0.004598
+REGION	1	Recurrent	1	Inverted	inversion_group1_1_start108310642_end108383736.phy	1	108310642	108383736	46	1035	1035	1.000000
+REGION	1	Recurrent	1	Inverted	inversion_group1_1_start13104252_end13122521.phy	1	13104252	13122521	42	861	861	1.000000
+REGION	1	Recurrent	1	Inverted	inversion_group1_2_start91832040_end92012663.phy	2	91832040	92012663	34	561	561	1.000000
+REGION	1	Recurrent	1	Inverted	inversion_group1_2_start95800191_end96024403.phy	2	95800191	96024403	5	10	10	1.000000
+REGION	1	Recurrent	1	Inverted	inversion_group1_3_start195749463_end195980207.phy	3	195749463	195980207	22	231	0	0.000000
+REGION	1	Recurrent	1	Inverted	inversion_group1_7_start5989046_end6735643.phy	7	5989046	6735643	9	36	0	0.000000
+REGION	1	Recurrent	1	Inverted	inversion_group1_7_start60911891_end61578023.phy	7	60911891	61578023	42	861	1	0.001161
+REGION	1	Recurrent	1	Inverted	inversion_group1_7_start62290674_end62363143.phy	7	62290674	62363143	34	561	30	0.053476
+REGION	1	Recurrent	1	Inverted	inversion_group1_7_start62408486_end62456444.phy	7	62408486	62456444	47	1081	8	0.007401
+REGION	1	Recurrent	1	Inverted	inversion_group1_7_start65219157_end65531823.phy	7	65219157	65531823	26	325	0	0.000000
+REGION	1	Recurrent	1	Inverted	inversion_group1_7_start73113989_end74799029.phy	7	73113989	74799029	3	3	0	0.000000
+REGION	1	Recurrent	1	Inverted	inversion_group1_7_start74869950_end75058098.phy	7	74869950	75058098	8	28	1	0.035714
+REGION	1	Recurrent	1	Inverted	inversion_group1_8_start2343351_end2378385.phy	8	2343351	2378385	42	861	23	0.026713
+REGION	1	Recurrent	1	Inverted	inversion_group1_8_start7301024_end12598379.phy	8	7301024	12598379	41	820	0	0.000000
+REGION	1	Recurrent	1	Inverted	inversion_group1_X_start103989434_end104049428.phy	X	103989434	104049428	28	378	15	0.039683
+REGION	1	Recurrent	1	Inverted	inversion_group1_X_start149599490_end149655967.phy	X	149599490	149655967	2	1	0	0.000000
+REGION	1	Recurrent	1	Inverted	inversion_group1_X_start149681035_end149722249.phy	X	149681035	149722249	30	435	21	0.048276
+REGION	1	Recurrent	1	Inverted	inversion_group1_X_start152729753_end152738707.phy	X	152729753	152738707	24	276	57	0.206522
+REGION	1	Recurrent	1	Inverted	inversion_group1_X_start153149748_end153250226.phy	X	153149748	153250226	27	351	12	0.034188
+REGION	1	Recurrent	1	Inverted	inversion_group1_X_start154347246_end154384867.phy	X	154347246	154384867	21	210	4	0.019048
+REGION	1	Recurrent	1	Inverted	inversion_group1_X_start154591327_end154613096.phy	X	154591327	154613096	17	136	13	0.095588
+REGION	1	Recurrent	1	Inverted	inversion_group1_X_start155386727_end155453982.phy	X	155386727	155453982	7	21	0	0.000000
+REGION	1	Recurrent	1	Inverted	inversion_group1_X_start52077120_end52176974.phy	X	52077120	52176974	21	210	8	0.038095
+REGION	1	Recurrent	1	Inverted	inversion_group1_X_start72997772_end73077479.phy	X	72997772	73077479	8	28	0	0.000000
+REGION	0	Single-event	0	Direct	inversion_group0_10_start15742803_end15760427.phy	10	15742803	15760427	81	3240	697	0.215123
+REGION	0	Single-event	0	Direct	inversion_group0_10_start46144703_end46204851.phy	10	46144703	46204851	75	2775	119	0.042883
+REGION	0	Single-event	0	Direct	inversion_group0_10_start55007431_end55013434.phy	10	55007431	55013434	68	2278	471	0.206760
+REGION	0	Single-event	0	Direct	inversion_group0_10_start65465445_end65470067.phy	10	65465445	65470067	75	2775	313	0.112793
+REGION	0	Single-event	0	Direct	inversion_group0_10_start79542901_end80217413.phy	10	79542901	80217413	77	2926	0	0.000000
+REGION	0	Single-event	0	Direct	inversion_group0_11_start18249084_end18265819.phy	11	18249084	18265819	81	3240	52	0.016049
+REGION	0	Single-event	0	Direct	inversion_group0_11_start71571819_end71576724.phy	11	71571819	71576724	79	3081	585	0.189873
+REGION	0	Single-event	0	Direct	inversion_group0_12_start131312081_end131644839.phy	12	131312081	131644839	79	3081	0	0.000000
+REGION	0	Single-event	0	Direct	inversion_group0_12_start46896694_end46915975.phy	12	46896694	46915975	77	2926	247	0.084416
+REGION	0	Single-event	0	Direct	inversion_group0_12_start75713180_end75731794.phy	12	75713180	75731794	81	3240	14	0.004321
+REGION	0	Single-event	0	Direct	inversion_group0_13_start48199250_end48206639.phy	13	48199250	48206639	78	3003	996	0.331668
+REGION	0	Single-event	0	Direct	inversion_group0_13_start52310302_end52320954.phy	13	52310302	52320954	74	2701	935	0.346168
+REGION	0	Single-event	0	Direct	inversion_group0_13_start53902573_end54093373.phy	13	53902573	54093373	81	3240	1	0.000309
+REGION	0	Single-event	0	Direct	inversion_group0_13_start64598737_end64616218.phy	13	64598737	64616218	81	3240	187	0.057716
+REGION	0	Single-event	0	Direct	inversion_group0_14_start60606118_end60611659.phy	14	60606118	60611659	68	2278	823	0.361282
+REGION	0	Single-event	0	Direct	inversion_group0_14_start85872200_end85889269.phy	14	85872200	85889269	81	3240	422	0.130247
+REGION	0	Single-event	0	Direct	inversion_group0_15_start23295576_end23318191.phy	15	23295576	23318191	9	36	36	1.000000
+REGION	0	Single-event	0	Direct	inversion_group0_15_start23345459_end28389868.phy	15	23345459	28389868	81	3240	0	0.000000
+REGION	0	Single-event	0	Direct	inversion_group0_16_start15384482_end16276146.phy	16	15384482	16276146	81	3240	0	0.000000
+REGION	0	Single-event	0	Direct	inversion_group0_16_start35946683_end35952382.phy	16	35946683	35952382	3	3	3	1.000000
+REGION	0	Single-event	0	Direct	inversion_group0_16_start75206214_end75222748.phy	16	75206214	75222748	14	91	28	0.307692
+REGION	0	Single-event	0	Direct	inversion_group0_17_start16823490_end18384190.phy	17	16823490	18384190	78	3003	0	0.000000
+REGION	0	Single-event	0	Direct	inversion_group0_17_start3082008_end3221835.phy	17	3082008	3221835	79	3081	1	0.000325
+REGION	0	Single-event	0	Direct	inversion_group0_17_start45585159_end46292045.phy	17	45585159	46292045	72	2556	0	0.000000
+REGION	0	Single-event	0	Direct	inversion_group0_1_start144376209_end144600799.phy	1	144376209	144600799	29	406	406	1.000000
+REGION	0	Single-event	0	Direct	inversion_group0_1_start149843518_end149850293.phy	1	149843518	149850293	28	378	378	1.000000
+REGION	0	Single-event	0	Direct	inversion_group0_1_start248128773_end248428856.phy	1	248128773	248428856	81	3240	3240	1.000000
+REGION	0	Single-event	0	Direct	inversion_group0_1_start25324280_end25369060.phy	1	25324280	25369060	81	3240	3240	1.000000
+REGION	0	Single-event	0	Direct	inversion_group0_1_start81650508_end81707447.phy	1	81650508	81707447	81	3240	3240	1.000000
+REGION	0	Single-event	0	Direct	inversion_group0_20_start24397726_end24406144.phy	20	24397726	24406144	81	3240	333	0.102778
+REGION	0	Single-event	0	Direct	inversion_group0_20_start29257746_end29419750.phy	20	29257746	29419750	69	2346	5	0.002131
+REGION	0	Single-event	0	Direct	inversion_group0_20_start47841016_end47888238.phy	20	47841016	47888238	81	3240	6	0.001852
+REGION	0	Single-event	0	Direct	inversion_group0_21_start13987773_end14056796.phy	21	13987773	14056796	79	3081	68	0.022071
+REGION	0	Single-event	0	Direct	inversion_group0_21_start19877734_end20070170.phy	21	19877734	20070170	81	3240	1	0.000309
+REGION	0	Single-event	0	Direct	inversion_group0_21_start43821742_end43835116.phy	21	43821742	43835116	81	3240	68	0.020988
+REGION	0	Single-event	0	Direct	inversion_group0_2_start130138212_end131200602.phy	2	130138212	131200602	80	3160	3160	1.000000
+REGION	0	Single-event	0	Direct	inversion_group0_2_start130138212_end131530534.phy	2	130138212	131530534	80	3160	3160	1.000000
+REGION	0	Single-event	0	Direct	inversion_group0_2_start45065588_end45081777.phy	2	45065588	45081777	79	3081	3081	1.000000
+REGION	0	Single-event	0	Direct	inversion_group0_2_start87987171_end111255403.phy	2	87987171	111255403	81	3240	3240	1.000000
+REGION	0	Single-event	0	Direct	inversion_group0_2_start87995841_end88180536.phy	2	87995841	88180536	81	3240	3240	1.000000
+REGION	0	Single-event	0	Direct	inversion_group0_3_start75454477_end75455715.phy	3	75454477	75455715	13	78	25	0.320513
+REGION	0	Single-event	0	Direct	inversion_group0_4_start33098066_end33104924.phy	4	33098066	33104924	79	3081	1074	0.348588
+REGION	0	Single-event	0	Direct	inversion_group0_5_start112179911_end112236600.phy	5	112179911	112236600	81	3240	19	0.005864
+REGION	0	Single-event	0	Direct	inversion_group0_5_start124425560_end124546657.phy	5	124425560	124546657	81	3240	1	0.000309
+REGION	0	Single-event	0	Direct	inversion_group0_5_start177946129_end178003952.phy	5	177946129	178003952	81	3240	2	0.000617
+REGION	0	Single-event	0	Direct	inversion_group0_5_start179643529_end179651253.phy	5	179643529	179651253				NA
+REGION	0	Single-event	0	Direct	inversion_group0_5_start71009586_end71093997.phy	5	71009586	71093997	6	15	2	0.133333
+REGION	0	Single-event	0	Direct	inversion_group0_6_start123106049_end123109821.phy	6	123106049	123109821	75	2775	978	0.352432
+REGION	0	Single-event	0	Direct	inversion_group0_6_start141866310_end141898728.phy	6	141866310	141898728	78	3003	141	0.046953
+REGION	0	Single-event	0	Direct	inversion_group0_6_start167209001_end167357782.phy	6	167209001	167357782	80	3160	1	0.000316
+REGION	0	Single-event	0	Direct	inversion_group0_6_start76109081_end76158474.phy	6	76109081	76158474	79	3081	96	0.031159
+REGION	0	Single-event	0	Direct	inversion_group0_7_start33990735_end34010143.phy	7	33990735	34010143	81	3240	158	0.048765
+REGION	0	Single-event	0	Direct	inversion_group0_7_start54234014_end54308393.phy	7	54234014	54308393	30	435	2	0.004598
+REGION	0	Single-event	0	Direct	inversion_group0_7_start57835188_end58119653.phy	7	57835188	58119653	81	3240	17	0.005247
+REGION	0	Single-event	0	Direct	inversion_group0_7_start70961198_end70973901.phy	7	70961198	70973901	30	435	109	0.250575
+REGION	0	Single-event	0	Direct	inversion_group0_7_start97445822_end97459601.phy	7	97445822	97459601	81	3240	214	0.066049
+REGION	0	Single-event	0	Direct	inversion_group0_9_start12004038_end12074552.phy	9	12004038	12074552	78	3003	2	0.000666
+REGION	0	Single-event	0	Direct	inversion_group0_9_start85797070_end85801040.phy	9	85797070	85801040	79	3081	885	0.287244
+REGION	0	Single-event	0	Direct	inversion_group0_9_start87942696_end88110274.phy	9	87942696	88110274	81	3240	2	0.000617
+REGION	0	Single-event	0	Direct	inversion_group0_X_start112504686_end112516959.phy	X	112504686	112516959	49	1176	84	0.071429
+REGION	0	Single-event	1	Inverted	inversion_group1_10_start15742803_end15760427.phy	10	15742803	15760427				NA
+REGION	0	Single-event	1	Inverted	inversion_group1_10_start46144703_end46204851.phy	10	46144703	46204851	5	10	1	0.100000
+REGION	0	Single-event	1	Inverted	inversion_group1_10_start55007431_end55013434.phy	10	55007431	55013434	6	15	3	0.200000
+REGION	0	Single-event	1	Inverted	inversion_group1_10_start65465445_end65470067.phy	10	65465445	65470067				NA
+REGION	0	Single-event	1	Inverted	inversion_group1_10_start79542901_end80217413.phy	10	79542901	80217413	3	3	0	0.000000
+REGION	0	Single-event	1	Inverted	inversion_group1_11_start18249084_end18265819.phy	11	18249084	18265819				NA
+REGION	0	Single-event	1	Inverted	inversion_group1_11_start71571819_end71576724.phy	11	71571819	71576724	3	3	1	0.333333
+REGION	0	Single-event	1	Inverted	inversion_group1_12_start131312081_end131644839.phy	12	131312081	131644839	3	3	0	0.000000
+REGION	0	Single-event	1	Inverted	inversion_group1_12_start46896694_end46915975.phy	12	46896694	46915975	5	10	10	1.000000
+REGION	0	Single-event	1	Inverted	inversion_group1_12_start75713180_end75731794.phy	12	75713180	75731794				NA
+REGION	0	Single-event	1	Inverted	inversion_group1_13_start48199250_end48206639.phy	13	48199250	48206639	2	1	0	0.000000
+REGION	0	Single-event	1	Inverted	inversion_group1_13_start52310302_end52320954.phy	13	52310302	52320954	2	1	0	0.000000
+REGION	0	Single-event	1	Inverted	inversion_group1_13_start53902573_end54093373.phy	13	53902573	54093373				NA
+REGION	0	Single-event	1	Inverted	inversion_group1_13_start64598737_end64616218.phy	13	64598737	64616218				NA
+REGION	0	Single-event	1	Inverted	inversion_group1_14_start60606118_end60611659.phy	14	60606118	60611659	14	91	78	0.857143
+REGION	0	Single-event	1	Inverted	inversion_group1_14_start85872200_end85889269.phy	14	85872200	85889269				NA
+REGION	0	Single-event	1	Inverted	inversion_group1_15_start23295576_end23318191.phy	15	23295576	23318191	51	1275	1275	1.000000
+REGION	0	Single-event	1	Inverted	inversion_group1_15_start23345459_end28389868.phy	15	23345459	28389868				NA
+REGION	0	Single-event	1	Inverted	inversion_group1_16_start15384482_end16276146.phy	16	15384482	16276146				NA
+REGION	0	Single-event	1	Inverted	inversion_group1_16_start35946683_end35952382.phy	16	35946683	35952382	67	2211	1541	0.696970
+REGION	0	Single-event	1	Inverted	inversion_group1_16_start75206214_end75222748.phy	16	75206214	75222748	68	2278	214	0.093942
+REGION	0	Single-event	1	Inverted	inversion_group1_17_start16823490_end18384190.phy	17	16823490	18384190	2	1	0	0.000000
+REGION	0	Single-event	1	Inverted	inversion_group1_17_start3082008_end3221835.phy	17	3082008	3221835				NA
+REGION	0	Single-event	1	Inverted	inversion_group1_17_start45585159_end46292045.phy	17	45585159	46292045	10	45	0	0.000000
+REGION	0	Single-event	1	Inverted	inversion_group1_1_start144376209_end144600799.phy	1	144376209	144600799	49	1176	1176	1.000000
+REGION	0	Single-event	1	Inverted	inversion_group1_1_start149843518_end149850293.phy	1	149843518	149850293	48	1128	1128	1.000000
+REGION	0	Single-event	1	Inverted	inversion_group1_1_start248128773_end248428856.phy	1	248128773	248428856				NA
+REGION	0	Single-event	1	Inverted	inversion_group1_1_start25324280_end25369060.phy	1	25324280	25369060				NA
+REGION	0	Single-event	1	Inverted	inversion_group1_1_start81650508_end81707447.phy	1	81650508	81707447				NA
+REGION	0	Single-event	1	Inverted	inversion_group1_20_start24397726_end24406144.phy	20	24397726	24406144				NA
+REGION	0	Single-event	1	Inverted	inversion_group1_20_start29257746_end29419750.phy	20	29257746	29419750				NA
+REGION	0	Single-event	1	Inverted	inversion_group1_20_start47841016_end47888238.phy	20	47841016	47888238				NA
+REGION	0	Single-event	1	Inverted	inversion_group1_21_start13987773_end14056796.phy	21	13987773	14056796	3	3	1	0.333333
+REGION	0	Single-event	1	Inverted	inversion_group1_21_start19877734_end20070170.phy	21	19877734	20070170				NA
+REGION	0	Single-event	1	Inverted	inversion_group1_21_start43821742_end43835116.phy	21	43821742	43835116				NA
+REGION	0	Single-event	1	Inverted	inversion_group1_2_start130138212_end131200602.phy	2	130138212	131200602	2	1	1	1.000000
+REGION	0	Single-event	1	Inverted	inversion_group1_2_start130138212_end131530534.phy	2	130138212	131530534	2	1	1	1.000000
+REGION	0	Single-event	1	Inverted	inversion_group1_2_start45065588_end45081777.phy	2	45065588	45081777	3	3	3	1.000000
+REGION	0	Single-event	1	Inverted	inversion_group1_2_start87987171_end111255403.phy	2	87987171	111255403				NA
+REGION	0	Single-event	1	Inverted	inversion_group1_2_start87995841_end88180536.phy	2	87995841	88180536				NA
+REGION	0	Single-event	1	Inverted	inversion_group1_3_start75454477_end75455715.phy	3	75454477	75455715				NA
+REGION	0	Single-event	1	Inverted	inversion_group1_4_start33098066_end33104924.phy	4	33098066	33104924	3	3	3	1.000000
+REGION	0	Single-event	1	Inverted	inversion_group1_5_start112179911_end112236600.phy	5	112179911	112236600				NA
+REGION	0	Single-event	1	Inverted	inversion_group1_5_start124425560_end124546657.phy	5	124425560	124546657				NA
+REGION	0	Single-event	1	Inverted	inversion_group1_5_start177946129_end178003952.phy	5	177946129	178003952				NA
+REGION	0	Single-event	1	Inverted	inversion_group1_5_start179643529_end179651253.phy	5	179643529	179651253	79	3081	297	0.096397
+REGION	0	Single-event	1	Inverted	inversion_group1_6_start123106049_end123109821.phy	6	123106049	123109821	3	3	3	1.000000
+REGION	0	Single-event	1	Inverted	inversion_group1_6_start141866310_end141898728.phy	6	141866310	141898728	4	6	3	0.500000
+REGION	0	Single-event	1	Inverted	inversion_group1_6_start167209001_end167357782.phy	6	167209001	167357782	2	1	0	0.000000
+REGION	0	Single-event	1	Inverted	inversion_group1_6_start76109081_end76158474.phy	6	76109081	76158474	3	3	1	0.333333
+REGION	0	Single-event	1	Inverted	inversion_group1_7_start33990735_end34010143.phy	7	33990735	34010143				NA
+REGION	0	Single-event	1	Inverted	inversion_group1_7_start54234014_end54308393.phy	7	54234014	54308393	52	1326	13	0.009804
+REGION	0	Single-event	1	Inverted	inversion_group1_7_start57835188_end58119653.phy	7	57835188	58119653				NA
+REGION	0	Single-event	1	Inverted	inversion_group1_7_start70961198_end70973901.phy	7	70961198	70973901	52	1326	1226	0.924585
+REGION	0	Single-event	1	Inverted	inversion_group1_7_start97445822_end97459601.phy	7	97445822	97459601				NA
+REGION	0	Single-event	1	Inverted	inversion_group1_9_start12004038_end12074552.phy	9	12004038	12074552	2	1	0	0.000000
+REGION	0	Single-event	1	Inverted	inversion_group1_9_start85797070_end85801040.phy	9	85797070	85801040				NA
+REGION	0	Single-event	1	Inverted	inversion_group1_9_start87942696_end88110274.phy	9	87942696	88110274				NA
+REGION	0	Single-event	1	Inverted	inversion_group1_X_start112504686_end112516959.phy	X	112504686	112516959				NA
