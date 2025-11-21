@@ -25,8 +25,8 @@ use clap::Parser;
 use colored::*;
 use crossbeam_channel::bounded;
 use csv::WriterBuilder;
-use flate2::write::GzEncoder;
 use flate2::Compression;
+use flate2::write::GzEncoder;
 use parking_lot::Mutex;
 use prettytable::{Table, row};
 use rayon::prelude::*;
@@ -1414,57 +1414,40 @@ pub fn process_config_entries(
         None
     };
 
-    // The map operation collects results per chromosome.
-    // Each result is a tuple: (main_csv_data_for_this_chr, hudson_data_for_this_chr, wc_data_for_this_chr)
-    // We iterate over sorted chromosomes to ensure deterministic order of results collection
-    let per_chromosome_collected_results: Vec<(
-        Vec<(
-            CsvRowData,
-            Vec<(i64, f64, f64, u8, bool)>,
-            Vec<(i64, f64, f64)>,
-            Vec<(i64, f64, f64, f64)>,
-        )>,
-        Vec<RegionalHudsonFSTOutcome>,
-        Vec<RegionalWcFSTOutcome>,
-    )> = sorted_chromosomes
-        .par_iter()
-        .map(|&chr| {
-            let chr_entries = &grouped[chr];
-            match process_chromosome_entries(
-                chr,
-                chr_entries,
-                vcf_folder,
-                min_gq,
-                &mask,
-                &allow,
-                args,
-                exclusion_set,
-                if args.enable_pca {
-                    Some((
-                        global_filtered_variants.clone(),
-                        global_sample_names.clone(),
-                    ))
-                } else {
-                    None
-                },
-                parsed_csv_populations_arc.clone(), // Pass the Arc'd map
-                temp_path,
-            ) {
-                Ok(data_tuple_for_chr) => Some(data_tuple_for_chr),
-                Err(e) => {
-                    eprintln!("Error processing chromosome {}: {}", chr, e);
-                    None // This chromosome processing failed
-                }
-            }
-        })
-        .filter_map(|optional_result| optional_result) // Remove None entries (failed chromosomes)
-        .collect();
-
     let mut all_regional_wc_outcomes: Vec<RegionalWcFSTOutcome> = Vec::new();
+    // Process each chromosome and immediately stream its outputs to disk to avoid
+    // accumulating per-site results for all chromosomes in memory at once.
+    for &chr in &sorted_chromosomes {
+        let chr_entries = &grouped[chr];
+        let mut data_tuple_for_chr = match process_chromosome_entries(
+            chr,
+            chr_entries,
+            vcf_folder,
+            min_gq,
+            &mask,
+            &allow,
+            args,
+            exclusion_set,
+            if args.enable_pca {
+                Some((
+                    global_filtered_variants.clone(),
+                    global_sample_names.clone(),
+                ))
+            } else {
+                None
+            },
+            parsed_csv_populations_arc.clone(), // Pass the Arc'd map
+            temp_path,
+        ) {
+            Ok(data_tuple_for_chr) => data_tuple_for_chr,
+            Err(e) => {
+                eprintln!("Error processing chromosome {}: {}", chr, e);
+                continue;
+            }
+        };
 
-    // BEFORE: big aggregation into all_main_csv_data_tuples + later write
-    // AFTER:
-    for (mut main_data_for_chr, mut hudson_data_for_chr, mut wc_data_for_this_chr) in per_chromosome_collected_results {
+        let (mut main_data_for_chr, mut hudson_data_for_chr, mut wc_data_for_this_chr) =
+            data_tuple_for_chr;
         // write each main CSV row + per-site outputs now
         for (csv_row, per_site_diversity_vec, fst_data_wc, fst_data_hudson) in
             main_data_for_chr.drain(..)
@@ -1505,9 +1488,7 @@ pub fn process_config_entries(
     }
 
     writer.flush().map_err(|e| VcfError::Io(e.into()))?;
-    println!(
-        "Wrote FASTA-style per-site diversity data to per_site_diversity_output.falsta.gz"
-    );
+    println!("Wrote FASTA-style per-site diversity data to per_site_diversity_output.falsta.gz");
     println!("Wrote FASTA-style per-site FST data to per_site_fst_output.falsta.gz");
     println!(
         "Processing complete. Check the output file: {:?}",
@@ -1643,10 +1624,7 @@ pub fn process_config_entries(
 
             log(
                 LogLevel::Info,
-                &format!(
-                    "Writing W&C FST results to: {}",
-                    wc_output_path.display()
-                ),
+                &format!("Writing W&C FST results to: {}", wc_output_path.display()),
             );
 
             let wc_file = File::create(&wc_output_path).map_err(|e| VcfError::Io(e.into()))?;
@@ -1671,7 +1649,7 @@ pub fn process_config_entries(
 
             // Write W&C FST data
             for r in &all_regional_wc_outcomes {
-                 // Write overall FST
+                // Write overall FST
                 let (fst_val, sum_a, sum_b, num_sites) =
                     crate::stats::extract_wc_fst_components(&r.overall_fst);
 
@@ -1973,12 +1951,25 @@ fn process_chromosome_entries(
     // Gatekeeper: Find N regions in the whole chromosome reference
     let n_regions_global = find_n_regions(&ref_sequence, 0);
     if !n_regions_global.is_empty() {
-        log(LogLevel::Info, &format!("Found {} N-regions in reference for chr{}, adding to mask.", n_regions_global.len(), chr));
+        log(
+            LogLevel::Info,
+            &format!(
+                "Found {} N-regions in reference for chr{}, adding to mask.",
+                n_regions_global.len(),
+                chr
+            ),
+        );
     }
 
     // Update mask
-    let mut global_mask_map = mask.as_ref().map(|m| m.as_ref().clone()).unwrap_or_default();
-    global_mask_map.entry(chr.to_string()).or_default().extend(n_regions_global);
+    let mut global_mask_map = mask
+        .as_ref()
+        .map(|m| m.as_ref().clone())
+        .unwrap_or_default();
+    global_mask_map
+        .entry(chr.to_string())
+        .or_default()
+        .extend(n_regions_global);
     let final_mask = Some(Arc::new(global_mask_map));
 
     // Parse all transcripts for that chromosome from the GTF
@@ -2088,15 +2079,25 @@ fn process_chromosome_entries(
     let mut all_extended_intervals = Vec::new();
     let chr_len_i64 = chr_length as i64;
     for entry in entries {
-         let extended_start = (entry.interval.start as i64 - 3_000_000).max(0);
-         let extended_end = (entry.interval.end as i64 + 3_000_000).min(chr_len_i64);
-         all_extended_intervals.push(ZeroBasedHalfOpen::from_0based_half_open(extended_start, extended_end));
+        let extended_start = (entry.interval.start as i64 - 3_000_000).max(0);
+        let extended_end = (entry.interval.end as i64 + 3_000_000).min(chr_len_i64);
+        all_extended_intervals.push(ZeroBasedHalfOpen::from_0based_half_open(
+            extended_start,
+            extended_end,
+        ));
     }
     let merged_regions = merge_intervals(all_extended_intervals);
 
     // 2. Load VCF once
     set_stage(ProcessingStage::VcfProcessing);
-    log(LogLevel::Info, &format!("Loading variants for {} union regions on chr{}", merged_regions.len(), chr));
+    log(
+        LogLevel::Info,
+        &format!(
+            "Loading variants for {} union regions on chr{}",
+            merged_regions.len(),
+            chr
+        ),
+    );
 
     let (all_variants, all_allele_infos, all_flags, sample_names, _, _, _) = match process_vcf(
         &vcf_file,
@@ -2334,7 +2335,11 @@ fn process_chromosome_entries(
     // 1. Data for the main CSV output file.
     // 2. Data for the dedicated Hudson FST output file, specific to this chromosome.
     // 3. Data for the dedicated W&C FST output file, specific to this chromosome.
-    Ok((main_csv_tuples, chromosome_hudson_fst_results, chromosome_wc_fst_results))
+    Ok((
+        main_csv_tuples,
+        chromosome_hudson_fst_results,
+        chromosome_wc_fst_results,
+    ))
 }
 
 fn generate_full_region_alignment(
@@ -2557,15 +2562,22 @@ fn process_single_config_entry(
     for &flag in slice_flags {
         if flag != FLAG_PASS {
             filtering_stats._filtered_variants += 1;
-            if (flag & FLAG_MASK) != 0 { filtering_stats.filtered_due_to_mask += 1; }
-            if (flag & FLAG_ALLOW) != 0 { filtering_stats.filtered_due_to_allow += 1; }
-            if (flag & FLAG_LOW_GQ) != 0 { filtering_stats.low_gq_variants += 1; }
-            if (flag & FLAG_MISSING) != 0 { filtering_stats.missing_data_variants += 1; }
+            if (flag & FLAG_MASK) != 0 {
+                filtering_stats.filtered_due_to_mask += 1;
+            }
+            if (flag & FLAG_ALLOW) != 0 {
+                filtering_stats.filtered_due_to_allow += 1;
+            }
+            if (flag & FLAG_LOW_GQ) != 0 {
+                filtering_stats.low_gq_variants += 1;
+            }
+            if (flag & FLAG_MISSING) != 0 {
+                filtering_stats.missing_data_variants += 1;
+            }
         }
     }
     // Note: mnp_variants are globally filtered and discarded in process_vcf, so we can't count them here.
     // They will be 0 in these stats.
-
 
     // Extract mask and allow regions early to filter "unfiltered" variants consistently
     let allow_regions_chr = allow.as_ref().and_then(|a| a.get(chr));
@@ -2581,7 +2593,6 @@ fn process_single_config_entry(
         Vec<Option<(char, Vec<char>)>>,
     ) = slice_variants
         .iter()
-
         .zip(all_allele_infos.iter())
         .filter(|(v, _)| {
             let p = v.position;
@@ -2638,10 +2649,16 @@ fn process_single_config_entry(
         DenseGenotypeMatrix::from_variants(&region_variants_filtered, sample_names.len());
 
     if dense_unfiltered.is_some() {
-        log(LogLevel::Debug, "Created dense matrix for unfiltered variants");
+        log(
+            LogLevel::Debug,
+            "Created dense matrix for unfiltered variants",
+        );
     }
     if dense_filtered.is_some() {
-        log(LogLevel::Debug, "Created dense matrix for filtered variants");
+        log(
+            LogLevel::Debug,
+            "Created dense matrix for filtered variants",
+        );
     }
     let mask_intervals_slice = mask_regions_chr.map(|regions| regions.as_slice());
 
@@ -2812,10 +2829,7 @@ fn process_single_config_entry(
                 "Due to allow".to_string(),
                 filtering_stats.filtered_due_to_allow.to_string(),
             ),
-            (
-                "MNP".to_string(),
-                filtering_stats.mnp_variants.to_string(),
-            ),
+            ("MNP".to_string(), filtering_stats.mnp_variants.to_string()),
             (
                 "Low GQ".to_string(),
                 filtering_stats.low_gq_variants.to_string(),
@@ -3612,9 +3626,7 @@ fn append_diversity_falsta<P: AsRef<std::path::Path>>(
         }
     }
     w.flush().map_err(VcfError::Io)?;
-    let encoder = w
-        .into_inner()
-        .map_err(|e| VcfError::Io(e.into_error()))?;
+    let encoder = w.into_inner().map_err(|e| VcfError::Io(e.into_error()))?;
     encoder.finish().map_err(VcfError::Io).map(|_| ())
 }
 
@@ -3737,9 +3749,7 @@ fn append_fst_falsta<P: AsRef<std::path::Path>>(
     }
 
     w.flush().map_err(VcfError::Io)?;
-    let encoder = w
-        .into_inner()
-        .map_err(|e| VcfError::Io(e.into_error()))?;
+    let encoder = w.into_inner().map_err(|e| VcfError::Io(e.into_error()))?;
     encoder.finish().map_err(VcfError::Io).map(|_| ())
 }
 
@@ -3888,7 +3898,9 @@ pub fn process_vcf(
     );
 
     // Small vectors to hold variants in batches, limiting memory usage
-    let all_variants = Arc::new(Mutex::new(Vec::<(Variant, u8, Option<(char, Vec<char>)>)>::with_capacity(10000)));
+    let all_variants = Arc::new(Mutex::new(
+        Vec::<(Variant, u8, Option<(char, Vec<char>)>)>::with_capacity(10000),
+    ));
 
     // Shared stats
     let missing_data_info = Arc::new(Mutex::new(MissingDataInfo::default()));
@@ -3907,10 +3919,7 @@ pub fn process_vcf(
     let processing_complete = Arc::new(AtomicBool::new(false));
     let processing_complete_clone = Arc::clone(&processing_complete);
     let progress_bar_clone = Arc::clone(&progress_bar); // Clone Arc for progress thread
-    let finish_message = format!(
-        "Finished reading VCF for chr{}",
-        chr
-    );
+    let finish_message = format!("Finished reading VCF for chr{}", chr);
     let progress_thread = thread::spawn(move || {
         while !processing_complete_clone.load(Ordering::Relaxed) {
             // Less frequent updates to prevent overprinting
@@ -4118,7 +4127,7 @@ pub fn process_vcf(
             Err(_) => {
                 return Err(VcfError::Parse(
                     "Consumer thread panicked while processing variants".to_string(),
-                ))
+                ));
             }
         }
     }
@@ -4384,7 +4393,6 @@ pub fn process_variant(
     } else {
         None
     };
-
 
     let gq_index = fields[8].split(':').position(|s| s == "GQ");
     if gq_index.is_none() {
