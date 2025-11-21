@@ -8,12 +8,14 @@ use crate::progress::{
     init_step_progress, log, set_stage, update_step_progress,
 };
 
+use colored::Colorize;
 use csv::Writer;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use std::collections::HashMap;
+use std::fmt::Write as FmtWrite;
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufWriter, Write};
 use std::path::Path;
@@ -60,6 +62,20 @@ static METADATA_WRITER: Lazy<Mutex<Writer<BufWriter<File>>>> = Lazy::new(|| {
     Mutex::new(writer)
 });
 
+// A global lock to serialize access to shared log files (like transcript_overlap.log and cds_validation.log)
+// preventing interleaved writes from parallel threads.
+static LOG_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
+/// Appends content to a log file in a thread-safe manner.
+/// It locks a global mutex, opens the file in append mode, writes the content, and flushes.
+fn safe_append_to_log(path: &Path, content: &str) -> io::Result<()> {
+    let _guard = LOG_LOCK.lock();
+    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+    file.write_all(content.as_bytes())?;
+    file.flush()?;
+    Ok(())
+}
+
 /// A CDS sequence guaranteed to have length divisible by 3 and no internal stops.
 #[derive(Debug)]
 pub struct CdsSeq {
@@ -74,15 +90,11 @@ impl CdsSeq {
     pub fn new(seq: Vec<u8>, temp_path: &Path) -> Result<Self, String> {
         let now = SystemTime::now();
         let log_file_path = temp_path.join("cds_validation.log");
-
-        let mut log_file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&log_file_path)
-            .map_err(|e| format!("Failed to open {}: {}", log_file_path.display(), e))?;
+        let mut log_buffer = String::new();
 
         if seq.is_empty() {
-            writeln!(log_file, "{:?} Invalid CDS: empty sequence", now)
+            writeln!(log_buffer, "{:?} Invalid CDS: empty sequence", now).unwrap();
+            safe_append_to_log(&log_file_path, &log_buffer)
                 .map_err(|e| format!("Failed to write log: {}", e))?;
             return Err("CDS is empty".to_string());
         }
@@ -94,33 +106,39 @@ impl CdsSeq {
 
         if seq_upper.len() < 3 {
             writeln!(
-                log_file,
+                log_buffer,
                 "{:?} Invalid CDS: too short, length = {}",
                 now,
                 seq_upper.len()
             )
-            .map_err(|e| format!("Failed to write log: {}", e))?;
+            .unwrap();
+            safe_append_to_log(&log_file_path, &log_buffer)
+                .map_err(|e| format!("Failed to write log: {}", e))?;
             return Err("CDS is too short".to_string());
         }
         if seq_upper.len() % 3 != 0 {
             writeln!(
-                log_file,
+                log_buffer,
                 "{:?} Invalid CDS: length not divisible by 3, length = {}",
                 now,
                 seq_upper.len()
             )
-            .map_err(|e| format!("Failed to write log: {}", e))?;
+            .unwrap();
+            safe_append_to_log(&log_file_path, &log_buffer)
+                .map_err(|e| format!("Failed to write log: {}", e))?;
             return Err(format!("CDS length {} not divisible by 3", seq_upper.len()));
         }
 
         for (i, &n) in seq_upper.iter().enumerate() {
             if !matches!(n, b'A' | b'C' | b'G' | b'T' | b'N') {
                 writeln!(
-                    log_file,
+                    log_buffer,
                     "{:?} Invalid CDS: bad nucleotide '{}' at position {}",
                     now, n as char, i
                 )
-                .map_err(|e| format!("Failed to write log: {}", e))?;
+                .unwrap();
+                safe_append_to_log(&log_file_path, &log_buffer)
+                    .map_err(|e| format!("Failed to write log: {}", e))?;
                 return Err(format!(
                     "Invalid nucleotide '{}' at position {}",
                     n as char, i
@@ -131,11 +149,13 @@ impl CdsSeq {
         let start_codon_up = &seq_upper[0..3];
         if start_codon_up != [b'A', b'T', b'G'] {
             writeln!(
-                log_file,
+                log_buffer,
                 "{:?} Invalid CDS: does not begin with ATG, found {:?}",
                 now, start_codon_up
             )
-            .map_err(|e| format!("Failed to write log: {}", e))?;
+            .unwrap();
+            safe_append_to_log(&log_file_path, &log_buffer)
+                .map_err(|e| format!("Failed to write log: {}", e))?;
             return Err(format!(
                 "CDS does not begin with ATG; found {:?}",
                 start_codon_up
@@ -148,12 +168,14 @@ impl CdsSeq {
                 let codon = &seq_upper[i..i + 3];
                 if stops.iter().any(|stop| *stop == codon) {
                     writeln!(
-                        log_file,
+                        log_buffer,
                         "{:?} Invalid CDS: internal stop at codon index {}",
                         now,
                         i / 3
                     )
-                    .map_err(|e| format!("Failed to write log: {}", e))?;
+                    .unwrap();
+                    safe_append_to_log(&log_file_path, &log_buffer)
+                        .map_err(|e| format!("Failed to write log: {}", e))?;
                     return Err(format!(
                         "CDS has internal stop codon at codon index {}",
                         i / 3
@@ -163,12 +185,14 @@ impl CdsSeq {
         }
 
         writeln!(
-            log_file,
+            log_buffer,
             "{:?} Valid CDS: length = {}",
             now,
             seq_upper.len()
         )
-        .map_err(|e| format!("Failed to write log: {}", e))?;
+        .unwrap();
+        safe_append_to_log(&log_file_path, &log_buffer)
+            .map_err(|e| format!("Failed to write log: {}", e))?;
         Ok(CdsSeq { data: seq_upper })
     }
 }
@@ -835,33 +859,24 @@ pub fn filter_and_log_transcripts(
     query: QueryRegion,
     temp_path: &Path,
 ) -> Vec<TranscriptAnnotationCDS> {
-    use colored::Colorize;
-    use std::fs::OpenOptions;
-    use std::io::{BufWriter, Write};
-
     // Open or create a log file once per call in the temporary directory
     let log_file_path = temp_path.join("transcript_overlap.log");
 
-    let log_file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_file_path)
-        .expect("Failed to open transcript_overlap.log in temporary directory");
-    let mut log_file = BufWriter::new(log_file);
+    // Use a String buffer to build the log content to avoid interleaved writes
+    // from parallel threads. We write the whole block atomically at the end.
+    let mut log_buffer = String::new();
 
     // Create a ZeroBasedHalfOpen for the query region
     let query_interval = ZeroBasedHalfOpen::from_0based_inclusive(query.start, query.end);
 
-    writeln!(log_file, "Query region: {} to {}", query.start, query.end)
-        .expect("Failed to write to transcript_overlap.log");
+    writeln!(log_buffer, "Query region: {} to {}", query.start, query.end).unwrap();
 
     let mut overlapping_transcript_count = 0;
 
     log(LogLevel::Info, "Processing CDS regions by transcript");
     init_step_progress("Filtering transcripts", transcripts.len() as u64);
 
-    writeln!(log_file, "Processing CDS regions by transcript...")
-        .expect("Failed to write to transcript_overlap.log");
+    writeln!(log_buffer, "Processing CDS regions by transcript...").unwrap();
 
     let mut filtered = Vec::new();
 
@@ -917,15 +932,21 @@ pub fn filter_and_log_transcripts(
             continue;
         }
 
-        tcds.segments.sort_by_key(|seg| seg.start);
+        // Determine sort order based on strand
+        if tcds.strand == '-' {
+            // For negative strand, biological order is High -> Low
+            tcds.segments
+                .sort_by_key(|seg| std::cmp::Reverse(seg.start));
+        } else {
+            // For positive strand, biological order is Low -> High
+            tcds.segments.sort_by_key(|seg| seg.start);
+        }
 
         // Only log to file instead of printing to terminal to reduce spam
-        writeln!(log_file, "\nProcessing transcript: {}", tcds.transcript_id)
-            .expect("Failed to write to transcript_overlap.log");
+        writeln!(log_buffer, "\nProcessing transcript: {}", tcds.transcript_id).unwrap();
 
         // Log to file only, not terminal
-        writeln!(log_file, "Found {} CDS segments", tcds.segments.len())
-            .expect("Failed to write to transcript_overlap.log");
+        writeln!(log_buffer, "Found {} CDS segments", tcds.segments.len()).unwrap();
 
         stats.total_transcripts += 1;
         stats.total_cds_segments += tcds.segments.len();
@@ -966,7 +987,7 @@ pub fn filter_and_log_transcripts(
             );
 
             writeln!(
-                log_file,
+                log_buffer,
                 "  Segment {}: {}-{} (length: {}, frame: {})",
                 i + 1,
                 seg.start,
@@ -974,7 +995,7 @@ pub fn filter_and_log_transcripts(
                 segment_length,
                 frame
             )
-            .expect("Failed to write to transcript_overlap.log");
+            .unwrap();
             coding_segments.push((seg.start as i64, seg.end as i64));
         }
 
@@ -1041,7 +1062,7 @@ pub fn filter_and_log_transcripts(
                 segment_summary
             );
             writeln!(
-                log_file,
+                log_buffer,
                 concat!(
                     "  Warning: Transcript {} (gene: {}, strand: {}) has total CDS length {} ",
                     "not divisible by 3 (remainder {}, span {}-{}, segments: [{}])"
@@ -1055,14 +1076,13 @@ pub fn filter_and_log_transcripts(
                 max_end,
                 segment_summary
             )
-            .expect("Failed to write to transcript_overlap.log");
+            .unwrap();
 
             log(
                 LogLevel::Info,
                 &format!("    Remainder when divided by 3: {}", remainder),
             );
-            writeln!(log_file, "    Remainder when divided by 3: {}", remainder)
-                .expect("Failed to write to transcript_overlap.log");
+            writeln!(log_buffer, "    Remainder when divided by 3: {}", remainder).unwrap();
 
             log(
                 LogLevel::Info,
@@ -1075,14 +1095,14 @@ pub fn filter_and_log_transcripts(
                 ),
             );
             writeln!(
-                log_file,
+                log_buffer,
                 "    Individual segment lengths: {:?}",
                 tcds.segments
                     .iter()
                     .map(|seg| seg.len())
                     .collect::<Vec<_>>()
             )
-            .expect("Failed to write to transcript_overlap.log");
+            .unwrap();
         }
 
         let transcript_span = max_end - min_start;
@@ -1091,30 +1111,26 @@ pub fn filter_and_log_transcripts(
             LogLevel::Info,
             &format!("  CDS region: {}-{}", min_start, max_end),
         );
-        writeln!(log_file, "  CDS region: {}-{}", min_start, max_end)
-            .expect("Failed to write to transcript_overlap.log");
+        writeln!(log_buffer, "  CDS region: {}-{}", min_start, max_end).unwrap();
 
         log(
             LogLevel::Info,
             &format!("    Genomic span: {}", transcript_span),
         );
-        writeln!(log_file, "    Genomic span: {}", transcript_span)
-            .expect("Failed to write to transcript_overlap.log");
+        writeln!(log_buffer, "    Genomic span: {}", transcript_span).unwrap();
 
         log(
             LogLevel::Info,
             &format!("    Total coding length: {}", total_coding_length),
         );
-        writeln!(log_file, "    Total coding length: {}", total_coding_length)
-            .expect("Failed to write to transcript_overlap.log");
+        writeln!(log_buffer, "    Total coding length: {}", total_coding_length).unwrap();
 
         filtered.push(tcds);
     }
 
     if stats.total_transcripts > 0 {
         log(LogLevel::Info, "CDS Processing Summary");
-        writeln!(log_file, "\nCDS Processing Summary:")
-            .expect("Failed to write to transcript_overlap.log");
+        writeln!(log_buffer, "\nCDS Processing Summary:").unwrap();
 
         // Build status box data
         let mut summary_stats = Vec::new();
@@ -1186,63 +1202,59 @@ pub fn filter_and_log_transcripts(
 
         // Still log everything to the file
         writeln!(
-            log_file,
+            log_buffer,
             "Total transcripts processed: {}",
             stats.total_transcripts
         )
-        .expect("Failed to write to transcript_overlap.log");
-        writeln!(log_file, "Total CDS segments: {}", stats.total_cds_segments)
-            .expect("Failed to write to transcript_overlap.log");
+        .unwrap();
+        writeln!(log_buffer, "Total CDS segments: {}", stats.total_cds_segments).unwrap();
         writeln!(
-            log_file,
+            log_buffer,
             "Average segments per transcript: {:.2}",
             stats.total_cds_segments as f64 / stats.total_transcripts as f64
         )
-        .expect("Failed to write to transcript_overlap.log");
+        .unwrap();
         writeln!(
-            log_file,
+            log_buffer,
             "Single-cds transcripts: {} ({:.1}%)",
             stats.single_cds_transcripts,
             100.0 * stats.single_cds_transcripts as f64 / stats.total_transcripts as f64
         )
-        .expect("Failed to write to transcript_overlap.log");
+        .unwrap();
         writeln!(
-            log_file,
+            log_buffer,
             "Multi-cds transcripts: {} ({:.1}%)",
             stats.multi_cds_transcripts,
             100.0 * stats.multi_cds_transcripts as f64 / stats.total_transcripts as f64
         )
-        .expect("Failed to write to transcript_overlap.log");
+        .unwrap();
         writeln!(
-            log_file,
+            log_buffer,
             "Transcripts with gaps: {} ({:.1}%)",
             stats.transcripts_with_gaps,
             100.0 * stats.transcripts_with_gaps as f64 / stats.total_transcripts as f64
         )
-        .expect("Failed to write to transcript_overlap.log");
+        .unwrap();
         writeln!(
-            log_file,
+            log_buffer,
             "Non-divisible by three: {} ({:.1}%)",
             stats.non_divisible_by_three,
             100.0 * stats.non_divisible_by_three as f64 / stats.total_transcripts as f64
         )
-        .expect("Failed to write to transcript_overlap.log");
+        .unwrap();
         writeln!(
-            log_file,
+            log_buffer,
             "Total coding bases: {}",
             stats.total_coding_length
         )
-        .expect("Failed to write to transcript_overlap.log");
+        .unwrap();
         if let Some(shortest) = stats.shortest_transcript_length {
-            writeln!(log_file, "Shortest transcript: {} bp", shortest)
-                .expect("Failed to write to transcript_overlap.log");
+            writeln!(log_buffer, "Shortest transcript: {} bp", shortest).unwrap();
         }
         if let Some(longest) = stats.longest_transcript_length {
-            writeln!(log_file, "Longest transcript: {} bp", longest)
-                .expect("Failed to write to transcript_overlap.log");
+            writeln!(log_buffer, "Longest transcript: {} bp", longest).unwrap();
         }
-        writeln!(log_file, "Average transcript length: {:.1} bp", avg_len)
-            .expect("Failed to write to transcript_overlap.log");
+        writeln!(log_buffer, "Average transcript length: {:.1} bp", avg_len).unwrap();
     }
 
     if filtered.is_empty() {
@@ -1250,16 +1262,20 @@ pub fn filter_and_log_transcripts(
             LogLevel::Warning,
             &format!("{}", "No valid CDS regions found!".red()),
         );
-        writeln!(log_file, "No valid CDS regions found!")
-            .expect("Failed to write to transcript_overlap.log");
+        writeln!(log_buffer, "No valid CDS regions found!").unwrap();
     }
 
     writeln!(
-        log_file,
+        log_buffer,
         "Summary: {} transcripts overlap query region {}..{}",
         overlapping_transcript_count, query.start, query.end
     )
-    .expect("Failed to write to transcript_overlap.log");
+    .unwrap();
+
+    // Write the buffered log content to the file
+    if let Err(e) = safe_append_to_log(&log_file_path, &log_buffer) {
+        eprintln!("Failed to write to transcript_overlap.log: {}", e);
+    }
 
     filtered
 }
