@@ -64,8 +64,6 @@ jobs:
           git add data/output.csv || true
           git add data/phy_metadata.tsv || true
           git add data/FST_data.tsv || true
-          git add data/per_site_diversity_output.falsta.gz || true
-          git add data/phy_outputs.zip || true
 
           if git diff --staged --quiet; then
             echo "No data changes to commit"
