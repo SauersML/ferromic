@@ -55,6 +55,9 @@ INV_RENAME_MAP: Dict[str, str] = {
     "OrigID": "Inversion ID",
     "Size_.kbp.": "Size (kbp)",
     "Inverted_AF": "Inversion allele frequency",
+    "hudson_fst_hap_group_0v1": "Hudson's FST",
+    "0_pi_filtered": "Direct haplotypes pi",
+    "1_pi_filtered": "Inverted haplotypes pi",
 }
 
 
@@ -78,6 +81,18 @@ INVERSION_COLUMN_DEFS: Dict[str, str] = OrderedDict(
         (
             "0_single_1_recur_consensus",
             "Consensus recurrence status used throughout this study: 0 indicates a Single-event inversion (evolved via a single historical mutational event), 1 indicates a Recurrent inversion (evolved via multiple independent events).",
+        ),
+        (
+            "Hudson's FST",
+            "Hudson's fixation index (FST) comparing inverted (haplotype group 1) and direct (haplotype group 0) chromosomes across informative sites.",
+        ),
+        (
+            "Direct haplotypes pi",
+            "Nucleotide diversity (π) among direct haplotypes after site filtering.",
+        ),
+        (
+            "Inverted haplotypes pi",
+            "Nucleotide diversity (π) among inverted haplotypes after site filtering.",
         ),
     ]
 )
@@ -438,6 +453,7 @@ CATEGORIES_RESULTS_CANDIDATES = (
 )
 IMPUTATION_RESULTS = DATA_DIR / "imputation_results.tsv"
 INV_PROPERTIES = DATA_DIR / "inv_properties.tsv"
+POPULATION_METRICS = DATA_DIR / "output.csv"
 TRAJECTORY_DATA = DATA_DIR / "Trajectory-12_47296118_A_G.tsv"
 
 TABLE_S1 = DATA_DIR / "tables.xlsx - Table S1.tsv"
@@ -487,6 +503,55 @@ def _prune_columns(df: pd.DataFrame, column_defs: Dict[str, str], sheet_name: st
         )
 
     return df.loc[:, available_cols].copy()
+
+
+def _prepare_merge_columns(df: pd.DataFrame, chrom_col: str, start_col: str, end_col: str) -> pd.DataFrame:
+    def _normalize_chr(series: pd.Series) -> pd.Series:
+        return series.astype(str).str.replace(r"^chr", "", regex=True).str.strip()
+
+    result = df.copy()
+    result["_merge_chr"] = _normalize_chr(result[chrom_col])
+    result["_merge_start"] = pd.to_numeric(result[start_col], errors="coerce").astype("Int64")
+    result["_merge_end"] = pd.to_numeric(result[end_col], errors="coerce").astype("Int64")
+    return result
+
+
+def _merge_population_metrics(inv_df: pd.DataFrame) -> pd.DataFrame:
+    if not POPULATION_METRICS.exists():
+        raise SupplementaryTablesError(f"Population metrics CSV not found: {POPULATION_METRICS}")
+
+    metrics_df = pd.read_csv(POPULATION_METRICS, dtype=str, low_memory=False)
+    required_cols = [
+        "chr",
+        "region_start",
+        "region_end",
+        "hudson_fst_hap_group_0v1",
+        "0_pi_filtered",
+        "1_pi_filtered",
+    ]
+
+    missing_metrics = [col for col in required_cols if col not in metrics_df.columns]
+    if missing_metrics:
+        raise SupplementaryTablesError(
+            "Population metrics CSV is missing required columns: " + ", ".join(missing_metrics)
+        )
+
+    inv_with_keys = _prepare_merge_columns(inv_df, "Chromosome", "Start", "End")
+    metrics_with_keys = _prepare_merge_columns(metrics_df, "chr", "region_start", "region_end")
+
+    metrics_trimmed = metrics_with_keys[
+        ["_merge_chr", "_merge_start", "_merge_end", "hudson_fst_hap_group_0v1", "0_pi_filtered", "1_pi_filtered"]
+    ]
+
+    merged = inv_with_keys.merge(
+        metrics_trimmed,
+        how="left",
+        on=["_merge_chr", "_merge_start", "_merge_end"],
+        validate="one_to_one",
+    )
+
+    helper_cols = [col for col in merged.columns if col.startswith("_merge_")]
+    return merged.drop(columns=helper_cols)
 
 
 def ensure_cds_summary() -> Path:
@@ -607,6 +672,7 @@ def _load_inversion_catalog() -> pd.DataFrame:
         )
 
     df = df[INV_COLUMNS_KEEP].copy()
+    df = _merge_population_metrics(df)
     df = df.rename(columns=INV_RENAME_MAP)
     return _prune_columns(df, INVERSION_COLUMN_DEFS, "Inversion catalog")
 
