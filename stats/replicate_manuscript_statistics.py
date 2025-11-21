@@ -186,7 +186,6 @@ def download_latest_artifacts():
         "run-vcf-hudson-fst": {"target": "FST_data.tsv.gz", "action": "extract_renamed"},
         # IMPORTANT: Do NOT download run-vcf-metadata to inv_properties.tsv.
         # run-vcf-metadata contains phy_metadata.tsv, which is different from inv_properties.tsv.
-        # We store it as phy_metadata.tsv to avoid overwriting the master inversion index.
         "run-vcf-metadata": {"target": "phy_metadata.tsv", "action": "extract_renamed"},
         "run-vcf-output-csv": {"target": "output.csv", "action": "extract_file"},
     }
@@ -284,6 +283,8 @@ def _stage_cds_inputs() -> list[Path]:
                 extracted_any = True
                 for member in members:
                     target_name = Path(member).name
+                    if target_name.endswith(".gz"):
+                        target_name = target_name[:-3]
                     target_path = Path(target_name)
                     with archive.open(member) as zipped_member:
                         if member.endswith(".gz"):
@@ -346,16 +347,19 @@ def run_fresh_cds_pipeline():
                 print(f"FATAL: Jackknife analysis failed: {e}")
                 sys.exit(1)
 
-            print("... Copying generated CDS tables to data/ ...")
+            print("... Copying generated TSV files to data/ ...")
             for filename in [
                 "cds_identical_proportions.tsv",
                 "gene_inversion_direct_inverted.tsv",
                 "region_identical_proportions.tsv",
                 "skipped_details.tsv",
             ]:
-                if Path(filename).exists():
-                    shutil.copy2(filename, DATA_DIR / filename)
-                    print(f"  Copied {filename}")
+                src = Path(filename)
+                if src.exists():
+                    shutil.copy2(src, DATA_DIR / filename)
+                    print(f"  Copied {filename} to data/")
+                else:
+                    print(f"  WARNING: {filename} not found, skipping copy.")
 
             print("\n>>> PIPELINE: GENERATION COMPLETE. Proceeding to manuscript report...\n")
 
@@ -1800,7 +1804,6 @@ def main() -> None:
     print(text)
     REPORT_PATH.write_text(text)
     print(f"\nSaved report to {REPORT_PATH.relative_to(Path.cwd())}")
-
     shutil.copy2(REPORT_PATH, DATA_DIR / "replicate_manuscript_statistics.txt")
     print(f"Copied report to {DATA_DIR / 'replicate_manuscript_statistics.txt'}")
 
