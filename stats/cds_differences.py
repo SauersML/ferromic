@@ -78,8 +78,11 @@ def load_inv_info(path: str):
 
         rows_all = []
         rows_by_cons = {0: [], 1: []}
+        rows_cons_na = []  # rows with consensus not in {0,1} but valid coords
         exact_triplets = set()
+        exact_triplets_na = set()
         rows_by_chr = defaultdict(list)
+        rows_by_chr_na = defaultdict(list)
 
         for row in reader:
             chr_raw = row.get(col_chr, "")
@@ -96,8 +99,6 @@ def load_inv_info(path: str):
             except Exception:
                 cons = None
 
-            if cons not in (0, 1):
-                continue
             if chr_norm == "" or start is None or end is None:
                 continue
 
@@ -105,17 +106,24 @@ def load_inv_info(path: str):
             d["_chr_norm"] = chr_norm
             d["_Start_int"] = start
             d["_End_int"] = end
-            d["_consensus_int"] = cons
 
-            rows_all.append(d)
-            rows_by_cons[cons].append(d)
-            exact_triplets.add((chr_norm, start, end))
-            rows_by_chr[chr_norm].append((start, end))
+            if cons in (0, 1):
+                d["_consensus_int"] = cons
+                rows_all.append(d)
+                rows_by_cons[cons].append(d)
+                exact_triplets.add((chr_norm, start, end))
+                rows_by_chr[chr_norm].append((start, end))
+            else:
+                rows_cons_na.append(d)
+                exact_triplets_na.add((chr_norm, start, end))
+                rows_by_chr_na[chr_norm].append((start, end))
 
     # Pre-sort per chr for nearest-interval search
     for chrk in rows_by_chr:
         rows_by_chr[chrk].sort()
-    return rows_all, rows_by_cons, exact_triplets, rows_by_chr
+    for chrk in rows_by_chr_na:
+        rows_by_chr_na[chrk].sort()
+    return rows_all, rows_by_cons, exact_triplets, rows_by_chr, rows_cons_na, exact_triplets_na, rows_by_chr_na
 
 # ===========================
 # Filename parsing (STRICT)
@@ -405,7 +413,7 @@ def main():
     os.makedirs(session_tmp_dir, exist_ok=True)
 
     print(">>> Loading inv_properties.tsv ...")
-    rows_all, rows_by_cons, exact_triplets, inv_by_chr = load_inv_info("inv_properties.tsv")
+    rows_all, rows_by_cons, exact_triplets, inv_by_chr, rows_cons_na, exact_triplets_na, inv_by_chr_na = load_inv_info("inv_properties.tsv")
     print(f"    Total inv_info rows (consensus in {{0,1}}): {len(rows_all)}")
     print(f"    Recurrent rows: {len(rows_by_cons[1])}")
     print(f"    Single-event rows: {len(rows_by_cons[0])}")
@@ -529,11 +537,17 @@ def main():
                       for row in rows_by_cons[1])
         overl_0 = any((chr_ == row["_chr_norm"]) and intervals_overlap(cds_s, cds_e, row["_Start_int"], row["_End_int"])
                       for row in rows_by_cons[0])
+        overl_na = any((chr_ == row["_chr_norm"]) and intervals_overlap(cds_s, cds_e, row["_Start_int"], row["_End_int"])
+                       for row in rows_cons_na)
         exact_ok = 1 if (chr_, inv_s, inv_e) in exact_triplets else 0
         cds_sanity_exact_match[fn] = exact_ok
         if not overl_1 and not overl_0:
-            record_skip("CDS", None, None, fn, "CDS_NO_OVERLAP",
-                        f"CDS [{cds_s},{cds_e}] on chr {chr_} overlaps no inv_info row")
+            if overl_na:
+                record_skip("CDS", None, None, fn, "CDS_CONSENSUS_NA",
+                            f"CDS [{cds_s},{cds_e}] on chr {chr_} overlaps inv_info row with NA consensus")
+            else:
+                record_skip("CDS", None, None, fn, "CDS_NO_OVERLAP",
+                            f"CDS [{cds_s},{cds_e}] on chr {chr_} overlaps no inv_info row")
             continue
         if overl_1: categories[("CDS", 1, grp)].add(fn)
         if overl_0: categories[("CDS", 0, grp)].add(fn)
@@ -560,7 +574,10 @@ def main():
     for rec in it:
         fn = rec["filename"]; chr_ = rec["chr"]; s = rec["start"]; e = rec["end"]; grp = rec["phy_group"]
         if (chr_, s, e) not in exact_triplets:
-            record_skip("REGION", None, grp, fn, "REGION_NO_EXACT_MATCH", f"No inv_info exact match for ({chr_},{s},{e})")
+            if (chr_, s, e) in exact_triplets_na:
+                record_skip("REGION", None, grp, fn, "REGION_CONSENSUS_NA", f"inv_info row for ({chr_},{s},{e}) has NA consensus")
+            else:
+                record_skip("REGION", None, grp, fn, "REGION_NO_EXACT_MATCH", f"No inv_info exact match for ({chr_},{s},{e})")
             continue
         has_1 = any((chr_ == row["_chr_norm"] and s == row["_Start_int"] and e == row["_End_int"]) for row in rows_by_cons[1])
         has_0 = any((chr_ == row["_chr_norm"] and s == row["_Start_int"] and e == row["_End_int"]) for row in rows_by_cons[0])
