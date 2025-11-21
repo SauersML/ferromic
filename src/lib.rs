@@ -164,6 +164,10 @@ impl FstEstimateInfo {
 }
 
 /// Difference counts between two samples.
+///
+/// `comparable_sites` reflects the effective number of base pairs compared across all haplotype pairs
+/// (including invariant reference positions), making it an appropriate denominator for genomic
+/// divergence (differences / comparable_sites).
 #[pyclass(module = "ferromic", freelist = 20)]
 #[derive(Clone)]
 struct PairwiseDifference {
@@ -181,7 +185,7 @@ struct PairwiseDifference {
 impl PairwiseDifference {
     fn __repr__(&self) -> String {
         format!(
-            "PairwiseDifference(sample_i={}, sample_j={}, differences={}, comparable_sites={})",
+            "PairwiseDifference(sample_i={}, sample_j={}, differences={}, comparable_sites={} [genomic bases])",
             self.sample_i, self.sample_j, self.differences, self.comparable_sites
         )
     }
@@ -1610,15 +1614,23 @@ fn watterson_theta_py(
 /// Compute pairwise nucleotide differences between samples.
 #[pyfunction(
     name = "pairwise_differences",
-    text_signature = "(variants, sample_count, /)"
+    text_signature = "(variants, sample_count, sequence_length, /)"
 )]
 fn pairwise_differences_py(
     py: Python,
     variants: Vec<VariantInput>,
     sample_count: usize,
+    sequence_length: i64,
 ) -> PyResult<Vec<Py<PairwiseDifference>>> {
+    if sequence_length <= 0 {
+        return Err(PyValueError::new_err(
+            "sequence_length must be a positive integer",
+        ));
+    }
+
     let variants: Vec<Variant> = variants.into_iter().map(VariantInput::into_inner).collect();
-    let diffs = py.allow_threads(|| calculate_pairwise_differences(&variants, sample_count));
+    let diffs = py
+        .allow_threads(|| calculate_pairwise_differences(&variants, sample_count, sequence_length));
     pairwise_differences_to_py(py, diffs)
 }
 
