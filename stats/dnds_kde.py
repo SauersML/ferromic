@@ -20,7 +20,7 @@ logger = logging.getLogger('median_omega_analysis_standalone')
 
 # File paths
 PAIRWISE_FILE = Path('all_pairwise_results.csv')
-INVERSION_FILE = Path('inv_info.tsv')
+INVERSION_FILE = Path('inv_properties.tsv')
 OUTPUT_PLOT_PATH = Path('median_omega_distribution_standalone.png')
 
 RECURRENT_COLOR = 'salmon'
@@ -72,7 +72,7 @@ def load_input_files():
             logger.error(f"Pairwise DF missing required columns. Need: {required_pairwise_cols}")
             return None, None
 
-        required_inversion_cols = ['Chromosome', 'Start', 'End', '0_single_1_recur']
+        required_inversion_cols = ['Chromosome', 'Start', 'End', '0_single_1_recur_consensus']
         if not all(col in inversion_df.columns for col in required_inversion_cols):
             logger.error(f"Inversion DF missing required columns. Need: {required_inversion_cols}")
             return None, None
@@ -81,13 +81,13 @@ def load_input_files():
         inversion_df['Chromosome'] = inversion_df['Chromosome'].astype(str).str.lower() # Normalize chromosome names
         inversion_df['Start'] = pd.to_numeric(inversion_df['Start'], errors='coerce')
         inversion_df['End'] = pd.to_numeric(inversion_df['End'], errors='coerce')
-        inversion_df['0_single_1_recur'] = pd.to_numeric(inversion_df['0_single_1_recur'], errors='coerce')
+        inversion_df['0_single_1_recur_consensus'] = pd.to_numeric(inversion_df['0_single_1_recur_consensus'], errors='coerce')
 
         # Drop rows with invalid numeric data in inversions
-        inversion_df = inversion_df.dropna(subset=['Start', 'End', '0_single_1_recur'])
+        inversion_df = inversion_df.dropna(subset=['Start', 'End', '0_single_1_recur_consensus'])
         inversion_df['Start'] = inversion_df['Start'].astype(int)
         inversion_df['End'] = inversion_df['End'].astype(int)
-        inversion_df['0_single_1_recur'] = inversion_df['0_single_1_recur'].astype(int)
+        inversion_df['0_single_1_recur_consensus'] = inversion_df['0_single_1_recur_consensus'].astype(int)
 
         # Convert omega to numeric, coercing errors (like non-numeric values) to NaN
         pairwise_df['omega'] = pd.to_numeric(pairwise_df['omega'], errors='coerce')
@@ -140,8 +140,8 @@ def map_cds_to_inversions_excluding_ambiguous(pairwise_df, inversion_df):
          return {}
 
     # Prepare inversion dataframes (already cleaned in load_input_files)
-    recurrent_inv = inversion_df[inversion_df['0_single_1_recur'] == 1].copy()
-    single_event_inv = inversion_df[inversion_df['0_single_1_recur'] == 0].copy()
+    recurrent_inv = inversion_df[inversion_df['0_single_1_recur_consensus'] == 1].copy()
+    single_event_inv = inversion_df[inversion_df['0_single_1_recur_consensus'] == 0].copy()
     logger.info(f"Using {len(recurrent_inv)} recurrent and {len(single_event_inv)} single-event inversion regions for mapping.")
 
     # Map CDS to inversion types

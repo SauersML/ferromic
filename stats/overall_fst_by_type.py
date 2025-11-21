@@ -13,7 +13,7 @@ import os
 
 # Input Files
 SUMMARY_STATS_FILE = 'output.csv'
-INVERSION_FILE = 'inv_info.tsv'
+INVERSION_FILE = 'inv_properties.tsv'
 COORDINATE_MAP_FILE = 'map.tsv' # New configuration for the map file
 
 # Output File Templates

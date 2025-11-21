@@ -22,7 +22,7 @@ logger = logging.getLogger('conservation_analysis_detailed')
 
 # File paths
 PAIRWISE_FILE = 'all_pairwise_results.csv'
-INVERSION_FILE = 'inv_info.tsv'
+INVERSION_FILE = 'inv_properties.tsv'
 OUTPUT_RESULTS_LOO_GENE_PROPORTION = 'leave_one_out_gene_proportion_results.csv' # Output name
 
 # --- Helper Functions ---
@@ -87,7 +87,7 @@ def map_cds_to_inversions(pairwise_df, inversion_df):
     logger.info(f"[{func_name}] Preparing inversion data...")
     initial_inversion_count = len(inversion_df)
     logger.info(f"[{func_name}] Initial inversion count: {initial_inversion_count:,}")
-    required_inv_cols = ['Start', 'End', '0_single_1_recur', 'Chromosome']
+    required_inv_cols = ['Start', 'End', '0_single_1_recur_consensus', 'Chromosome']
     if not all(col in inversion_df.columns for col in required_inv_cols):
         logger.error(f"[{func_name}] Inversion info DataFrame missing required columns: {required_inv_cols}. Cannot map.")
         return {}, {}, {}
@@ -96,7 +96,7 @@ def map_cds_to_inversions(pairwise_df, inversion_df):
     inversion_df_proc = inversion_df.copy()
 
     # Convert necessary columns to numeric, coercing errors
-    for col in ['Start', 'End', '0_single_1_recur']:
+    for col in ['Start', 'End', '0_single_1_recur_consensus']:
         inversion_df_proc[col] = pd.to_numeric(inversion_df_proc[col], errors='coerce')
 
     # Drop rows with NaNs in essential columns AFTER coercion
@@ -114,11 +114,11 @@ def map_cds_to_inversions(pairwise_df, inversion_df):
     # Ensure correct types
     inversion_df_proc['Start'] = inversion_df_proc['Start'].astype(int)
     inversion_df_proc['End'] = inversion_df_proc['End'].astype(int)
-    inversion_df_proc['0_single_1_recur'] = inversion_df_proc['0_single_1_recur'].astype(int)
+    inversion_df_proc['0_single_1_recur_consensus'] = inversion_df_proc['0_single_1_recur_consensus'].astype(int)
 
     # Separate inversion types
-    recurrent_inv = inversion_df_proc[inversion_df_proc['0_single_1_recur'] == 1]
-    single_event_inv = inversion_df_proc[inversion_df_proc['0_single_1_recur'] == 0]
+    recurrent_inv = inversion_df_proc[inversion_df_proc['0_single_1_recur_consensus'] == 1]
+    single_event_inv = inversion_df_proc[inversion_df_proc['0_single_1_recur_consensus'] == 0]
     logger.info(f"[{func_name}] Input inversion counts by type: Recurrent={len(recurrent_inv):,}, Single-Event={len(single_event_inv):,}")
     logger.info(f"   (Total potential inversions to match against: {len(recurrent_inv) + len(single_event_inv):,})")
 
@@ -924,11 +924,11 @@ def main():
         logger.info(f"  Inversion data columns: {inversion_df.columns.tolist()}")
         logger.info(f"  First 5 rows of inversion data:\n{inversion_df.head().to_string()}")
         # Count initial potential types from inversion file
-        if '0_single_1_recur' in inversion_df.columns:
-            raw_inv_type_counts = inversion_df['0_single_1_recur'].value_counts(dropna=False).to_dict()
+        if '0_single_1_recur_consensus' in inversion_df.columns:
+            raw_inv_type_counts = inversion_df['0_single_1_recur_consensus'].value_counts(dropna=False).to_dict()
             logger.info(f"  Initial type counts in {INVERSION_FILE} (0=Single, 1=Recurrent, NaN=Unknown): {raw_inv_type_counts}")
         else:
-            logger.warning(f" Column '0_single_1_recur' not found in {INVERSION_FILE} for initial type count.")
+            logger.warning(f" Column '0_single_1_recur_consensus' not found in {INVERSION_FILE} for initial type count.")
 
 
     except FileNotFoundError as e:
