@@ -493,12 +493,27 @@ def read_phy_sequences(filename):
 
         for line in lines[1:]:
             parts = line.split()
+            seq_found = None
+
             if len(parts) >= 2:
-                sequence_part = parts[-1]
-                if re.fullmatch(r'[ACGTN-]+', sequence_part, re.IGNORECASE):
-                    sequences.append(sequence_part.upper())
-                else:
-                    logger.add("PHYLIP Format Warning", f"Skipping malformed sequence line in {filename}: '{line}'")
+                # Standard case: space separated
+                candidate = parts[-1]
+                if re.fullmatch(r'[ACGTN-]+', candidate, re.IGNORECASE):
+                    seq_found = candidate
+
+            if not seq_found:
+                # Fallback case: fused lines (e.g. name >= 10 chars with no space padding)
+                # Look for the longest suffix of DNA characters at the end of the line.
+                # Since sample names typically end in _L or _R (which contain non-DNA chars),
+                # this regex should correctly isolate the sequence.
+                match = re.search(r'([ACGTN-]+)$', line, re.IGNORECASE)
+                if match:
+                    seq_found = match.group(1)
+
+            if seq_found:
+                sequences.append(seq_found.upper())
+            else:
+                logger.add("PHYLIP Format Warning", f"Skipping malformed sequence line in {filename}: '{line}'")
 
         if not sequences:
             logger.add("PHYLIP Format Error", f"No valid sequence lines found after header in: {filename}")
