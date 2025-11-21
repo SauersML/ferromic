@@ -233,12 +233,24 @@ def read_standard_phylip(path: str, n: int, m: int) -> List[Tuple[str,str]]:
             idx += 1
         if idx >= len(lines):
             raise PhylipParseError(f"Truncated first block at sequence {i+1}/{n}")
-        line = lines[idx]
+        raw_line = lines[idx]
         idx += 1
-        if len(line) < 10:
-            raise PhylipParseError("Standard PHYLIP requires >=10 chars for name field")
-        name = line[:10].strip()
-        seq_chunk = "".join(line[10:].split()).upper()
+        line = raw_line.rstrip("\n\r")
+        if line.strip() == "":
+            raise PhylipParseError("Standard PHYLIP line contains no name/sequence")
+
+        # PHYLIP allows a 10-character name field, but the writer in this project
+        # emits long labels separated from the sequence by whitespace.  Splitting
+        # on the first whitespace correctly recovers the full name in both cases
+        # and prevents the tail of a long name from being misinterpreted as
+        # sequence characters.
+        parts = line.strip().split(maxsplit=1)
+        if len(parts) < 2:
+            raise PhylipParseError(
+                f"Standard PHYLIP line missing sequence after name: '{raw_line}'"
+            )
+        name = parts[0]
+        seq_chunk = "".join(parts[1].split()).upper()
         if name == "":
             raise PhylipParseError("Empty name in standard PHYLIP")
         names.append(name)
