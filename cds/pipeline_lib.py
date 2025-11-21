@@ -169,7 +169,7 @@ PAML_OUT_DIR  = os.environ.get("PAML_OUT_DIR", "paml_runs")
 PAML_CACHE_DIR = os.environ.get("PAML_CACHE_DIR", "paml_cache")
 
 IQTREE_TIMEOUT = int(os.environ.get("IQTREE_TIMEOUT", "7200"))
-PAML_TIMEOUT   = int(os.environ.get("PAML_TIMEOUT", "3600"))
+PAML_TIMEOUT   = int(os.environ.get("PAML_TIMEOUT", "20880"))
 
 RUN_BRANCH_MODEL_TEST = False
 RUN_CLADE_MODEL_TEST = True
@@ -1176,7 +1176,7 @@ def parse_paml_lnl(outfile_path):
                     return float(match.group(1))
     raise ValueError(f"Could not parse lnL from {outfile_path}")
 def analyze_single_gene(gene_info, region_tree_path, region_label, paml_bin, cache_dir,
-                        timeout=3600,
+                        timeout=PAML_TIMEOUT,
                         run_branch_model=False,
                         run_clade_model=True,
                         proceed_on_terminal_only=False,
