@@ -16,11 +16,12 @@ mod tests {
         // This should be rejected because of the 'TT'.
         let variant_line = "chr1\t1000\t.\tA\tG,TT\t.\tPASS\t.\tGT:GQ\t1|2:40";
         let region = ZeroBasedHalfOpen { start: 999, end: 2000 };
+        let regions = [region];
 
         let result = process_variant(
             variant_line,
             "1",
-            region,
+            &regions,
             &mut missing_data_info,
             &sample_names,
             &indices,

@@ -21,10 +21,11 @@ fn test_variant_filtering_unit() -> Result<(), Box<dyn std::error::Error>> {
     // Test variant with high GQ values (should pass)
     let high_gq_variant = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:50\t0|1:60";
     let indices = vec![9, 10];
+    let regions = [region];
     let result_high = process_variant(
         high_gq_variant,
         "1",
-        region,
+        &regions,
         &mut missing_data_info,
         &sample_names,
         &indices,
@@ -38,8 +39,8 @@ fn test_variant_filtering_unit() -> Result<(), Box<dyn std::error::Error>> {
         result_high.is_ok(),
         "High GQ variant should be processed successfully"
     );
-    let (variant_high, is_valid_high, _) = result_high.unwrap().unwrap();
-    assert!(is_valid_high, "High GQ variant should be marked as valid");
+    let (variant_high, flags_high, _) = result_high.unwrap().unwrap();
+    assert!(flags_high == 0, "High GQ variant should be marked as valid (flags=0)");
     assert_eq!(variant_high.position, 999); // 1-based to 0-based conversion
 
     // Test variant with low GQ values (should be filtered)
@@ -47,7 +48,7 @@ fn test_variant_filtering_unit() -> Result<(), Box<dyn std::error::Error>> {
     let result_low = process_variant(
         low_gq_variant,
         "1",
-        region,
+        &regions,
         &mut missing_data_info,
         &sample_names,
         &indices,
@@ -61,9 +62,9 @@ fn test_variant_filtering_unit() -> Result<(), Box<dyn std::error::Error>> {
         result_low.is_ok(),
         "Low GQ variant should be processed successfully"
     );
-    let (variant_low, is_valid_low, _) = result_low.unwrap().unwrap();
+    let (variant_low, flags_low, _) = result_low.unwrap().unwrap();
     assert!(
-        !is_valid_low,
+        flags_low != 0,
         "Low GQ variant should be marked as invalid (filtered)"
     );
     assert_eq!(variant_low.position, 1000); // 1-based to 0-based conversion
