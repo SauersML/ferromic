@@ -1003,8 +1003,17 @@ def parse_simple_paml_output(outfile_path):
 
 def parse_h1_paml_output(outfile_path):
     params = {'kappa': np.nan, 'omega_background': np.nan, 'omega_direct': np.nan, 'omega_inverted': np.nan}
+
+    if not os.path.exists(outfile_path):
+        raise RuntimeError(f"PAML output file missing: {outfile_path}")
+
     omega_lines = []
     with open(outfile_path, 'r') as f:
+        content = f.read()
+        if not content.strip():
+            raise RuntimeError(f"PAML output file is empty: {outfile_path}")
+
+        f.seek(0)
         for line in f:
             if line.lstrip().startswith('kappa'):
                 m = re.search(r'kappa \(ts/tv\)\s*=\s*(' + FLOAT_REGEX + ')', line)
@@ -1039,11 +1048,14 @@ def parse_h1_cmc_paml_output(outfile_path):
         'cmc_omega2_inverted': np.nan,
     }
 
-    try:
-        with open(outfile_path, 'r', errors='ignore') as f:
-            text = f.read()
-    except Exception:
-        return params
+    if not os.path.exists(outfile_path):
+        raise RuntimeError(f"PAML output file missing: {outfile_path}")
+
+    with open(outfile_path, 'r', errors='ignore') as f:
+        text = f.read()
+
+    if not text.strip():
+        raise RuntimeError(f"PAML output file is empty: {outfile_path}")
 
     m = re.search(r'\bkappa\s*\(ts/tv\)\s*[=:]\s*(' + F + r')', text, re.I)
     if m: params['cmc_kappa'] = float(m.group(1))
