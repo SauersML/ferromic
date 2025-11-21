@@ -779,6 +779,8 @@ pub fn process_variants(
     mask_intervals: Option<&[(i64, i64)]>,
     temp_path: &Path,
     dense_matrix: Option<&DenseGenotypeMatrix>,
+    extended_variants: Option<&[Variant]>,
+    extended_allele_infos: Option<&[Option<(char, Vec<char>)>]>,
 ) -> Result<Option<(usize, f64, f64, usize, Vec<SiteDiversity>)>, VcfError> {
     set_stage(ProcessingStage::VariantAnalysis);
 
@@ -1100,8 +1102,8 @@ pub fn process_variants(
         ));
 
         if let Err(e) = make_sequences(
-            variants,
-            allele_infos,
+            extended_variants.unwrap_or(variants),
+            extended_allele_infos.unwrap_or(allele_infos),
             sample_names,
             haplotype_group,
             sample_filter,
@@ -2438,19 +2440,44 @@ fn process_single_config_entry(
 
     update_step_progress(1, "Analyzing variant statistics");
 
-    // UNFILTERED
-    let (region_variants_unfiltered, region_allele_infos_unfiltered): (Vec<Variant>, Vec<Option<(char, Vec<char>)>>) = all_variants
+    // UNFILTERED (extended)
+    // all_variants and all_allele_infos are already for the extended region.
+    // We just need to clone them or treat them as the source for extended sequences.
+    // Since we need to pass slices or Vecs, and VariantInvocation takes references,
+    // we can just use all_variants directly if we change logic, but let's stick to explicit naming.
+
+    // UNFILTERED core
+    let (region_variants_unfiltered, region_allele_infos_unfiltered): (
+        Vec<Variant>,
+        Vec<Option<(char, Vec<char>)>>,
+    ) = all_variants
         .iter()
         .zip(all_allele_infos.iter())
         .filter(|(v, _)| entry.interval.contains(ZeroBasedPosition(v.position)))
         .map(|(v, a)| (v.clone(), a.clone()))
         .unzip();
 
-    // FILTERED
-    let (region_variants_filtered, region_allele_infos_filtered): (Vec<Variant>, Vec<Option<(char, Vec<char>)>>) = filtered_idxs
+    // FILTERED core
+    let (region_variants_filtered, region_allele_infos_filtered): (
+        Vec<Variant>,
+        Vec<Option<(char, Vec<char>)>>,
+    ) = filtered_idxs
         .iter()
         .map(|&i| (&all_variants[i], &all_allele_infos[i]))
         .filter(|(v, _)| entry.interval.contains(ZeroBasedPosition(v.position)))
+        .map(|(v, a)| (v.clone(), a.clone()))
+        .unzip();
+
+    // FILTERED extended
+    // We need the extended set of variants that passed filters.
+    // filtered_idxs refers to indices in all_variants (which is extended).
+    let (extended_variants_filtered, extended_allele_infos_filtered): (
+        Vec<Variant>,
+        Vec<Option<(char, Vec<char>)>>,
+    ) = filtered_idxs
+        .iter()
+        .map(|&i| (&all_variants[i], &all_allele_infos[i]))
+        // No filter by entry.interval here, keep everything in extended region
         .map(|(v, a)| (v.clone(), a.clone()))
         .unzip();
 
@@ -2748,6 +2775,8 @@ fn process_single_config_entry(
         maybe_adjusted_len: Option<i64>,
         filtered_positions: &'a HashSet<i64>,
         dense_matrix: Option<&'a DenseGenotypeMatrix>,
+        extended_variants: Option<&'a [Variant]>,
+        extended_allele_infos: Option<&'a [Option<(char, Vec<char>)>]>,
     }
 
     // Set up the four analysis invocations (filtered/unfiltered × group 0/1)
@@ -2755,6 +2784,10 @@ fn process_single_config_entry(
     init_step_progress("Analyzing haplotype groups", 4);
 
     let empty_filtered_positions: HashSet<i64> = HashSet::new();
+
+    // all_variants and all_allele_infos act as the "extended unfiltered" sets.
+    let all_variants_slice = &all_variants[..];
+    let all_allele_infos_slice = &all_allele_infos[..];
 
     let invocations = [
         VariantInvocation {
@@ -2766,6 +2799,8 @@ fn process_single_config_entry(
             maybe_adjusted_len: Some(filtered_adjusted_sequence_length),
             filtered_positions: &filtered_positions_in_region,
             dense_matrix: dense_filtered.as_ref(),
+            extended_variants: Some(&extended_variants_filtered),
+            extended_allele_infos: Some(&extended_allele_infos_filtered),
         },
         VariantInvocation {
             group_id: 1,
@@ -2776,6 +2811,8 @@ fn process_single_config_entry(
             maybe_adjusted_len: Some(filtered_adjusted_sequence_length),
             filtered_positions: &filtered_positions_in_region,
             dense_matrix: dense_filtered.as_ref(),
+            extended_variants: Some(&extended_variants_filtered),
+            extended_allele_infos: Some(&extended_allele_infos_filtered),
         },
         VariantInvocation {
             group_id: 0,
@@ -2786,6 +2823,8 @@ fn process_single_config_entry(
             maybe_adjusted_len: Some(adjusted_sequence_length),
             filtered_positions: &empty_filtered_positions,
             dense_matrix: dense_unfiltered.as_ref(),
+            extended_variants: Some(all_variants_slice),
+            extended_allele_infos: Some(all_allele_infos_slice),
         },
         VariantInvocation {
             group_id: 1,
@@ -2796,6 +2835,8 @@ fn process_single_config_entry(
             maybe_adjusted_len: Some(adjusted_sequence_length),
             filtered_positions: &empty_filtered_positions,
             dense_matrix: dense_unfiltered.as_ref(),
+            extended_variants: Some(all_variants_slice),
+            extended_allele_infos: Some(all_allele_infos_slice),
         },
     ];
 
@@ -2830,6 +2871,8 @@ fn process_single_config_entry(
             mask_intervals_slice,
             temp_path,
             call.dense_matrix,
+            call.extended_variants,
+            call.extended_allele_infos,
         )?;
 
         if let Some(x) = stats_opt {
