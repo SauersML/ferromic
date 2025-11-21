@@ -480,6 +480,13 @@ class PiStructureMetrics:
     spearman_recur_inv: SpearmanResult   # Group 1, Recur 1
     spearman_single_dir: SpearmanResult  # Group 0, Recur 0
 
+    # Spearman Decay Metrics (Median within 2kb bins)
+    spearman_overall_median: SpearmanResult
+    spearman_single_inv_median: SpearmanResult
+    spearman_recur_dir_median: SpearmanResult
+    spearman_recur_inv_median: SpearmanResult
+    spearman_single_dir_median: SpearmanResult
+
     unique_inversions: int
 
 
@@ -587,7 +594,10 @@ def _calc_pi_structure_metrics() -> PiStructureMetrics:
 
     # Spearman Accumulators (Group, Recurrence) -> list of window arrays
     # Keys: (0, 0), (0, 1), (1, 0), (1, 1)
-    acc_spearman: dict[tuple[int, int], list[np.ndarray]] = {
+    acc_spearman_mean: dict[tuple[int, int], list[np.ndarray]] = {
+        (0, 0): [], (0, 1): [], (1, 0): [], (1, 1): []
+    }
+    acc_spearman_median: dict[tuple[int, int], list[np.ndarray]] = {
         (0, 0): [], (0, 1): [], (1, 0): [], (1, 1): []
     }
 
@@ -660,16 +670,31 @@ def _calc_pi_structure_metrics() -> PiStructureMetrics:
                 subgroup_acc.add_edge_middle(values, hap_count=hap_count)
 
         # --- Logic for Spearman (Threshold 100kb) ---
-        # "first 100 kbp ... total length greater than 100 kbp"
+        # "folded" 100 kbp ... (average of start and reversed end)
         if values.size >= 100_000:
-            first_100k = values[:100_000]
-            # Reshape to 2kb windows (100,000 / 2,000 = 50 windows)
-            reshaped = first_100k.reshape(50, 2_000)
-            window_means = np.nanmean(reshaped, axis=1)
+            # 1. Left 100kb
+            left_100k = values[:100_000]
+            left_wins_mean = np.nanmean(left_100k.reshape(50, 2_000), axis=1)
+            left_wins_median = np.nanmedian(left_100k.reshape(50, 2_000), axis=1)
+
+            # 2. Right 100kb (Reversed so index 0 is the breakpoint)
+            right_100k = values[-100_000:][::-1]
+            right_wins_mean = np.nanmean(right_100k.reshape(50, 2_000), axis=1)
+            right_wins_median = np.nanmedian(right_100k.reshape(50, 2_000), axis=1)
+
+            # 3. Fold (Average) them
+            # This treats both edges as distance=0
+            folded_means = np.nanmean(
+                np.vstack([left_wins_mean, right_wins_mean]), axis=0
+            )
+            folded_medians = np.nanmean(
+                np.vstack([left_wins_median, right_wins_median]), axis=0
+            )
 
             key = (group_id, recur_flag)
-            if key in acc_spearman:
-                acc_spearman[key].append(window_means)
+            if key in acc_spearman_mean:
+                acc_spearman_mean[key].append(folded_means)
+                acc_spearman_median[key].append(folded_medians)
 
     current_header: str | None = None
     sequence_lines: list[str] = []
@@ -739,22 +764,31 @@ def _calc_pi_structure_metrics() -> PiStructureMetrics:
     # --- Compile Spearman Metrics ---
     # 1. Overall (All 4 subgroups)
     all_spearman_data = (
-        acc_spearman[(0, 0)] + acc_spearman[(0, 1)] +
-        acc_spearman[(1, 0)] + acc_spearman[(1, 1)]
+        acc_spearman_mean[(0, 0)] + acc_spearman_mean[(0, 1)] +
+        acc_spearman_mean[(1, 0)] + acc_spearman_mean[(1, 1)]
     )
     res_overall = _calc_spearman(all_spearman_data)
+    all_spearman_median_data = (
+        acc_spearman_median[(0, 0)] + acc_spearman_median[(0, 1)] +
+        acc_spearman_median[(1, 0)] + acc_spearman_median[(1, 1)]
+    )
+    res_overall_median = _calc_spearman(all_spearman_median_data)
 
     # 2. Single-Inv (G1, R0)
-    res_single_inv = _calc_spearman(acc_spearman[(1, 0)])
+    res_single_inv = _calc_spearman(acc_spearman_mean[(1, 0)])
+    res_single_inv_median = _calc_spearman(acc_spearman_median[(1, 0)])
 
     # 3. Recur-Dir (G0, R1)
-    res_recur_dir = _calc_spearman(acc_spearman[(0, 1)])
+    res_recur_dir = _calc_spearman(acc_spearman_mean[(0, 1)])
+    res_recur_dir_median = _calc_spearman(acc_spearman_median[(0, 1)])
 
     # 4. Recur-Inv (G1, R1)
-    res_recur_inv = _calc_spearman(acc_spearman[(1, 1)])
+    res_recur_inv = _calc_spearman(acc_spearman_mean[(1, 1)])
+    res_recur_inv_median = _calc_spearman(acc_spearman_median[(1, 1)])
 
     # 5. Single-Dir (G0, R0)
-    res_single_dir = _calc_spearman(acc_spearman[(0, 0)])
+    res_single_dir = _calc_spearman(acc_spearman_mean[(0, 0)])
+    res_single_dir_median = _calc_spearman(acc_spearman_median[(0, 0)])
 
     return PiStructureMetrics(
         dir_stats=stats_0,
@@ -768,6 +802,12 @@ def _calc_pi_structure_metrics() -> PiStructureMetrics:
         spearman_recur_dir=res_recur_dir,
         spearman_recur_inv=res_recur_inv,
         spearman_single_dir=res_single_dir,
+
+        spearman_overall_median=res_overall_median,
+        spearman_single_inv_median=res_single_inv_median,
+        spearman_recur_dir_median=res_recur_dir_median,
+        spearman_recur_inv_median=res_recur_inv_median,
+        spearman_single_dir_median=res_single_dir_median,
 
         unique_inversions=len(qualifying_regions),
     )
@@ -1088,6 +1128,14 @@ def summarize_pi_structure() -> List[str]:
     lines.append(_fmt_spearman(metrics.spearman_recur_dir, "Recurrent Direct (G0, R1)"))
     lines.append(_fmt_spearman(metrics.spearman_recur_inv, "Recurrent Inverted (G1, R1)"))
     lines.append(_fmt_spearman(metrics.spearman_single_dir, "Single-Event Direct (G0, R0)"))
+
+    lines.append("")
+    lines.append("Internal decay (median within 2kb bins, Spearman's ρ for first 100kb, loci ≥100kb):")
+    lines.append(_fmt_spearman(metrics.spearman_overall_median, "Overall (All Consensus 0+1)"))
+    lines.append(_fmt_spearman(metrics.spearman_single_inv_median, "Single-Event Inverted (G1, R0)"))
+    lines.append(_fmt_spearman(metrics.spearman_recur_dir_median, "Recurrent Direct (G0, R1)"))
+    lines.append(_fmt_spearman(metrics.spearman_recur_inv_median, "Recurrent Inverted (G1, R1)"))
+    lines.append(_fmt_spearman(metrics.spearman_single_dir_median, "Single-Event Direct (G0, R0)"))
 
     return lines
 
