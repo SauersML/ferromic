@@ -52,11 +52,11 @@ def group_label(g: int) -> str:
     return "Direct" if g == 0 else "Inverted"
 
 # ===========================
-# Load inv_info.tsv
+# Load inv_properties.tsv
 # ===========================
 def load_inv_info(path: str):
     if not os.path.exists(path):
-        sys.exit(f"ERROR: inv_info.tsv not found at {path}")
+        sys.exit(f"ERROR: inv_properties.tsv not found at {path}")
 
     with open(path, "r", newline="") as f:
         reader = csv.DictReader(f, delimiter="\t")
@@ -74,7 +74,7 @@ def load_inv_info(path: str):
         col_cons = find_col("0_single_1_recur_consensus")
 
         if not all([col_chr, col_start, col_end, col_cons]):
-            sys.exit("ERROR: inv_info.tsv missing required columns. Found: " + ", ".join(header))
+            sys.exit("ERROR: inv_properties.tsv missing required columns. Found: " + ", ".join(header))
 
         rows_all = []
         rows_by_cons = {0: [], 1: []}
@@ -404,8 +404,8 @@ def main():
     session_tmp_dir = os.path.join(ram_root, f"phy_pairs_tmp_{os.getpid()}")
     os.makedirs(session_tmp_dir, exist_ok=True)
 
-    print(">>> Loading inv_info.tsv ...")
-    rows_all, rows_by_cons, exact_triplets, inv_by_chr = load_inv_info("inv_info.tsv")
+    print(">>> Loading inv_properties.tsv ...")
+    rows_all, rows_by_cons, exact_triplets, inv_by_chr = load_inv_info("inv_properties.tsv")
     print(f"    Total inv_info rows (consensus in {{0,1}}): {len(rows_all)}")
     print(f"    Recurrent rows: {len(rows_by_cons[1])}")
     print(f"    Single-event rows: {len(rows_by_cons[0])}")
@@ -434,6 +434,37 @@ def main():
 
     # Gene-name anomaly tracking
     gene_name_anomalies = [d for d in cds_files if d["_gene_name_anom"] or d["_bad_gene_id"] or d["_bad_tx_id"]]
+
+    # Detect multiple CDS alignments for the same (gene, inversion, group)
+    # early, before any downstream aggregation. These duplicates typically
+    # arise when multiple transcript alignments exist for the same gene and
+    # inversion interval within a single group, which would later trigger a
+    # hard failure in the jackknife stage when averaging is disallowed.
+    print(">>> Checking for duplicate CDS alignments per (gene, inversion, group) ...")
+    dup_tracker: Dict[Tuple[str, str, int], List[Dict]] = defaultdict(list)
+    for rec in cds_files:
+        inv_id = f"{rec['chr']}:{rec['inv_start']}-{rec['inv_end']}"
+        key = (rec["gene_name"], inv_id, rec["phy_group"])
+        dup_tracker[key].append(rec)
+
+    dup_examples = [(k, v) for k, v in dup_tracker.items() if len(v) > 1]
+    if dup_examples:
+        msg_lines = [
+            "FATAL: Multiple CDS alignments detected for the same (gene, inversion, group).",
+            "This usually means multiple transcript alignments exist for the same locus.",
+            "Examples (up to 10):",
+        ]
+        for (g, inv, grp), recs in dup_examples[:10]:
+            txs = ", ".join(sorted({r["transcript_id"] for r in recs}))
+            fns = ", ".join(sorted(r["filename"] for r in recs))
+            msg_lines.append(
+                f"  gene={g}  inv={inv}  group={'Inverted' if grp==1 else 'Direct'}  count={len(recs)}"
+            )
+            msg_lines.append(f"    transcripts: {txs}")
+            msg_lines.append(f"    files      : {fns}")
+        msg_lines.append("Please deduplicate upstream so only one alignment remains per key.")
+        print("\n".join(msg_lines))
+        sys.exit(1)
 
     # Categories
     categories = defaultdict(set)  # (dataset, consensus, group) -> set(filenames)

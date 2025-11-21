@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 # ====================== Paths ======================
-INV_FILE   = Path("inv_info.tsv")          # required
+INV_FILE   = Path("inv_properties.tsv")          # required
 SUMMARY    = Path("output.csv")            # required
 OUT_TSV    = Path("per_inversion_raw.tsv") # output (one row per inversion)
 
@@ -59,14 +59,14 @@ def parse_freq(x) -> float:
 def load_inversions(inv_path: Path) -> pd.DataFrame:
     if not inv_path.is_file():
         raise FileNotFoundError(f"Required inversion file not found: {inv_path}")
-    dbg("Loading inversion mapping from inv_info.tsv ...")
+    dbg("Loading inversion mapping from inv_properties.tsv ...")
     df = pd.read_csv(inv_path, sep=None, engine="python", dtype=str)
-    dbg(f"inv_info.tsv columns: {list(df.columns)}")
+    dbg(f"inv_properties.tsv columns: {list(df.columns)}")
 
     need = ["Chromosome", "Start", "End", "0_single_1_recur_consensus", "Inverted_AF"]
     miss = [c for c in need if c not in df.columns]
     if miss:
-        raise RuntimeError(f"inv_info.tsv missing required columns: {miss}")
+        raise RuntimeError(f"inv_properties.tsv missing required columns: {miss}")
 
     out = pd.DataFrame({
         "chr": df["Chromosome"].map(norm_chr),
@@ -93,7 +93,7 @@ def load_inversions(inv_path: Path) -> pd.DataFrame:
     dups = dup_counts[dup_counts > 1]
     if len(dups) > 0:
         examples = out.merge(dups.rename("n"), on=["chr","start","end"])
-        err("Duplicate exact inversion coordinates detected in inv_info.tsv (this is a hard error).")
+        err("Duplicate exact inversion coordinates detected in inv_properties.tsv (this is a hard error).")
         err("Examples of duplicates:\n" + str(examples.head(10)))
         raise RuntimeError("Duplicate exact inversion coordinates in inversion table.")
 
@@ -237,7 +237,7 @@ def main():
     # Join to per-inversion table
     out = inv.merge(matched_sum, on=["chr","start","end"], how="inner", validate="one_to_one")
     if len(out) != len(inv):
-        err(f"Joined rows = {len(out)}, expected {len(inv)} from inv_info.tsv")
+        err(f"Joined rows = {len(out)}, expected {len(inv)} from inv_properties.tsv")
         raise RuntimeError("Join did not yield 1 row per inversion.")
 
     # Build human-readable TSV (capitalize first word; no abbreviations except ID)
@@ -264,8 +264,8 @@ def main():
     c1 = pearson_corr(out["Inverted_AF"], out["inversion_freq_no_filter"])
     c2 = pearson_corr(out["Inverted_AF"], out["inversion_freq_filter"])
     print("\nCorrelation checks (Pearson, pairwise complete observations):")
-    print(f"- Inversion allele frequency (inv_info.tsv) vs inversion frequency without filter (output.csv): {c1 if not math.isnan(c1) else float('nan'):.6f}")
-    print(f"- Inversion allele frequency (inv_info.tsv) vs inversion frequency with filter    (output.csv): {c2 if not math.isnan(c2) else float('nan'):.6f}")
+    print(f"- Inversion allele frequency (inv_properties.tsv) vs inversion frequency without filter (output.csv): {c1 if not math.isnan(c1) else float('nan'):.6f}")
+    print(f"- Inversion allele frequency (inv_properties.tsv) vs inversion frequency with filter    (output.csv): {c2 if not math.isnan(c2) else float('nan'):.6f}")
 
     # Exact mismatch report (printed only)
     mismatches = []
@@ -278,7 +278,7 @@ def main():
         mismatches.append({
             "Inversion ID": r.inversion_id,
             "Region ID": region_id(r.chr, int(r.start), int(r.end)),
-            "Inversion allele frequency (inv_info.tsv)": a,
+            "Inversion allele frequency (inv_properties.tsv)": a,
             "Inversion frequency without filter (output.csv)": nf,
             "Inversion frequency with filter (output.csv)": ff,
         })
@@ -286,10 +286,10 @@ def main():
     if not mismatches:
         print("\nAll inversions have exact matching frequencies across the three sources (exact comparison).")
     else:
-        print("\nFrequency mismatches (any where inv_info.tsv differs from output.csv):")
+        print("\nFrequency mismatches (any where inv_properties.tsv differs from output.csv):")
         dfm = pd.DataFrame(mismatches, columns=[
             "Inversion ID","Region ID",
-            "Inversion allele frequency (inv_info.tsv)",
+            "Inversion allele frequency (inv_properties.tsv)",
             "Inversion frequency without filter (output.csv)",
             "Inversion frequency with filter (output.csv)",
         ])

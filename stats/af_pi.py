@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 # --- Configuration ---
-INV_INFO_FILE = "inv_info.tsv"
+INV_INFO_FILE = "inv_properties.tsv"
 STATS_FILE = "output.csv"
 
 # Columns to use (Reduced)
