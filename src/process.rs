@@ -4098,25 +4098,20 @@ pub fn process_variant(
 
     let zero_based_position = one_based_vcf_position.zero_based(); // Zero-based coordinate
 
+    let mut filtered_due_to_allow = false;
+    let mut filtered_due_to_mask = false;
+
     // Check allow regions
     if let Some(allow_regions_chr) = allow_regions.and_then(|ar| ar.get(vcf_chr)) {
         if !position_in_regions(zero_based_position, allow_regions_chr) {
-            filtering_stats._filtered_variants += 1;
+            filtered_due_to_allow = true;
             filtering_stats.filtered_due_to_allow += 1;
-            filtering_stats
-                .filtered_positions
-                .insert(zero_based_position);
             filtering_stats.add_example(format!("{}: Filtered due to allow", line.trim()));
-            return Ok(None);
         }
     } else if allow_regions.is_some() {
-        filtering_stats._filtered_variants += 1;
+        filtered_due_to_allow = true;
         filtering_stats.filtered_due_to_allow += 1;
-        filtering_stats
-            .filtered_positions
-            .insert(zero_based_position);
         filtering_stats.add_example(format!("{}: Filtered due to allow", line.trim()));
-        return Ok(None);
     }
 
     // Check mask regions
@@ -4137,13 +4132,9 @@ pub fn process_variant(
         });
 
         if is_masked {
-            filtering_stats._filtered_variants += 1;
+            filtered_due_to_mask = true;
             filtering_stats.filtered_due_to_mask += 1;
-            filtering_stats
-                .filtered_positions
-                .insert(zero_based_position);
             filtering_stats.add_example(format!("{}: Filtered due to mask", line.trim()));
-            return Ok(None);
         }
     } else if mask_regions.is_some() {
         // Chromosome not found in mask regions, but mask was provided
@@ -4161,29 +4152,23 @@ pub fn process_variant(
     // Move alt_alleles split up
     let alt_alleles: Vec<&str> = fields[4].split(',').collect();
 
+    let mut filtered_due_to_indel = false;
+
     // Check REF length
     if fields[3].len() != 1 {
-        filtering_stats._filtered_variants += 1;
-        filtering_stats
-            .filtered_positions
-            .insert(zero_based_position);
+        filtered_due_to_indel = true;
         filtering_stats.add_example(format!("{}: Filtered due to REF INDEL", line.trim()));
-        return Ok(None);
     }
 
     // Check ALT length (any of them)
-    if alt_alleles.iter().any(|a| a.len() != 1) {
-        filtering_stats._filtered_variants += 1;
+    if !filtered_due_to_indel && alt_alleles.iter().any(|a| a.len() != 1) {
+        filtered_due_to_indel = true;
         if alt_alleles.iter().any(|a| a.len() > 1) {
             filtering_stats.mnp_variants += 1;
             filtering_stats.add_example(format!("{}: Filtered due to ALT MNP", line.trim()));
         } else {
             filtering_stats.add_example(format!("{}: Filtered due to ALT INDEL", line.trim()));
         }
-        filtering_stats
-            .filtered_positions
-            .insert(zero_based_position);
-        return Ok(None);
     }
     // --- END LENGTH GUARD ---
 
@@ -4285,26 +4270,15 @@ pub fn process_variant(
     }
 
     let has_missing_genotypes = raw_genotypes.iter().any(|gt| gt.is_none());
-    let passes_filters = !sample_has_low_gq && !has_missing_genotypes;
+    let passes_filters = !filtered_due_to_allow
+        && !filtered_due_to_mask
+        && !filtered_due_to_indel
+        && !sample_has_low_gq
+        && !has_missing_genotypes;
 
     if sample_has_low_gq {
-        // Skip this variant
         filtering_stats.low_gq_variants += 1;
-        filtering_stats._filtered_variants += 1;
-        filtering_stats
-            .filtered_positions
-            .insert(zero_based_position);
         filtering_stats.add_example(format!("{}: Filtered due to low GQ", line.trim()));
-
-        let packed_genotypes: Vec<Option<PackedGenotype>> = raw_genotypes
-            .into_iter()
-            .map(|gt| gt.map(PackedGenotype::from_vec))
-            .collect();
-        let variant = Variant {
-            position: zero_based_position,
-            genotypes: CompressedGenotypes::new(packed_genotypes),
-        };
-        return Ok(Some((variant, passes_filters, allele_info)));
     }
 
     if has_missing_genotypes {
@@ -4313,16 +4287,12 @@ pub fn process_variant(
     }
 
     // Update filtering stats if variant is filtered out
+    // This handles all filter types: mask, allow, indel, low GQ, missing data.
     if !passes_filters {
         filtering_stats._filtered_variants += 1;
         filtering_stats
             .filtered_positions
             .insert(zero_based_position);
-
-        if has_missing_genotypes {
-            filtering_stats.missing_data_variants += 1;
-            filtering_stats.add_example(format!("{}: Filtered due to missing data", line.trim()));
-        }
     }
 
     let packed_genotypes: Vec<Option<PackedGenotype>> = raw_genotypes
