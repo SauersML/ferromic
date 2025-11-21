@@ -982,6 +982,7 @@ def summarize_linear_model() -> List[str]:
 
     lines = ["Orientation × recurrence linear models (replicated strict logic):"]
     lines.append(
+
         "  Model definitions (mirroring stats/inv_dir_recur_model.py):"
     )
     lines.append(
@@ -1006,7 +1007,11 @@ def summarize_linear_model() -> List[str]:
     lines.append(f"  Detection floor applied before logs: ε = {_fmt(eps, 6)}.")
 
     # Model A (Basic)
-    lines.append("  [Model A] Basic interaction (Δ-logπ ~ Recurrence):")
+    lines.append(
+        "  [Model A] Δ-logπ = log(π_inv+ε) – log(π_dir+ε) ~ 1 + Recurrent (HC3 SEs). "
+        "No weights or covariates; effects reported for single-event, recurrent, "
+        "interaction, and pooled Δ-logπ."
+    )
     try:
         _, tabA, dfA = inv_dir_recur_model.run_model_A(matched, eps=eps, nonzero_only=False)
         for row in tabA.itertuples():
@@ -1018,7 +1023,11 @@ def summarize_linear_model() -> List[str]:
         lines.append(f"    Model A failed: {exc}")
 
     # Model B (Fixed Effects)
-    lines.append("  [Model B] Fixed-effects validation (Cluster-robust):")
+    lines.append(
+        "  [Model B] log(π+ε) ~ Inverted + Inverted:Recurrent + C(region_id); "
+        "cluster-robust by region_id. Recurrence main effect absorbed by fixed "
+        "effects; contrasts give single-event, recurrent, and interaction pairs."
+    )
     try:
         _, tabB, _, _ = inv_dir_recur_model.run_model_B(matched, eps=eps)
         for row in tabB.itertuples():
@@ -1030,10 +1039,19 @@ def summarize_linear_model() -> List[str]:
         lines.append(f"    Model B failed: {exc}")
 
     # Model C (Covariate Adjusted)
-    lines.append("  [Model C] Covariate-adjusted (Recurrence + formation/size/AF):")
+    lines.append(
+        "  [Model C] Δ-logπ ~ 1 + Recurrent + z-scored covariates from inv_properties.tsv "
+        "(Number_recurrent_events ln1p, Size_.kbp. ln, Inverted_AF, Formation_rate_per_generation ln). "
+        "HC3 SEs; rows require complete covariates with missingness dummies excluded."
+    )
     try:
         _, tabC, _, _ = inv_dir_recur_model.run_model_C(
             matched, invinfo_path=str(inv_path), eps=eps, nonzero_only=False
+        )
+        covariate_rows = tabC.iloc[3:]
+        lines.append(
+            "    Covariates included in fit: "
+            + (", ".join(covariate_rows.effect) if not covariate_rows.empty else "None (dropped as constant)")
         )
         for row in tabC.itertuples():
             lines.append(
