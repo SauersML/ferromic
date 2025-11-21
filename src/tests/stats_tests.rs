@@ -717,11 +717,12 @@ mod tests {
         // VCF line with one genotype below the GQ threshold
         let variant_line = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:20\t0|1:40";
         let region = ZeroBasedHalfOpen { start: 999, end: 2000 };
+        let regions = [region];
         let indices = vec![9, 10];
         let result = process_variant(
             variant_line,
             "1",
-            region,
+            &regions,
             &mut missing_data_info,
             &sample_names,
             &indices,
@@ -735,10 +736,11 @@ mod tests {
         assert!(result.is_ok());
 
         // Assert that the variant is returned but marked as invalid (filtered out)
-        assert_eq!(
-            result.unwrap(),
-            Some((expected_variant, false, Some((999, 'A', vec!['T']))))
-        );
+        // flags != 0 means invalid
+        let (variant, flags, info) = result.unwrap().unwrap();
+        assert_eq!(variant, expected_variant);
+        assert_ne!(flags, 0);
+        assert_eq!(info, Some((999, 'A', vec!['T'])));
     }
 
     #[test]
@@ -751,11 +753,12 @@ mod tests {
 
         let valid_variant_line = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:35\t0|1:40";
         let region = ZeroBasedHalfOpen { start: 999, end: 2000 };
+        let regions = [region];
         let indices = vec![9, 10];
         let result = process_variant(
             valid_variant_line,
             "1",
-            region,
+            &regions,
             &mut missing_data_info,
             &sample_names,
             &indices,
@@ -768,8 +771,8 @@ mod tests {
         // Variant should be Some because all samples have GQ >= min_gq
         assert!(result.is_some());
 
-        if let Some((variant, is_valid, allele_info)) = result {
-            assert!(is_valid);
+        if let Some((variant, flags, allele_info)) = result {
+            assert_eq!(flags, 0); // 0 means valid (FLAG_PASS)
             let expected: Vec<Option<PackedGenotype>> = vec![
                 Some(PackedGenotype::from_vec(vec![0, 0])),
                 Some(PackedGenotype::from_vec(vec![0, 1])),
@@ -977,10 +980,11 @@ mod tests {
             let mut missing_data_info = MissingDataInfo::default();
             let mut filtering_stats = FilteringStats::default();
             let region = ZeroBasedHalfOpen { start: 999, end: 3001 };
+            let regions = [region];
             let result = process_variant(
                 line,
                 "1",
-                region,
+                &regions,
                 &mut missing_data_info,
                 &sample_names,
                 &indices,
