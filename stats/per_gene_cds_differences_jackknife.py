@@ -158,16 +158,17 @@ def main():
         df0[c] = pd.to_numeric(df0[c], errors="coerce")
 
     # Filter: CDS only, exact match only, consensus in {0,1}, groups in {0,1}, k>=3
+    # Note: strict inv_exact_match filter disabled to allow approximate overlaps
     df = df0[
         (df0["dataset"] == "CDS") &
-        (df0["inv_exact_match"] == 1) &
+        #(df0["inv_exact_match"] == 1) &
         (df0["consensus"].isin([0,1])) &
         (df0["phy_group"].isin([0,1])) &
         (df0["n_sequences"] >= 3)
     ].copy()
 
     if df.empty:
-        print("No alignments remain after filtering (CDS, exact-match, consensus ∈ {0,1}, k ≥ 3).")
+        print("No alignments remain after filtering (CDS, consensus ∈ {0,1}, k ≥ 3).")
         return
 
     # normalize/strings

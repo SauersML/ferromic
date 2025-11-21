@@ -18,13 +18,10 @@ env/
 *.tmp
 *.phy
 *.swp
-*.csv
-*.tsv
 *.vcf
 *.bed
 *.png
 *.pdf
-*.txt
 .DS_Store
 web/figures-site/public/downloads/supplementary_tables.xlsx
 
