@@ -184,6 +184,9 @@ def download_latest_artifacts():
         "run-vcf-phy-outputs": {"target": "phy_outputs.zip", "action": "copy_inner_zip"},
         "run-vcf-falsta": {"target": "per_site_diversity_output.falsta.gz", "action": "extract_file"},
         "run-vcf-hudson-fst": {"target": "FST_data.tsv.gz", "action": "extract_renamed"},
+        # IMPORTANT: Do NOT download run-vcf-metadata to inv_properties.tsv.
+        # run-vcf-metadata contains phy_metadata.tsv, which is different from inv_properties.tsv.
+        # We store it as phy_metadata.tsv to avoid overwriting the master inversion index.
         "run-vcf-metadata": {"target": "phy_metadata.tsv", "action": "extract_renamed"},
         "run-vcf-output-csv": {"target": "output.csv", "action": "extract_file"},
     }
@@ -342,6 +345,17 @@ def run_fresh_cds_pipeline():
             except Exception as e:
                 print(f"FATAL: Jackknife analysis failed: {e}")
                 sys.exit(1)
+
+            print("... Copying generated CDS tables to data/ ...")
+            for filename in [
+                "cds_identical_proportions.tsv",
+                "gene_inversion_direct_inverted.tsv",
+                "region_identical_proportions.tsv",
+                "skipped_details.tsv",
+            ]:
+                if Path(filename).exists():
+                    shutil.copy2(filename, DATA_DIR / filename)
+                    print(f"  Copied {filename}")
 
             print("\n>>> PIPELINE: GENERATION COMPLETE. Proceeding to manuscript report...\n")
 
@@ -1786,6 +1800,9 @@ def main() -> None:
     print(text)
     REPORT_PATH.write_text(text)
     print(f"\nSaved report to {REPORT_PATH.relative_to(Path.cwd())}")
+
+    shutil.copy2(REPORT_PATH, DATA_DIR / "replicate_manuscript_statistics.txt")
+    print(f"Copied report to {DATA_DIR / 'replicate_manuscript_statistics.txt'}")
 
 
 if __name__ == "__main__":
