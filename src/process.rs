@@ -2022,7 +2022,7 @@ fn process_chromosome_entries(
     let mut main_csv_tuples: Vec<(
         CsvRowData,
         Vec<(i64, f64, f64, u8, bool)>,
-        Vec<(i64, f64, f64)>,
+        Vec<PerSiteWcOutput>,
         Vec<(i64, f64, f64, f64)>,
     )> = Vec::with_capacity(entries.len());
     // Stores RegionalHudsonFSTOutcome for the dedicated Hudson FST output file for this chromosome
