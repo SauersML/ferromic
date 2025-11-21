@@ -10,8 +10,8 @@ use crate::progress::{
 
 use colored::Colorize;
 use csv::Writer;
-use flate2::write::GzEncoder;
 use flate2::Compression;
+use flate2::write::GzEncoder;
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use std::collections::HashMap;
@@ -393,27 +393,25 @@ pub fn apply_variants_to_transcripts(
     // The reference sequence passed to make_sequences is the entire chromosome.
     // We rely on ZeroBasedHalfOpen externally, so we do not manually slice here.
 
-    for (variant, allele_info) in variants.iter().zip(allele_infos.iter()) {
-        if !extended_region.contains(ZeroBasedPosition(variant.position)) {
-            continue;
-        }
+    for &(sample_idx, hap_idx) in haplotype_indices {
+        let sample_name = format!(
+            "{}_{}",
+            sample_names[sample_idx],
+            match hap_idx {
+                HaplotypeSide::Left => "L",
+                HaplotypeSide::Right => "R",
+            }
+        );
 
-        // Map the chromosome position to the zero-based offset within extended_region.
-        let pos_in_seq = (variant.position as usize).saturating_sub(extended_region.start);
-
-        // Iterate through the haplotypes for the current group
-        for &(sample_idx, hap_idx) in haplotype_indices {
-            let sample_name = format!(
-                "{}_{}",
-                sample_names[sample_idx],
-                match hap_idx {
-                    HaplotypeSide::Left => "L",
-                    HaplotypeSide::Right => "R",
+        if let Some(seq_vec) = hap_sequences.get_mut(&sample_name) {
+            for (variant, allele_info) in variants.iter().zip(allele_infos.iter()) {
+                if !extended_region.contains(ZeroBasedPosition(variant.position)) {
+                    continue;
                 }
-            );
 
-            // Get the mutable sequence vector for the current sample and haplotype
-            if let Some(seq_vec) = hap_sequences.get_mut(&sample_name) {
+                // Map the chromosome position to the zero-based offset within extended_region.
+                let pos_in_seq = (variant.position as usize).saturating_sub(extended_region.start);
+
                 // Check if the calculated position is within the bounds of the sequence vector
                 // The length of seq_vec is the length of the region of interest.
                 // The length of pos_in_seq is also relative to the beginning of the extended region,
@@ -431,8 +429,7 @@ pub fn apply_variants_to_transcripts(
                             } else {
                                 // allele_code is 1-based index into alt alleles
                                 // e.g., 1 => alt_alleles[0], 2 => alt_alleles[1]
-                                if let Some(alt_char) =
-                                    alt_alleles.get((allele_code - 1) as usize)
+                                if let Some(alt_char) = alt_alleles.get((allele_code - 1) as usize)
                                 {
                                     *alt_char as u8
                                 } else {
@@ -943,7 +940,12 @@ pub fn filter_and_log_transcripts(
         }
 
         // Only log to file instead of printing to terminal to reduce spam
-        writeln!(log_buffer, "\nProcessing transcript: {}", tcds.transcript_id).unwrap();
+        writeln!(
+            log_buffer,
+            "\nProcessing transcript: {}",
+            tcds.transcript_id
+        )
+        .unwrap();
 
         // Log to file only, not terminal
         writeln!(log_buffer, "Found {} CDS segments", tcds.segments.len()).unwrap();
@@ -1123,7 +1125,12 @@ pub fn filter_and_log_transcripts(
             LogLevel::Info,
             &format!("    Total coding length: {}", total_coding_length),
         );
-        writeln!(log_buffer, "    Total coding length: {}", total_coding_length).unwrap();
+        writeln!(
+            log_buffer,
+            "    Total coding length: {}",
+            total_coding_length
+        )
+        .unwrap();
 
         filtered.push(tcds);
     }
@@ -1207,7 +1214,12 @@ pub fn filter_and_log_transcripts(
             stats.total_transcripts
         )
         .unwrap();
-        writeln!(log_buffer, "Total CDS segments: {}", stats.total_cds_segments).unwrap();
+        writeln!(
+            log_buffer,
+            "Total CDS segments: {}",
+            stats.total_cds_segments
+        )
+        .unwrap();
         writeln!(
             log_buffer,
             "Average segments per transcript: {:.2}",
@@ -1361,10 +1373,7 @@ pub fn write_phylip_file(
     writer.flush().map_err(|e| {
         VcfError::Io(io::Error::new(
             io::ErrorKind::Other,
-            format!(
-                "Failed to flush PHYLIP file '{}': {:?}",
-                output_file_gz, e
-            ),
+            format!("Failed to flush PHYLIP file '{}': {:?}", output_file_gz, e),
         ))
     })?;
 
