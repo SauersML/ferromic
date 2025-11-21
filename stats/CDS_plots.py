@@ -865,7 +865,7 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
 def prepare_volcano(gene_tests: pd.DataFrame, cds_summary: pd.DataFrame) -> pd.DataFrame:
     """
     Build volcano DF with:
-      - recurrence: assigned STRICTLY from inv_info.tsv via (chr, start, end) locus match only
+      - recurrence: assigned STRICTLY from inv_properties.tsv via (chr, start, end) locus match only
       - n_pairs_total: optional size, summed from cds_summary via (chr, start, end) locus match only
 
     No joins on gene_name or transcript_id for recurrence or sizing.
@@ -911,8 +911,8 @@ def prepare_volcano(gene_tests: pd.DataFrame, cds_summary: pd.DataFrame) -> pd.D
     if not bad_gt.empty:
         print(bad_gt[["gene_name","transcript_id","inv_id"]].head(5).to_string(index=False))
 
-    # ---- read inv_info.tsv and normalize columns ----
-    inv_info_path = "inv_info.tsv"
+    # ---- read inv_properties.tsv and normalize columns ----
+    inv_info_path = "inv_properties.tsv"
     inv_df = safe_read_tsv(inv_info_path)
     print(f"[prepare_volcano] inv_info path: {inv_info_path}")
     print(f"[prepare_volcano] inv_info columns: {list(inv_df.columns)}")

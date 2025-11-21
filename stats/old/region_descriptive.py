@@ -3,7 +3,7 @@ import numpy as np
 import io
 import os
 
-def calculate_inversion_stats(input_filename="inv_info.tsv", output_filename="inversion_stats.csv"):
+def calculate_inversion_stats(input_filename="inv_properties.tsv", output_filename="inversion_stats.csv"):
     """
     Reads inversion data from the input TSV file, calculates descriptive
     statistics (mean and standard deviation) for frequency, size, and
@@ -12,7 +12,7 @@ def calculate_inversion_stats(input_filename="inv_info.tsv", output_filename="in
     with human-readable headers (using spaces).
 
     Args:
-        input_filename (str): The path to the input TSV file (e.g., "inv_info.tsv").
+        input_filename (str): The path to the input TSV file (e.g., "inv_properties.tsv").
         output_filename (str): The path to save the output CSV file (e.g., "inversion_stats.csv").
 
     Returns:
@@ -35,7 +35,7 @@ def calculate_inversion_stats(input_filename="inv_info.tsv", output_filename="in
             # --- Identify column indices robustly ---
             column_mapping = {
                 'chrom': 'Chromosome',
-                'recur': '0_single_1_recur',
+                'recur': '0_single_1_recur_consensus',
                 'size': 'Size_.kbp.',
                 'freq': 'Inverted_AF',
                 'identity': 'Flanking_Inverted_repeat_identity'
@@ -184,5 +184,5 @@ def calculate_inversion_stats(input_filename="inv_info.tsv", output_filename="in
 
 # --- Main execution block ---
 if __name__ == "__main__":
-    result_message = calculate_inversion_stats("inv_info.tsv", "inversion_stats.csv")
+    result_message = calculate_inversion_stats("inv_properties.tsv", "inversion_stats.csv")
     print(result_message)

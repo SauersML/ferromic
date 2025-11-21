@@ -15,7 +15,7 @@ from scipy.stats import spearmanr, sem
 
 # ------------------------- CONFIG -------------------------
 
-INV_TSV        = Path("inv_info.tsv")  # recurrence mapping input
+INV_TSV        = Path("inv_properties.tsv")  # recurrence mapping input
 
 DIVERSITY_FILE = Path("per_site_diversity_output.falsta")
 FST_FILE       = Path("per_site_fst_output.falsta")
@@ -119,7 +119,7 @@ def _parse_values_fast(line: str) -> np.ndarray:
 
 def _load_inv_mapping(INV_TSV: Path) -> pd.DataFrame:
     """
-    Load inv_info.tsv robustly; pull Chromosome/Start/End and recurrence flag.
+    Load inv_properties.tsv robustly; pull Chromosome/Start/End and recurrence flag.
 
     Recurrence logic:
       - If column '0_single_1_recur_consensus' exists and equals 1 → recurrent; 0 → single-event
@@ -140,7 +140,7 @@ def _load_inv_mapping(INV_TSV: Path) -> pd.DataFrame:
             break
 
     if "Chromosome" not in df.columns or "Start" not in df.columns or "End" not in df.columns:
-        raise ValueError("inv_info.tsv must contain 'Chromosome', 'Start', 'End' columns.")
+        raise ValueError("inv_properties.tsv must contain 'Chromosome', 'Start', 'End' columns.")
 
     df["_chrom"] = df["Chromosome"].map(_norm_chr)
     df["_start"] = pd.to_numeric(df["Start"], errors="coerce").astype("Int64")

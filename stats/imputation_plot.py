@@ -10,7 +10,7 @@ plt.rcParams["ps.fonttype"] = 42
 
 # ---------- Load & prepare data ----------
 imp = pd.read_csv("imputation_results.tsv", sep="\t", dtype=str)
-inv = pd.read_csv("inv_info.tsv", sep="\t", dtype=str)
+inv = pd.read_csv("inv_properties.tsv", sep="\t", dtype=str)
 
 # Trim whitespace in headers & values
 imp.columns = imp.columns.str.strip()
@@ -26,12 +26,12 @@ if "OrigID" not in inv.columns:
     if "OrigIDSize_.kbp." in inv.columns:
         inv["OrigID"] = inv["OrigIDSize_.kbp."].astype(str).str.strip().str.split().str[0]
     else:
-        raise RuntimeError("Neither 'OrigID' nor 'OrigIDSize_.kbp.' found in inv_info.tsv")
+        raise RuntimeError("Neither 'OrigID' nor 'OrigIDSize_.kbp.' found in inv_properties.tsv")
 
 cons_col = "0_single_1_recur_consensus"
 for col in ["Chromosome", "Start", "End", cons_col]:
     if col not in inv.columns:
-        raise RuntimeError(f"Column '{col}' not found in inv_info.tsv")
+        raise RuntimeError(f"Column '{col}' not found in inv_properties.tsv")
 
 # Normalize types for merge
 imp["id"] = imp["id"].astype(str).str.strip()

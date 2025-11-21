@@ -52,11 +52,11 @@ def group_label(g: int) -> str:
     return "Direct" if g == 0 else "Inverted"
 
 # ===========================
-# Load inv_info.tsv
+# Load inv_properties.tsv
 # ===========================
 def load_inv_info(path: str):
     if not os.path.exists(path):
-        sys.exit(f"ERROR: inv_info.tsv not found at {path}")
+        sys.exit(f"ERROR: inv_properties.tsv not found at {path}")
 
     with open(path, "r", newline="") as f:
         reader = csv.DictReader(f, delimiter="\t")
@@ -74,7 +74,7 @@ def load_inv_info(path: str):
         col_cons = find_col("0_single_1_recur_consensus")
 
         if not all([col_chr, col_start, col_end, col_cons]):
-            sys.exit("ERROR: inv_info.tsv missing required columns. Found: " + ", ".join(header))
+            sys.exit("ERROR: inv_properties.tsv missing required columns. Found: " + ", ".join(header))
 
         rows_all = []
         rows_by_cons = {0: [], 1: []}
@@ -404,8 +404,8 @@ def main():
     session_tmp_dir = os.path.join(ram_root, f"phy_pairs_tmp_{os.getpid()}")
     os.makedirs(session_tmp_dir, exist_ok=True)
 
-    print(">>> Loading inv_info.tsv ...")
-    rows_all, rows_by_cons, exact_triplets, inv_by_chr = load_inv_info("inv_info.tsv")
+    print(">>> Loading inv_properties.tsv ...")
+    rows_all, rows_by_cons, exact_triplets, inv_by_chr = load_inv_info("inv_properties.tsv")
     print(f"    Total inv_info rows (consensus in {{0,1}}): {len(rows_all)}")
     print(f"    Recurrent rows: {len(rows_by_cons[1])}")
     print(f"    Single-event rows: {len(rows_by_cons[0])}")

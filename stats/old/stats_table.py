@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 # ---------- Files ----------
-INV_FILE   = Path("inv_info.tsv")                 # required
+INV_FILE   = Path("inv_properties.tsv")                 # required
 SUMMARY    = Path("output.csv")                   # required
 PI_FALSTA  = Path("per_site_diversity_output.falsta")
 FST_FALSTA = Path("per_site_fst_output.falsta")
@@ -47,14 +47,14 @@ def mean_median_sd(xs: List[float]) -> Tuple[Optional[float], Optional[float], O
 def load_inversions(inv_path: Path) -> pd.DataFrame:
     if not inv_path.is_file():
         raise FileNotFoundError(f"Required inversion file not found: {inv_path}")
-    dbg("Loading inversion mapping from inv_info.tsv ...")
+    dbg("Loading inversion mapping from inv_properties.tsv ...")
     df = pd.read_csv(inv_path, sep=None, engine="python", dtype=str)
-    dbg(f"inv_info.tsv columns: {list(df.columns)}")
+    dbg(f"inv_properties.tsv columns: {list(df.columns)}")
 
     need = ["Chromosome", "Start", "End", "0_single_1_recur_consensus"]
     miss = [c for c in need if c not in df.columns]
     if miss:
-        raise RuntimeError(f"inv_info.tsv missing required columns: {miss}")
+        raise RuntimeError(f"inv_properties.tsv missing required columns: {miss}")
 
     # Normalize
     df["_chr"]   = df["Chromosome"].map(norm_chr)
@@ -81,7 +81,7 @@ def load_inversions(inv_path: Path) -> pd.DataFrame:
     if len(dups) > 0:
         # Show a few offending rows to make diagnosis easy.
         examples = df.merge(dups.rename("n"), on=["_chr","_start","_end"])
-        err("Duplicate exact inversion coordinates detected in inv_info.tsv (this is a hard error).")
+        err("Duplicate exact inversion coordinates detected in inv_properties.tsv (this is a hard error).")
         err("Examples of duplicates:\n" + str(examples.head(10)))
         raise RuntimeError("Duplicate exact inversion coordinates in inversion table.")
 
