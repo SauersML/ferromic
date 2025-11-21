@@ -58,7 +58,10 @@ def download_file(filename):
     encoded_filename = quote(filename)
     url = BASE_URL + encoded_filename
     local_path = data_dir / filename
-    
+
+    if local_path.exists() and local_path.stat().st_size > 0:
+        return local_path
+
     request = Request(url, headers={"User-Agent": "ferromic-replication/1.0"})
     with urlopen(request) as response, local_path.open("wb") as f:
         shutil.copyfileobj(response, f)

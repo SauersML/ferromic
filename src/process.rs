@@ -2510,14 +2510,43 @@ fn process_single_config_entry(
     // Note: mnp_variants are globally filtered and discarded in process_vcf, so we can't count them here.
     // They will be 0 in these stats.
 
-    // UNFILTERED core: within entry interval
+
+    // Extract mask and allow regions early to filter "unfiltered" variants consistently
+    let allow_regions_chr = allow.as_ref().and_then(|a| a.get(chr));
+    // Use the local_mask_arc which includes 'N' regions from the reference
+    let mask_regions_chr = local_mask_arc.as_ref().and_then(|m| m.get(chr));
+
+    // UNFILTERED core
+    // We filter out variants that are in masked regions or not in allowed regions
+    // to match the denominator (adjusted_sequence_length) which excludes these regions.
+    // This ensures "unfiltered" refers to quality filters, not region validity.
     let (region_variants_unfiltered, region_allele_infos_unfiltered): (
         Vec<Variant>,
         Vec<Option<(char, Vec<char>)>>,
     ) = slice_variants
         .iter()
-        .zip(slice_allele_infos.iter())
-        .filter(|(v, _)| entry.interval.contains(ZeroBasedPosition(v.position)))
+
+        .zip(all_allele_infos.iter())
+        .filter(|(v, _)| {
+            let p = v.position;
+            if !entry.interval.contains(ZeroBasedPosition(p)) {
+                return false;
+            }
+
+            if let Some(allow_regions) = allow_regions_chr {
+                if !position_in_regions(p, allow_regions) {
+                    return false;
+                }
+            }
+
+            if let Some(mask_regions) = mask_regions_chr {
+                if position_in_regions(p, mask_regions) {
+                    return false;
+                }
+            }
+
+            true
+        })
         .map(|(v, a)| (v.clone(), a.clone()))
         .unzip();
 
@@ -2558,10 +2587,6 @@ fn process_single_config_entry(
     if dense_filtered.is_some() {
         log(LogLevel::Debug, "Created dense matrix for filtered variants");
     }
-
-    let allow_regions_chr = allow.as_ref().and_then(|a| a.get(chr));
-    // Use the local_mask_arc which includes 'N' regions from the reference
-    let mask_regions_chr = local_mask_arc.as_ref().and_then(|m| m.get(chr));
     let mask_intervals_slice = mask_regions_chr.map(|regions| regions.as_slice());
 
     // Track callable sites that failed quality filters within the region.
