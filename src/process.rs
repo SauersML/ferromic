@@ -732,6 +732,51 @@ fn position_in_regions(pos: i64, regions: &[(i64, i64)]) -> bool {
         .any(|&(start, end)| pos >= start && pos < end)
 }
 
+fn position_in_zero_based_regions(pos: i64, regions: &[ZeroBasedHalfOpen]) -> bool {
+    // Since regions are sorted and disjoint (if merged), we could use binary search,
+    // but linear is safe. The caller should ensure regions are optimized if possible.
+    // Given the "Sparse Union" strategy, regions will be merged and sorted.
+    // We can optimize using binary search.
+
+    // Find the first region that ends after pos
+    let idx = regions.partition_point(|r| (r.end as i64) <= pos);
+    if let Some(region) = regions.get(idx) {
+        // Check if this region starts before (or at) pos
+        (region.start as i64) <= pos
+    } else {
+        false
+    }
+}
+
+fn merge_intervals(mut intervals: Vec<ZeroBasedHalfOpen>) -> Vec<ZeroBasedHalfOpen> {
+    if intervals.is_empty() {
+        return Vec::new();
+    }
+    // Sort by start
+    intervals.sort_by_key(|k| k.start);
+
+    let mut merged = Vec::new();
+    let mut current = intervals[0];
+
+    for next in intervals.into_iter().skip(1) {
+        if next.start <= current.end {
+            // Overlap or adjacent
+            current.end = current.end.max(next.end);
+        } else {
+            merged.push(current);
+            current = next;
+        }
+    }
+    merged.push(current);
+    merged
+}
+
+const FLAG_PASS: u8 = 0;
+const FLAG_MASK: u8 = 1 << 0;
+const FLAG_ALLOW: u8 = 1 << 1;
+const FLAG_LOW_GQ: u8 = 1 << 2;
+const FLAG_MISSING: u8 = 1 << 3;
+
 /*
 When the code calls something like:
         let filename = format!(
@@ -1887,6 +1932,17 @@ fn process_chromosome_entries(
         ),
     );
 
+    // Gatekeeper: Find N regions in the whole chromosome reference
+    let n_regions_global = find_n_regions(&ref_sequence, 0);
+    if !n_regions_global.is_empty() {
+        log(LogLevel::Info, &format!("Found {} N-regions in reference for chr{}, adding to mask.", n_regions_global.len(), chr));
+    }
+
+    // Update mask
+    let mut global_mask_map = mask.as_ref().map(|m| m.as_ref().clone()).unwrap_or_default();
+    global_mask_map.entry(chr.to_string()).or_default().extend(n_regions_global);
+    let final_mask = Some(Arc::new(global_mask_map));
+
     // Parse all transcripts for that chromosome from the GTF
     update_step_progress(2, &format!("Loading transcript annotations for chr{}", chr));
     let all_transcripts = parse_gtf_file(Path::new(&args.gtf_path), chr)?;
@@ -1990,6 +2046,55 @@ fn process_chromosome_entries(
         entries.len() as u64,
     );
 
+    // 1. Calculate Union Hull
+    let mut all_extended_intervals = Vec::new();
+    let chr_len_i64 = chr_length as i64;
+    for entry in entries {
+         let extended_start = (entry.interval.start as i64 - 3_000_000).max(0);
+         let extended_end = (entry.interval.end as i64 + 3_000_000).min(chr_len_i64);
+         all_extended_intervals.push(ZeroBasedHalfOpen::from_0based_half_open(extended_start, extended_end));
+    }
+    let merged_regions = merge_intervals(all_extended_intervals);
+
+    // 2. Load VCF once
+    set_stage(ProcessingStage::VcfProcessing);
+    log(LogLevel::Info, &format!("Loading variants for {} union regions on chr{}", merged_regions.len(), chr));
+
+    let (all_variants, all_allele_infos, all_flags, sample_names, _, _, _) = match process_vcf(
+        &vcf_file,
+        Path::new(&args.reference_path),
+        chr.to_string(),
+        &merged_regions,
+        min_gq,
+        final_mask.clone(),
+        allow.clone(),
+        exclusion_set,
+    ) {
+        Ok(data) => data,
+        Err(e) => {
+            log(LogLevel::Error, &format!("Error processing VCF for {}: {}", chr, e));
+            finish_step_progress("VCF processing failed");
+            return Ok((Vec::new(), Vec::new(), Vec::new()));
+        }
+    };
+
+    // Store PCA variants if needed (globally filtered variants)
+    if args.enable_pca {
+        if let Some((variants_storage, sample_names_storage)) = &pca_storage {
+             let filtered_for_chr: Vec<Variant> = all_variants.iter().zip(all_flags.iter())
+                .filter(|&(_, &f)| f == FLAG_PASS)
+                .map(|(v, _)| v.clone())
+                .collect();
+
+            variants_storage.lock().insert(chr.to_string(), filtered_for_chr);
+
+            let mut names = sample_names_storage.lock();
+            if names.is_empty() {
+                *names = sample_names.clone();
+            }
+        }
+    }
+
     // For each config entry in this chromosome, do the work
     //    (We could also parallelize here...)
     // Should this be for entry in entries instead?
@@ -1999,15 +2104,16 @@ fn process_chromosome_entries(
 
         let result = process_single_config_entry(
             entry.clone(),
-            &vcf_file,
-            min_gq,
-            mask,
+            &all_variants,
+            &all_allele_infos,
+            &all_flags,
+            &sample_names,
+            &final_mask,
             allow,
             &ref_sequence,
             &cds_regions,
             chr,
             args,
-            exclusion_set,
             pca_storage.as_ref(),
             parsed_csv_populations_arc.clone(), // Pass down the Arc<HashMap<String, Vec<String>>>
             temp_path,
@@ -2289,31 +2395,31 @@ fn generate_full_region_alignment(
 ///  - Returns one `CsvRowData` if successful, or None if e.g. no haplotypes matched
 fn process_single_config_entry(
     entry: ConfigEntry,
-    vcf_file: &Path,
-    min_gq: u16,
+    all_variants: &[Variant],
+    all_allele_infos: &[Option<(char, Vec<char>)>],
+    all_variant_flags: &[u8],
+    sample_names: &[String],
     mask: &Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     allow: &Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     ref_sequence: &[u8],
     cds_regions: &[TranscriptAnnotationCDS],
     chr: &str,
     args: &Args,
-    exclusion_set: &HashSet<String>,
-    pca_storage: Option<&(
+    // exclusion_set: &HashSet<String>, // Removed as handled in process_vcf
+    _pca_storage: Option<&(
         Arc<Mutex<HashMap<String, Vec<Variant>>>>,
         Arc<Mutex<Vec<String>>>,
     )>,
-    // Arc containing the parsed population definitions from the CSV file, if provided.
-    // Key: Population Name (String), Value: List of Sample IDs (String) in that population.
     parsed_csv_populations_arc: Option<Arc<HashMap<String, Vec<String>>>>,
     temp_path: &Path,
 ) -> Result<
     Option<(
-        CsvRowData, // Data for the main CSV output (W&C FST, diversity stats, etc.)
-        Vec<(i64, f64, f64, u8, bool)>, // Per-site diversity data (pos, pi, theta, group_id, is_filtered) for falsta output
-        Vec<(i64, f64, f64)>, // Per-site W&C FST data (pos, overall_wc_fst, pairwise_wc_fst_0vs1) for falsta output
-        Vec<(i64, f64, f64, f64)>, // Per-site Hudson data (pos_1based, fst, numerator, denominator) for haplotype groups
-        Vec<RegionalHudsonFSTOutcome>, // Hudson FST results specific to this config entry
-        Option<RegionalWcFSTOutcome>, // W&C FST results for CSV populations
+        CsvRowData,
+        Vec<(i64, f64, f64, u8, bool)>,
+        Vec<(i64, f64, f64)>,
+        Vec<(i64, f64, f64, f64)>,
+        Vec<RegionalHudsonFSTOutcome>,
+        Option<RegionalWcFSTOutcome>,
     )>,
     VcfError,
 > {
@@ -2370,115 +2476,75 @@ fn process_single_config_entry(
         extended_region.get_1based_inclusive_end_coord()
     ));
 
-    // Gatekeeper Rule: Scan reference for 'N' blocks and add them to the mask.
-    // This ensures that:
-    // 1. process_vcf discards variants in 'N' regions.
-    // 2. calculate_adjusted_sequence_length subtracts 'N' regions from the denominator.
-    let extended_start = extended_region.start;
-    let extended_end = extended_region.end.min(ref_sequence.len());
-    let ref_slice = &ref_sequence[extended_start..extended_end];
-    let n_regions = find_n_regions(ref_slice, extended_start as i64);
+    // Mask already includes N-regions from process_chromosome_entries
+    let local_mask_arc = mask.clone();
 
-    if !n_regions.is_empty() {
-        log(
-            LogLevel::Info,
-            &format!(
-                "Identified {} N-regions in reference for {}, adding to mask.",
-                n_regions.len(),
-                region_desc
-            ),
-        );
-    }
+    // --- SPLICE FROM GLOBAL LOADED VARIANTS ---
+    // Find the slice of variants corresponding to the extended region
+    let start_idx = all_variants.partition_point(|v| (v.position as usize) < extended_region.start);
+    let end_idx = all_variants.partition_point(|v| (v.position as usize) < extended_region.end);
 
-    let mut local_mask_map = mask
-        .as_ref()
-        .map(|m| m.as_ref().clone())
-        .unwrap_or_default();
-    local_mask_map
-        .entry(chr.to_string())
-        .or_default()
-        .extend(n_regions);
-    let local_mask_arc = Some(Arc::new(local_mask_map));
-
-    set_stage(ProcessingStage::VcfProcessing);
-    init_step_progress(&format!("Processing VCF for {}", region_desc), 2);
-
-    log(
-        LogLevel::Info,
-        &format!(
-            "Processing VCF for {}:{}-{} (extended: {}-{})",
-            chr,
-            entry.interval.start,
-            entry.interval.end,
-            extended_region.start,
-            extended_region.end
-        ),
-    );
-
-    let (all_variants, all_allele_infos, filtered_idxs, sample_names, _, _, filtering_stats) = match process_vcf(
-        vcf_file,
-        Path::new(&args.reference_path),
-        chr.to_string(),
-        extended_region,
-        min_gq,
-        local_mask_arc.clone(),
-        allow.clone(),
-        exclusion_set,
-    ) {
-        Ok(data) => data,
-        Err(e) => {
-            log(
-                LogLevel::Error,
-                &format!("Error processing VCF for {}: {}", chr, e),
-            );
-            finish_step_progress("VCF processing failed");
-            return Ok(None);
-        }
-    };
+    let slice_variants = &all_variants[start_idx..end_idx];
+    let slice_allele_infos = &all_allele_infos[start_idx..end_idx];
+    let slice_flags = &all_variant_flags[start_idx..end_idx];
 
     let vcf_sample_id_to_index = map_sample_names_to_indices(&sample_names)?;
 
     update_step_progress(1, "Analyzing variant statistics");
 
-    // UNFILTERED (extended)
-    // all_variants and all_allele_infos are already for the extended region.
-    // We just need to clone them or treat them as the source for extended sequences.
-    // Since we need to pass slices or Vecs, and VariantInvocation takes references,
-    // we can just use all_variants directly if we change logic, but let's stick to explicit naming.
+    // Compute filtering stats for this slice
+    let mut filtering_stats = FilteringStats {
+        total_variants: slice_variants.len(),
+        ..Default::default()
+    };
 
-    // UNFILTERED core
+    for &flag in slice_flags {
+        if flag != FLAG_PASS {
+            filtering_stats._filtered_variants += 1;
+            if (flag & FLAG_MASK) != 0 { filtering_stats.filtered_due_to_mask += 1; }
+            if (flag & FLAG_ALLOW) != 0 { filtering_stats.filtered_due_to_allow += 1; }
+            if (flag & FLAG_LOW_GQ) != 0 { filtering_stats.low_gq_variants += 1; }
+            if (flag & FLAG_MISSING) != 0 { filtering_stats.missing_data_variants += 1; }
+        }
+    }
+    // Note: mnp_variants are globally filtered and discarded in process_vcf, so we can't count them here.
+    // They will be 0 in these stats.
+
+    // UNFILTERED core: within entry interval
     let (region_variants_unfiltered, region_allele_infos_unfiltered): (
         Vec<Variant>,
         Vec<Option<(char, Vec<char>)>>,
-    ) = all_variants
+    ) = slice_variants
         .iter()
-        .zip(all_allele_infos.iter())
+        .zip(slice_allele_infos.iter())
         .filter(|(v, _)| entry.interval.contains(ZeroBasedPosition(v.position)))
         .map(|(v, a)| (v.clone(), a.clone()))
         .unzip();
 
-    // FILTERED core
+    // FILTERED core: within entry interval AND passed filters
     let (region_variants_filtered, region_allele_infos_filtered): (
         Vec<Variant>,
         Vec<Option<(char, Vec<char>)>>,
-    ) = filtered_idxs
+    ) = slice_variants
         .iter()
-        .map(|&i| (&all_variants[i], &all_allele_infos[i]))
-        .filter(|(v, _)| entry.interval.contains(ZeroBasedPosition(v.position)))
-        .map(|(v, a)| (v.clone(), a.clone()))
+        .zip(slice_allele_infos.iter())
+        .zip(slice_flags.iter())
+        .filter(|&((v, _), &flag)| {
+            flag == FLAG_PASS && entry.interval.contains(ZeroBasedPosition(v.position))
+        })
+        .map(|((v, a), _)| (v.clone(), a.clone()))
         .unzip();
 
-    // FILTERED extended
-    // We need the extended set of variants that passed filters.
-    // filtered_idxs refers to indices in all_variants (which is extended).
+    // FILTERED extended: everything in slice that passed filters
     let (extended_variants_filtered, extended_allele_infos_filtered): (
         Vec<Variant>,
         Vec<Option<(char, Vec<char>)>>,
-    ) = filtered_idxs
+    ) = slice_variants
         .iter()
-        .map(|&i| (&all_variants[i], &all_allele_infos[i]))
-        // No filter by entry.interval here, keep everything in extended region
-        .map(|(v, a)| (v.clone(), a.clone()))
+        .zip(slice_allele_infos.iter())
+        .zip(slice_flags.iter())
+        .filter(|&((_, _), &flag)| flag == FLAG_PASS)
+        .map(|((v, a), _)| (v.clone(), a.clone()))
         .unzip();
 
     let dense_unfiltered =
@@ -2634,24 +2700,7 @@ fn process_single_config_entry(
         (None, None)
     };
 
-    // Store filtered variants for PCA if enabled and the pca_storage is provided
-    if args.enable_pca {
-        if let Some((variants_storage, sample_names_storage)) = &pca_storage {
-            let filtered_for_chr: Vec<Variant> = filtered_idxs
-                .iter()
-                .map(|&i| all_variants[i].clone())
-                .collect();
-            variants_storage
-                .lock()
-                .insert(chr.to_string(), filtered_for_chr);
-
-            // Store sample names if not already stored
-            let mut names = sample_names_storage.lock();
-            if names.is_empty() {
-                *names = sample_names.clone();
-            }
-        }
-    }
+    // Store filtered variants for PCA if enabled (moved to process_chromosome_entries)
 
     // Display variant filtering statistics
     display_status_box(StatusBox {
@@ -3704,7 +3753,7 @@ pub fn process_vcf(
     file: &Path,
     reference_path: &Path,
     chr: String,
-    region: ZeroBasedHalfOpen,
+    regions: &[ZeroBasedHalfOpen],
     min_gq: u16,
     mask_regions: Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     allow_regions: Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
@@ -3713,7 +3762,7 @@ pub fn process_vcf(
     (
         Vec<Variant>,
         Vec<Option<(char, Vec<char>)>>,
-        Vec<usize>,
+        Vec<u8>,
         Vec<String>,
         i64,
         MissingDataInfo,
@@ -3722,14 +3771,16 @@ pub fn process_vcf(
     VcfError,
 > {
     set_stage(ProcessingStage::VcfProcessing);
+    let start_min = regions.iter().map(|r| r.start).min().unwrap_or(0);
+    let end_max = regions.iter().map(|r| r.end).max().unwrap_or(0);
     log(
         LogLevel::Info,
         &format!(
-            "Processing VCF file {} for chr{}:{}-{}",
+            "Processing VCF file {} for chr{} (union: {}-{})",
             file.display(),
             chr,
-            region.start,
-            region.end
+            start_min,
+            end_max
         ),
     );
 
@@ -3756,7 +3807,7 @@ pub fn process_vcf(
     );
 
     // Small vectors to hold variants in batches, limiting memory usage
-    let all_variants = Arc::new(Mutex::new(Vec::<(Variant, bool, Option<(char, Vec<char>)>)>::with_capacity(10000)));
+    let all_variants = Arc::new(Mutex::new(Vec::<(Variant, u8, Option<(char, Vec<char>)>)>::with_capacity(10000)));
 
     // Shared stats
     let missing_data_info = Arc::new(Mutex::new(MissingDataInfo::default()));
@@ -3769,15 +3820,15 @@ pub fn process_vcf(
     } else {
         Some(fs::metadata(file)?.len())
     };
-    let progress_message = format!("Reading VCF for chr{}:{}-{}", chr, region.start, region.end);
+    let progress_message = format!("Reading VCF for chr{}", chr);
     let progress_bar = Arc::new(create_vcf_progress(total_bytes, &progress_message));
 
     let processing_complete = Arc::new(AtomicBool::new(false));
     let processing_complete_clone = Arc::clone(&processing_complete);
     let progress_bar_clone = Arc::clone(&progress_bar); // Clone Arc for progress thread
     let finish_message = format!(
-        "Finished reading VCF for chr{}:{}-{}",
-        chr, region.start, region.end
+        "Finished reading VCF for chr{}",
+        chr
     );
     let progress_thread = thread::spawn(move || {
         while !processing_complete_clone.load(Ordering::Relaxed) {
@@ -3855,6 +3906,9 @@ pub fn process_vcf(
     let num_threads = num_cpus::get();
     let arc_sample_names = Arc::new(sample_names);
     let arc_kept_col_indices = Arc::new(kept_col_indices);
+    let regions_vec = regions.to_vec();
+    let arc_regions = Arc::new(regions_vec);
+
     let mut consumers = Vec::with_capacity(num_threads);
     for _ in 0..num_threads {
         let line_receiver = line_receiver.clone();
@@ -3864,21 +3918,16 @@ pub fn process_vcf(
         let arc_mask = mask_regions.clone();
         let arc_allow = allow_regions.clone();
         let chr_copy = chr.to_string();
+        let arc_regions = arc_regions.clone();
         consumers.push(thread::spawn(move || -> Result<(), VcfError> {
             while let Ok(line) = line_receiver.recv() {
                 let mut single_line_miss_info = MissingDataInfo::default();
                 let mut single_line_filt_stats = FilteringStats::default();
 
-                // Construct a ZeroBasedHalfOpen region for the consumer thread
-                let consumer_region = ZeroBasedHalfOpen {
-                    start: region.start,
-                    end: region.end,
-                };
-
                 match process_variant(
                     &line,
                     &chr_copy,
-                    consumer_region,
+                    &arc_regions,
                     &mut single_line_miss_info,
                     &arc_names,
                     &arc_indices,
@@ -3889,9 +3938,9 @@ pub fn process_vcf(
                 ) {
                     Ok(variant_opt) => {
                         let variant_for_channel = match variant_opt {
-                            Some((variant, passes, allele_info)) => {
+                            Some((variant, flags, allele_info)) => {
                                 let stripped_info = allele_info.map(|(_, r, a)| (r, a));
-                                Some((variant, passes, stripped_info))
+                                Some((variant, flags, stripped_info))
                             }
                             None => None,
                         };
@@ -3919,9 +3968,9 @@ pub fn process_vcf(
         move || -> Result<(), VcfError> {
             while let Ok(msg) = result_receiver.recv() {
                 match msg {
-                    Ok((Some((variant, passes, allele_info)), local_miss, mut local_stats)) => {
+                    Ok((Some((variant, flags, allele_info)), local_miss, mut local_stats)) => {
                         let mut u = all_variants.lock();
-                        u.push((variant, passes, allele_info)); // single owner of the heavy genotypes
+                        u.push((variant, flags, allele_info)); // single owner of the heavy genotypes
 
                         {
                             let mut global_miss = missing_data_info.lock();
@@ -4018,13 +4067,11 @@ pub fn process_vcf(
 
     let mut final_all = Vec::with_capacity(final_all_with_flags.len());
     let mut final_allele_infos = Vec::with_capacity(final_all_with_flags.len());
-    let mut final_filtered_idxs = Vec::new();
-    for (idx, (variant, passes, allele_info)) in final_all_with_flags.into_iter().enumerate() {
+    let mut final_flags = Vec::with_capacity(final_all_with_flags.len());
+    for (variant, flags, allele_info) in final_all_with_flags.into_iter() {
         final_all.push(variant);
         final_allele_infos.push(allele_info);
-        if passes {
-            final_filtered_idxs.push(idx);
-        }
+        final_flags.push(flags);
     }
 
     // Extract stats.
@@ -4037,15 +4084,15 @@ pub fn process_vcf(
     let final_names = Arc::try_unwrap(arc_sample_names)
         .map_err(|_| VcfError::Parse("Sample names have multiple owners".to_string()))?;
 
+    let filtered_count = final_flags.iter().filter(|&&f| f == FLAG_PASS).count();
+
     log(
         LogLevel::Info,
         &format!(
-            "VCF processing complete for chr{}:{}-{}: {} variants loaded, {} filtered",
+            "VCF processing complete for chr{}: {} variants loaded, {} passed filters",
             chr,
-            region.start,
-            region.end,
             final_all.len(),
-            final_filtered_idxs.len()
+            filtered_count
         ),
     );
 
@@ -4053,9 +4100,9 @@ pub fn process_vcf(
         log(
             LogLevel::Info,
             &format!(
-                "DEBUG X: chrX VCF processing complete with {} unfiltered and {} filtered variants",
+                "DEBUG X: chrX VCF processing complete with {} total and {} passed variants",
                 final_all.len(),
-                final_filtered_idxs.len()
+                filtered_count
             ),
         );
     }
@@ -4074,7 +4121,7 @@ pub fn process_vcf(
     Ok((
         final_all,
         final_allele_infos,
-        final_filtered_idxs,
+        final_flags,
         final_names,
         chr_length,
         final_miss,
@@ -4085,7 +4132,7 @@ pub fn process_vcf(
 pub fn process_variant(
     line: &str,
     chr: &str,
-    region: ZeroBasedHalfOpen,
+    regions: &[ZeroBasedHalfOpen],
     missing_data_info: &mut MissingDataInfo,
     sample_names: &[String],
     kept_col_indices: &[usize],
@@ -4093,7 +4140,7 @@ pub fn process_variant(
     filtering_stats: &mut FilteringStats,
     allow_regions: Option<&HashMap<String, Vec<(i64, i64)>>>,
     mask_regions: Option<&HashMap<String, Vec<(i64, i64)>>>,
-) -> Result<Option<(Variant, bool, Option<(i64, char, Vec<char>)>)>, VcfError> {
+) -> Result<Option<(Variant, u8, Option<(i64, char, Vec<char>)>)>, VcfError> {
     let fields: Vec<&str> = line.split('\t').collect();
 
     let required_fixed_fields = 9;
@@ -4142,8 +4189,8 @@ pub fn process_variant(
             .map_err(|_| VcfError::Parse("Invalid position".to_string()))?,
     )?;
 
-    // call region.contains using zero-based
-    if !region.contains(ZeroBasedPosition(one_based_vcf_position.zero_based())) {
+    // call regions check using zero-based
+    if !position_in_zero_based_regions(one_based_vcf_position.zero_based(), regions) {
         return Ok(None);
     }
 
@@ -4160,18 +4207,17 @@ pub fn process_variant(
 
     let zero_based_position = one_based_vcf_position.zero_based(); // Zero-based coordinate
 
-    let mut filtered_due_to_allow = false;
-    let mut filtered_due_to_mask = false;
+    let mut flags = FLAG_PASS;
 
     // Check allow regions
     if let Some(allow_regions_chr) = allow_regions.and_then(|ar| ar.get(vcf_chr)) {
         if !position_in_regions(zero_based_position, allow_regions_chr) {
-            filtered_due_to_allow = true;
+            flags |= FLAG_ALLOW;
             filtering_stats.filtered_due_to_allow += 1;
             filtering_stats.add_example(format!("{}: Filtered due to allow", line.trim()));
         }
     } else if allow_regions.is_some() {
-        filtered_due_to_allow = true;
+        flags |= FLAG_ALLOW;
         filtering_stats.filtered_due_to_allow += 1;
         filtering_stats.add_example(format!("{}: Filtered due to allow", line.trim()));
     }
@@ -4194,7 +4240,7 @@ pub fn process_variant(
         });
 
         if is_masked {
-            filtered_due_to_mask = true;
+            flags |= FLAG_MASK;
             filtering_stats.filtered_due_to_mask += 1;
             filtering_stats.add_example(format!("{}: Filtered due to mask", line.trim()));
         }
@@ -4341,21 +4387,20 @@ pub fn process_variant(
     }
 
     let has_missing_genotypes = raw_genotypes.iter().any(|gt| gt.is_none());
-    let passes_filters = !filtered_due_to_allow
-        && !filtered_due_to_mask
-        && !filtered_due_to_indel
-        && !sample_has_low_gq
-        && !has_missing_genotypes;
 
     if sample_has_low_gq {
         filtering_stats.low_gq_variants += 1;
+        flags |= FLAG_LOW_GQ;
         filtering_stats.add_example(format!("{}: Filtered due to low GQ", line.trim()));
     }
 
     if has_missing_genotypes {
         filtering_stats.missing_data_variants += 1;
+        flags |= FLAG_MISSING;
         filtering_stats.add_example(format!("{}: Filtered due to missing data", line.trim()));
     }
+
+    let passes_filters = flags == FLAG_PASS && !filtered_due_to_indel;
 
     // Update filtering stats if variant is filtered out
     // This handles all filter types: mask, allow, indel, low GQ, missing data.
@@ -4381,5 +4426,5 @@ pub fn process_variant(
     };
 
     // Return the parsed variant and whether it passes filters
-    Ok(Some((variant, passes_filters, allele_info)))
+    Ok(Some((variant, flags, allele_info)))
 }
