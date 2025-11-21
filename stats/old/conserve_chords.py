@@ -31,7 +31,7 @@ logger.info("--- Starting New Script Run (Node Avg Color, Blue-Red CMap 0-1, Sep
 
 # File paths
 PAIRWISE_FILE = 'all_pairwise_results.csv'
-INVERSION_FILE = 'inv_info.tsv'
+INVERSION_FILE = 'inv_properties.tsv'
 timestamp = time.strftime("%Y%m%d-%H%M%S")
 OUTPUT_DIR = f'chord_plots_node_avg_color_{timestamp}'
 RECURRENT_CHORD_PLOT_FILE = os.path.join(OUTPUT_DIR, 'recurrent_chord_node_avg.html')
@@ -77,27 +77,27 @@ def map_cds_to_inversions(pairwise_df, inversion_df):
     if not cds_coords:
         logger.warning("Could not extract coordinates from any CDS string."); return {}, {}, {} # Still return empty dicts
 
-    required_inv_cols = ['Start', 'End', '0_single_1_recur', 'Chromosome']
+    required_inv_cols = ['Start', 'End', '0_single_1_recur_consensus', 'Chromosome']
     if not all(col in inversion_df.columns for col in required_inv_cols):
         logger.error(f"Missing required columns in inversion info file: {required_inv_cols}. Cannot map types."); return {}, {}, {}
 
     logger.info("Cleaning inversion data...")
     # Create a copy to avoid SettingWithCopyWarning
     inversion_df_cleaned = inversion_df.copy()
-    for col in ['Start', 'End', '0_single_1_recur']:
+    for col in ['Start', 'End', '0_single_1_recur_consensus']:
         try:
             inversion_df_cleaned[col] = pd.to_numeric(inversion_df_cleaned[col], errors='coerce')
         except Exception as e:
              logger.error(f"Error converting inversion column {col} to numeric: {e}"); return {}, {}, {}
-    inversion_df_cleaned.dropna(subset=['Start', 'End', '0_single_1_recur', 'Chromosome'], inplace=True)
+    inversion_df_cleaned.dropna(subset=['Start', 'End', '0_single_1_recur_consensus', 'Chromosome'], inplace=True)
     if inversion_df_cleaned.empty:
         logger.error("Inversion df empty after cleaning required columns."); return {}, {}, {}
     inversion_df_cleaned['Start'] = inversion_df_cleaned['Start'].astype(int)
     inversion_df_cleaned['End'] = inversion_df_cleaned['End'].astype(int)
-    inversion_df_cleaned['0_single_1_recur'] = inversion_df_cleaned['0_single_1_recur'].astype(int)
+    inversion_df_cleaned['0_single_1_recur_consensus'] = inversion_df_cleaned['0_single_1_recur_consensus'].astype(int)
 
-    recurrent_inv = inversion_df_cleaned[inversion_df_cleaned['0_single_1_recur'] == 1];
-    single_event_inv = inversion_df_cleaned[inversion_df_cleaned['0_single_1_recur'] == 0]
+    recurrent_inv = inversion_df_cleaned[inversion_df_cleaned['0_single_1_recur_consensus'] == 1];
+    single_event_inv = inversion_df_cleaned[inversion_df_cleaned['0_single_1_recur_consensus'] == 0]
 
     cds_to_type = {}; cds_to_inversion_id = {}; inversion_to_cds = defaultdict(list) # inversion_id/cds mapping not fully used here
     processed_cds_count = 0; mapped_cds_count = 0; ambiguous_map_count = 0; unknown_map_count = 0

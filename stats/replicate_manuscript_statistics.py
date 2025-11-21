@@ -258,10 +258,10 @@ def _stage_cds_inputs() -> list[Path]:
     metadata_src = DATA_DIR / "inv_properties.tsv"
     if not metadata_src.exists():
         raise FileNotFoundError(
-            "Missing metadata: expected data/inv_properties.tsv to stage inv_info.tsv"
+            "Missing metadata: expected data/inv_properties.tsv to stage inv_properties.tsv"
         )
 
-    metadata_dest = Path("inv_info.tsv")
+    metadata_dest = Path("inv_properties.tsv")
     shutil.copy2(metadata_src, metadata_dest)
     staged_paths.append(metadata_dest)
 

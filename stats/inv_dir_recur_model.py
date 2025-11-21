@@ -19,7 +19,7 @@ from scipy.stats import wilcoxon
 # ------------------------- FILE PATHS -------------------------
 
 OUTPUT_CSV  = "./output.csv"
-INVINFO_TSV = "./inv_info.tsv"
+INVINFO_TSV = "./inv_properties.tsv"
 
 # Save outputs
 SAVE_TABLES = True
@@ -117,7 +117,7 @@ def choose_floor_from_quantile(pi_all: np.ndarray, q: float, min_floor: float) -
 def load_and_match(output_csv: str, invinfo_tsv: str) -> pd.DataFrame:
     """
     STRICT loader with Forensic Logging:
-      - Loads inv_info.tsv and identifies ALL target inversions (Consensus 0 or 1).
+      - Loads inv_properties.tsv and identifies ALL target inversions (Consensus 0 or 1).
       - Loads output.csv and attempts strict ±1bp matching.
       - PRINTS a detailed report of exactly which inversions were dropped and why.
     """
@@ -165,7 +165,7 @@ def load_and_match(output_csv: str, invinfo_tsv: str) -> pd.DataFrame:
     
     # Check duplicates in inv_info keys → CRASH if any (as per original strict logic)
     if inv_small.duplicated(subset=["chr_std", "Start", "End"]).any():
-        raise ValueError("inv_info.tsv contains duplicate keys.")
+        raise ValueError("inv_properties.tsv contains duplicate keys.")
 
     merged = df_cand.merge(inv_small, on=["chr_std", "Start", "End"], how="inner")
 
@@ -446,7 +446,7 @@ def _impute_by_recurrence_transformed(df: pd.DataFrame, col: str, rec_col: str =
 
 def _prepare_invinfo_covariates(invinfo_path: Optional[str]) -> pd.DataFrame:
     """
-    Load inv_info.tsv, filter to 0/1 in consensus, compute cleaned & transformed covariates.
+    Load inv_properties.tsv, filter to 0/1 in consensus, compute cleaned & transformed covariates.
     """
     path = invinfo_path if invinfo_path is not None else INVINFO_TSV
     inv = pd.read_csv(path, sep="\t")
@@ -501,7 +501,7 @@ def run_model_C(matched: pd.DataFrame, invinfo_path: Optional[str], eps: float, 
     """
     MODEL C:
       - Outcome: logFC = log(pi_inverted+eps) - log(pi_direct+eps)
-      - Predictors: Recurrent + z-scored covariates from inv_info.tsv (with missingness dummies)
+      - Predictors: Recurrent + z-scored covariates from inv_properties.tsv (with missingness dummies)
       - SEs: HC3 robust
       - Reporting: rows for SE, RE, Interaction, plus each covariate (per +1 SD)
     Returns:
@@ -1023,7 +1023,7 @@ def main():
         except Exception: pass
 
     # 5) Model C (covariate-adjusted)
-    _print_header("MODEL C — Δ-logπ ~ Recurrence + covariates from inv_info.tsv (HC3)")
+    _print_header("MODEL C — Δ-logπ ~ Recurrence + covariates from inv_properties.tsv (HC3)")
     resC, tabC, dfC, used_covs = run_model_C(matched, invinfo_path=INVINFO_TSV, eps=floor_used, nonzero_only=False)
     for _, r in tabC.iterrows():
         print(f"{r['effect']:<52}  ratio={_fmt_ratio(r['ratio'])}  CI={_fmt_ci(r['ci_low'], r['ci_high'])}  change={_fmt_pct(r['ratio'])}  p={_fmt_p(r['p'])}")

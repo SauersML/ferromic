@@ -60,7 +60,7 @@ def fuzzy_overlaps(data_start, data_end, inv_start, inv_end, tolerance=1):
     return overlap
 
 # --- Main Plotting Function ---
-def create_manhattan_plot(data_file, inv_file='inv_info.tsv'):
+def create_manhattan_plot(data_file, inv_file='inv_properties.tsv'):
     """Generates the multi-panel Manhattan-like plot."""
     print(f"\n--- Starting Plot Generation ---")
     print(f"Reading main data from: {data_file}")
@@ -161,7 +161,7 @@ def create_manhattan_plot(data_file, inv_file='inv_info.tsv'):
 
     print("Reading and filtering inversion data...")
     inv_raw_cols = ['Chromosome', 'Start', 'End']
-    inv_recur_col_raw = '0_single_1_recur'
+    inv_recur_col_raw = '0_single_1_recur_consensus'
     inv_internal_cols = ['chr', 'region_start', 'region_end']
     inv_recur_col_internal = 'recurrence_flag'
     inv_df = pd.DataFrame(columns=inv_internal_cols + [inv_recur_col_internal])
@@ -509,7 +509,7 @@ def create_manhattan_plot(data_file, inv_file='inv_info.tsv'):
 def main():
     """Sets up file paths and calls the plotting function."""
     data_file = RESULTS_DIR / 'final_results.csv'
-    inv_file = 'inv_info.tsv'
+    inv_file = 'inv_properties.tsv'
 
     if not data_file.exists():
         print(f"ERROR: Main data file not found: {data_file}")

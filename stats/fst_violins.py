@@ -8,7 +8,7 @@ import matplotlib.ticker as mticker
 from scipy.stats import mannwhitneyu
 
 SUMMARY_STATS_FILE = 'output.csv'
-INVERSION_FILE = 'inv_info.tsv'
+INVERSION_FILE = 'inv_properties.tsv'
 COORDINATE_MAP_FILE = 'map.tsv'
 
 SUMMARY_STATS_COORDINATE_COLUMNS = {'chr': 'chr', 'start': 'region_start', 'end': 'region_end'}
