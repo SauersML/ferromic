@@ -130,11 +130,11 @@ def load_inv_info(path: str):
 # ===========================
 CDS_RE = re.compile(
     r'^group(?P<phy_group>[01])_'
-    r'(?P<gene_name>[^_]+)_'
+    r'(?P<gene_name>.+)_'
     r'(?P<gene_id>[^_]+)_'
     r'(?P<transcript_id>[^_]+)_'
     r'chr(?P<chr>[^_]+)_'
-    r'cds_start(?P<cds_start>\d+)_cds_end(?P<cds_end>\d+)_'
+    r'cds_start(?P<cds_start>\d+)_cds_end(?P<cds_end>\d+)_' 
     r'inv_start(?P<inv_start>\d+)_inv_end(?P<inv_end>\d+)\.phy$'
 )
 
@@ -197,16 +197,9 @@ class PhylipParseError(Exception):
 # Non-standard: `<name ending _L/_R><sequence>` (no space)
 NONSTD_LINE_RE = re.compile(r'^(?P<name>.*?_[LR])(?P<seq>[ACGTRYKMSWBDHVN\-\.\?]+)$', re.IGNORECASE)
 
-def read_nonstandard_phylip(path: str, n: int, m: int) -> List[Tuple[str,str]]:
+def read_nonstandard_phylip(lines: List[str], n: int, m: int, start_idx: int) -> List[Tuple[str,str]]:
     out: List[Tuple[str,str]] = []
-    with open(path, "r") as fh:
-        lines = [ln.rstrip("\r\n") for ln in fh]
-    idx = 0
-    while idx < len(lines) and lines[idx].strip() == "":
-        idx += 1
-    if idx >= len(lines):
-        raise PhylipParseError("Empty file")
-    idx += 1  # past header
+    idx = start_idx
     while len(out) < n and idx < len(lines):
         line = lines[idx].strip()
         idx += 1
@@ -225,15 +218,8 @@ def read_nonstandard_phylip(path: str, n: int, m: int) -> List[Tuple[str,str]]:
         raise PhylipParseError(f"Expected {n} sequences; got {len(out)}")
     return out
 
-def read_standard_phylip(path: str, n: int, m: int) -> List[Tuple[str,str]]:
-    with open(path, "r") as fh:
-        lines = [ln.rstrip("\r\n") for ln in fh]
-    idx = 0
-    while idx < len(lines) and lines[idx].strip() == "":
-        idx += 1
-    if idx >= len(lines):
-        raise PhylipParseError("Empty file")
-    idx += 1  # skip header
+def read_standard_phylip(lines: List[str], n: int, m: int, start_idx: int) -> List[Tuple[str,str]]:
+    idx = start_idx
     names: List[str] = []
     seqs: List[str] = [""] * n
     # First block
@@ -310,9 +296,9 @@ def read_phylip_sequences_strict(path: str) -> List[Tuple[str,str]]:
         raise PhylipParseError("Header present but no sequences")
     first_line = lines[idx].strip()
     if NONSTD_LINE_RE.match(first_line):
-        return read_nonstandard_phylip(path, n, m)
+        return read_nonstandard_phylip(lines, n, m, idx)
     else:
-        return read_standard_phylip(path, n, m)
+        return read_standard_phylip(lines, n, m, idx)
 
 # ===========================
 # Identity / Differences
