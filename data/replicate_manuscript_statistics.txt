@@ -39,20 +39,17 @@ Internal decay (Spearman's ρ of diversity vs distance from start for first 100k
 
 LINEAR MODEL
 Orientation × recurrence linear models (replicated strict logic):
-  Inputs: output.csv (π per orientation) strictly ±1bp matched to inv_properties.tsv consensus (0/1); requires finite π in both columns.
-  Matched inversions: 62 (Single-event=30, Recurrent=32).
   Detection floor applied before logs: ε = 6.360000e-06.
-  [Model A] Δ-logπ = log(π_inv+ε) – log(π_dir+ε) ~ 1 + Recurrent (HC3 SEs). No weights or covariates; effects reported for single-event, recurrent, interaction, and pooled Δ-logπ.
+  [Model A] Basic interaction (Δ-logπ ~ Recurrence):
     Single-event: Inverted vs Direct: fold-change = 0.279 (95% CI 0.143–0.546), p = 1.949e-04.
     Recurrent: Inverted vs Direct: fold-change = 1.107 (95% CI 0.920–1.332), p = 0.280.
     Interaction (difference between those two): fold-change = 3.965 (95% CI 1.977–7.953), p = 1.050e-04.
     Overall inversion effect (pooled Δ-logπ): fold-change = 0.569 (95% CI 0.391–0.828), p = 3.198e-03.
-  [Model B] log(π+ε) ~ Inverted + Inverted:Recurrent + C(region_id); cluster-robust by region_id. Recurrence main effect absorbed by fixed effects; contrasts give single-event, recurrent, and interaction pairs.
+  [Model B] Fixed-effects validation (Cluster-robust):
     Single-event: Inverted vs Direct: fold-change = 0.279 (95% CI 0.109–0.712), p = 7.586e-03.
     Recurrent: Inverted vs Direct: fold-change = 1.107 (95% CI 0.855–1.434), p = 0.440.
     Interaction (difference between those two): fold-change = 3.965 (95% CI 1.501–10.474), p = 5.446e-03.
-  [Model C] Δ-logπ ~ 1 + Recurrent + z-scored covariates from inv_properties.tsv (Number_recurrent_events ln1p, Size_.kbp. ln, Inverted_AF, Formation_rate_per_generation ln). HC3 SEs; rows require complete covariates with missingness dummies excluded.
-    Covariates included in fit: Covariate: Number_recurrent_events (ln1p, z), Covariate: Size_.kbp. (ln, z), Covariate: Inverted_AF (z), Covariate: Formation_rate_per_generation (ln, z)
+  [Model C] Covariate-adjusted (Recurrence + formation/size/AF):
     Single-event: Inverted vs Direct (adjusted): fold-change = 0.364 (95% CI 0.212–0.624), p = 2.390e-04.
     Recurrent: Inverted vs Direct (adjusted): fold-change = 0.398 (95% CI 0.181–0.875), p = 0.022.
     Interaction (difference between those two): fold-change = 1.095 (95% CI 0.430–2.784), p = 0.850.
