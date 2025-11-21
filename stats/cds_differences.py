@@ -625,6 +625,7 @@ def main():
             "dataset","consensus","consensus_label","phy_group","group_label","filename",
             "gene_name","gene_id","transcript_id","chr",
             "cds_start","cds_end","inv_start","inv_end",
+            "n_sites",
             "n_sequences","n_pairs","n_identical_pairs","prop_identical_pairs",
             "inv_exact_match"
         ])
@@ -639,6 +640,7 @@ def main():
                         "CDS", cons, consensus_label(cons), grp, group_label(grp), fn,
                         rec["gene_name"], rec["gene_id"], rec["transcript_id"], rec["chr"],
                         rec["cds_start"], rec["cds_end"], rec["inv_start"], rec["inv_end"],
+                        met.get("n_sites",""),
                         met.get("n_sequences",""),
                         met.get("n_pairs",""),
                         met.get("n_identical_pairs",""),
