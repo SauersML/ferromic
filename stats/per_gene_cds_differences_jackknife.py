@@ -21,6 +21,9 @@ PAIRS_PREFIX = "pairs_CDS__"   # actual filename: f"{PAIRS_PREFIX}{summary_filen
 # jackknife estimates require at least three haplotypes.
 MIN_HAPLOTYPES_PER_GROUP = 3
 
+# Where duplicate transcript resolutions are recorded before jackknife.
+DUPLICATE_LOG = "cds_duplicate_resolutions.tsv"
+
 def cat_label(cons: int, grp: int) -> str:
     return f"{'Recurrent' if cons==1 else 'Single'}/{ 'Inverted' if grp==1 else 'Direct'}"
 
@@ -120,6 +123,83 @@ def compute_alignment_stats(pairs_path: str) -> Tuple[float, float, int, int, Se
         raise ValueError(f"SE is not finite for {pairs_path}")
 
     return p_full, se, k, n_sites, H, y, n, dict(ident_counts)
+
+
+def deduplicate_alignments(aln: pd.DataFrame, log_path: str) -> pd.DataFrame:
+    """Collapse duplicate gene×inversion×group alignments before jackknife."""
+
+    columns = [
+        "gene_name",
+        "inv_id",
+        "phy_group",
+        "transcript_id",
+        "filename",
+        "k",
+        "n_sites",
+        "y",
+        "n",
+        "p",
+        "se",
+        "decision",
+        "decision_basis",
+    ]
+
+    if aln.empty:
+        pd.DataFrame(columns=columns).to_csv(log_path, sep="\t", index=False)
+        return aln
+
+    keep_indices = set()
+    log_rows = []
+    dup_keys = 0
+
+    for key, sub in aln.groupby(["gene_name", "inv_id", "phy_group"]):
+        if len(sub) == 1:
+            keep_indices.update(sub.index)
+            continue
+
+        dup_keys += 1
+        prioritized = sub.sort_values(
+            by=["k", "n_sites", "y", "p", "transcript_id"],
+            ascending=[False, False, False, False, True],
+        )
+        keep_idx = int(prioritized.index[0])
+
+        for idx, row in prioritized.iterrows():
+            log_rows.append(
+                {
+                    "gene_name": row["gene_name"],
+                    "inv_id": row["inv_id"],
+                    "phy_group": int(row["phy_group"]),
+                    "transcript_id": row["transcript_id"],
+                    "filename": row["filename"],
+                    "k": int(row["k"]),
+                    "n_sites": int(row["n_sites"]),
+                    "y": int(row["y"]),
+                    "n": int(row["n"]),
+                    "p": float(row["p"]),
+                    "se": float(row["se"]),
+                    "decision": "kept" if idx == keep_idx else "dropped",
+                    "decision_basis": "k_desc,n_sites_desc,y_desc,p_desc,transcript_id_asc",
+                }
+            )
+
+        keep_indices.add(keep_idx)
+
+    dedup_log = pd.DataFrame(log_rows, columns=columns)
+    dedup_log.to_csv(log_path, sep="\t", index=False)
+
+    kept = aln.loc[sorted(keep_indices)].reset_index(drop=True)
+
+    if dup_keys > 0:
+        dropped = (dedup_log["decision"] == "dropped").sum()
+        print(
+            f"    Resolved {dup_keys} duplicate gene×inversion×group keys; "
+            f"dropped {dropped} transcripts (details in {log_path})."
+        )
+    else:
+        print("    No duplicate gene×inversion×group alignments detected.")
+
+    return kept
 
 # Recompute alignment p when dropping haplotype h
 def alignment_p_minus_h(k: int, y: int, p: float, ident_counts: Dict[str,int], h: str) -> float:
@@ -246,6 +326,12 @@ def main():
     aln = pd.DataFrame(alignment_rows)
 
     # -------------------------
+    # Resolve transcript duplicates within each gene×inversion×group key
+    # -------------------------
+    print("\n>>> Resolving duplicate gene×inversion×group alignments ...")
+    aln = deduplicate_alignments(aln, DUPLICATE_LOG)
+
+    # -------------------------
     # Per-inversion REGION medians and median-of-medians (diagnostic)
     # -------------------------
     print("\n>>> Computing per-inversion medians and median-of-medians for each group ...")
@@ -276,18 +362,33 @@ def main():
         key = (row["gene_name"], row["inv_id"], int(row["phy_group"]))
         key_to_idxs[key].append(idx)
 
-    # Crash the program if any (gene, inversion, group) has multiple alignments
+    # Warn (instead of crash) if any (gene, inversion, group) has multiple alignments
     violations = [(g, inv, grp, len(idxs)) for (g, inv, grp), idxs in key_to_idxs.items() if len(idxs) > 1]
     if violations:
-        msg_lines = [
-            "ASSERTION FAILED: Multiple CDS alignments/files detected for the same (gene, inversion, group).",
-            "This program forbids averaging and aborts when duplicates exist.",
-            "Examples (up to 10):"
-        ]
+        print("WARNING: Multiple CDS alignments/files detected for the same (gene, inversion, group).")
+        print("  This program forbids averaging; affected alignments will be skipped. Examples (up to 10):")
         for (g, inv, grp, cnt) in violations[:10]:
-            msg_lines.append(f"  gene={g}  inv={inv}  group={'Inverted' if grp==1 else 'Direct'}  count={cnt}")
-        msg_lines.append("Please deduplicate upstream so that each (gene, inversion, group) has exactly one CDS file.")
-        raise AssertionError("\n".join(msg_lines))
+            print(f"    gene={g}  inv={inv}  group={'Inverted' if grp==1 else 'Direct'}  count={cnt}")
+        print("  Please deduplicate upstream so that each (gene, inversion, group) has exactly one CDS file.")
+
+        violation_keys = {(g, inv, grp) for (g, inv, grp, _) in violations}
+        # Drop all alignments for duplicated keys so downstream logic can continue
+        aln = aln[
+            ~aln.apply(
+                lambda r: (r["gene_name"], r["inv_id"], int(r["phy_group"])) in violation_keys,
+                axis=1,
+            )
+        ]
+
+        if aln.empty:
+            print("No valid alignments remain after removing duplicates; exiting.")
+            return
+
+        # Re-index after filtering out violations
+        key_to_idxs = defaultdict(list)
+        for idx, row in aln.iterrows():
+            key = (row["gene_name"], row["inv_id"], int(row["phy_group"]))
+            key_to_idxs[key].append(idx)
 
     # Also map (gene, inv) to present groups
     gi_groups: Dict[Tuple[str,str], Set[int]] = defaultdict(set)

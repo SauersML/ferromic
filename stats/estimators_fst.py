@@ -61,11 +61,34 @@ def normalize_chromosome_name(chromosome_id):
          chromosome_id_str = f"chr{chromosome_id_str}"
     return chromosome_id_str
 
+def _ensure_recurrence_column(df: pd.DataFrame) -> pd.DataFrame:
+    """Guarantee presence of ``0_single_1_recur`` using common fallbacks."""
+
+    if '0_single_1_recur' in df.columns:
+        return df
+
+    for alt in ['0_single_1_recur_consensus', 'RecurrenceCode']:
+        if alt in df.columns:
+            df = df.copy()
+            df['0_single_1_recur'] = df[alt]
+            logger.info(
+                "Added missing column '0_single_1_recur' from '%s'", alt
+            )
+            return df
+
+    missing_cols = [c for c in INVERSION_FILE_COLUMNS if c not in df.columns]
+    raise ValueError(
+        "Inversion data missing required columns: "
+        f"{missing_cols if missing_cols else ['0_single_1_recur']}"
+    )
+
+
 def map_coordinates_to_inversion_types(inversion_info_df):
     recurrent_regions = {}
     single_event_regions = {}
-    if not all(col in inversion_info_df.columns for col in INVERSION_FILE_COLUMNS):
-        missing = [c for c in INVERSION_FILE_COLUMNS if c not in inversion_info_df.columns]
+    inversion_info_df = _ensure_recurrence_column(inversion_info_df)
+    missing = [c for c in INVERSION_FILE_COLUMNS if c not in inversion_info_df.columns]
+    if missing:
         raise ValueError(f"Inversion data missing required columns: {missing}")
     logger.info(f"Mapping inversion types from {len(inversion_info_df)} entries...")
     parsed_count = 0; skipped_count = 0
@@ -294,12 +317,14 @@ def main():
     ))
 
     try:
-        inv_df = pd.read_csv(INVERSION_FILE, sep='\t', usecols=INVERSION_FILE_COLUMNS)
+        inv_df = pd.read_csv(INVERSION_FILE, sep='\t')
+        inv_df = _ensure_recurrence_column(inv_df)
         sum_df_raw = pd.read_csv(SUMMARY_STATS_FILE)
         missing_cols = [col for col in summary_cols_to_load if col not in sum_df_raw.columns]
         if missing_cols:
             logger.critical(f"CRITICAL: Missing required columns in '{SUMMARY_STATS_FILE}': {missing_cols}. Halting.")
             sys.exit(1)
+        inv_df = inv_df[[c for c in INVERSION_FILE_COLUMNS if c in inv_df.columns]]
         sum_df = sum_df_raw[summary_cols_to_load].copy()
     except FileNotFoundError as e: logger.critical(f"CRITICAL: Input file not found: {e}. Halting."); sys.exit(1)
     except Exception as e: logger.critical(f"CRITICAL: Failed to load data: {e}", exc_info=True); sys.exit(1)

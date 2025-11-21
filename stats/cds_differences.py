@@ -435,6 +435,37 @@ def main():
     # Gene-name anomaly tracking
     gene_name_anomalies = [d for d in cds_files if d["_gene_name_anom"] or d["_bad_gene_id"] or d["_bad_tx_id"]]
 
+    # Detect multiple CDS alignments for the same (gene, inversion, group)
+    # early, before any downstream aggregation. These duplicates typically
+    # arise when multiple transcript alignments exist for the same gene and
+    # inversion interval within a single group, which would later trigger a
+    # hard failure in the jackknife stage when averaging is disallowed.
+    print(">>> Checking for duplicate CDS alignments per (gene, inversion, group) ...")
+    dup_tracker: Dict[Tuple[str, str, int], List[Dict]] = defaultdict(list)
+    for rec in cds_files:
+        inv_id = f"{rec['chr']}:{rec['inv_start']}-{rec['inv_end']}"
+        key = (rec["gene_name"], inv_id, rec["phy_group"])
+        dup_tracker[key].append(rec)
+
+    dup_examples = [(k, v) for k, v in dup_tracker.items() if len(v) > 1]
+    if dup_examples:
+        msg_lines = [
+            "FATAL: Multiple CDS alignments detected for the same (gene, inversion, group).",
+            "This usually means multiple transcript alignments exist for the same locus.",
+            "Examples (up to 10):",
+        ]
+        for (g, inv, grp), recs in dup_examples[:10]:
+            txs = ", ".join(sorted({r["transcript_id"] for r in recs}))
+            fns = ", ".join(sorted(r["filename"] for r in recs))
+            msg_lines.append(
+                f"  gene={g}  inv={inv}  group={'Inverted' if grp==1 else 'Direct'}  count={len(recs)}"
+            )
+            msg_lines.append(f"    transcripts: {txs}")
+            msg_lines.append(f"    files      : {fns}")
+        msg_lines.append("Please deduplicate upstream so only one alignment remains per key.")
+        print("\n".join(msg_lines))
+        sys.exit(1)
+
     # Categories
     categories = defaultdict(set)  # (dataset, consensus, group) -> set(filenames)
     cds_sanity_exact_match: Dict[str, int] = {}
