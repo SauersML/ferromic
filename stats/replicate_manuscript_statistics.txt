@@ -25,21 +25,21 @@ Nucleotide diversity (π) by orientation and recurrence:
 
 PI STRUCTURE
 Nucleotide diversity structure (Edge vs Middle and Internal Decay), filtered by consensus inversion status:
-  Qualifying regions (≥40kbp): 44 unique inversions.
-  [Edge vs Middle] Direct/Group 0: n=44 regions. Haplotypes (N): Total=2747, Mean=62.4 [Min 16, Max 81]. Flank Mean = 4.685e-04, Middle Mean = 5.303e-04.
-  [Edge vs Middle] Inverted/Group 1: n=32 regions. Haplotypes (N): Total=583, Mean=18.2 [Min 2, Max 58]. Flank Mean = 2.491e-04, Middle Mean = 3.042e-04.
-  [Edge vs Middle] Overall: n=76 regions. Haplotypes (N): Total=3330, Mean=43.8 [Min 2, Max 81]. Flank Mean = 3.761e-04, Middle Mean = 4.356e-04.
-    - Single-event Inverted (Group 1, Recurrence 0): n=10 regions. Haplotypes (N): Total=85, Mean=8.5 [Min 2, Max 52]. Flank Mean = 8.202e-05, Middle Mean = 1.462e-04.
-    - Recurrent Direct (Group 0, Recurrence 1): n=22 regions. Haplotypes (N): Total=1062, Mean=48.3 [Min 16, Max 77]. Flank Mean = 3.263e-04, Middle Mean = 4.120e-04.
-    - Single-event Direct (Group 0, Recurrence 0): n=22 regions. Haplotypes (N): Total=1685, Mean=76.6 [Min 30, Max 81]. Flank Mean = 6.108e-04, Middle Mean = 6.433e-04.
-    - Recurrent Inverted (Group 1, Recurrence 1): n=22 regions. Haplotypes (N): Total=498, Mean=22.6 [Min 2, Max 58]. Flank Mean = 3.250e-04, Middle Mean = 3.795e-04.
+  Qualifying regions (≥40kbp): 46 unique inversions.
+  [Edge vs Middle] Direct/Group 0: n=46 regions. Haplotypes (N): Total=2791, Mean=60.7 [Min 6, Max 81]. Flank Mean = 4.250e-04, Middle Mean = 5.391e-04.
+  [Edge vs Middle] Inverted/Group 1: n=33 regions. Haplotypes (N): Total=627, Mean=19.0 [Min 2, Max 58]. Flank Mean = 2.033e-04, Middle Mean = 3.139e-04.
+  [Edge vs Middle] Overall: n=79 regions. Haplotypes (N): Total=3418, Mean=43.3 [Min 2, Max 81]. Flank Mean = 3.324e-04, Middle Mean = 4.450e-04.
+    - Single-event Inverted (Group 1, Recurrence 0): n=10 regions. Haplotypes (N): Total=85, Mean=8.5 [Min 2, Max 52]. Flank Mean = 6.702e-05, Middle Mean = 1.462e-04.
+    - Recurrent Direct (Group 0, Recurrence 1): n=23 regions. Haplotypes (N): Total=1100, Mean=47.8 [Min 16, Max 77]. Flank Mean = 2.705e-04, Middle Mean = 4.630e-04.
+    - Single-event Direct (Group 0, Recurrence 0): n=23 regions. Haplotypes (N): Total=1691, Mean=73.5 [Min 6, Max 81]. Flank Mean = 5.796e-04, Middle Mean = 6.153e-04.
+    - Recurrent Inverted (Group 1, Recurrence 1): n=23 regions. Haplotypes (N): Total=542, Mean=23.6 [Min 2, Max 58]. Flank Mean = 2.626e-04, Middle Mean = 3.868e-04.
 
 Internal decay (Spearman's ρ of diversity vs distance from start for first 100kb, loci ≥100kb):
-  Overall (All Consensus 0+1): ρ = 0.171 (p = 1.009e-14, n = 45).
+  Overall (All Consensus 0+1): ρ = 0.175 (p = 1.558e-17, n = 47).
   Single-Event Inverted (G1, R0): ρ = 0.172 (p = 6.402e-03, n = 5).
-  Recurrent Direct (G0, R1): ρ = 0.181 (p = 2.694e-05, n = 13).
-  Recurrent Inverted (G1, R1): ρ = 0.172 (p = 6.658e-05, n = 13).
-  Single-Event Direct (G0, R0): ρ = 0.166 (p = 1.207e-05, n = 14).
+  Recurrent Direct (G0, R1): ρ = 0.181 (p = 1.359e-06, n = 14).
+  Recurrent Inverted (G1, R1): ρ = 0.175 (p = 3.096e-06, n = 14).
+  Single-Event Direct (G0, R0): ρ = 0.188 (p = 5.822e-07, n = 14).
 
 LINEAR MODEL
 Orientation × recurrence linear models (replicated strict logic):
@@ -73,14 +73,16 @@ CDS CONSERVATION
 CDS conservation GLM (proportion of identical CDS pairs):
   Model definition: Binomial GLM with logit link and frequency weights = n_pairs, cluster-robust by inversion; formula prop ~ C(consensus) * C(phy_group) + log_m + log_L + log_k (log of n_sites, inversion length, and n_sequences).
   Categories use Single/Recurrent × Direct/Inverted encoding; estimated marginal means are standardized with equal inversion weight and covariates set to their weighted means before pairwise contrasts.
-  FATAL: CDS GLM inputs unavailable. The pipeline should have generated cds_identical_proportions.tsv.
-  Failed to compute GLM: Missing per-file pairs TSV: pairs_CDS__group0_AIMP2_ENSG00000106305.10_ENST00000223029.8_chr7_cds_start6009364_cds_end6023688_inv_start5989046_inv_end6735643.phy.tsv
+  Source: loaded from cds_identical_proportions.tsv.
+  Single/Inverted vs Single/Direct: Δlogit = 1.979, Δp = 0.190, p = 1.092e-03, BH q = 2.287e-03.
+  Single/Inverted vs Recurrent/Inverted: Δlogit = 2.206, Δp = 0.232, p = 2.874e-04, BH q = 1.724e-03.
+  Single/Inverted vs Recurrent/Direct: Δlogit = 2.024, Δp = 0.198, p = 1.144e-03, BH q = 2.287e-03.
 
 DIFFERENTIATION
 Differentiation between orientations (Hudson's FST):
-  Single-event: median FST = 0.207 (n = 28).
-  Recurrent: median FST = 0.064 (n = 32).
-  Mann–Whitney U test (single-event vs recurrent): U = 591.000, p = 0.034.
+  Single-event: median FST = 0.352 (n = 22).
+  Recurrent: median FST = 0.107 (n = 28).
+  Mann–Whitney U test (single-event vs recurrent): U = 465.000, p = 2.223e-03.
   Highly differentiated loci: 24 with FST > 0.2 and 9 with FST > 0.5.
 
 BREAKPOINT FRF
