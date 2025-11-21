@@ -42,6 +42,18 @@ use std::thread;
 use std::time::Duration;
 use tempfile::TempDir;
 
+/// Per-site Weir & Cockerham FST outputs used for writing FASTA-style tracks.
+#[derive(Debug, Clone)]
+pub struct PerSiteWcOutput {
+    pub position: i64,
+    pub overall_fst: f64,
+    pub overall_numerator: f64,
+    pub overall_denominator: f64,
+    pub pairwise_fst: f64,
+    pub pairwise_numerator: f64,
+    pub pairwise_denominator: f64,
+}
+
 pub fn create_temp_dir() -> Result<TempDir, VcfError> {
     let ramdisk_path = std::env::var("RAMDISK_PATH").unwrap_or_else(|_| "/dev/shm".to_string());
     let temp_dir = match TempDir::new_in(&ramdisk_path) {
@@ -1885,7 +1897,7 @@ fn process_chromosome_entries(
         Vec<(
             CsvRowData,
             Vec<(i64, f64, f64, u8, bool)>,
-            Vec<(i64, f64, f64)>,
+            Vec<PerSiteWcOutput>,
             Vec<(i64, f64, f64, f64)>,
         )>,
         Vec<RegionalHudsonFSTOutcome>,
@@ -2476,7 +2488,7 @@ fn process_single_config_entry(
     Option<(
         CsvRowData,
         Vec<(i64, f64, f64, u8, bool)>,
-        Vec<(i64, f64, f64)>,
+        Vec<PerSiteWcOutput>,
         Vec<(i64, f64, f64, f64)>,
         Vec<RegionalHudsonFSTOutcome>,
         Option<RegionalWcFSTOutcome>,
@@ -3435,9 +3447,8 @@ fn process_single_config_entry(
     }
 
     // Collect per-site FST records specifically for the haplotype group analysis (0 vs. 1)
-    // for summary FALSTA output.
-    // Stores (1-based position, Overall_Haplotype_FstEstimate_as_f64, Pairwise_0v1_Haplotype_FstEstimate_as_f64).
-    let mut per_site_fst_records: Vec<(i64, f64, f64)> = Vec::new();
+    // for summary FALSTA output, preserving both FST values and numerator/denominator components.
+    let mut per_site_fst_records: Vec<PerSiteWcOutput> = Vec::new();
 
     if let Some(fst_results_hap_groups) = &fst_results_filtered {
         // fst_results_hap_groups is &FstWcResults
@@ -3458,11 +3469,25 @@ fn process_single_config_entry(
                 Some(&crate::stats::FstEstimate::Calculable { value, .. }) => value, // Extract the value field
                 _ => f64::NAN, // Use NaN if the pair is not found or its FstEstimate is not Calculable.
             };
-            per_site_fst_records.push((
-                site_fst_wc.position,
-                overall_site_hap_fst_val,
-                pairwise_0_vs_1_hap_fst_val,
-            ));
+            let (overall_numerator, overall_within) = site_fst_wc.variance_components;
+            let overall_denominator = overall_numerator + overall_within;
+
+            let (pairwise_numerator, pairwise_within) = site_fst_wc
+                .pairwise_variance_components
+                .get("0_vs_1")
+                .copied()
+                .unwrap_or((f64::NAN, f64::NAN));
+            let pairwise_denominator = pairwise_numerator + pairwise_within;
+
+            per_site_fst_records.push(PerSiteWcOutput {
+                position: site_fst_wc.position,
+                overall_fst: overall_site_hap_fst_val,
+                overall_numerator,
+                overall_denominator,
+                pairwise_fst: pairwise_0_vs_1_hap_fst_val,
+                pairwise_numerator,
+                pairwise_denominator,
+            });
         }
     }
 
@@ -3629,17 +3654,31 @@ fn append_diversity_falsta<P: AsRef<std::path::Path>>(
     encoder.finish().map_err(VcfError::Io).map(|_| ())
 }
 
-// per-site WC FST: (pos_1based, overall_wc, pairwise_0v1_wc)
-// and Hudson hap FST components: (pos_1based, fst, numerator, denominator)
+// per-site WC FST and Hudson hap FST components
 fn append_fst_falsta<P: AsRef<std::path::Path>>(
     path: P,
     row: &CsvRowData,
-    wc_sites: &[(i64, f64, f64)],
+    wc_sites: &[PerSiteWcOutput],
     hudson_sites: &[(i64, f64, f64, f64)],
 ) -> Result<(), VcfError> {
     let mut w = open_append_compressed(path.as_ref()).map_err(VcfError::Io)?;
     let region = ZeroBasedHalfOpen::from_1based_inclusive(row.region_start, row.region_end);
     let n = region.len();
+    let format_value = |value: f64| -> String {
+        if value.is_nan() {
+            "NA".into()
+        } else if value.is_infinite() {
+            if value.is_sign_positive() {
+                "Infinity".into()
+            } else {
+                "-Infinity".into()
+            }
+        } else if value == 0.0 {
+            "0".into()
+        } else {
+            format!("{:.6}", value)
+        }
+    };
 
     // WC overall
     if !wc_sites.is_empty() {
@@ -3650,17 +3689,43 @@ fn append_fst_falsta<P: AsRef<std::path::Path>>(
         )
         .map_err(VcfError::Io)?;
         let mut v = vec![String::from("NA"); n];
-        for &(p1, ovl, _) in wc_sites {
-            if let Some(rel1) = region.relative_position_1based_inclusive(p1) {
+        for site in wc_sites {
+            if let Some(rel1) = region.relative_position_1based_inclusive(site.position) {
                 let i = (rel1 - 1) as usize;
-                v[i] = if ovl.is_nan() {
-                    "NA".into()
-                } else {
-                    format!("{:.6}", ovl)
-                };
+                v[i] = format_value(site.overall_fst);
             }
         }
         writeln!(w, "{}", v.join(",")).map_err(VcfError::Io)?;
+
+        writeln!(
+            w,
+            ">haplotype_overall_fst_numerator_chr_{}_start_{}_end_{}",
+            row.seqname, row.region_start, row.region_end
+        )
+        .map_err(VcfError::Io)?;
+        let mut numerators = vec![String::from("NA"); n];
+        for site in wc_sites {
+            if let Some(rel1) = region.relative_position_1based_inclusive(site.position) {
+                let i = (rel1 - 1) as usize;
+                numerators[i] = format_value(site.overall_numerator);
+            }
+        }
+        writeln!(w, "{}", numerators.join(",")).map_err(VcfError::Io)?;
+
+        writeln!(
+            w,
+            ">haplotype_overall_fst_denominator_chr_{}_start_{}_end_{}",
+            row.seqname, row.region_start, row.region_end
+        )
+        .map_err(VcfError::Io)?;
+        let mut denominators = vec![String::from("NA"); n];
+        for site in wc_sites {
+            if let Some(rel1) = region.relative_position_1based_inclusive(site.position) {
+                let i = (rel1 - 1) as usize;
+                denominators[i] = format_value(site.overall_denominator);
+            }
+        }
+        writeln!(w, "{}", denominators.join(",")).map_err(VcfError::Io)?;
 
         // WC pairwise 0v1
         writeln!(
@@ -3670,37 +3735,47 @@ fn append_fst_falsta<P: AsRef<std::path::Path>>(
         )
         .map_err(VcfError::Io)?;
         let mut pv = vec![String::from("NA"); n];
-        for &(p1, _, pair) in wc_sites {
-            if let Some(rel1) = region.relative_position_1based_inclusive(p1) {
+        for site in wc_sites {
+            if let Some(rel1) = region.relative_position_1based_inclusive(site.position) {
                 let i = (rel1 - 1) as usize;
-                pv[i] = if pair.is_nan() {
-                    "NA".into()
-                } else {
-                    format!("{:.6}", pair)
-                };
+                pv[i] = format_value(site.pairwise_fst);
             }
         }
         writeln!(w, "{}", pv.join(",")).map_err(VcfError::Io)?;
+
+        writeln!(
+            w,
+            ">haplotype_0v1_pairwise_fst_numerator_chr_{}_start_{}_end_{}",
+            row.seqname, row.region_start, row.region_end
+        )
+        .map_err(VcfError::Io)?;
+        let mut pairwise_numerators = vec![String::from("NA"); n];
+        for site in wc_sites {
+            if let Some(rel1) = region.relative_position_1based_inclusive(site.position) {
+                let i = (rel1 - 1) as usize;
+                pairwise_numerators[i] = format_value(site.pairwise_numerator);
+            }
+        }
+        writeln!(w, "{}", pairwise_numerators.join(",")).map_err(VcfError::Io)?;
+
+        writeln!(
+            w,
+            ">haplotype_0v1_pairwise_fst_denominator_chr_{}_start_{}_end_{}",
+            row.seqname, row.region_start, row.region_end
+        )
+        .map_err(VcfError::Io)?;
+        let mut pairwise_denominators = vec![String::from("NA"); n];
+        for site in wc_sites {
+            if let Some(rel1) = region.relative_position_1based_inclusive(site.position) {
+                let i = (rel1 - 1) as usize;
+                pairwise_denominators[i] = format_value(site.pairwise_denominator);
+            }
+        }
+        writeln!(w, "{}", pairwise_denominators.join(",")).map_err(VcfError::Io)?;
     }
 
     // Hudson per-site hap FST 0v1
     if !hudson_sites.is_empty() {
-        let format_value = |value: f64| -> String {
-            if value.is_nan() {
-                "NA".into()
-            } else if value.is_infinite() {
-                if value.is_sign_positive() {
-                    "Infinity".into()
-                } else {
-                    "-Infinity".into()
-                }
-            } else if value == 0.0 {
-                "0".into()
-            } else {
-                format!("{:.6}", value)
-            }
-        };
-
         writeln!(
             w,
             ">hudson_pairwise_fst_hap_0v1_chr_{}_start_{}_end_{}",
