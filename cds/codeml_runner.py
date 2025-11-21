@@ -62,11 +62,13 @@ def _execute_task(args):
         )
     except Exception as e:
         logging.error(f"[{gene_name}] Unexpected error: {e}")
+        # Clean the error message to keep TSV rows intact
+        clean_reason = str(e).replace('\n', ' | ').replace('\r', '').replace('\t', ' ')
         return {
             'gene': gene_name,
             'region': region_label,
             'status': 'runtime_error',
-            'reason': str(e)
+            'reason': clean_reason
         }
 
 def main():
@@ -227,11 +229,12 @@ def main():
                 results.append(res)
             except Exception as e:
                 logging.error(f"[{gene_name}] Worker crashed: {e}")
+                clean_reason = str(e).replace('\n', ' | ').replace('\r', '').replace('\t', ' ')
                 results.append({
                     'gene': gene_name,
                     'region': region_label,
                     'status': 'runtime_error',
-                    'reason': f'Worker failure: {e}'
+                    'reason': f'Worker failure: {clean_reason}'
                 })
 
     # 6. Save Results
