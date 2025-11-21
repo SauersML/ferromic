@@ -1026,13 +1026,24 @@ def parse_h1_paml_output(outfile_path):
         raise RuntimeError(f"BM output appears incomplete/crashed: {outfile_path}")
 
     params = {'kappa': np.nan, 'omega_background': np.nan, 'omega_direct': np.nan, 'omega_inverted': np.nan}
+
+    if not os.path.exists(outfile_path):
+        raise RuntimeError(f"PAML output file missing: {outfile_path}")
+
     omega_lines = []
-    for line in text.splitlines():
-        if line.lstrip().startswith('kappa'):
-            m = re.search(r'kappa \(ts/tv\)\s*=\s*(' + FLOAT_REGEX + ')', line)
-            if m: params['kappa'] = float(m.group(1))
-        if re.search(r'\bw\s*\(dN/dS\)', line) or re.search(r'w\s*for\s*branch\s*type', line) or re.search(r'w\s*ratios?\s*for\s*branches?', line):
-            omega_lines.append(line)
+    with open(outfile_path, 'r') as f:
+        content = f.read()
+        if not content.strip():
+            raise RuntimeError(f"PAML output file is empty: {outfile_path}")
+
+        f.seek(0)
+        for line in f:
+            if line.lstrip().startswith('kappa'):
+                m = re.search(r'kappa \(ts/tv\)\s*=\s*(' + FLOAT_REGEX + ')', line)
+                if m: params['kappa'] = float(m.group(1))
+            if re.search(r'\bw\s*\(dN/dS\)', line) or re.search(r'w\s*for\s*branch\s*type', line) or re.search(r'w\s*ratios?\s*for\s*branches?', line):
+                omega_lines.append(line)
+
 
     for line in omega_lines:
         if re.search(r'branch type\s*0', line):
@@ -1068,6 +1079,7 @@ def parse_h1_cmc_paml_output(outfile_path):
         text = f.read()
 
     if not text.strip():
+
         raise ValueError(f"PAML output file is empty: {outfile_path}")
 
     if "Time used" not in text and "lnL" not in text:
