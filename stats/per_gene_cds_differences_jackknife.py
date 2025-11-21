@@ -168,7 +168,7 @@ def main():
 
     if df.empty:
         print("No alignments remain after filtering (CDS, exact-match, consensus ∈ {0,1}, k ≥ 3).")
-        sys.exit(0)
+        return
 
     # normalize/strings
     df["filename"] = df["filename"].astype(str)
@@ -240,7 +240,7 @@ def main():
 
     if not alignment_rows:
         print("No valid alignments after processing; exiting.")
-        sys.exit(0)
+        return
 
     aln = pd.DataFrame(alignment_rows)
 
@@ -446,7 +446,7 @@ def main():
     ok = tests_df[tests_df["status"] == "OK"].copy()
     if ok.empty:
         print("No valid (gene, inversion) tests to report. Exiting.")
-        sys.exit(0)
+        return
 
     # FDR across VALID p-values only
     valid_pvals = ok["p_value"].astype(float).tolist()
