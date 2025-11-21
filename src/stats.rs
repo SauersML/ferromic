@@ -9,12 +9,12 @@ use crate::progress::{
 use rayon::prelude::*;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 use std::fmt;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 
 /// Epsilon threshold for numerical stability in FST calculations.
 /// Used consistently across per-site and aggregation functions to handle
@@ -2482,10 +2482,7 @@ pub fn calculate_d_xy_hudson<'a>(
                 (acc_dxy, acc_count, acc_skipped)
             },
         )
-        .reduce(
-            || (0.0, 0, 0),
-            |a, b| (a.0 + b.0, a.1 + b.1, a.2 + b.2),
-        );
+        .reduce(|| (0.0, 0, 0), |a, b| (a.0 + b.0, a.1 + b.1, a.2 + b.2));
 
     log(
         LogLevel::Debug,
@@ -2497,8 +2494,8 @@ pub fn calculate_d_xy_hudson<'a>(
 
     // Final Dxy = sum of per-site Dxy values divided by sequence length
     // Monomorphic sites (including those not in variants list) contribute 0
-    let effective_sequence_length = (pop1_context.sequence_length as i64)
-        .saturating_sub(skipped_sites);
+    let effective_sequence_length =
+        (pop1_context.sequence_length as i64).saturating_sub(skipped_sites);
     let d_xy_value = if effective_sequence_length > 0 {
         Some(sum_dxy / effective_sequence_length as f64)
     } else {
@@ -3702,8 +3699,7 @@ pub fn calculate_adjusted_sequence_length(
             .collect()
     });
 
-    let unmasked_intervals =
-        subtract_regions(&allowed_intervals, converted_masks.as_deref());
+    let unmasked_intervals = subtract_regions(&allowed_intervals, converted_masks.as_deref());
 
     // Calculate the total length of all unmasked intervals
     let adjusted_length: i64 = unmasked_intervals
@@ -4572,15 +4568,12 @@ pub fn calculate_per_site_diversity(
         return Vec::new();
     }
 
-    let region_len_usize = region_len as usize;
-
     let total_variants = variants
         .iter()
         .filter(|variant| region.contains(variant.position))
         .count();
 
-    let mut site_diversities = Vec::with_capacity(region_len_usize);
-    let mut variant_metrics: HashMap<i64, (f64, f64)> = HashMap::with_capacity(total_variants);
+    let mut site_diversities = Vec::with_capacity(total_variants);
 
     if haplotypes_in_group.len() < 2 {
         log(
@@ -4638,7 +4631,25 @@ pub fn calculate_per_site_diversity(
             polymorphic_sites += 1;
         }
 
-        variant_metrics.insert(variant.position, (pi_value, watterson_value));
+        let zero_based_pos = variant.position;
+        let is_masked_region = mask_intervals.map_or(false, |intervals| {
+            intervals
+                .iter()
+                .any(|&(start, end)| zero_based_pos >= start && zero_based_pos < end)
+        });
+
+        let (pi_value, watterson_value) =
+            if filtered_positions.contains(&zero_based_pos) || is_masked_region {
+                (f64::NAN, f64::NAN)
+            } else {
+                (pi_value, watterson_value)
+            };
+
+        site_diversities.push(SiteDiversity {
+            position: ZeroBasedPosition(zero_based_pos).to_one_based(),
+            pi: pi_value,
+            watterson_theta: watterson_value,
+        });
     }
 
     finish_step_progress(&format!(
@@ -4653,37 +4664,6 @@ pub fn calculate_per_site_diversity(
             total_variants, polymorphic_sites
         ),
     );
-
-    for offset in 0..region_len_usize {
-        let zero_based_pos = region.start + offset as i64;
-        let is_masked_region = mask_intervals.map_or(false, |intervals| {
-            intervals
-                .iter()
-                .any(|&(start, end)| zero_based_pos >= start && zero_based_pos < end)
-        });
-        if let Some((pi_value, watterson_value)) = variant_metrics.get(&zero_based_pos) {
-            site_diversities.push(SiteDiversity {
-                position: ZeroBasedPosition(zero_based_pos).to_one_based(),
-                pi: *pi_value,
-                watterson_theta: *watterson_value,
-            });
-            continue;
-        }
-
-        let (pi_value, watterson_value) = if filtered_positions.contains(&zero_based_pos)
-            || is_masked_region
-        {
-            (f64::NAN, f64::NAN)
-        } else {
-            (0.0, 0.0)
-        };
-
-        site_diversities.push(SiteDiversity {
-            position: ZeroBasedPosition(zero_based_pos).to_one_based(),
-            pi: pi_value,
-            watterson_theta: watterson_value,
-        });
-    }
 
     let total_time = start_time.elapsed();
     display_status_box(StatusBox {
