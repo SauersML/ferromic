@@ -2121,7 +2121,9 @@ fn calculate_variance_components(
     // Calculate component 'a' (among-population variance component)
     let a_numerator_term = s_squared - (x_wc / (n_bar - 1.0));
     // a_denominator_factor is n_c / n_bar, so dividing by it is multiplying by n_bar / n_c.
-    let a_denominator_factor = 1.0 - (c_squared / r);
+    // Correct formula for n_c involves division by (r-1), so n_c = n_bar * (1 - c^2/(r-1)).
+    // Therefore, a_denominator_factor = 1.0 - (c_squared / (r - 1.0)).
+    let a_denominator_factor = 1.0 - (c_squared / (r - 1.0));
 
     // This division for 'a' is allowed to produce Infinity or NaN if a_denominator_factor is zero
     // (e.g., due to extreme sample size variance where n_c becomes 0)
