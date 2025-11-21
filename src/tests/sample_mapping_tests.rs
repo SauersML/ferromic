@@ -7,7 +7,7 @@ fn maps_core_and_full_sample_ids() {
         "HG54321".to_string(),
     ];
 
-    let mapping = map_sample_names_to_indices(&samples).expect("mapping should succeed");
+    let mapping = map_sample_names_to_indices(&samples);
 
     // Core ID should resolve to the same index as the full VCF name
     assert_eq!(mapping.get("HG12345"), Some(&0));

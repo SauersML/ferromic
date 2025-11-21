@@ -29,7 +29,6 @@ use flate2::Compression;
 use flate2::write::GzEncoder;
 use parking_lot::Mutex;
 use prettytable::{Table, row};
-use rayon::prelude::*;
 use smallvec::SmallVec;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
@@ -1419,7 +1418,7 @@ pub fn process_config_entries(
     // accumulating per-site results for all chromosomes in memory at once.
     for &chr in &sorted_chromosomes {
         let chr_entries = &grouped[chr];
-        let mut data_tuple_for_chr = match process_chromosome_entries(
+        let data_tuple_for_chr = match process_chromosome_entries(
             chr,
             chr_entries,
             vcf_folder,
