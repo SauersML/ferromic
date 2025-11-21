@@ -2593,7 +2593,7 @@ fn process_single_config_entry(
         Vec<Option<(char, Vec<char>)>>,
     ) = slice_variants
         .iter()
-        .zip(all_allele_infos.iter())
+        .zip(slice_allele_infos.iter())
         .filter(|(v, _)| {
             let p = v.position;
             if !entry.interval.contains(ZeroBasedPosition(p)) {
