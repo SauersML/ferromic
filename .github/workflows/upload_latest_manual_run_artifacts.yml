@@ -177,4 +177,5 @@ jobs:
             exit 0
           fi
           git commit -m "Sync data from Manual Run VCF Pipeline (run $RUN_ID)"
+          git pull --rebase origin main
           git push https://${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git HEAD:main
