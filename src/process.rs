@@ -4248,7 +4248,16 @@ pub fn process_variant(
     }
 
     let mut sample_has_low_gq = false;
-    for &idx in kept_col_indices {
+    for (i, &idx) in kept_col_indices.iter().enumerate() {
+        // If the genotype is missing, we skip the GQ check for this sample.
+        // This sample will still cause `has_missing_genotypes` to be true,
+        // failing the `passes_filters` check, which is the intended behavior.
+        // We do not want to return a Parse error just because a missing genotype
+        // (which is valid VCF) lacks a GQ field.
+        if raw_genotypes[i].is_none() {
+            continue;
+        }
+
         let gt_field = fields
             .get(idx)
             .ok_or_else(|| VcfError::Parse("Missing genotype field".to_string()))?;
