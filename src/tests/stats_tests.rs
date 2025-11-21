@@ -216,12 +216,21 @@ mod tests {
     #[test]
     fn test_calculate_pairwise_differences_basic() {
         let variants = vec![
-            create_variant(1000, vec![Some(vec![0, 0]), Some(vec![0, 1]), Some(vec![1, 1])]),
-            create_variant(2000, vec![Some(vec![0, 0]), Some(vec![0, 0]), Some(vec![0, 1])]),
-            create_variant(3000, vec![Some(vec![0, 1]), Some(vec![1, 1]), Some(vec![0, 0])]),
+            create_variant(
+                1000,
+                vec![Some(vec![0, 0]), Some(vec![0, 1]), Some(vec![1, 1])],
+            ),
+            create_variant(
+                2000,
+                vec![Some(vec![0, 0]), Some(vec![0, 0]), Some(vec![0, 1])],
+            ),
+            create_variant(
+                3000,
+                vec![Some(vec![0, 1]), Some(vec![1, 1]), Some(vec![0, 0])],
+            ),
         ];
 
-        let result = calculate_pairwise_differences(&variants, 3);
+        let result = calculate_pairwise_differences(&variants, 3, 3);
 
         assert_eq!(result.len(), 3);
     }
@@ -229,18 +238,26 @@ mod tests {
     #[test]
     fn test_calculate_pairwise_differences_pair_0_1() {
         let variants = vec![
-            create_variant(1000, vec![Some(vec![0, 0]), Some(vec![0, 1]), Some(vec![1, 1])]),
-            create_variant(2000, vec![Some(vec![0, 0]), Some(vec![0, 0]), Some(vec![0, 1])]),
-            create_variant(3000, vec![Some(vec![0, 1]), Some(vec![1, 1]), Some(vec![0, 0])]),
+            create_variant(
+                1000,
+                vec![Some(vec![0, 0]), Some(vec![0, 1]), Some(vec![1, 1])],
+            ),
+            create_variant(
+                2000,
+                vec![Some(vec![0, 0]), Some(vec![0, 0]), Some(vec![0, 1])],
+            ),
+            create_variant(
+                3000,
+                vec![Some(vec![0, 1]), Some(vec![1, 1]), Some(vec![0, 0])],
+            ),
         ];
 
-        let result = calculate_pairwise_differences(&variants, 3);
+        let result = calculate_pairwise_differences(&variants, 3, 3);
 
         for &((i, j), difference_count, comparable_site_count) in &result {
             if (i, j) == (0, 1) {
                 assert_eq!(difference_count, 4); // Per-haplotype comparison: 2 haplotypes × 2 haplotypes = 4 comparisons
-                // comparable_site_count should be > 0
-                assert!(comparable_site_count > 0);
+                assert_eq!(comparable_site_count, 12); // 3 genomic sites × 4 haplotype pairings
             }
         }
     }
@@ -248,18 +265,26 @@ mod tests {
     #[test]
     fn test_calculate_pairwise_differences_pair_0_2() {
         let variants = vec![
-            create_variant(1000, vec![Some(vec![0, 0]), Some(vec![0, 1]), Some(vec![1, 1])]),
-            create_variant(2000, vec![Some(vec![0, 0]), Some(vec![0, 0]), Some(vec![0, 1])]),
-            create_variant(3000, vec![Some(vec![0, 1]), Some(vec![1, 1]), Some(vec![0, 0])]),
+            create_variant(
+                1000,
+                vec![Some(vec![0, 0]), Some(vec![0, 1]), Some(vec![1, 1])],
+            ),
+            create_variant(
+                2000,
+                vec![Some(vec![0, 0]), Some(vec![0, 0]), Some(vec![0, 1])],
+            ),
+            create_variant(
+                3000,
+                vec![Some(vec![0, 1]), Some(vec![1, 1]), Some(vec![0, 0])],
+            ),
         ];
 
-        let result = calculate_pairwise_differences(&variants, 3);
+        let result = calculate_pairwise_differences(&variants, 3, 3);
 
         for &((i, j), difference_count, comparable_site_count) in &result {
             if (i, j) == (0, 2) {
                 assert_eq!(difference_count, 8); // Per-haplotype comparison across 3 variants
-                // comparable_site_count should be > 0
-                assert!(comparable_site_count > 0);
+                assert_eq!(comparable_site_count, 12);
             }
         }
     }
@@ -270,15 +295,24 @@ mod tests {
             create_variant(1, vec![Some(vec![0]), None, Some(vec![1])]),
             create_variant(2, vec![Some(vec![1]), Some(vec![1]), None]),
         ];
-        let missing_data_result = calculate_pairwise_differences(&missing_data_variants, 3);
+        let missing_data_result = calculate_pairwise_differences(&missing_data_variants, 3, 2);
 
         assert_eq!(missing_data_result.len(), 3);
 
-        for &((i, j), count, _) in &missing_data_result {
+        for &((i, j), count, comparable_sites) in &missing_data_result {
             match (i, j) {
-                (0, 1) => assert_eq!(count, 0),
-                (0, 2) => assert_eq!(count, 1),
-                (1, 2) => assert_eq!(count, 0),
+                (0, 1) => {
+                    assert_eq!(count, 0);
+                    assert_eq!(comparable_sites, 1); // One site dropped due to missing data
+                }
+                (0, 2) => {
+                    assert_eq!(count, 1);
+                    assert_eq!(comparable_sites, 1); // One site dropped due to missing data
+                }
+                (1, 2) => {
+                    assert_eq!(count, 0);
+                    assert_eq!(comparable_sites, 0); // Both sites missing for the pair
+                }
                 _ => panic!("Unexpected pair: ({}, {})", i, j),
             }
         }
