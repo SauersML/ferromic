@@ -343,12 +343,15 @@ jobs:
           # Optional: configure timeouts etc
           PAML_TIMEOUT: 21100
           REGION_OVERRIDE_FILTER: ${{ inputs.region_override }}
+          KEEP_PAML_OUT: 1
 
       - name: Upload Partial Results
         uses: actions/upload-artifact@v4
         with:
           name: paml-results-${{ strategy.job-index }}
-          path: partial_results_*.tsv
+          path: |
+            partial_results_*.tsv
+            paml_runs/
           retention-days: 3
 
   finalize-phase:
