@@ -1115,7 +1115,8 @@ def run_metric(which: str,
                # bp mode outputs
                out_plot_bp: Path,
                out_tsv_bp: Path,
-               agg_kind: str):
+               agg_kind: str,
+               max_bp: int = MAX_BP):
     """
     Run a metric end-to-end for both proportion and bp modes.
     π: agg_kind ∈ {'mean','median'} on per-sequence bin means.
@@ -1133,7 +1134,7 @@ def run_metric(which: str,
         fuzzy_map=fuzzy_map,
         mode="proportion",
         num_bins=NUM_BINS_PROP,
-        max_bp=MAX_BP,     # cap for proportion mode too
+        max_bp=max_bp,     # cap for proportion mode too
     )
     total_loaded_prop = sum(per_group_counts_prop.values())
     if total_loaded_prop == 0:
@@ -1141,7 +1142,7 @@ def run_metric(which: str,
     else:
         _assemble_outputs(
             per_group_means_prop, per_group_counts_prop,
-            which=which, mode="proportion", num_bins=NUM_BINS_PROP, max_bp=MAX_BP,
+            which=which, mode="proportion", num_bins=NUM_BINS_PROP, max_bp=max_bp,
             y_label=y_label,
             out_path=out_plot_prop,
             out_tsv=out_tsv_prop,
@@ -1156,7 +1157,7 @@ def run_metric(which: str,
         fuzzy_map=fuzzy_map,
         mode="bp",
         num_bins=NUM_BINS_BP,
-        max_bp=MAX_BP,
+        max_bp=max_bp,
     )
     total_loaded_bp = sum(per_group_counts_bp.values())
     if total_loaded_bp == 0:
@@ -1164,7 +1165,7 @@ def run_metric(which: str,
     else:
         _assemble_outputs(
             per_group_means_bp, per_group_counts_bp,
-            which=which, mode="bp", num_bins=NUM_BINS_BP, max_bp=MAX_BP,
+            which=which, mode="bp", num_bins=NUM_BINS_BP, max_bp=max_bp,
             y_label=y_label,
             out_path=out_plot_bp,
             out_tsv=out_tsv_bp,
@@ -1229,6 +1230,20 @@ def main():
         out_plot_bp=OUTDIR / f"fst_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped_pooled.pdf",
         out_tsv_bp=OUTDIR / f"fst_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped_pooled.tsv",
         agg_kind="pooled",
+    )
+    # --- POOLED (40 kb cap to include shorter inversions) ---
+    run_metric(
+        which="hudson",
+        falsta=FST_FILE,
+        min_len=80_000,
+        fuzzy_map=fuzzy_map,
+        y_label="Hudson FST (pooled ratio-of-sums)",
+        out_plot_prop=OUTDIR / "fst_vs_inversion_edge_proportion_cap40kb_grouped_pooled.pdf",
+        out_tsv_prop=OUTDIR / "fst_vs_inversion_edge_proportion_cap40kb_grouped_pooled.tsv",
+        out_plot_bp=OUTDIR / "fst_vs_inversion_edge_bp_cap40kb_grouped_pooled.pdf",
+        out_tsv_bp=OUTDIR / "fst_vs_inversion_edge_bp_cap40kb_grouped_pooled.tsv",
+        agg_kind="pooled",
+        max_bp=40_000,
     )
     # --- MEDIAN (across inversions; per-inversion is ratio-of-sums across sites) ---
     run_metric(
