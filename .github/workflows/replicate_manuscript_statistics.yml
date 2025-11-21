@@ -50,10 +50,22 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data
+          # Add only specific result files, strictly avoiding .gz/.zip or large artifacts
+          # Use individual adds or || true to handle potential missing optional files
+          git add data/cds_identical_proportions.tsv || true
+          git add data/gene_inversion_direct_inverted.tsv || true
+          git add data/region_identical_proportions.tsv || true
+          git add data/skipped_details.tsv || true
+          git add data/replicate_manuscript_statistics.txt || true
+
           if git diff --staged --quiet; then
             echo "No data changes to commit"
             exit 0
           fi
+
           git commit -m "Update CDS statistics from replication pipeline"
+
+          # Pull changes to resolve potential conflicts (rebase local commit on top of remote)
+          git pull https://${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git main --rebase
+
           git push https://${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git HEAD:main
