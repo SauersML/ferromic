@@ -41,8 +41,3 @@ pipeline_run_*.log
 region_trees/
 tree_figures/
 annotated_tree_figures/
-
-# Generated analysis artifacts
-data/pairs_CDS__*.tsv
-data/pairs_REGION__*.tsv
-data/phy_files.zip
