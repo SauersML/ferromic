@@ -785,7 +785,6 @@ pub fn prepare_to_write_cds(
         let segment_coords_str = cds
             .segments
             .iter()
-            .filter_map(|seg| seg.intersect(&hap_region))
             .map(|seg| {
                 format!(
                     "{}-{}",
