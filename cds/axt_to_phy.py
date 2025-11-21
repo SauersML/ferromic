@@ -296,6 +296,16 @@ def chromosome_to_bare(chrom):
         return None
     return normalized[len(CHR_PREFIX):]
 
+def sanitize_gene_name(name):
+    """
+    Sanitize gene name to match Rust's filename generation logic.
+    Strips all non-alphanumeric characters (including dots and dashes).
+    Example: 'AC004556.1' -> 'AC0045561'
+    """
+    if not name:
+        return name
+    return "".join(c for c in name if c.isalnum())
+
 def resolve_phy_filename(fname):
     """
     Check if fname exists. If not, and it ends with .gz, check if the version without .gz exists.
@@ -588,7 +598,9 @@ def parse_transcript_metadata():
                 log_detail("CDS", f"line_{line_num}", "SKIP_INCOMPLETE", "Metadata line missing required columns.", raw=line.strip())
                 continue
 
-            phy_fname, t_id, gene, chrom, _, start, end, _, coords_str = parts[:9]
+            phy_fname, t_id, gene_raw, chrom, _, start, end, _, coords_str = parts[:9]
+            gene = sanitize_gene_name(gene_raw)
+
             cds_key = (t_id, coords_str)
             if cds_key in seen:
                 log_detail("CDS", t_id, "SKIP_DUPLICATE", "Duplicate transcript/coordinate entry encountered; keeping first instance.",
