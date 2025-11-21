@@ -31,9 +31,9 @@ Nucleotide diversity structure (Edge vs Middle and Internal Decay), filtered by 
   [Edge vs Middle] Overall (n=76): Flank Mean = 3.761e-04, Middle Mean = 4.356e-04.
 
 Internal decay (Spearman's ρ of diversity vs distance from start for first 100kb, loci ≥100kb):
-  Overall (All Consensus 0+1): ρ = 0.171 (p = 1.010e-14, n = 45).
-  Single-Event Inverted (G1, R0): ρ = 0.172 (p = 6.393e-03, n = 5).
-  Recurrent Direct (G0, R1): ρ = 0.181 (p = 2.697e-05, n = 13).
+  Overall (All Consensus 0+1): ρ = 0.171 (p = 1.009e-14, n = 45).
+  Single-Event Inverted (G1, R0): ρ = 0.172 (p = 6.402e-03, n = 5).
+  Recurrent Direct (G0, R1): ρ = 0.181 (p = 2.694e-05, n = 13).
   Recurrent Inverted (G1, R1): ρ = 0.172 (p = 6.658e-05, n = 13).
   Single-Event Direct (G0, R0): ρ = 0.166 (p = 1.207e-05, n = 14).
 
@@ -88,7 +88,7 @@ Breakpoint enrichment (Flat–Ramp–Flat Model):
 
   [Precision-Weighted Meta-Analysis]
     Weighted Median Delta: Single=0.176, Recurrent=-0.028, Diff=0.205.
-    Median P-value (Two-sided): 1.0000e-06.
+    Median P-value (Two-sided): 3.0000e-06.
     Weighted Mean Delta:   Single=0.067, Recurrent=-0.024, Diff=0.091.
     Mean P-value (Two-sided):   0.0111.
 
