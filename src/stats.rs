@@ -1,5 +1,6 @@
 use crate::process::{
     HaplotypeSide, QueryRegion, Variant, VcfError, ZeroBasedHalfOpen, ZeroBasedPosition,
+    map_sample_names_to_indices, normalize_sample_name_for_lookup,
 };
 use crate::progress::{
     LogLevel, ProcessingStage, StatusBox, create_spinner, display_status_box, finish_step_progress,
@@ -996,11 +997,7 @@ pub fn parse_population_csv(csv_path: &Path) -> Result<HashMap<String, Vec<Strin
 
 /// Extracts a core sample identifier by removing optional haplotype suffixes.
 pub fn core_sample_id(name: &str) -> &str {
-    if let Some(s) = name.strip_suffix("_L").or_else(|| name.strip_suffix("_R")) {
-        s
-    } else {
-        name
-    }
+    normalize_sample_name_for_lookup(name)
 }
 
 #[cfg(test)]
@@ -1030,16 +1027,11 @@ fn map_samples_to_haplotype_groups(
     sample_to_group_map: &HashMap<String, (u8, u8)>,
 ) -> HashMap<(usize, HaplotypeSide), String> {
     let mut haplotype_to_group = HashMap::new();
-
-    let mut sample_id_to_index = HashMap::new();
-    for (idx, name) in sample_names.iter().enumerate() {
-        let core = core_sample_id(name);
-        sample_id_to_index.insert(core.to_string(), idx);
-        sample_id_to_index.insert(name.clone(), idx);
-    }
+    let sample_id_to_index = map_sample_names_to_indices(sample_names);
 
     for (config_sample_name, &(left_group, right_group)) in sample_to_group_map {
-        if let Some(&vcf_idx) = sample_id_to_index.get(config_sample_name.as_str()) {
+        let lookup_name = normalize_sample_name_for_lookup(config_sample_name);
+        if let Some(&vcf_idx) = sample_id_to_index.get(lookup_name) {
             haplotype_to_group.insert((vcf_idx, HaplotypeSide::Left), left_group.to_string());
             haplotype_to_group.insert((vcf_idx, HaplotypeSide::Right), right_group.to_string());
         }
@@ -1054,6 +1046,8 @@ fn map_samples_to_populations(
 ) -> HashMap<(usize, HaplotypeSide), String> {
     let mut sample_to_pop_map_for_fst = HashMap::new();
 
+    let sample_id_to_index = map_sample_names_to_indices(sample_names);
+
     let mut csv_sample_id_to_pop_name = HashMap::new();
     for (pop_name, samples_in_pop) in population_assignments {
         for sample_id in samples_in_pop {
@@ -1061,29 +1055,11 @@ fn map_samples_to_populations(
         }
     }
 
-    for (vcf_idx, vcf_sample_name) in sample_names.iter().enumerate() {
-        if let Some(pop_name) = csv_sample_id_to_pop_name.get(vcf_sample_name) {
+    for (csv_sample_name, pop_name) in csv_sample_id_to_pop_name {
+        let lookup_name = normalize_sample_name_for_lookup(&csv_sample_name);
+        if let Some(&vcf_idx) = sample_id_to_index.get(lookup_name) {
             sample_to_pop_map_for_fst.insert((vcf_idx, HaplotypeSide::Left), pop_name.clone());
-            sample_to_pop_map_for_fst.insert((vcf_idx, HaplotypeSide::Right), pop_name.clone());
-            continue;
-        }
-
-        let core_vcf_id = core_sample_id(vcf_sample_name);
-        if let Some(pop_name) = csv_sample_id_to_pop_name.get(core_vcf_id) {
-            sample_to_pop_map_for_fst.insert((vcf_idx, HaplotypeSide::Left), pop_name.clone());
-            sample_to_pop_map_for_fst.insert((vcf_idx, HaplotypeSide::Right), pop_name.clone());
-            continue;
-        }
-
-        let vcf_prefix = vcf_sample_name.split('_').next().unwrap_or(vcf_sample_name);
-        for (csv_pop_name, _) in population_assignments {
-            if vcf_sample_name.starts_with(csv_pop_name) || vcf_prefix == csv_pop_name {
-                sample_to_pop_map_for_fst
-                    .insert((vcf_idx, HaplotypeSide::Left), csv_pop_name.clone());
-                sample_to_pop_map_for_fst
-                    .insert((vcf_idx, HaplotypeSide::Right), csv_pop_name.clone());
-                break;
-            }
+            sample_to_pop_map_for_fst.insert((vcf_idx, HaplotypeSide::Right), pop_name);
         }
     }
 
