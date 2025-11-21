@@ -75,6 +75,7 @@ jobs:
           git commit -m "Update CDS statistics from replication pipeline"
 
           # Pull changes to resolve potential conflicts (rebase local commit on top of remote)
-          git pull https://${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git main --rebase --autostash
+          # Prefer newly generated artifacts when resolving conflicts (e.g., add/add on data files)
+          git pull https://${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git main --rebase --autostash --strategy=recursive -X ours
 
           git push https://${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git HEAD:main
