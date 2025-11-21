@@ -383,17 +383,87 @@ def run_fresh_cds_pipeline():
 
 
 @dataclass
+class SpearmanResult:
+    rho: float | None
+    p_value: float | None
+    n: int
+
+
+@dataclass
 class PiStructureMetrics:
-    flank_mean: float | None
-    middle_mean: float | None
-    qualifying_entries: int
+    # Edge vs Middle Metrics (≥40kb)
+    # Direct (Group 0)
+    dir_flank_mean: float | None
+    dir_middle_mean: float | None
+    dir_entries: int
+
+    # Inverted (Group 1)
+    inv_flank_mean: float | None
+    inv_middle_mean: float | None
+    inv_entries: int
+
+    # Overall (Group 0 + 1)
+    all_flank_mean: float | None
+    all_middle_mean: float | None
+    all_entries: int
+
+    # Spearman Decay Metrics (≥100kb, first 100kb)
+    spearman_overall: SpearmanResult
+    spearman_single_inv: SpearmanResult  # Group 1, Recur 0
+    spearman_recur_dir: SpearmanResult   # Group 0, Recur 1
+    spearman_recur_inv: SpearmanResult   # Group 1, Recur 1
+    spearman_single_dir: SpearmanResult  # Group 0, Recur 0
+
     unique_inversions: int
-    decay_entries: int
-    decay_rho: float | None
+
+
+class _MetricAccumulator:
+    """Accumulates Pi data for stats."""
+    def __init__(self):
+        self.flank_means: list[float] = []
+        self.middle_means: list[float] = []
+
+    def add_edge_middle(self, values: np.ndarray) -> None:
+        # Expects values length >= 40,000 checked by caller
+        flanks = np.r_[values[:10_000], values[-10_000:]]
+        flank_mean = float(np.nanmean(flanks))
+        if np.isfinite(flank_mean):
+            self.flank_means.append(flank_mean)
+
+        middle_start = max((values.size - 20_000) // 2, 0)
+        middle_slice = values[middle_start : middle_start + 20_000]
+        if middle_slice.size == 20_000:
+            middle_mean = float(np.nanmean(middle_slice))
+            if np.isfinite(middle_mean):
+                self.middle_means.append(middle_mean)
+
+
+def _calc_spearman(window_data: list[np.ndarray]) -> SpearmanResult:
+    if not window_data:
+        return SpearmanResult(None, None, 0)
+
+    # 50 windows per entry (100kb / 2kb)
+    window_values = np.concatenate(window_data)
+    base_distances = np.arange(0, 100_000, 2_000, dtype=float)
+    distances = np.tile(base_distances, len(window_data))
+
+    mask = np.isfinite(window_values)
+    if mask.sum() < 2:
+        return SpearmanResult(None, None, len(window_data))
+
+    rho_val, p_val = stats.spearmanr(distances[mask], window_values[mask])
+
+    rho = float(rho_val) if np.isfinite(rho_val) else None
+    p = float(p_val) if np.isfinite(p_val) else None
+
+    return SpearmanResult(rho, p, len(window_data))
 
 
 def _calc_pi_structure_metrics() -> PiStructureMetrics:
-    """Parse per-site diversity tracks to replicate π structure metrics."""
+    """Parse per-site diversity tracks to replicate π structure metrics.
+
+    Filters for consensus inversions (0/1) and computes stats for Direct, Inverted, and Overall.
+    """
 
     falsta_candidates = [
         DATA_DIR / "per_site_diversity_output.falsta",
@@ -405,11 +475,29 @@ def _calc_pi_structure_metrics() -> PiStructureMetrics:
             "Missing per-site diversity FALSTA: per_site_diversity_output.falsta(.gz)"
         )
 
-    flank_means_40k: list[float] = []
-    middle_means_20k: list[float] = []
-    window_data_40k: list[np.ndarray] = []
-    qualifying_regions: list[tuple[str, int, int]] = []
-    decay_regions: list[tuple[str, int, int]] = []
+    # Load inversion whitelist and recurrence mapping
+    try:
+        inv_df = _load_inv_properties()
+        # Map (chrom, start, end) -> recurrence_flag
+        recurrence_map = {
+            (str(row.chromosome), int(row.start), int(row.end)): int(row.recurrence_flag)
+            for row in inv_df.itertuples(index=False)
+        }
+    except Exception:
+        raise
+
+    # Edge/Middle Accumulators (Group 0, Group 1)
+    acc_em_0 = _MetricAccumulator()
+    acc_em_1 = _MetricAccumulator()
+
+    # Spearman Accumulators (Group, Recurrence) -> list of window arrays
+    # Keys: (0, 0), (0, 1), (1, 0), (1, 1)
+    acc_spearman: dict[tuple[int, int], list[np.ndarray]] = {
+        (0, 0): [], (0, 1): [], (1, 0): [], (1, 1): []
+    }
+
+    qualifying_regions: set[tuple[str, int, int]] = set()
+
     header_pattern = re.compile(
         r"chr[_:=]*(?P<chrom>[^_]+).*?start[_:=]*(?P<start>\d+).*?end[_:=]*(?P<end>\d+)",
         re.IGNORECASE,
@@ -430,46 +518,59 @@ def _calc_pi_structure_metrics() -> PiStructureMetrics:
     def _process_record(header: str | None, body_lines: list[str]) -> None:
         if not header or not body_lines or not header.startswith(">filtered_pi"):
             return
+
         match = header_pattern.search(header)
         if not match:
             return
         chrom = match.group("chrom")
         start = int(match.group("start"))
         end = int(match.group("end"))
+
+        # FILTER: Check against allowed list and get recurrence
+        region = (chrom, start, end)
+        if region not in recurrence_map:
+            return
+        recur_flag = recurrence_map[region]
+
+        # Check group
+        group_match = re.search(r"_group_(?P<grp>\d+)", header)
+        if not group_match:
+            return
+        group_id = int(group_match.group("grp"))
+        if group_id not in (0, 1):
+            return
+
         values = _parse_values(body_lines)
         if values.size == 0 or not np.isfinite(values).any():
             return
 
-        if "group_0" not in header:
-            return
-
+        # Filter Logic:
+        # Must have finite bases check?
+        # Original code used `finite_bases < 40_000` as a hard reject for everything.
+        # Now we have two thresholds.
+        # Let's check finite bases relative to thresholds.
         finite_mask = np.isfinite(values)
         finite_bases = int(finite_mask.sum())
-        if finite_bases < 40_000:
-            return
 
-        region = (chrom, start, end)
-        qualifying_regions.append(region)
+        # --- Logic for Edge/Middle (Threshold 40kb) ---
+        if finite_bases >= 40_000 and values.size >= 40_000:
+            qualifying_regions.add(region)
+            if group_id == 0:
+                acc_em_0.add_edge_middle(values)
+            else:
+                acc_em_1.add_edge_middle(values)
 
-        if values.size >= 40_000:
-            flanks = np.r_[values[:10_000], values[-10_000:]]
-            flank_mean = float(np.nanmean(flanks))
-            if np.isfinite(flank_mean):
-                flank_means_40k.append(flank_mean)
+        # --- Logic for Spearman (Threshold 100kb) ---
+        # "first 100 kbp ... total length greater than 100 kbp"
+        if finite_bases >= 100_000 and values.size >= 100_000:
+            first_100k = values[:100_000]
+            # Reshape to 2kb windows (100,000 / 2,000 = 50 windows)
+            reshaped = first_100k.reshape(50, 2_000)
+            window_means = np.nanmean(reshaped, axis=1)
 
-            middle_start = max((values.size - 20_000) // 2, 0)
-            middle_slice = values[middle_start : middle_start + 20_000]
-            if middle_slice.size == 20_000:
-                middle_mean = float(np.nanmean(middle_slice))
-                if np.isfinite(middle_mean):
-                    middle_means_20k.append(middle_mean)
-
-            first = values[:40_000]
-            if first.size == 40_000:
-                reshaped = first.reshape(20, 2_000)
-                window_means = np.nanmean(reshaped, axis=1)
-                window_data_40k.append(window_means)
-                decay_regions.append(region)
+            key = (group_id, recur_flag)
+            if key in acc_spearman:
+                acc_spearman[key].append(window_means)
 
     current_header: str | None = None
     sequence_lines: list[str] = []
@@ -491,32 +592,62 @@ def _calc_pi_structure_metrics() -> PiStructureMetrics:
                 sequence_lines.append(line)
     _process_record(current_header, sequence_lines)
 
-    mean_flank = float(np.mean(flank_means_40k)) if flank_means_40k else None
-    mean_middle = float(np.mean(middle_means_20k)) if middle_means_20k else None
-    rho: float | None
-    if window_data_40k:
-        window_values = np.concatenate(window_data_40k)
-        base_distances = np.arange(0, 40_000, 2_000, dtype=float)
-        distances = np.tile(base_distances, len(window_data_40k))
-        mask = np.isfinite(window_values)
-        if mask.sum() >= 2:
-            rho_val, _ = stats.spearmanr(distances[mask], window_values[mask])
-            rho = float(rho_val) if np.isfinite(rho_val) else None
-        else:
-            rho = None
-    else:
-        rho = None
+    # --- Compile Edge/Middle Metrics ---
+    def _em_stats(acc):
+        fm = float(np.mean(acc.flank_means)) if acc.flank_means else None
+        mm = float(np.mean(acc.middle_means)) if acc.middle_means else None
+        n = len(acc.flank_means)
+        return fm, mm, n
 
-    unique_inversions = len(set(qualifying_regions))
-    decay_entries = len(decay_regions)
+    d_fm, d_mm, d_n = _em_stats(acc_em_0)
+    i_fm, i_mm, i_n = _em_stats(acc_em_1)
+
+    # Overall Edge/Middle
+    acc_em_all = _MetricAccumulator()
+    acc_em_all.flank_means = acc_em_0.flank_means + acc_em_1.flank_means
+    acc_em_all.middle_means = acc_em_0.middle_means + acc_em_1.middle_means
+    a_fm, a_mm, a_n = _em_stats(acc_em_all)
+
+    # --- Compile Spearman Metrics ---
+    # 1. Overall (All 4 subgroups)
+    all_spearman_data = (
+        acc_spearman[(0, 0)] + acc_spearman[(0, 1)] +
+        acc_spearman[(1, 0)] + acc_spearman[(1, 1)]
+    )
+    res_overall = _calc_spearman(all_spearman_data)
+
+    # 2. Single-Inv (G1, R0)
+    res_single_inv = _calc_spearman(acc_spearman[(1, 0)])
+
+    # 3. Recur-Dir (G0, R1)
+    res_recur_dir = _calc_spearman(acc_spearman[(0, 1)])
+
+    # 4. Recur-Inv (G1, R1)
+    res_recur_inv = _calc_spearman(acc_spearman[(1, 1)])
+
+    # 5. Single-Dir (G0, R0)
+    res_single_dir = _calc_spearman(acc_spearman[(0, 0)])
 
     return PiStructureMetrics(
-        flank_mean=mean_flank,
-        middle_mean=mean_middle,
-        qualifying_entries=len(flank_means_40k),
-        unique_inversions=unique_inversions,
-        decay_entries=decay_entries,
-        decay_rho=rho,
+        dir_flank_mean=d_fm,
+        dir_middle_mean=d_mm,
+        dir_entries=d_n,
+
+        inv_flank_mean=i_fm,
+        inv_middle_mean=i_mm,
+        inv_entries=i_n,
+
+        all_flank_mean=a_fm,
+        all_middle_mean=a_mm,
+        all_entries=a_n,
+
+        spearman_overall=res_overall,
+        spearman_single_inv=res_single_inv,
+        spearman_recur_dir=res_recur_dir,
+        spearman_recur_inv=res_recur_inv,
+        spearman_single_dir=res_single_dir,
+
+        unique_inversions=len(qualifying_regions),
     )
 
 
@@ -751,26 +882,45 @@ def summarize_pi_structure() -> List[str]:
 
     lines = [
         (
-            "First, nucleotide diversity was compared between 10 thousand base pairs (10 kbp) breakpoint-flanking regions at each "
-            "end within the inversion and the 20 kbp middle segment, which requires inversions with at least 40 kbp in total length."
+            "Nucleotide diversity structure (Edge vs Middle and Internal Decay), "
+            "filtered by consensus inversion status:"
         ),
-        (
-            "In what: The "
-            f"{_fmt(metrics.qualifying_entries, 0)} group_0 (orientation-0) entries in the filtered-π FALSTA with ≥40 kbp of per-site "
-            f"filtered π estimates, spanning {_fmt(metrics.unique_inversions, 0)} unique inversion intervals."
-        ),
-        (
-            "Where: Specifically within the filtered π regions, the combined breakpoint-flanking mean is "
-            f"{_fmt(metrics.flank_mean)} and the middle-segment mean is {_fmt(metrics.middle_mean)}."
-        ),
+        f"  Qualifying regions (≥40kbp): {_fmt(metrics.unique_inversions, 0)} unique inversions.",
     ]
 
+    # Direct
     lines.append(
-        "Internal decay: "
-        f"{_fmt(metrics.decay_entries, 0)} qualifying entries cover at least 40 kbp and support the Spearman’s correlation "
-        f"(ρ = {_fmt(metrics.decay_rho)}) between nucleotide diversity (20 × 2 kbp windows across the first 40 kbp) and "
-        "distance from the sequence start."
+        f"  [Edge vs Middle] Direct/Group 0 (n={metrics.dir_entries}): "
+        f"Flank Mean = {_fmt(metrics.dir_flank_mean)}, Middle Mean = {_fmt(metrics.dir_middle_mean)}."
     )
+
+    # Inverted
+    lines.append(
+        f"  [Edge vs Middle] Inverted/Group 1 (n={metrics.inv_entries}): "
+        f"Flank Mean = {_fmt(metrics.inv_flank_mean)}, Middle Mean = {_fmt(metrics.inv_middle_mean)}."
+    )
+
+    # Overall
+    lines.append(
+        f"  [Edge vs Middle] Overall (n={metrics.all_entries}): "
+        f"Flank Mean = {_fmt(metrics.all_flank_mean)}, Middle Mean = {_fmt(metrics.all_middle_mean)}."
+    )
+
+    # Spearman Decay
+    lines.append("")
+    lines.append("Internal decay (Spearman's ρ of diversity vs distance from start for first 100kb, loci ≥100kb):")
+
+    def _fmt_spearman(r, label):
+        return (
+            f"  {label}: ρ = {_fmt(r.rho, 3)} "
+            f"(p = {_fmt(r.p_value, 3)}, n = {_fmt(r.n, 0)})."
+        )
+
+    lines.append(_fmt_spearman(metrics.spearman_overall, "Overall (All Consensus 0+1)"))
+    lines.append(_fmt_spearman(metrics.spearman_single_inv, "Single-Event Inverted (G1, R0)"))
+    lines.append(_fmt_spearman(metrics.spearman_recur_dir, "Recurrent Direct (G0, R1)"))
+    lines.append(_fmt_spearman(metrics.spearman_recur_inv, "Recurrent Inverted (G1, R1)"))
+    lines.append(_fmt_spearman(metrics.spearman_single_dir, "Single-Event Direct (G0, R0)"))
 
     return lines
 
