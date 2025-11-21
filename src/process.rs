@@ -4304,6 +4304,11 @@ pub fn process_variant(
             .insert(zero_based_position);
     }
 
+    // Discard INDELs and MNPs entirely so they don't pollute unfiltered lists
+    if filtered_due_to_indel {
+        return Ok(None);
+    }
+
     let packed_genotypes: Vec<Option<PackedGenotype>> = raw_genotypes
         .into_iter()
         .map(|gt| gt.map(PackedGenotype::from_vec))
