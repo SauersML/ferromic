@@ -946,6 +946,8 @@ def prepare_volcano(gene_tests: pd.DataFrame, cds_summary: pd.DataFrame) -> pd.D
                .agg(lambda s: pd.to_numeric(s, errors="coerce").dropna().astype(int).mode().iloc[0]
                     if not pd.to_numeric(s, errors="coerce").dropna().empty else np.nan)
                .reset_index())
+
+    rec_map = rec_map[rec_map["consensus_mode"].isin([0, 1])].copy()
     rec_map["recurrence"] = rec_map["consensus_mode"].map({0:"SE", 1:"REC"})
 
     # ---- coverage diagnostics: loci in GT vs inv_info ----
@@ -966,6 +968,11 @@ def prepare_volcano(gene_tests: pd.DataFrame, cds_summary: pd.DataFrame) -> pd.D
     n_rec = out["recurrence"].notna().sum()
     print(f"[prepare_volcano] recurrence assigned: {n_rec}/{len(out)} rows")
     print(f"[prepare_volcano] recurrence counts:", out["recurrence"].value_counts(dropna=False).to_dict())
+
+    valid_recurrence = {"SE", "REC"}
+    out = out[out["recurrence"].isin(valid_recurrence)].copy()
+    dropped = len(gt) - len(out)
+    print(f"[prepare_volcano] dropped rows without consensus recurrence (not 0/1): {dropped}")
 
     # ---- optional: size from cds_summary by locus ONLY ----
     cs = cds_summary.copy()
@@ -1023,6 +1030,10 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
     Data points and axes are NEVER adjusted by the overlap solver. Only label
     offsets (in offset points) are changed.
     """
+    valid_recurrence = {"SE", "REC"}
+    df = df[df["recurrence"].isin(valid_recurrence)].copy()
+    print(f"[volcano_plot] plotting rows with valid recurrence (SE/REC) only: {len(df)}")
+
     fig, ax = plt.subplots(figsize=(8.6, 5.6))
 
     ax.set_xlabel("Δ proportion identical (Inverted − Direct)")
