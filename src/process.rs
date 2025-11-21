@@ -849,49 +849,10 @@ pub fn process_variants(
     // Map sample names to indices
     init_step_progress(&format!("Mapping samples for group {}", haplotype_group), 3);
 
-    let mut index_map = HashMap::new();
-    for (sample_index, name) in sample_names.iter().enumerate() {
-        let trimmed_id = name.rsplit('_').next().unwrap_or(name);
-        index_map.insert(trimmed_id, sample_index);
-    }
+    let index_map = map_sample_names_to_indices(sample_names);
 
     // List of haplotype indices and their sides (left or right) for the given haplotype_group
-    let mut group_haps: Vec<(usize, HaplotypeSide)> = Vec::new();
-    let mut missing_samples = Vec::new();
-    for (config_sample_name, &(left_side, right_side)) in sample_filter {
-        match index_map.get(config_sample_name.as_str()) {
-            Some(&mapped_index) => {
-                if left_side == haplotype_group {
-                    group_haps.push((mapped_index, HaplotypeSide::Left));
-                }
-                if right_side == haplotype_group {
-                    group_haps.push((mapped_index, HaplotypeSide::Right));
-                }
-            }
-            None => {
-                missing_samples.push(config_sample_name.clone());
-                log(
-                    LogLevel::Warning,
-                    &format!(
-                        "Sample '{}' from config not found in VCF - skipping",
-                        config_sample_name
-                    ),
-                );
-            }
-        }
-    }
-
-    if !missing_samples.is_empty() {
-        log(
-            LogLevel::Warning,
-            &format!(
-                "Missing {} samples for chromosome {}: {}",
-                missing_samples.len(),
-                chromosome,
-                missing_samples.join(", ")
-            ),
-        );
-    }
+    let group_haps = get_haplotype_indices_for_group(haplotype_group, sample_filter, &index_map)?;
 
     if group_haps.is_empty() {
         log(
@@ -1215,16 +1176,48 @@ pub fn process_variants(
     )))
 }
 
-pub fn map_sample_names_to_indices(
-    sample_names: &[String],
-) -> Result<HashMap<String, usize>, VcfError> {
-    let mut vcf_sample_id_to_index = HashMap::new();
+/// Removes optional haplotype direction suffixes ("_L" / "_R") from configuration sample names.
+/// This normalization ensures consistent lookup against the pre-built VCF sample index map.
+pub fn normalize_sample_name_for_lookup(name: &str) -> &str {
+    name.strip_suffix("_L")
+        .or_else(|| name.strip_suffix("_R"))
+        .unwrap_or(name)
+}
+
+pub fn map_sample_names_to_indices(sample_names: &[String]) -> HashMap<String, usize> {
+    // Exact names are always preserved. Alias candidates (suffix after the last underscore) are
+    // added only when unambiguous; collisions remove the alias to avoid wrong matches.
+    let mut exact_map = HashMap::new();
+    let mut alias_candidates: HashMap<String, Option<usize>> = HashMap::new();
+
     for (i, name) in sample_names.iter().enumerate() {
-        // Convert to String to so the HashMap owns its keys.
-        let sample_id = name.rsplit('_').next().unwrap_or(name).to_string();
-        vcf_sample_id_to_index.insert(sample_id, i);
+        exact_map.insert(name.clone(), i);
+
+        if let Some(suffix) = name.rsplit('_').next() {
+            if suffix != name {
+                match alias_candidates.entry(suffix.to_string()) {
+                    std::collections::hash_map::Entry::Vacant(entry) => {
+                        entry.insert(Some(i));
+                    }
+                    std::collections::hash_map::Entry::Occupied(mut entry) => {
+                        if entry.get() != &Some(i) {
+                            entry.insert(None);
+                        }
+                    }
+                }
+            }
+        }
     }
-    Ok(vcf_sample_id_to_index)
+
+    for (alias, target) in alias_candidates {
+        if let Some(idx) = target {
+            if !exact_map.contains_key(&alias) {
+                exact_map.insert(alias, idx);
+            }
+        }
+    }
+
+    exact_map
 }
 
 /// Retrieves VCF sample indices and HaplotypeSides for samples belonging to a specific haplotype group (0 or 1),
@@ -1246,7 +1239,8 @@ pub fn get_haplotype_indices_for_group(
     let mut missing_samples = Vec::new();
 
     for (sample_name, &(left_tsv, right_tsv)) in sample_filter {
-        match vcf_sample_id_to_index.get(sample_name.as_str()) {
+        let lookup_name = normalize_sample_name_for_lookup(sample_name);
+        match vcf_sample_id_to_index.get(lookup_name) {
             Some(&idx) => {
                 if left_tsv == haplotype_group {
                     haplotype_indices.push((idx, HaplotypeSide::Left));
@@ -1279,6 +1273,15 @@ pub fn get_haplotype_indices_for_group(
             ),
         );
     }
+
+    log(
+        LogLevel::Info,
+        &format!(
+            "Matched {} haplotypes for haplotype group {}",
+            haplotype_indices.len(),
+            haplotype_group
+        ),
+    );
 
     Ok(haplotype_indices)
 }
@@ -2488,7 +2491,7 @@ fn process_single_config_entry(
     let slice_allele_infos = &all_allele_infos[start_idx..end_idx];
     let slice_flags = &all_variant_flags[start_idx..end_idx];
 
-    let vcf_sample_id_to_index = map_sample_names_to_indices(&sample_names)?;
+    let vcf_sample_id_to_index = map_sample_names_to_indices(&sample_names);
 
     update_step_progress(1, "Analyzing variant statistics");
 
