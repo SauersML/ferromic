@@ -1229,6 +1229,32 @@ pub fn map_sample_names_to_indices(sample_names: &[String]) -> HashMap<String, u
     exact_map
 }
 
+/// Counts unique haplotypes defined in the configuration entries that can be matched
+/// to VCF samples. Each sample contributes up to two haplotypes (Left/Right) when its
+/// name can be resolved against the VCF header.
+fn count_valid_haplotypes(
+    entries: &[ConfigEntry],
+    vcf_sample_id_to_index: &HashMap<String, usize>,
+) -> usize {
+    let mut haplotypes = HashSet::new();
+
+    for entry in entries {
+        for (sample_name, &(left_group, right_group)) in &entry.samples_filtered {
+            let lookup_name = normalize_sample_name_for_lookup(sample_name);
+            if let Some(&idx) = vcf_sample_id_to_index.get(lookup_name) {
+                if left_group <= 1 {
+                    haplotypes.insert((idx, HaplotypeSide::Left));
+                }
+                if right_group <= 1 {
+                    haplotypes.insert((idx, HaplotypeSide::Right));
+                }
+            }
+        }
+    }
+
+    haplotypes.len()
+}
+
 /// Retrieves VCF sample indices and HaplotypeSides for samples belonging to a specific haplotype group (0 or 1),
 /// based on the sample filter definitions from the configuration.
 ///
@@ -2084,21 +2110,39 @@ fn process_chromosome_entries(
     ) {
         Ok(data) => data,
         Err(e) => {
-            log(LogLevel::Error, &format!("Error processing VCF for {}: {}", chr, e));
+            log(
+                LogLevel::Error,
+                &format!("Error processing VCF for {}: {}", chr, e),
+            );
             finish_step_progress("VCF processing failed");
             return Ok((Vec::new(), Vec::new(), Vec::new()));
         }
     };
 
+    let vcf_sample_id_to_index = map_sample_names_to_indices(&sample_names);
+    let valid_haplotype_count = count_valid_haplotypes(entries, &vcf_sample_id_to_index);
+
+    log(
+        LogLevel::Info,
+        &format!(
+            "Using {} haplotypes present in both the configuration entries and VCF for chr{}",
+            valid_haplotype_count, chr
+        ),
+    );
+
     // Store PCA variants if needed (globally filtered variants)
     if args.enable_pca {
         if let Some((variants_storage, sample_names_storage)) = &pca_storage {
-             let filtered_for_chr: Vec<Variant> = all_variants.iter().zip(all_flags.iter())
+            let filtered_for_chr: Vec<Variant> = all_variants
+                .iter()
+                .zip(all_flags.iter())
                 .filter(|&(_, &f)| f == FLAG_PASS)
                 .map(|(v, _)| v.clone())
                 .collect();
 
-            variants_storage.lock().insert(chr.to_string(), filtered_for_chr);
+            variants_storage
+                .lock()
+                .insert(chr.to_string(), filtered_for_chr);
 
             let mut names = sample_names_storage.lock();
             if names.is_empty() {
