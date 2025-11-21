@@ -184,7 +184,7 @@ def download_latest_artifacts():
         "run-vcf-phy-outputs": {"target": "phy_outputs.zip", "action": "copy_inner_zip"},
         "run-vcf-falsta": {"target": "per_site_diversity_output.falsta.gz", "action": "extract_file"},
         "run-vcf-hudson-fst": {"target": "FST_data.tsv.gz", "action": "extract_renamed"},
-        "run-vcf-metadata": {"target": "phy_metadata.tsv", "action": "extract_renamed"},
+        "run-vcf-metadata": {"target": "inv_properties.tsv", "action": "extract_renamed"},
         "run-vcf-output-csv": {"target": "output.csv", "action": "extract_file"},
     }
 
@@ -281,6 +281,8 @@ def _stage_cds_inputs() -> list[Path]:
                 extracted_any = True
                 for member in members:
                     target_name = Path(member).name
+                    if target_name.endswith(".gz"):
+                        target_name = target_name[:-3]
                     target_path = Path(target_name)
                     with archive.open(member) as zipped_member:
                         if member.endswith(".gz"):
