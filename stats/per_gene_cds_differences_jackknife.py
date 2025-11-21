@@ -276,18 +276,33 @@ def main():
         key = (row["gene_name"], row["inv_id"], int(row["phy_group"]))
         key_to_idxs[key].append(idx)
 
-    # Crash the program if any (gene, inversion, group) has multiple alignments
+    # Warn (instead of crash) if any (gene, inversion, group) has multiple alignments
     violations = [(g, inv, grp, len(idxs)) for (g, inv, grp), idxs in key_to_idxs.items() if len(idxs) > 1]
     if violations:
-        msg_lines = [
-            "ASSERTION FAILED: Multiple CDS alignments/files detected for the same (gene, inversion, group).",
-            "This program forbids averaging and aborts when duplicates exist.",
-            "Examples (up to 10):"
-        ]
+        print("WARNING: Multiple CDS alignments/files detected for the same (gene, inversion, group).")
+        print("  This program forbids averaging; affected alignments will be skipped. Examples (up to 10):")
         for (g, inv, grp, cnt) in violations[:10]:
-            msg_lines.append(f"  gene={g}  inv={inv}  group={'Inverted' if grp==1 else 'Direct'}  count={cnt}")
-        msg_lines.append("Please deduplicate upstream so that each (gene, inversion, group) has exactly one CDS file.")
-        raise AssertionError("\n".join(msg_lines))
+            print(f"    gene={g}  inv={inv}  group={'Inverted' if grp==1 else 'Direct'}  count={cnt}")
+        print("  Please deduplicate upstream so that each (gene, inversion, group) has exactly one CDS file.")
+
+        violation_keys = {(g, inv, grp) for (g, inv, grp, _) in violations}
+        # Drop all alignments for duplicated keys so downstream logic can continue
+        aln = aln[
+            ~aln.apply(
+                lambda r: (r["gene_name"], r["inv_id"], int(r["phy_group"])) in violation_keys,
+                axis=1,
+            )
+        ]
+
+        if aln.empty:
+            print("No valid alignments remain after removing duplicates; exiting.")
+            return
+
+        # Re-index after filtering out violations
+        key_to_idxs = defaultdict(list)
+        for idx, row in aln.iterrows():
+            key = (row["gene_name"], row["inv_id"], int(row["phy_group"]))
+            key_to_idxs[key].append(idx)
 
     # Also map (gene, inv) to present groups
     gi_groups: Dict[Tuple[str,str], Set[int]] = defaultdict(set)
