@@ -9,7 +9,7 @@ use std::io::{BufWriter, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use terminal_size::{terminal_size, Height, Width};
+use terminal_size::{Height, Width, terminal_size};
 
 // A global tracker that can be accessed from anywhere
 pub static PROGRESS_TRACKER: Lazy<Arc<Mutex<ProgressTracker>>> =
@@ -100,7 +100,12 @@ impl ProgressTracker {
     pub fn new() -> Self {
         let multi_progress = MultiProgress::new();
         // Limit update frequency to reduce flickering in multi-threaded environments
-        multi_progress.set_draw_target(ProgressDrawTarget::stdout_with_hz(12));
+        let draw_target = if progress_enabled() {
+            ProgressDrawTarget::stdout_with_hz(12)
+        } else {
+            ProgressDrawTarget::hidden()
+        };
+        multi_progress.set_draw_target(draw_target);
 
         // Create default log directory
         let log_dir = PathBuf::from("ferromic_logs");
@@ -766,134 +771,82 @@ impl ProgressTracker {
 
 // Helper functions for common operations
 pub fn init_global_progress(total: usize) {
-    if !progress_enabled() {
-        return;
-    }
     let mut tracker = PROGRESS_TRACKER.lock();
     tracker.init_global_progress(total);
 }
 
 pub fn update_global_progress(current: usize, message: &str) {
-    if !progress_enabled() {
-        return;
-    }
     let mut tracker = PROGRESS_TRACKER.lock();
     tracker.update_global_progress(current, message);
 }
 
 pub fn init_entry_progress(entry_desc: &str, len: u64) {
-    if !progress_enabled() {
-        return;
-    }
     let mut tracker = PROGRESS_TRACKER.lock();
     tracker.init_entry_progress(entry_desc, len);
 }
 
 pub fn update_entry_progress(position: u64, message: &str) {
-    if !progress_enabled() {
-        return;
-    }
     let mut tracker = PROGRESS_TRACKER.lock();
     tracker.update_entry_progress(position, message);
 }
 
 pub fn finish_entry_progress(message: &str, completed_units: usize) {
-    if !progress_enabled() {
-        return;
-    }
     let mut tracker = PROGRESS_TRACKER.lock();
     tracker.finish_entry_progress(message, completed_units);
 }
 
 pub fn init_step_progress(step_desc: &str, len: u64) {
-    if !progress_enabled() {
-        return;
-    }
     let mut tracker = PROGRESS_TRACKER.lock();
     tracker.init_step_progress(step_desc, len);
 }
 
 pub fn update_step_progress(position: u64, message: &str) {
-    if !progress_enabled() {
-        return;
-    }
     let mut tracker = PROGRESS_TRACKER.lock();
     tracker.update_step_progress(position, message);
 }
 
 pub fn finish_step_progress(message: &str) {
-    if !progress_enabled() {
-        return;
-    }
     let mut tracker = PROGRESS_TRACKER.lock();
     tracker.finish_step_progress(message);
 }
 
 pub fn init_variant_progress(desc: &str, len: u64) {
-    if !progress_enabled() {
-        return;
-    }
     let mut tracker = PROGRESS_TRACKER.lock();
     tracker.init_variant_progress(desc, len);
 }
 
 pub fn update_variant_progress(position: u64, message: &str) {
-    if !progress_enabled() {
-        return;
-    }
     let mut tracker = PROGRESS_TRACKER.lock();
     tracker.update_variant_progress(position, message);
 }
 
 pub fn finish_variant_progress(message: &str) {
-    if !progress_enabled() {
-        return;
-    }
     let mut tracker = PROGRESS_TRACKER.lock();
     tracker.finish_variant_progress(message);
 }
 
 pub fn create_spinner(message: &str) -> ProgressBar {
-    if !progress_enabled() {
-        let bar = ProgressBar::hidden();
-        bar.set_message(message.to_string());
-        return bar;
-    }
     let mut tracker = PROGRESS_TRACKER.lock();
     tracker.spinner(message)
 }
 
 pub fn create_vcf_progress(total_bytes: Option<u64>, message: &str) -> ProgressBar {
-    if !progress_enabled() {
-        let bar = ProgressBar::hidden();
-        bar.set_message(message.to_string());
-        return bar;
-    }
     let mut tracker = PROGRESS_TRACKER.lock();
     tracker.create_vcf_progress(total_bytes, message)
 }
 
 pub fn log(level: LogLevel, message: &str) {
-    if !progress_enabled() {
-        return;
-    }
     let mut tracker = PROGRESS_TRACKER.lock();
     tracker.log(level, message);
 }
 
 pub fn set_stage(stage: ProcessingStage) {
-    if !progress_enabled() {
-        return;
-    }
     let mut tracker = PROGRESS_TRACKER.lock();
     tracker.set_stage(stage);
 }
 
 /// Display status box without directly borrowing the mutable tracker.
 pub fn display_status_box(status: StatusBox) {
-    if !progress_enabled() {
-        return;
-    }
     // Get active progress bar and context information
     let active_bar_opt = {
         let mut tracker = PROGRESS_TRACKER.lock();
@@ -944,9 +897,6 @@ pub fn display_status_box(status: StatusBox) {
 }
 
 pub fn finish_all() {
-    if !progress_enabled() {
-        return;
-    }
     let mut tracker = PROGRESS_TRACKER.lock();
     tracker.finish_all();
 }
