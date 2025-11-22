@@ -16,11 +16,9 @@ from typing import Iterable, List, Tuple
 import tempfile
 
 import shutil
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import requests
-import seaborn as sns
 from scipy import stats
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -869,9 +867,9 @@ def _calc_pi_structure_metrics() -> PiStructureMetrics:
     )
 
 
-def _plot_spearman_raincloud(points: list[SpearmanPoint]) -> list[Path]:
+def _save_spearman_points(points: list[SpearmanPoint]) -> Path | None:
     if not points:
-        return []
+        return None
 
     df = pd.DataFrame(
         [
@@ -881,6 +879,9 @@ def _plot_spearman_raincloud(points: list[SpearmanPoint]) -> list[Path]:
                 "q_value": p.q_value,
                 "recurrence_flag": p.recurrence_flag,
                 "group": p.group,
+                "region_chr": p.region[0] if p.region else None,
+                "region_start": p.region[1] if p.region else None,
+                "region_end": p.region[2] if p.region else None,
             }
             for p in points
             if p.rho is not None
@@ -888,127 +889,11 @@ def _plot_spearman_raincloud(points: list[SpearmanPoint]) -> list[Path]:
     )
 
     if df.empty:
-        return []
+        return None
 
-    df["label"] = df["recurrence_flag"].map({0: "Single-event", 1: "Recurrent"})
-    df["is_significant"] = df["q_value"].apply(lambda q: q is not None and q < 0.05)
-    df["alpha"] = np.where(df["is_significant"], 0.6, 0.3)
-    df["size"] = np.where(df["is_significant"], 220, 160)
-
-    palette = {"Recurrent": "#f28e2b", "Single-event": "#59a14f"}
-
-    sns.set_theme(context="talk", style="white")
-    fig, ax = plt.subplots(figsize=(12, 10))
-
-    sns.kdeplot(
-        data=df,
-        x="rho",
-        hue="label",
-        fill=True,
-        common_norm=False,
-        alpha=0.35,
-        palette=palette,
-        linewidth=3,
-        ax=ax,
-    )
-
-    y_jitter = -0.035 + np.random.normal(loc=0.0, scale=0.005, size=len(df))
-    ax.scatter(
-        df["rho"],
-        y_jitter,
-        c=df["label"].map(palette),
-        alpha=df["alpha"],
-        s=df["size"],
-        edgecolors="black",
-        linewidths=1.1,
-        marker="o",
-        zorder=5,
-    )
-
-    ax.set_ylabel("Density", fontsize=20)
-    ax.set_xlabel("Spearman correlation", fontsize=20)
-    ax.tick_params(axis="both", which="major", labelsize=16)
-    ax.set_ylim(bottom=min(ax.get_ylim()[0], -0.08))
-    ax.grid(False)
-    ax.set_title(
-        "Spearman decay across inversions", fontsize=22, pad=20, weight="bold"
-    )
-
-    ax.axhline(0, color="gray", lw=1.0, alpha=0.6)
-    ax.spines["bottom"].set_linewidth(1.3)
-    ax.spines["left"].set_linewidth(1.3)
-    ax.spines["right"].set_visible(False)
-    ax.spines["top"].set_visible(False)
-
-    x_min, x_max = ax.get_xlim()
-    y_min, y_max = ax.get_ylim()
-    arrow_y = y_max * 0.92
-    ax.annotate(
-        "Higher FST near breakpoints →",
-        xy=(x_max * 0.95, arrow_y),
-        xytext=(x_min + (x_max - x_min) * 0.55, arrow_y),
-        arrowprops={"arrowstyle": "->", "color": "gray", "lw": 2.2},
-        ha="right",
-        va="center",
-        fontsize=17,
-        color="gray",
-    )
-
-    from matplotlib.lines import Line2D
-
-    legend_handles = [
-        Line2D(
-            [0],
-            [0],
-            marker="o",
-            color="w",
-            label="Recurrent",
-            markerfacecolor=palette["Recurrent"],
-            markeredgecolor="black",
-            markersize=18,
-            alpha=0.6,
-        ),
-        Line2D(
-            [0],
-            [0],
-            marker="o",
-            color="w",
-            label="Single-event",
-            markerfacecolor=palette["Single-event"],
-            markeredgecolor="black",
-            markersize=18,
-            alpha=0.6,
-        ),
-        Line2D(
-            [0],
-            [0],
-            marker="o",
-            color="w",
-            label="FDR < 0.05",
-            markerfacecolor="gray",
-            markeredgecolor="black",
-            markersize=22,
-            alpha=0.6,
-        ),
-    ]
-    ax.legend(
-        handles=legend_handles,
-        title="Key",
-        frameon=True,
-        fontsize=15,
-        title_fontsize=16,
-        loc="upper left",
-    )
-
-    plot_base = DATA_DIR / "spearman_decay_raincloud"
-    png_path = plot_base.with_suffix(".png")
-    pdf_path = plot_base.with_suffix(".pdf")
-    fig.tight_layout()
-    fig.savefig(png_path, dpi=300, bbox_inches="tight")
-    fig.savefig(pdf_path, bbox_inches="tight")
-    plt.close(fig)
-
-    return [png_path, pdf_path]
+    output_path = DATA_DIR / "spearman_decay_points.tsv"
+    df.to_csv(output_path, sep="\t", index=False)
+    return output_path
 
 
 # ---------------------------------------------------------------------------
@@ -1335,11 +1220,13 @@ def summarize_pi_structure() -> List[str]:
     lines.append(_fmt_spearman(metrics.spearman_recur_inv_median, "Recurrent Inverted (G1, R1)"))
     lines.append(_fmt_spearman(metrics.spearman_single_dir_median, "Single-Event Direct (G0, R0)"))
 
-    plot_paths = _plot_spearman_raincloud(metrics.spearman_points)
-    if plot_paths:
-        rel_paths = ", ".join(_relative_to_repo(p) for p in plot_paths)
+    saved_points = _save_spearman_points(metrics.spearman_points)
+    if saved_points:
         lines.append("")
-        lines.append(f"  Saved Spearman rainclouds with KDE to: {rel_paths}.")
+        lines.append(
+            "  Saved Spearman decay points (including q-values) to: "
+            f"{_relative_to_repo(saved_points)}."
+        )
 
     return lines
 
