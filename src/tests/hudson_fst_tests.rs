@@ -351,15 +351,11 @@ mod hudson_fst_tests {
         let outcome = result.unwrap();
         println!("Monomorphic window FST: {:?}", outcome.fst);
 
-        // Monomorphic windows should return FST = 0.0, not None
+        // Monomorphic windows have 0 variance, so FST is undefined (0/0) -> None
         assert!(
-            outcome.fst.is_some(),
-            "Monomorphic window should have FST = 0.0, not None"
-        );
-        assert_eq!(
-            outcome.fst.unwrap(),
-            0.0,
-            "Monomorphic window FST should be exactly 0.0"
+            outcome.fst.is_none(),
+            "Monomorphic window should have FST = None (undefined), got {:?}",
+            outcome.fst
         );
     }
 
@@ -729,25 +725,22 @@ mod hudson_fst_tests {
         // Should have 0 sites, as per-site output is now sparse and there are no variants
         assert_eq!(sites.len(), 0, "Should have exactly 0 sites in region");
 
-        // Aggregated FST should be 0.0 (Σnum = 0, Σden = 0)
-        let aggregated_fst =
-            aggregate_hudson_from_sites(&sites).expect("Aggregated FST should be Some(0.0)");
+        // Aggregated FST should be None (Σnum = 0, Σden = 0)
+        let aggregated_fst = aggregate_hudson_from_sites(&sites);
         assert!(
-            (aggregated_fst - 0.0).abs() < 1e-12,
-            "Aggregated FST should be exactly 0.0"
+            aggregated_fst.is_none(),
+            "Aggregated FST should be None (undefined) for empty sites list, got {:?}",
+            aggregated_fst
         );
 
-        // Window FST should also be 0.0
-        assert!(outcome.fst.is_some(), "Window FST should be Some(0.0)");
+        // Window FST should also be None
         assert!(
-            (outcome.fst.unwrap() - 0.0).abs() < 1e-12,
-            "Window FST should be exactly 0.0"
+            outcome.fst.is_none(),
+            "Window FST should be None (undefined), got {:?}",
+            outcome.fst
         );
 
-        println!(
-            "Test 3 PASSED: Monomorphic window FST = {} (expected 0.0)",
-            outcome.fst.unwrap()
-        );
+        println!("Test 3 PASSED: Monomorphic window FST = None (expected None)");
     }
 
     #[test]
