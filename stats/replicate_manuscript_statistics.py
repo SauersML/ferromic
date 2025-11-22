@@ -27,6 +27,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from stats import (
     CDS_identical_model,
+    fst_edge_decay,
     inv_dir_recur_model,
     recur_breakpoint_tests,
     per_inversion_breakpoint_metric,
@@ -1140,6 +1141,37 @@ def summarize_pi_structure() -> List[str]:
     return lines
 
 
+def summarize_fst_edge_decay() -> List[str]:
+    header = (
+        "Folded Hudson FST decay (one-sided Spearman testing for decreases from edge to center):"
+    )
+    try:
+        results = fst_edge_decay.compute_fst_edge_decay(DATA_DIR)
+    except FileNotFoundError as exc:
+        return [f"Hudson FST decay inputs unavailable: {exc}"]
+    except Exception as exc:  # pragma: no cover - defensive parsing guard
+        return [f"Hudson FST decay summary failed: {exc}"]
+
+    if not results:
+        return [header, "  No qualifying inversions (length > 100kbp with recurrence labels)."]
+
+    lines = [header]
+    results = sorted(
+        results,
+        key=lambda r: (r.chrom, r.start, r.end, r.recurrence_flag),
+    )
+    for res in results:
+        lines.append(f"  {res.inv_label} ({res.recurrence_label}):")
+        lines.append(
+            "    "
+            f"rho={_fmt(res.rho)}, "
+            f"p(one-sided)={_fmt(res.p_one_sided)}, "
+            f"q={_fmt(res.q_value)}, "
+            f"bins={_fmt(res.bins_used, 0)}"
+        )
+    return lines
+
+
 def summarize_linear_model() -> List[str]:
     pi_path = DATA_DIR / "output.csv"
     inv_path = DATA_DIR / "inv_properties.tsv"
@@ -2180,6 +2212,7 @@ def build_report() -> List[str]:
         ("Sample sizes", summarize_sample_sizes()),
         ("Diversity", summarize_diversity()),
         ("Pi Structure", summarize_pi_structure()),
+        ("Hudson FST edge decay", summarize_fst_edge_decay()),
         ("Linear model", summarize_linear_model()),
         ("CDS conservation", summarize_cds_conservation_glm()),
         ("Differentiation", summarize_fst()),
