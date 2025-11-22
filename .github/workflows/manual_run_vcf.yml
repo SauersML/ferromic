@@ -278,6 +278,14 @@ jobs:
           path: output.csv
           if-no-files-found: error
 
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-vcf-logs
+          path: ferromic_logs/**/*
+          if-no-files-found: warn
+
       - name: Upload PHY artifact
         if: hashFiles('phy_outputs.zip') != ''
         uses: actions/upload-artifact@v4
