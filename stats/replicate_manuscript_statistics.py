@@ -16,9 +16,11 @@ from typing import Iterable, List, Tuple
 import tempfile
 
 import shutil
-import requests
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import requests
+import seaborn as sns
 from scipy import stats
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -448,6 +450,16 @@ class SpearmanResult:
 
 
 @dataclass
+class SpearmanPoint:
+    rho: float | None
+    p_value: float | None
+    recurrence_flag: int
+    group: int
+    region: tuple[str, int, int] | None = None
+    q_value: float | None = None
+
+
+@dataclass
 class EdgeMiddleStats:
     flank_mean: float | None
     middle_mean: float | None
@@ -488,6 +500,8 @@ class PiStructureMetrics:
     spearman_recur_inv_median: SpearmanResult
     spearman_single_dir_median: SpearmanResult
 
+    spearman_points: list[SpearmanPoint]
+
     unique_inversions: int
 
 
@@ -518,7 +532,7 @@ class _MetricAccumulator:
 
 def _calc_spearman(window_data: list[np.ndarray]) -> SpearmanResult:
     if not window_data:
-        return SpearmanResult(None, None, 0)
+        return SpearmanResult(rho=None, p_value=None, n=0)
 
     # 50 windows per entry (100kb / 2kb)
     window_values = np.concatenate(window_data)
@@ -527,14 +541,14 @@ def _calc_spearman(window_data: list[np.ndarray]) -> SpearmanResult:
 
     mask = np.isfinite(window_values)
     if mask.sum() < 2:
-        return SpearmanResult(None, None, len(window_data))
+        return SpearmanResult(rho=None, p_value=None, n=len(window_data))
 
     rho_val, p_val = stats.spearmanr(distances[mask], window_values[mask])
 
     rho = float(rho_val) if np.isfinite(rho_val) else None
     p = float(p_val) if np.isfinite(p_val) else None
 
-    return SpearmanResult(rho, p, len(window_data))
+    return SpearmanResult(rho=rho, p_value=p, n=len(window_data))
 
 
 def _calc_pi_structure_metrics() -> PiStructureMetrics:
@@ -601,6 +615,9 @@ def _calc_pi_structure_metrics() -> PiStructureMetrics:
     acc_spearman_median: dict[tuple[int, int], list[np.ndarray]] = {
         (0, 0): [], (0, 1): [], (1, 0): [], (1, 1): []
     }
+
+    spearman_points: list[SpearmanPoint] = []
+    spearman_distances = np.arange(0, 100_000, 2_000, dtype=float)
 
     qualifying_regions: set[tuple[str, int, int]] = set()
     processed_entries: set[tuple[tuple[str, int, int], int]] = set()
@@ -692,6 +709,26 @@ def _calc_pi_structure_metrics() -> PiStructureMetrics:
                 np.vstack([left_wins_median, right_wins_median]), axis=0
             )
 
+            point_rho = None
+            point_p = None
+            mask = np.isfinite(folded_means)
+            if np.sum(mask) >= 2:
+                rho_val, p_val = stats.spearmanr(
+                    spearman_distances[mask], folded_means[mask]
+                )
+                point_rho = float(rho_val) if np.isfinite(rho_val) else None
+                point_p = float(p_val) if np.isfinite(p_val) else None
+
+            spearman_points.append(
+                SpearmanPoint(
+                    rho=point_rho,
+                    p_value=point_p,
+                    recurrence_flag=recur_flag,
+                    group=group_id,
+                    region=region,
+                )
+            )
+
             key = (group_id, recur_flag)
             if key in acc_spearman_mean:
                 acc_spearman_mean[key].append(folded_means)
@@ -762,6 +799,22 @@ def _calc_pi_structure_metrics() -> PiStructureMetrics:
     for key, acc in acc_em_subgroup.items():
         subgroup_stats[key] = _em_stats(acc)
 
+    p_for_fdr = [pt.p_value for pt in spearman_points if pt.p_value is not None]
+    if p_for_fdr:
+        try:
+            from statsmodels.stats.multitest import multipletests
+
+            _, q_vals, _, _ = multipletests(p_for_fdr, alpha=0.05, method="fdr_bh")
+            idx = 0
+            for pt in spearman_points:
+                if pt.p_value is None:
+                    continue
+                pt.q_value = float(q_vals[idx])
+                idx += 1
+        except Exception:
+            # If statsmodels is unavailable or the correction fails, leave q-values as None
+            pass
+
     # --- Compile Spearman Metrics ---
     # 1. Overall (All 4 subgroups)
     all_spearman_data = (
@@ -810,8 +863,152 @@ def _calc_pi_structure_metrics() -> PiStructureMetrics:
         spearman_recur_inv_median=res_recur_inv_median,
         spearman_single_dir_median=res_single_dir_median,
 
+        spearman_points=spearman_points,
+
         unique_inversions=len(qualifying_regions),
     )
+
+
+def _plot_spearman_raincloud(points: list[SpearmanPoint]) -> list[Path]:
+    if not points:
+        return []
+
+    df = pd.DataFrame(
+        [
+            {
+                "rho": p.rho,
+                "p_value": p.p_value,
+                "q_value": p.q_value,
+                "recurrence_flag": p.recurrence_flag,
+                "group": p.group,
+            }
+            for p in points
+            if p.rho is not None
+        ]
+    )
+
+    if df.empty:
+        return []
+
+    df["label"] = df["recurrence_flag"].map({0: "Single-event", 1: "Recurrent"})
+    df["is_significant"] = df["q_value"].apply(lambda q: q is not None and q < 0.05)
+    df["alpha"] = np.where(df["is_significant"], 0.6, 0.3)
+    df["size"] = np.where(df["is_significant"], 220, 160)
+
+    palette = {"Recurrent": "#f28e2b", "Single-event": "#59a14f"}
+
+    sns.set_theme(context="talk", style="white")
+    fig, ax = plt.subplots(figsize=(12, 10))
+
+    sns.kdeplot(
+        data=df,
+        x="rho",
+        hue="label",
+        fill=True,
+        common_norm=False,
+        alpha=0.35,
+        palette=palette,
+        linewidth=3,
+        ax=ax,
+    )
+
+    y_jitter = -0.035 + np.random.normal(loc=0.0, scale=0.005, size=len(df))
+    ax.scatter(
+        df["rho"],
+        y_jitter,
+        c=df["label"].map(palette),
+        alpha=df["alpha"],
+        s=df["size"],
+        edgecolors="black",
+        linewidths=1.1,
+        marker="o",
+        zorder=5,
+    )
+
+    ax.set_ylabel("Density", fontsize=20)
+    ax.set_xlabel("Spearman correlation", fontsize=20)
+    ax.tick_params(axis="both", which="major", labelsize=16)
+    ax.set_ylim(bottom=min(ax.get_ylim()[0], -0.08))
+    ax.grid(False)
+    ax.set_title(
+        "Spearman decay across inversions", fontsize=22, pad=20, weight="bold"
+    )
+
+    ax.axhline(0, color="gray", lw=1.0, alpha=0.6)
+    ax.spines["bottom"].set_linewidth(1.3)
+    ax.spines["left"].set_linewidth(1.3)
+    ax.spines["right"].set_visible(False)
+    ax.spines["top"].set_visible(False)
+
+    x_min, x_max = ax.get_xlim()
+    y_min, y_max = ax.get_ylim()
+    arrow_y = y_max * 0.92
+    ax.annotate(
+        "Higher FST near breakpoints →",
+        xy=(x_max * 0.95, arrow_y),
+        xytext=(x_min + (x_max - x_min) * 0.55, arrow_y),
+        arrowprops={"arrowstyle": "->", "color": "gray", "lw": 2.2},
+        ha="right",
+        va="center",
+        fontsize=17,
+        color="gray",
+    )
+
+    from matplotlib.lines import Line2D
+
+    legend_handles = [
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="w",
+            label="Recurrent",
+            markerfacecolor=palette["Recurrent"],
+            markeredgecolor="black",
+            markersize=18,
+            alpha=0.6,
+        ),
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="w",
+            label="Single-event",
+            markerfacecolor=palette["Single-event"],
+            markeredgecolor="black",
+            markersize=18,
+            alpha=0.6,
+        ),
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="w",
+            label="FDR < 0.05",
+            markerfacecolor="gray",
+            markeredgecolor="black",
+            markersize=22,
+            alpha=0.6,
+        ),
+    ]
+    ax.legend(
+        handles=legend_handles,
+        title="Key",
+        frameon=True,
+        fontsize=15,
+        title_fontsize=16,
+        loc="upper left",
+    )
+
+    plot_base = DATA_DIR / "spearman_decay_raincloud"
+    png_path = plot_base.with_suffix(".png")
+    pdf_path = plot_base.with_suffix(".pdf")
+    fig.tight_layout()
+    fig.savefig(png_path, dpi=300, bbox_inches="tight")
+    fig.savefig(pdf_path, bbox_inches="tight")
+    plt.close(fig)
+
+    return [png_path, pdf_path]
 
 
 # ---------------------------------------------------------------------------
@@ -1121,7 +1318,7 @@ def summarize_pi_structure() -> List[str]:
     def _fmt_spearman(r, label):
         return (
             f"  {label}: ρ = {_fmt(r.rho, 3)} "
-            f"(p = {_fmt(r.p_value, 3)}, n = {_fmt(r.n, 0)})."
+            f"(p(two-sided) = {_fmt(r.p_value, 3)}, n = {_fmt(r.n, 0)})."
         )
 
     lines.append(_fmt_spearman(metrics.spearman_overall, "Overall (All Consensus 0+1)"))
@@ -1137,6 +1334,12 @@ def summarize_pi_structure() -> List[str]:
     lines.append(_fmt_spearman(metrics.spearman_recur_dir_median, "Recurrent Direct (G0, R1)"))
     lines.append(_fmt_spearman(metrics.spearman_recur_inv_median, "Recurrent Inverted (G1, R1)"))
     lines.append(_fmt_spearman(metrics.spearman_single_dir_median, "Single-Event Direct (G0, R0)"))
+
+    plot_paths = _plot_spearman_raincloud(metrics.spearman_points)
+    if plot_paths:
+        rel_paths = ", ".join(_relative_to_repo(p) for p in plot_paths)
+        lines.append("")
+        lines.append(f"  Saved Spearman rainclouds with KDE to: {rel_paths}.")
 
     return lines
 
