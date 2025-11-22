@@ -17,6 +17,7 @@ SCRIPT_IMAGE_MAP: Dict[str, str] = {
     'qq_plot.py': 'phewas_plots/qq_plot_overall.png',
     'chr17_inversion_tag_correlation.py': 'phewas_plots/chr17_inversion_tag_correlation.png',
     'family_forest.py': 'family_vs_main_forest.png',
+    'stats/replicate_manuscript_statistics.py': 'data/spearman_decay_raincloud.png',
 }
 
 # Name of the directory to store the final plots
