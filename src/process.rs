@@ -3122,6 +3122,11 @@ fn process_single_config_entry(
         ),
     );
 
+    // Initialize status trackers for FALSTA output logic
+    let mut pi_falsta_status = FalstaStatus::Pending;
+    let mut wc_falsta_status = FalstaStatus::Pending;
+    let mut hudson_falsta_status = FalstaStatus::Pending;
+
     // Initialize Hudson FST components for haplotype groups 0 vs 1 to None
     let mut hudson_fst_hap_group_0v1_val: Option<f64> = None;
     let mut hudson_dxy_hap_group_0v1_val: Option<f64> = None;
@@ -3185,16 +3190,37 @@ fn process_single_config_entry(
                                 region_end: entry.interval.get_0based_inclusive_end_coord(), // 0-based inclusive
                                 outcome: outcome.clone(),
                             });
-                            for site in site_values {
-                                let fst_val = site.fst.unwrap_or(f64::NAN);
-                                let numerator = site.num_component.unwrap_or(f64::NAN);
-                                let denominator = site.den_component.unwrap_or(f64::NAN);
-                                per_site_hudson_fst_records.push((
-                                    site.position,
-                                    fst_val,
-                                    numerator,
-                                    denominator,
-                                ));
+
+                            let informative_sites_count = site_values
+                                .iter()
+                                .filter(|s| {
+                                    s.den_component.is_some()
+                                        && s.den_component.unwrap().is_finite()
+                                        && s.den_component.unwrap() > 0.0
+                                })
+                                .count();
+
+                            if informative_sites_count > 0 {
+                                hudson_falsta_status = FalstaStatus::Produced {
+                                    num_sites: site_values.len(),
+                                    num_informative: informative_sites_count,
+                                };
+
+                                for site in site_values {
+                                    let fst_val = site.fst.unwrap_or(f64::NAN);
+                                    let numerator = site.num_component.unwrap_or(f64::NAN);
+                                    let denominator = site.den_component.unwrap_or(f64::NAN);
+                                    per_site_hudson_fst_records.push((
+                                        site.position,
+                                        fst_val,
+                                        numerator,
+                                        denominator,
+                                    ));
+                                }
+                            } else {
+                                hudson_falsta_status = FalstaStatus::Skipped(
+                                    "no informative Hudson denominators within region",
+                                );
                             }
                             hudson_fst_hap_group_0v1_val = outcome.fst;
                             hudson_dxy_hap_group_0v1_val = outcome.d_xy;
@@ -3202,16 +3228,26 @@ fn process_single_config_entry(
                             hudson_pi_hap_group_1_val = outcome.pi_pop2;
                             hudson_pi_avg_hap_group_0v1_val = outcome.pi_xy_avg;
                         }
-                        Err(e) => log(
-                            LogLevel::Error,
-                            &format!(
-                                "Error calculating Hudson FST for haplotype groups 0 vs 1 in region {}: {}",
-                                region_desc, e
-                            ),
-                        ),
+                        Err(e) => {
+                            let err_msg = format!("Hudson FST calculation failed: {}", e);
+                            log(
+                                LogLevel::Error,
+                                &format!(
+                                    "Error calculating Hudson FST for haplotype groups 0 vs 1 in region {}: {}",
+                                    region_desc, e
+                                ),
+                            );
+                            hudson_falsta_status = FalstaStatus::Error(err_msg);
+                        }
                     }
+                } else {
+                    hudson_falsta_status = FalstaStatus::Skipped(
+                        "Hudson query window collapsed after masks/allow list",
+                    );
                 }
             } else {
+                hudson_falsta_status =
+                    FalstaStatus::Skipped("fewer than 2 filtered haplotypes per group");
                 log(
                     LogLevel::Warning,
                     &format!(
@@ -3221,6 +3257,9 @@ fn process_single_config_entry(
                 );
             }
         } else {
+            hudson_falsta_status = FalstaStatus::Skipped(
+                "failed to resolve haplotype indices for one or both groups",
+            );
             log(
                 LogLevel::Error,
                 &format!(
@@ -3446,6 +3485,16 @@ fn process_single_config_entry(
         per_site_diversity_records.push((sd.position, sd.pi, sd.watterson_theta, 1, true));
     }
 
+    if !per_site_diversity_records.is_empty() {
+        pi_falsta_status = FalstaStatus::Produced {
+            num_sites: per_site_diversity_records.len(),
+            num_informative: per_site_diversity_records.len(), // All records here are informative (sites with diversity)
+        };
+    } else {
+        pi_falsta_status =
+            FalstaStatus::Skipped("no per-site diversity records (likely 0 haplotypes or no variants)");
+    }
+
     // Collect per-site FST records specifically for the haplotype group analysis (0 vs. 1)
     // for summary FALSTA output, preserving both FST values and numerator/denominator components.
     let mut per_site_fst_records: Vec<PerSiteWcOutput> = Vec::new();
@@ -3491,6 +3540,15 @@ fn process_single_config_entry(
         }
     }
 
+    if !per_site_fst_records.is_empty() {
+        wc_falsta_status = FalstaStatus::Produced {
+            num_sites: per_site_fst_records.len(),
+            num_informative: per_site_fst_records.len(),
+        };
+    } else {
+        wc_falsta_status = FalstaStatus::Skipped("no calculable WC per-site FST values");
+    }
+
     // Note: Per-site FST data from CSV-defined populations (pop_fst_results_filtered)
     // is NOT added to this specific `per_site_fst_records` vector.
     // That data is fully contained within `row_data.population_fst_wc_results`
@@ -3517,6 +3575,43 @@ fn process_single_config_entry(
         ),
     );
 
+    // Log status for each FALSTA modality
+    for (modality, status) in &[
+        ("Pi", &pi_falsta_status),
+        ("WC FST", &wc_falsta_status),
+        ("Hudson FST", &hudson_falsta_status),
+    ] {
+        match status {
+            FalstaStatus::Pending => {
+                // Should not happen if logic is correct, but safe fallback
+            }
+            FalstaStatus::Produced {
+                num_sites,
+                num_informative,
+            } => {
+                log(
+                    LogLevel::Info,
+                    &format!(
+                        "{} FALSTA: produced {} sites ({} informative)",
+                        modality, num_sites, num_informative
+                    ),
+                );
+            }
+            FalstaStatus::Skipped(reason) => {
+                log(
+                    LogLevel::Warning,
+                    &format!("{} FALSTA skipped: {}", modality, reason),
+                );
+            }
+            FalstaStatus::Error(e) => {
+                log(
+                    LogLevel::Error,
+                    &format!("{} FALSTA error: {}", modality, e),
+                );
+            }
+        }
+    }
+
     Ok(Some((
         row_data,
         per_site_diversity_records,
@@ -3525,6 +3620,21 @@ fn process_single_config_entry(
         local_regional_hudson_outcomes,
         regional_wc_outcome,
     )))
+}
+
+/// Status of per-site FASTA-style output generation for a given modality (e.g., Pi, WC FST, Hudson FST).
+/// Used to track and log exactly why an output track was produced or skipped.
+#[derive(Debug, Clone)]
+enum FalstaStatus {
+    Pending,
+    Skipped(&'static str),
+    #[allow(dead_code)]
+    Error(String),
+    Produced {
+        num_sites: usize,
+        #[allow(dead_code)]
+        num_informative: usize,
+    },
 }
 
 /// Helper struct to associate a HudsonFSTOutcome with its genomic region.
@@ -3602,6 +3712,17 @@ fn append_diversity_falsta<P: AsRef<std::path::Path>>(
     row: &CsvRowData,
     per_site: &[(i64, f64, f64, u8, bool)],
 ) -> Result<(), VcfError> {
+    if per_site.is_empty() {
+        log(
+            LogLevel::Warning,
+            &format!(
+                "Pi per-site track omitted for {}:{}-{} (no site records)",
+                row.seqname, row.region_start, row.region_end
+            ),
+        );
+        return Ok(());
+    }
+
     let mut w = open_append_compressed(path.as_ref()).map_err(VcfError::Io)?;
     // region in 0-based half-open for mapping
     let region = ZeroBasedHalfOpen::from_1based_inclusive(row.region_start, row.region_end);
@@ -3661,6 +3782,30 @@ fn append_fst_falsta<P: AsRef<std::path::Path>>(
     wc_sites: &[PerSiteWcOutput],
     hudson_sites: &[(i64, f64, f64, f64)],
 ) -> Result<(), VcfError> {
+    if wc_sites.is_empty() {
+        log(
+            LogLevel::Warning,
+            &format!(
+                "WC FST per-site track omitted for {}:{}-{} (no site records)",
+                row.seqname, row.region_start, row.region_end
+            ),
+        );
+    }
+
+    if hudson_sites.is_empty() {
+        log(
+            LogLevel::Warning,
+            &format!(
+                "Hudson FST per-site track omitted for {}:{}-{} (no site records)",
+                row.seqname, row.region_start, row.region_end
+            ),
+        );
+    }
+
+    if wc_sites.is_empty() && hudson_sites.is_empty() {
+        return Ok(());
+    }
+
     let mut w = open_append_compressed(path.as_ref()).map_err(VcfError::Io)?;
     let region = ZeroBasedHalfOpen::from_1based_inclusive(row.region_start, row.region_end);
     let n = region.len();
