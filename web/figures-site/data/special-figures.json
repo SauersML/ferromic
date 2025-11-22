@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2025-10-30T18:30:00Z",
+  "generatedAt": "2025-11-22T18:50:41+00:00",
   "groups": [
     {
       "title": "Diversity and FST Profiles",
@@ -34,6 +34,27 @@
           "title": "Mean π by Category: Flanks vs. Middle",
           "filename": "pi_analysis_results_exact_mf_quadrants/total_40kb/pi_mf_recurrence_violins_total_40kb.pdf",
           "description": "Four-panel flank versus middle comparison stratified by recurrence status and orientation."
+        }
+      ]
+    },
+    {
+      "title": "Breakpoint FRF Analyses",
+      "slug": "frf",
+      "figures": [
+        {
+          "title": "FRF Edge vs. Middle Half-Violins",
+          "filename": "frf/frf_violin_from_url.pdf",
+          "description": "Half-violin comparison of FRF means for edge versus middle windows with paired inversion connections and box plots." 
+        },
+        {
+          "title": "FRF Volcano Plot",
+          "filename": "frf/frf_volcano.pdf",
+          "description": "Volcano plot of centered FRF delta with point sizes scaled by within-category weight and colors separating single-event versus recurrent inversions."
+        },
+        {
+          "title": "FRF Breakpoint Enrichment by Status",
+          "filename": "frf/frf_delta_strip_box.pdf",
+          "description": "Precision-weighted strip-plus-box plot of frf_delta_centered values split by single-event and recurrent inversions with weighted medians and p-value annotation."
         }
       ]
     },
