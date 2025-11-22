@@ -4,20 +4,21 @@ import shutil
 import sys
 import platform
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 # --- Configuration ---
 
 # Map script names to their expected output image file names
 # This makes the relationship explicit and drives the execution flow.
-SCRIPT_IMAGE_MAP: Dict[str, str] = {
+SCRIPT_IMAGE_MAP: Dict[str, Optional[str]] = {
     'recur_diversity.py': 'inversion_pi_violins.png',
     'overall_fst_by_type.py': 'fst_recurrent_vs_single_event.png',
     'dist_diversity_by_type.py': 'pi_flanking_regions_mean_bar_plot.png',
     'qq_plot.py': 'phewas_plots/qq_plot_overall.png',
     'chr17_inversion_tag_correlation.py': 'phewas_plots/chr17_inversion_tag_correlation.png',
     'family_forest.py': 'family_vs_main_forest.png',
-    'stats/replicate_manuscript_statistics.py': 'data/spearman_decay_raincloud.png',
+    'stats/replicate_manuscript_statistics.py': None,
+    'stats/replicate_spearman_raincloud.py': 'data/spearman_decay_raincloud.png',
 }
 
 # Name of the directory to store the final plots
@@ -102,8 +103,8 @@ def main():
     print("\n--- Running Analysis Scripts ---")
     for script_name, image_name in SCRIPT_IMAGE_MAP.items():
         script_path = start_time / script_name
-        source_image_path = start_time / image_name
-        dest_image_path = output_dir / image_name
+        source_image_path = start_time / image_name if image_name else None
+        dest_image_path = output_dir / image_name if image_name else None
 
         if not script_path.is_file():
             print(f"ERROR: Script '{script_name}' not found. Skipping.")
@@ -118,25 +119,28 @@ def main():
             # Continue processing other scripts and checking for images
 
         # Check for and copy the expected image AFTER running the script
-        print(f"Checking for output: {image_name}")
-        # Handle subdirectory paths in image_name
-        if '/' in image_name:
-            source_image_path = start_time / image_name
-            dest_image_path = output_dir / Path(image_name).name
-        
-        if source_image_path.is_file():
-            try:
-                shutil.copy2(source_image_path, dest_image_path)
-                print(f"  Copied '{image_name}' to '{output_dir.name}/'")
-                copied_image_paths.append(dest_image_path)
-            except Exception as e:
-                print(f"  ERROR: Failed to copy '{image_name}': {e}")
-        else:
-            # Only warn if the script itself succeeded but the image is missing
-            if success:
-                 print(f"  WARNING: Expected image '{image_name}' not found after running '{script_name}'.")
+        if image_name:
+            print(f"Checking for output: {image_name}")
+            # Handle subdirectory paths in image_name
+            if '/' in image_name:
+                source_image_path = start_time / image_name
+                dest_image_path = output_dir / Path(image_name).name
+
+            if source_image_path.is_file():
+                try:
+                    shutil.copy2(source_image_path, dest_image_path)
+                    print(f"  Copied '{image_name}' to '{output_dir.name}/'")
+                    copied_image_paths.append(dest_image_path)
+                except Exception as e:
+                    print(f"  ERROR: Failed to copy '{image_name}': {e}")
             else:
-                 print(f"  INFO: Expected image '{image_name}' not found (script '{script_name}' failed).")
+                # Only warn if the script itself succeeded but the image is missing
+                if success:
+                    print(f"  WARNING: Expected image '{image_name}' not found after running '{script_name}'.")
+                else:
+                    print(f"  INFO: Expected image '{image_name}' not found (script '{script_name}' failed).")
+        else:
+            print("No expected image for this script; skipping copy check.")
 
 
     # 3. Report Overall Status and Open Images
