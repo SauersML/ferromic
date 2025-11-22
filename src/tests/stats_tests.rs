@@ -30,59 +30,159 @@ mod tests {
 
     #[test]
     fn test_missing_sites_default_to_zero_diversity() {
-        let variants = vec![
-            create_variant(
-                2,
-                vec![
-                    Some(vec![0, 0]),
-                    Some(vec![0, 0]),
-                ],
-            ),
-        ];
+        // This integration test verifies that the dense writer (append_diversity_falsta)
+        // correctly fills in "0" for sites that have no variants in the VCF but are within the requested region.
 
-        let haplotypes = vec![
-            (0, HaplotypeSide::Left),
-            (0, HaplotypeSide::Right),
-            (1, HaplotypeSide::Left),
-            (1, HaplotypeSide::Right),
-        ];
+        // Use tempfile to create a unique directory for this test
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let temp_path = temp_dir.path();
 
-        let region = QueryRegion { start: 0, end: 4 };
-        let filtered_positions = HashSet::new();
-        let per_site = calculate_per_site_diversity(
-            &variants,
-            &haplotypes,
-            region,
-            &filtered_positions,
-            None,
-        );
+        // 1. Setup VCF:
+        // Region length 5 (1..5).
+        // Only ONE variant at position 3.
+        // Expected output: 0, 0, <val>, 0, 0
+        let vcf_dir = temp_path.join("vcf");
+        std::fs::create_dir_all(&vcf_dir).expect("failed to create vcf dir");
+        let vcf_path = vcf_dir.join("chr1.vcf");
+        let mut vcf_file = File::create(&vcf_path).expect("failed to create vcf");
+        writeln!(vcf_file, "##fileformat=VCFv4.2").unwrap();
+        writeln!(
+            vcf_file,
+            "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSample1"
+        )
+        .unwrap();
+        // Variant at pos 3
+        writeln!(
+            vcf_file,
+            "chr1\t3\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|1:99"
+        )
+        .unwrap();
 
-        assert_eq!(per_site.len(), 5);
-        for (offset, site) in per_site.iter().enumerate() {
-            assert_eq!(site.position, (offset as i64) + 1);
-            assert!(
-                site.pi.is_finite(),
-                "pi at position {} should be numeric",
-                site.position
-            );
-            assert!(
-                site.watterson_theta.is_finite(),
-                "theta at position {} should be numeric",
-                site.position
-            );
-            assert!(
-                (site.pi - 0.0).abs() < f64::EPSILON,
-                "pi at position {} expected 0, found {}",
-                site.position,
-                site.pi
-            );
-            assert!(
-                (site.watterson_theta - 0.0).abs() < f64::EPSILON,
-                "theta at position {} expected 0, found {}",
-                site.position,
-                site.watterson_theta
-            );
+        // 2. Setup Reference (FASTA)
+        let fasta_path = temp_path.join("reference.fa");
+        let mut fasta_file = File::create(&fasta_path).expect("failed to create fasta");
+        writeln!(fasta_file, ">chr1").unwrap();
+        writeln!(fasta_file, "ACGTACGTAC").unwrap(); // 10 bases
+        drop(fasta_file);
+
+        let fai_path = temp_path.join("reference.fa.fai");
+        let mut fai_file = File::create(&fai_path).expect("failed to create fai");
+        // Name, Len, Offset, LineBases, LineWidth
+        writeln!(fai_file, "chr1\t10\t6\t10\t11").unwrap();
+
+        // 3. Setup GTF (Dummy)
+        let gtf_path = temp_path.join("annotations.gtf");
+        let mut gtf_file = File::create(&gtf_path).expect("failed to create gtf");
+        writeln!(
+            gtf_file,
+            "chr1\tsource\tCDS\t1\t10\t.\t+\t0\tgene_id \"G1\"; transcript_id \"T1\";"
+        )
+        .unwrap();
+
+        // 4. Setup Config
+        let config_path = temp_path.join("config.tsv");
+        let mut config_file = File::create(&config_path).expect("failed to create config");
+        writeln!(
+            config_file,
+            "seqnames\tstart\tend\tPOS\torig_ID\tverdict\tcateg\tSample1"
+        )
+        .unwrap();
+        // Request region 1-5
+        writeln!(config_file, "chr1\t1\t5\t1\tid1\tpass\tinv\t0|0").unwrap();
+
+        let config_entries = parse_config_file(&config_path).expect("failed to parse config");
+
+        // 5. Run Process
+        struct ProgressGuard;
+        impl Drop for ProgressGuard {
+            fn drop(&mut self) {
+                crate::progress::finish_all();
+            }
         }
+        crate::progress::init_global_progress(config_entries.len());
+        let _progress_guard = ProgressGuard;
+
+        // Provide absolute paths to Args to avoid CWD dependency
+        let args = Args {
+            vcf_folder: vcf_dir.canonicalize().expect("failed to canonicalize vcf_dir").to_string_lossy().into_owned(),
+            chr: None,
+            region: None,
+            config_file: None,
+            output_file: None,
+            min_gq: 30,
+            mask_file: None,
+            allow_file: None,
+            reference_path: fasta_path.canonicalize().expect("failed to canonicalize fasta").to_string_lossy().into_owned(),
+            gtf_path: gtf_path.canonicalize().expect("failed to canonicalize gtf").to_string_lossy().into_owned(),
+            enable_pca: false,
+            pca_components: 10,
+            pca_output: "pca_results.tsv".to_string(),
+            enable_fst: false,
+            fst_populations: None,
+            exclude: None,
+        };
+
+        let output_csv = temp_path.join("results.csv");
+        let exclusion_set = HashSet::new();
+        process_config_entries(
+            &config_entries,
+            &args.vcf_folder,
+            &output_csv,
+            args.min_gq,
+            None,
+            None,
+            &args,
+            &exclusion_set,
+            temp_path,
+        )
+        .expect("process_config_entries failed");
+
+        // 6. Verify Output
+        let falsta_path = temp_dir.path().join("per_site_diversity_output.falsta.gz");
+        assert!(falsta_path.exists(), "per-site falsta was not created");
+
+        let file = File::open(&falsta_path).expect("failed to open falsta file");
+        let mut decoder = GzDecoder::new(file);
+        let mut contents = String::new();
+        decoder.read_to_string(&mut contents).expect("failed to read falsta");
+
+        let lines: Vec<&str> = contents.lines().collect();
+
+        // Look for Pi of group 0 (unfiltered)
+        // Header format: >unfiltered_pi_chr_1_start_1_end_5_group_0
+        let pi_header = ">unfiltered_pi_chr_1_start_1_end_5_group_0";
+        let pi_index = lines
+            .iter()
+            .position(|line| *line == pi_header)
+            .expect("missing pi header in falsta");
+
+        let pi_values: Vec<&str> = lines[pi_index + 1].split(',').collect();
+
+        // Region is 1-5 (length 5).
+        // Variant is at pos 3.
+        // Expected: 0, 0, val, 0, 0
+        assert_eq!(pi_values.len(), 5, "Expected 5 values for region length 5");
+
+        assert_eq!(pi_values[0], "0", "Pos 1 should be 0");
+        assert_eq!(pi_values[1], "0", "Pos 2 should be 0");
+        assert_ne!(pi_values[2], "0", "Pos 3 (variant) should not be 0");
+        assert_eq!(pi_values[3], "0", "Pos 4 should be 0");
+        assert_eq!(pi_values[4], "0", "Pos 5 should be 0");
+
+        // Also check Theta
+        let theta_header = ">unfiltered_theta_chr_1_start_1_end_5_group_0";
+        let theta_index = lines
+            .iter()
+            .position(|line| *line == theta_header)
+            .expect("missing theta header in falsta");
+        let theta_values: Vec<&str> = lines[theta_index + 1].split(',').collect();
+
+        assert_eq!(theta_values.len(), 5);
+        assert_eq!(theta_values[0], "0");
+        assert_eq!(theta_values[1], "0");
+        assert_ne!(theta_values[2], "0");
+        assert_eq!(theta_values[3], "0");
+        assert_eq!(theta_values[4], "0");
     }
 
     #[test]
