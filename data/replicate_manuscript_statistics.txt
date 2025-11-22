@@ -50,6 +50,117 @@ Internal decay (median within 2kb bins, Spearman's ρ for first 100kb, loci ≥1
   Recurrent Inverted (G1, R1): ρ = NA (p = NA, n = 14).
   Single-Event Direct (G0, R0): ρ = NA (p = NA, n = 14).
 
+HUDSON FST EDGE DECAY
+Folded Hudson FST decay (one-sided Spearman testing for decreases from edge to center):
+  chr10:46983451-47468232 (Recurrent):
+    rho=0.601, p(one-sided)=1.000, q=1.000, bins=46
+  chr10:46983451-47468232 (Recurrent):
+    rho=0.585, p(one-sided)=1.000, q=1.000, bins=46
+  chr10:46983451-47468232 (Recurrent):
+    rho=-0.252, p(one-sided)=0.046, q=0.495, bins=46
+  chr10:79542901-80217413 (Single-event):
+    rho=0.044, p(one-sided)=0.615, q=1.000, bins=46
+  chr10:79542901-80217413 (Single-event):
+    rho=-0.059, p(one-sided)=0.348, q=1.000, bins=46
+  chr10:79542901-80217413 (Single-event):
+    rho=0.046, p(one-sided)=0.618, q=1.000, bins=46
+  chr11:50154999-50324102 (Recurrent):
+    rho=-0.046, p(one-sided)=0.386, q=1.000, bins=42
+  chr11:50154999-50324102 (Recurrent):
+    rho=-0.014, p(one-sided)=0.466, q=1.000, bins=42
+  chr11:50154999-50324102 (Recurrent):
+    rho=-0.066, p(one-sided)=0.339, q=1.000, bins=42
+  chr12:131312081-131644839 (Single-event):
+    rho=0.182, p(one-sided)=0.897, q=1.000, bins=50
+  chr12:131312081-131644839 (Single-event):
+    rho=0.177, p(one-sided)=0.890, q=1.000, bins=50
+  chr12:131312081-131644839 (Single-event):
+    rho=0.148, p(one-sided)=0.847, q=1.000, bins=50
+  chr15:30618103-32153204 (Recurrent):
+    rho=0.053, p(one-sided)=0.643, q=1.000, bins=50
+  chr15:30618103-32153204 (Recurrent):
+    rho=0.193, p(one-sided)=0.911, q=1.000, bins=50
+  chr15:30618103-32153204 (Recurrent):
+    rho=0.063, p(one-sided)=0.669, q=1.000, bins=50
+  chr16:14954790-15100859 (Recurrent):
+    rho=0.213, p(one-sided)=0.890, q=1.000, bins=35
+  chr16:14954790-15100859 (Recurrent):
+    rho=0.134, p(one-sided)=0.778, q=1.000, bins=35
+  chr16:14954790-15100859 (Recurrent):
+    rho=0.187, p(one-sided)=0.859, q=1.000, bins=35
+  chr16:16721273-18073542 (Recurrent):
+    rho=0.402, p(one-sided)=0.998, q=1.000, bins=50
+  chr16:16721273-18073542 (Recurrent):
+    rho=0.359, p(one-sided)=0.995, q=1.000, bins=50
+  chr16:16721273-18073542 (Recurrent):
+    rho=-0.306, p(one-sided)=0.015, q=0.209, bins=50
+  chr16:28471892-28637651 (Recurrent):
+    rho=0.276, p(one-sided)=0.930, q=1.000, bins=30
+  chr16:28471892-28637651 (Recurrent):
+    rho=0.246, p(one-sided)=0.909, q=1.000, bins=31
+  chr16:28471892-28637651 (Recurrent):
+    rho=0.190, p(one-sided)=0.847, q=1.000, bins=31
+  chr17:16823490-18384190 (Single-event):
+    rho=-0.378, p(one-sided)=6.847e-03, q=0.123, bins=42
+  chr17:16823490-18384190 (Single-event):
+    rho=-0.502, p(one-sided)=3.556e-04, q=0.018, bins=42
+  chr17:16823490-18384190 (Single-event):
+    rho=0.422, p(one-sided)=0.997, q=1.000, bins=42
+  chr17:45585159-46292045 (Single-event):
+    rho=0.108, p(one-sided)=0.770, q=1.000, bins=49
+  chr17:45585159-46292045 (Single-event):
+    rho=0.328, p(one-sided)=0.989, q=1.000, bins=49
+  chr17:45585159-46292045 (Single-event):
+    rho=0.126, p(one-sided)=0.806, q=1.000, bins=49
+  chr3:195749463-195980207 (Recurrent):
+    rho=0.031, p(one-sided)=0.584, q=1.000, bins=48
+  chr3:195749463-195980207 (Recurrent):
+    rho=0.026, p(one-sided)=0.570, q=1.000, bins=48
+  chr3:195749463-195980207 (Recurrent):
+    rho=-0.039, p(one-sided)=0.396, q=1.000, bins=48
+  chr6:167209001-167357782 (Single-event):
+    rho=-0.158, p(one-sided)=0.175, q=1.000, bins=37
+  chr6:167209001-167357782 (Single-event):
+    rho=-0.147, p(one-sided)=0.193, q=1.000, bins=37
+  chr6:167209001-167357782 (Single-event):
+    rho=-0.130, p(one-sided)=0.222, q=1.000, bins=37
+  chr7:5989046-6735643 (Recurrent):
+    rho=0.160, p(one-sided)=0.866, q=1.000, bins=50
+  chr7:5989046-6735643 (Recurrent):
+    rho=0.043, p(one-sided)=0.617, q=1.000, bins=50
+  chr7:5989046-6735643 (Recurrent):
+    rho=-0.441, p(one-sided)=6.731e-04, q=0.018, bins=50
+  chr7:60911891-61578023 (Recurrent):
+    rho=0.226, p(one-sided)=0.911, q=1.000, bins=37
+  chr7:60911891-61578023 (Recurrent):
+    rho=0.131, p(one-sided)=0.780, q=1.000, bins=37
+  chr7:60911891-61578023 (Recurrent):
+    rho=4.505e-03, p(one-sided)=0.511, q=1.000, bins=37
+  chr7:65219157-65531823 (Recurrent):
+    rho=0.024, p(one-sided)=0.563, q=1.000, bins=47
+  chr7:65219157-65531823 (Recurrent):
+    rho=0.032, p(one-sided)=0.585, q=1.000, bins=47
+  chr7:65219157-65531823 (Recurrent):
+    rho=0.111, p(one-sided)=0.771, q=1.000, bins=47
+  chr7:73113989-74799029 (Recurrent):
+    rho=0.153, p(one-sided)=0.699, q=1.000, bins=14
+  chr7:73113989-74799029 (Recurrent):
+    rho=0.171, p(one-sided)=0.721, q=1.000, bins=14
+  chr7:73113989-74799029 (Recurrent):
+    rho=-0.042, p(one-sided)=0.443, q=1.000, bins=14
+  chr7:74869950-75058098 (Recurrent):
+    rho=-0.171, p(one-sided)=0.166, q=1.000, bins=34
+  chr7:74869950-75058098 (Recurrent):
+    rho=-0.160, p(one-sided)=0.184, q=1.000, bins=34
+  chr7:74869950-75058098 (Recurrent):
+    rho=0.332, p(one-sided)=0.973, q=1.000, bins=34
+  chrX:153149748-153250226 (Recurrent):
+    rho=0.087, p(one-sided)=0.660, q=1.000, bins=25
+  chrX:153149748-153250226 (Recurrent):
+    rho=0.217, p(one-sided)=0.851, q=1.000, bins=25
+  chrX:153149748-153250226 (Recurrent):
+    rho=0.045, p(one-sided)=0.584, q=1.000, bins=25
+
 LINEAR MODEL
 Orientation × recurrence linear models (replicated strict logic):
   Model definitions (mirroring stats/inv_dir_recur_model.py):
