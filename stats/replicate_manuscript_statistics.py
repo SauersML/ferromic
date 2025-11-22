@@ -16,9 +16,9 @@ from typing import Iterable, List, Tuple
 import tempfile
 
 import shutil
-import requests
 import numpy as np
 import pandas as pd
+import requests
 from scipy import stats
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -448,6 +448,16 @@ class SpearmanResult:
 
 
 @dataclass
+class SpearmanPoint:
+    rho: float | None
+    p_value: float | None
+    recurrence_flag: int
+    group: int
+    region: tuple[str, int, int] | None = None
+    q_value: float | None = None
+
+
+@dataclass
 class EdgeMiddleStats:
     flank_mean: float | None
     middle_mean: float | None
@@ -488,6 +498,8 @@ class PiStructureMetrics:
     spearman_recur_inv_median: SpearmanResult
     spearman_single_dir_median: SpearmanResult
 
+    spearman_points: list[SpearmanPoint]
+
     unique_inversions: int
 
 
@@ -518,7 +530,7 @@ class _MetricAccumulator:
 
 def _calc_spearman(window_data: list[np.ndarray]) -> SpearmanResult:
     if not window_data:
-        return SpearmanResult(None, None, 0)
+        return SpearmanResult(rho=None, p_value=None, n=0)
 
     # 50 windows per entry (100kb / 2kb)
     window_values = np.concatenate(window_data)
@@ -527,14 +539,14 @@ def _calc_spearman(window_data: list[np.ndarray]) -> SpearmanResult:
 
     mask = np.isfinite(window_values)
     if mask.sum() < 2:
-        return SpearmanResult(None, None, len(window_data))
+        return SpearmanResult(rho=None, p_value=None, n=len(window_data))
 
     rho_val, p_val = stats.spearmanr(distances[mask], window_values[mask])
 
     rho = float(rho_val) if np.isfinite(rho_val) else None
     p = float(p_val) if np.isfinite(p_val) else None
 
-    return SpearmanResult(rho, p, len(window_data))
+    return SpearmanResult(rho=rho, p_value=p, n=len(window_data))
 
 
 def _calc_pi_structure_metrics() -> PiStructureMetrics:
@@ -601,6 +613,9 @@ def _calc_pi_structure_metrics() -> PiStructureMetrics:
     acc_spearman_median: dict[tuple[int, int], list[np.ndarray]] = {
         (0, 0): [], (0, 1): [], (1, 0): [], (1, 1): []
     }
+
+    spearman_points: list[SpearmanPoint] = []
+    spearman_distances = np.arange(0, 100_000, 2_000, dtype=float)
 
     qualifying_regions: set[tuple[str, int, int]] = set()
     processed_entries: set[tuple[tuple[str, int, int], int]] = set()
@@ -692,6 +707,26 @@ def _calc_pi_structure_metrics() -> PiStructureMetrics:
                 np.vstack([left_wins_median, right_wins_median]), axis=0
             )
 
+            point_rho = None
+            point_p = None
+            mask = np.isfinite(folded_means)
+            if np.sum(mask) >= 2:
+                rho_val, p_val = stats.spearmanr(
+                    spearman_distances[mask], folded_means[mask]
+                )
+                point_rho = float(rho_val) if np.isfinite(rho_val) else None
+                point_p = float(p_val) if np.isfinite(p_val) else None
+
+            spearman_points.append(
+                SpearmanPoint(
+                    rho=point_rho,
+                    p_value=point_p,
+                    recurrence_flag=recur_flag,
+                    group=group_id,
+                    region=region,
+                )
+            )
+
             key = (group_id, recur_flag)
             if key in acc_spearman_mean:
                 acc_spearman_mean[key].append(folded_means)
@@ -762,6 +797,22 @@ def _calc_pi_structure_metrics() -> PiStructureMetrics:
     for key, acc in acc_em_subgroup.items():
         subgroup_stats[key] = _em_stats(acc)
 
+    p_for_fdr = [pt.p_value for pt in spearman_points if pt.p_value is not None]
+    if p_for_fdr:
+        try:
+            from statsmodels.stats.multitest import multipletests
+
+            _, q_vals, _, _ = multipletests(p_for_fdr, alpha=0.05, method="fdr_bh")
+            idx = 0
+            for pt in spearman_points:
+                if pt.p_value is None:
+                    continue
+                pt.q_value = float(q_vals[idx])
+                idx += 1
+        except Exception:
+            # If statsmodels is unavailable or the correction fails, leave q-values as None
+            pass
+
     # --- Compile Spearman Metrics ---
     # 1. Overall (All 4 subgroups)
     all_spearman_data = (
@@ -810,8 +861,39 @@ def _calc_pi_structure_metrics() -> PiStructureMetrics:
         spearman_recur_inv_median=res_recur_inv_median,
         spearman_single_dir_median=res_single_dir_median,
 
+        spearman_points=spearman_points,
+
         unique_inversions=len(qualifying_regions),
     )
+
+
+def _save_spearman_points(points: list[SpearmanPoint]) -> Path | None:
+    if not points:
+        return None
+
+    df = pd.DataFrame(
+        [
+            {
+                "rho": p.rho,
+                "p_value": p.p_value,
+                "q_value": p.q_value,
+                "recurrence_flag": p.recurrence_flag,
+                "group": p.group,
+                "region_chr": p.region[0] if p.region else None,
+                "region_start": p.region[1] if p.region else None,
+                "region_end": p.region[2] if p.region else None,
+            }
+            for p in points
+            if p.rho is not None
+        ]
+    )
+
+    if df.empty:
+        return None
+
+    output_path = DATA_DIR / "spearman_decay_points.tsv"
+    df.to_csv(output_path, sep="\t", index=False)
+    return output_path
 
 
 # ---------------------------------------------------------------------------
@@ -1121,7 +1203,7 @@ def summarize_pi_structure() -> List[str]:
     def _fmt_spearman(r, label):
         return (
             f"  {label}: ρ = {_fmt(r.rho, 3)} "
-            f"(p = {_fmt(r.p_value, 3)}, n = {_fmt(r.n, 0)})."
+            f"(p(two-sided) = {_fmt(r.p_value, 3)}, n = {_fmt(r.n, 0)})."
         )
 
     lines.append(_fmt_spearman(metrics.spearman_overall, "Overall (All Consensus 0+1)"))
@@ -1137,6 +1219,14 @@ def summarize_pi_structure() -> List[str]:
     lines.append(_fmt_spearman(metrics.spearman_recur_dir_median, "Recurrent Direct (G0, R1)"))
     lines.append(_fmt_spearman(metrics.spearman_recur_inv_median, "Recurrent Inverted (G1, R1)"))
     lines.append(_fmt_spearman(metrics.spearman_single_dir_median, "Single-Event Direct (G0, R0)"))
+
+    saved_points = _save_spearman_points(metrics.spearman_points)
+    if saved_points:
+        lines.append("")
+        lines.append(
+            "  Saved Spearman decay points (including q-values) to: "
+            f"{_relative_to_repo(saved_points)}."
+        )
 
     return lines
 
