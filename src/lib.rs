@@ -69,6 +69,7 @@ mod tests {
     mod mnp_test;
     mod sample_mapping_tests;
     mod stats_tests;
+    mod partial_overlap_test;
 }
 
 /// Rich description of an FST estimate, exposed as ``ferromic.FstEstimate``.
