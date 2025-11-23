@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2025-11-23T20:16:00.084292+00:00",
+  "generatedAt": "2025-11-23T21:07:36.381406+00:00",
   "groups": [
     {
       "title": "Top-level figures",
@@ -105,30 +105,6 @@
           "name": "filtered_pi_beginning_middle_end.png",
           "href": "figures/filtered_pi_beginning_middle_end.png",
           "preview": "figures/filtered_pi_beginning_middle_end.png",
-          "type": "image"
-        },
-        {
-          "name": "frf_violin_from_url.pdf",
-          "href": "figures/frf_violin_from_url.pdf",
-          "preview": "figures/frf_violin_from_url.pdf",
-          "type": "pdf"
-        },
-        {
-          "name": "frf_violin_from_url.png",
-          "href": "figures/frf_violin_from_url.png",
-          "preview": "figures/frf_violin_from_url.png",
-          "type": "image"
-        },
-        {
-          "name": "frf_volcano.pdf",
-          "href": "figures/frf_volcano.pdf",
-          "preview": "figures/frf_volcano.pdf",
-          "type": "pdf"
-        },
-        {
-          "name": "frf_volcano.png",
-          "href": "figures/frf_volcano.png",
-          "preview": "figures/frf_volcano.png",
           "type": "image"
         },
         {
@@ -412,18 +388,6 @@
           "href": "figures/data/phewas_chr6_167209001-167357782.pdf",
           "preview": "figures/data/phewas_chr6_167209001-167357782.pdf",
           "type": "pdf"
-        },
-        {
-          "name": "spearman_decay_raincloud.pdf",
-          "href": "figures/data/spearman_decay_raincloud.pdf",
-          "preview": "figures/data/spearman_decay_raincloud.pdf",
-          "type": "pdf"
-        },
-        {
-          "name": "spearman_decay_raincloud.png",
-          "href": "figures/data/spearman_decay_raincloud.png",
-          "preview": "figures/data/spearman_decay_raincloud.png",
-          "type": "image"
         }
       ]
     },
@@ -496,18 +460,6 @@
           "href": "figures/final_plots/filtered_pi_beginning_middle_end.png",
           "preview": "figures/final_plots/filtered_pi_beginning_middle_end.png",
           "type": "image"
-        },
-        {
-          "name": "frf_violin_from_url.pdf",
-          "href": "figures/final_plots/frf_violin_from_url.pdf",
-          "preview": "figures/final_plots/frf_violin_from_url.pdf",
-          "type": "pdf"
-        },
-        {
-          "name": "frf_volcano.pdf",
-          "href": "figures/final_plots/frf_volcano.pdf",
-          "preview": "figures/final_plots/frf_volcano.pdf",
-          "type": "pdf"
         },
         {
           "name": "fst_flanking_regions_bar_plot.png",
@@ -634,6 +586,30 @@
           "href": "figures/final_plots/variance_wc_vs_dxy_hudson_log_scale_colored.png",
           "preview": "figures/final_plots/variance_wc_vs_dxy_hudson_log_scale_colored.png",
           "type": "image"
+        }
+      ]
+    },
+    {
+      "title": "final_plots/frf",
+      "slug": "final-plots-frf",
+      "items": [
+        {
+          "name": "frf_delta_strip_box.pdf",
+          "href": "figures/final_plots/frf/frf_delta_strip_box.pdf",
+          "preview": "figures/final_plots/frf/frf_delta_strip_box.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "frf_violin_from_url.pdf",
+          "href": "figures/final_plots/frf/frf_violin_from_url.pdf",
+          "preview": "figures/final_plots/frf/frf_violin_from_url.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "frf_volcano.pdf",
+          "href": "figures/final_plots/frf/frf_volcano.pdf",
+          "preview": "figures/final_plots/frf/frf_volcano.pdf",
+          "type": "pdf"
         }
       ]
     },
@@ -1851,6 +1827,60 @@
           "name": "pi_vs_recurrent_events_separate_lmm_plot.png",
           "href": "figures/final_plots/recurrent_events_analysis_separate_v2/pi_vs_recurrent_events_separate_lmm_plot.png",
           "preview": "figures/final_plots/recurrent_events_analysis_separate_v2/pi_vs_recurrent_events_separate_lmm_plot.png",
+          "type": "image"
+        }
+      ]
+    },
+    {
+      "title": "final_plots/special",
+      "slug": "final-plots-special",
+      "items": [
+        {
+          "name": "spearman_decay_raincloud.pdf",
+          "href": "figures/final_plots/special/spearman_decay_raincloud.pdf",
+          "preview": "figures/final_plots/special/spearman_decay_raincloud.pdf",
+          "type": "pdf"
+        }
+      ]
+    },
+    {
+      "title": "frf",
+      "slug": "frf",
+      "items": [
+        {
+          "name": "frf_delta_strip_box.pdf",
+          "href": "figures/frf/frf_delta_strip_box.pdf",
+          "preview": "figures/frf/frf_delta_strip_box.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "frf_delta_strip_box.png",
+          "href": "figures/frf/frf_delta_strip_box.png",
+          "preview": "figures/frf/frf_delta_strip_box.png",
+          "type": "image"
+        },
+        {
+          "name": "frf_violin_from_url.pdf",
+          "href": "figures/frf/frf_violin_from_url.pdf",
+          "preview": "figures/frf/frf_violin_from_url.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "frf_violin_from_url.png",
+          "href": "figures/frf/frf_violin_from_url.png",
+          "preview": "figures/frf/frf_violin_from_url.png",
+          "type": "image"
+        },
+        {
+          "name": "frf_volcano.pdf",
+          "href": "figures/frf/frf_volcano.pdf",
+          "preview": "figures/frf/frf_volcano.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "frf_volcano.png",
+          "href": "figures/frf/frf_volcano.png",
+          "preview": "figures/frf/frf_volcano.png",
           "type": "image"
         }
       ]
@@ -3393,6 +3423,24 @@
           "name": "pi_vs_recurrent_events_separate_lmm_plot.png",
           "href": "figures/recurrent_events_analysis_separate_v2/pi_vs_recurrent_events_separate_lmm_plot.png",
           "preview": "figures/recurrent_events_analysis_separate_v2/pi_vs_recurrent_events_separate_lmm_plot.png",
+          "type": "image"
+        }
+      ]
+    },
+    {
+      "title": "special",
+      "slug": "special",
+      "items": [
+        {
+          "name": "spearman_decay_raincloud.pdf",
+          "href": "figures/special/spearman_decay_raincloud.pdf",
+          "preview": "figures/special/spearman_decay_raincloud.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "spearman_decay_raincloud.png",
+          "href": "figures/special/spearman_decay_raincloud.png",
+          "preview": "figures/special/spearman_decay_raincloud.png",
           "type": "image"
         }
       ]
