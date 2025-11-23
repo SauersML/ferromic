@@ -20,7 +20,7 @@ on:
 
 # Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -232,6 +232,34 @@ jobs:
           if [ "$GENERATED" != "true" ]; then
             echo "Manifest is missing a generatedAt timestamp; skipping deployment."
           fi
+
+      - name: Commit and push updated figures manifest
+        if: steps.check-site.outputs.exists == 'true' && steps.check-manifest.outputs.generated == 'true'
+        env:
+          PUSH_TOKEN: ${{ secrets.WRITE_TOKEN }}
+        run: |
+          set -euo pipefail
+          APP_PATH="${{ env.NEXT_APP_PATH }}"
+          MANIFEST="$APP_PATH/data/figures.json"
+
+          if [ ! -f "$MANIFEST" ]; then
+            echo "Figures manifest not found at $MANIFEST; nothing to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add "$MANIFEST"
+
+          if git diff --staged --quiet; then
+            echo "No changes to commit for figures manifest."
+            exit 0
+          fi
+
+          git commit -m "Update figures manifest for figures site"
+          git pull https://${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git main --rebase --autostash --strategy=recursive -X ours
+          git push https://${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git HEAD:main
 
       - name: Setup Node
         if: steps.check-site.outputs.exists == 'true' && steps.check-manifest.outputs.generated == 'true'
