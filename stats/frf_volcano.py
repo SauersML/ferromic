@@ -10,13 +10,25 @@ import math
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from urllib.request import urlretrieve
 from math import erfc, sqrt, isfinite
 
 def main():
-    url = "https://raw.githubusercontent.com/SauersML/ferromic/refs/heads/main/data/per_inversion_frf_effects.tsv"
-    local_path = "per_inversion_frf_effects.tsv"
-    urlretrieve(url, local_path)
+    # Attempt to locate the input file locally (provided by replicate_figures.py or existing in data/)
+    filename = "per_inversion_frf_effects.tsv"
+    candidates = [
+        filename,
+        os.path.join("data", filename),
+        os.path.join(os.path.dirname(__file__), "..", "data", filename),
+    ]
+
+    local_path = None
+    for cand in candidates:
+        if os.path.exists(cand):
+            local_path = cand
+            break
+
+    if not local_path:
+        raise FileNotFoundError(f"Could not find {filename}. Ensure it is present in CWD or data/.")
 
     df = pd.read_csv(local_path, sep="\t")
 

@@ -78,6 +78,11 @@ REMOTE_PATHS: Sequence[RemoteResource] = [
     # MAPT PHYLIP files for CDS polymorphism heatmap
     "public_internet/group0_MAPT_ENSG00000186868.18_ENST00000262410.10_chr17_cds_start45962338_cds_end46024168_inv_start45585159_inv_end46292045.phy",
     "public_internet/group1_MAPT_ENSG00000186868.18_ENST00000262410.10_chr17_cds_start45962338_cds_end46024168_inv_start45585159_inv_end46292045.phy",
+    # FRF data
+    (
+        "data/per_inversion_frf_effects.tsv",
+        "https://raw.githubusercontent.com/SauersML/ferromic/refs/heads/main/data/per_inversion_frf_effects.tsv",
+    ),
 ]
 
 # URL for bulk CDS PHYLIP files
@@ -159,6 +164,27 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         outputs=(Path("hudson_fst.pdf"),),
         dependencies=("output.csv", "inv_properties.tsv"),
         optional_dependencies=("map.tsv",),
+    ),
+    FigureTask(
+        name="Spearman Decay Raincloud",
+        script=Path("stats/replicate_spearman_raincloud.py"),
+        outputs=(Path("spearman_decay_raincloud.pdf"),),
+        dependencies=("data/spearman_decay_points.tsv",),
+        note="Generates raincloud plot for Spearman decay correlations.",
+    ),
+    FigureTask(
+        name="FRF Volcano Plot",
+        script=Path("stats/frf_volcano.py"),
+        outputs=(Path("frf_volcano.pdf"),),
+        dependencies=("data/per_inversion_frf_effects.tsv",),
+        note="Generates volcano plot for FRF effects.",
+    ),
+    FigureTask(
+        name="FRF Edge vs Middle Violins",
+        script=Path("stats/frf_violin.py"),
+        outputs=(Path("frf_violin_from_url.pdf"),),
+        dependencies=("data/per_inversion_frf_effects.tsv",),
+        note="Generates violin plots for FRF edge vs middle regions.",
     ),
     FigureTask(
         name="Inversion imputation performance",
