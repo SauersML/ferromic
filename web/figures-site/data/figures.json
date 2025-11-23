@@ -1,4 +1,3401 @@
 {
-  "generatedAt": null,
-  "groups": []
+  "generatedAt": "2025-11-23T07:02:38.148841+00:00",
+  "groups": [
+    {
+      "title": "Top-level figures",
+      "slug": "top-level-figures",
+      "items": [
+        {
+          "name": "PGS_control_comparison.pdf",
+          "href": "figures/PGS_control_comparison.pdf",
+          "preview": "figures/PGS_control_comparison.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "PGS_control_comparison.png",
+          "href": "figures/PGS_control_comparison.png",
+          "preview": "figures/PGS_control_comparison.png",
+          "type": "image"
+        },
+        {
+          "name": "PGS_control_volcano.pdf",
+          "href": "figures/PGS_control_volcano.pdf",
+          "preview": "figures/PGS_control_volcano.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "PGS_control_volcano.png",
+          "href": "figures/PGS_control_volcano.png",
+          "preview": "figures/PGS_control_volcano.png",
+          "type": "image"
+        },
+        {
+          "name": "cds_conservation_volcano.pdf",
+          "href": "figures/cds_conservation_volcano.pdf",
+          "preview": "figures/cds_conservation_volcano.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "cds_proportion_identical_by_category_violin.pdf",
+          "href": "figures/cds_proportion_identical_by_category_violin.pdf",
+          "preview": "figures/cds_proportion_identical_by_category_violin.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "comparison_boxplot_haplotype_num_informative_sites_wc.png",
+          "href": "figures/comparison_boxplot_haplotype_num_informative_sites_wc.png",
+          "preview": "figures/comparison_boxplot_haplotype_num_informative_sites_wc.png",
+          "type": "image"
+        },
+        {
+          "name": "comparison_boxplot_haplotype_within_pop_variance_wc.png",
+          "href": "figures/comparison_boxplot_haplotype_within_pop_variance_wc.png",
+          "preview": "figures/comparison_boxplot_haplotype_within_pop_variance_wc.png",
+          "type": "image"
+        },
+        {
+          "name": "comparison_boxplot_hudson_dxy_hap_group_0v1.png",
+          "href": "figures/comparison_boxplot_hudson_dxy_hap_group_0v1.png",
+          "preview": "figures/comparison_boxplot_hudson_dxy_hap_group_0v1.png",
+          "type": "image"
+        },
+        {
+          "name": "comparison_boxplot_hudson_pi_avg_hap_group_0v1.png",
+          "href": "figures/comparison_boxplot_hudson_pi_avg_hap_group_0v1.png",
+          "preview": "figures/comparison_boxplot_hudson_pi_avg_hap_group_0v1.png",
+          "type": "image"
+        },
+        {
+          "name": "comparison_violin_filtered_hap_min_haplotype_overall_fst_wc.png",
+          "href": "figures/comparison_violin_filtered_hap_min_haplotype_overall_fst_wc.png",
+          "preview": "figures/comparison_violin_filtered_hap_min_haplotype_overall_fst_wc.png",
+          "type": "image"
+        },
+        {
+          "name": "comparison_violin_filtered_hap_min_hudson_fst_hap_group_0v1.png",
+          "href": "figures/comparison_violin_filtered_hap_min_hudson_fst_hap_group_0v1.png",
+          "preview": "figures/comparison_violin_filtered_hap_min_hudson_fst_hap_group_0v1.png",
+          "type": "image"
+        },
+        {
+          "name": "comparison_violin_haplotype_overall_fst_wc.png",
+          "href": "figures/comparison_violin_haplotype_overall_fst_wc.png",
+          "preview": "figures/comparison_violin_haplotype_overall_fst_wc.png",
+          "type": "image"
+        },
+        {
+          "name": "comparison_violin_hudson_fst_hap_group_0v1.png",
+          "href": "figures/comparison_violin_hudson_fst_hap_group_0v1.png",
+          "preview": "figures/comparison_violin_hudson_fst_hap_group_0v1.png",
+          "type": "image"
+        },
+        {
+          "name": "family_vs_main_forest.pdf",
+          "href": "figures/family_vs_main_forest.pdf",
+          "preview": "figures/family_vs_main_forest.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "family_vs_main_forest.png",
+          "href": "figures/family_vs_main_forest.png",
+          "preview": "figures/family_vs_main_forest.png",
+          "type": "image"
+        },
+        {
+          "name": "filtered_pi_beginning_middle_end.png",
+          "href": "figures/filtered_pi_beginning_middle_end.png",
+          "preview": "figures/filtered_pi_beginning_middle_end.png",
+          "type": "image"
+        },
+        {
+          "name": "frf_violin_from_url.pdf",
+          "href": "figures/frf_violin_from_url.pdf",
+          "preview": "figures/frf_violin_from_url.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "frf_violin_from_url.png",
+          "href": "figures/frf_violin_from_url.png",
+          "preview": "figures/frf_violin_from_url.png",
+          "type": "image"
+        },
+        {
+          "name": "frf_volcano.pdf",
+          "href": "figures/frf_volcano.pdf",
+          "preview": "figures/frf_volcano.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "frf_volcano.png",
+          "href": "figures/frf_volcano.png",
+          "preview": "figures/frf_volcano.png",
+          "type": "image"
+        },
+        {
+          "name": "fst_flanking_regions_bar_plot.png",
+          "href": "figures/fst_flanking_regions_bar_plot.png",
+          "preview": "figures/fst_flanking_regions_bar_plot.png",
+          "type": "image"
+        },
+        {
+          "name": "fst_vs_formation_rate.pdf",
+          "href": "figures/fst_vs_formation_rate.pdf",
+          "preview": "figures/fst_vs_formation_rate.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_vs_nrecur.pdf",
+          "href": "figures/fst_vs_nrecur.pdf",
+          "preview": "figures/fst_vs_nrecur.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_wc_vs_hudson_colored_by_inversion_type.png",
+          "href": "figures/fst_wc_vs_hudson_colored_by_inversion_type.png",
+          "preview": "figures/fst_wc_vs_hudson_colored_by_inversion_type.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_fst.pdf",
+          "href": "figures/hudson_fst.pdf",
+          "preview": "figures/hudson_fst.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "inversion_pi_violins.png",
+          "href": "figures/inversion_pi_violins.png",
+          "preview": "figures/inversion_pi_violins.png",
+          "type": "image"
+        },
+        {
+          "name": "inversion_r_plot.pdf",
+          "href": "figures/inversion_r_plot.pdf",
+          "preview": "figures/inversion_r_plot.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "logfc_vs_formation_rate.pdf",
+          "href": "figures/logfc_vs_formation_rate.pdf",
+          "preview": "figures/logfc_vs_formation_rate.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "logfc_vs_nrecur.pdf",
+          "href": "figures/logfc_vs_nrecur.pdf",
+          "preview": "figures/logfc_vs_nrecur.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "mapt_cds_polymorphism_heatmap.pdf",
+          "href": "figures/mapt_cds_polymorphism_heatmap.pdf",
+          "preview": "figures/mapt_cds_polymorphism_heatmap.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "phewas_category_heatmap.pdf",
+          "href": "figures/phewas_category_heatmap.pdf",
+          "preview": "figures/phewas_category_heatmap.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "phewas_forest.pdf",
+          "href": "figures/phewas_forest.pdf",
+          "preview": "figures/phewas_forest.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "phewas_forest.png",
+          "href": "figures/phewas_forest.png",
+          "preview": "figures/phewas_forest.png",
+          "type": "image"
+        },
+        {
+          "name": "phewas_forest_chr17_only.pdf",
+          "href": "figures/phewas_forest_chr17_only.pdf",
+          "preview": "figures/phewas_forest_chr17_only.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "phewas_forest_chr17_only.png",
+          "href": "figures/phewas_forest_chr17_only.png",
+          "preview": "figures/phewas_forest_chr17_only.png",
+          "type": "image"
+        },
+        {
+          "name": "phewas_forest_excluding_chr17.pdf",
+          "href": "figures/phewas_forest_excluding_chr17.pdf",
+          "preview": "figures/phewas_forest_excluding_chr17.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "phewas_forest_excluding_chr17.png",
+          "href": "figures/phewas_forest_excluding_chr17.png",
+          "preview": "figures/phewas_forest_excluding_chr17.png",
+          "type": "image"
+        },
+        {
+          "name": "phewas_heatmap.pdf",
+          "href": "figures/phewas_heatmap.pdf",
+          "preview": "figures/phewas_heatmap.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "phewas_heatmap.svg",
+          "href": "figures/phewas_heatmap.svg",
+          "preview": "figures/phewas_heatmap.svg",
+          "type": "image"
+        },
+        {
+          "name": "phewas_volcano.pdf",
+          "href": "figures/phewas_volcano.pdf",
+          "preview": "figures/phewas_volcano.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "phewas_volcano.png",
+          "href": "figures/phewas_volcano.png",
+          "preview": "figures/phewas_volcano.png",
+          "type": "image"
+        },
+        {
+          "name": "phewas_volcano_ranged.pdf",
+          "href": "figures/phewas_volcano_ranged.pdf",
+          "preview": "figures/phewas_volcano_ranged.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_comparison_violins.pdf",
+          "href": "figures/pi_comparison_violins.pdf",
+          "preview": "figures/pi_comparison_violins.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "scatter_af_vs_pi_combined.png",
+          "href": "figures/scatter_af_vs_pi_combined.png",
+          "preview": "figures/scatter_af_vs_pi_combined.png",
+          "type": "image"
+        },
+        {
+          "name": "scatter_fst_haplotype_overall_fst_wc_vs_0_num_hap_filter.png",
+          "href": "figures/scatter_fst_haplotype_overall_fst_wc_vs_0_num_hap_filter.png",
+          "preview": "figures/scatter_fst_haplotype_overall_fst_wc_vs_0_num_hap_filter.png",
+          "type": "image"
+        },
+        {
+          "name": "scatter_fst_haplotype_overall_fst_wc_vs_1_num_hap_filter.png",
+          "href": "figures/scatter_fst_haplotype_overall_fst_wc_vs_1_num_hap_filter.png",
+          "preview": "figures/scatter_fst_haplotype_overall_fst_wc_vs_1_num_hap_filter.png",
+          "type": "image"
+        },
+        {
+          "name": "scatter_fst_haplotype_overall_fst_wc_vs_inversion_freq_filter.png",
+          "href": "figures/scatter_fst_haplotype_overall_fst_wc_vs_inversion_freq_filter.png",
+          "preview": "figures/scatter_fst_haplotype_overall_fst_wc_vs_inversion_freq_filter.png",
+          "type": "image"
+        },
+        {
+          "name": "scatter_fst_hudson_fst_hap_group_0v1_vs_0_num_hap_filter.png",
+          "href": "figures/scatter_fst_hudson_fst_hap_group_0v1_vs_0_num_hap_filter.png",
+          "preview": "figures/scatter_fst_hudson_fst_hap_group_0v1_vs_0_num_hap_filter.png",
+          "type": "image"
+        },
+        {
+          "name": "scatter_fst_hudson_fst_hap_group_0v1_vs_1_num_hap_filter.png",
+          "href": "figures/scatter_fst_hudson_fst_hap_group_0v1_vs_1_num_hap_filter.png",
+          "preview": "figures/scatter_fst_hudson_fst_hap_group_0v1_vs_1_num_hap_filter.png",
+          "type": "image"
+        },
+        {
+          "name": "scatter_fst_hudson_fst_hap_group_0v1_vs_inversion_freq_filter.png",
+          "href": "figures/scatter_fst_hudson_fst_hap_group_0v1_vs_inversion_freq_filter.png",
+          "preview": "figures/scatter_fst_hudson_fst_hap_group_0v1_vs_inversion_freq_filter.png",
+          "type": "image"
+        },
+        {
+          "name": "variance_wc_vs_dxy_hudson_log_scale_colored.png",
+          "href": "figures/variance_wc_vs_dxy_hudson_log_scale_colored.png",
+          "preview": "figures/variance_wc_vs_dxy_hudson_log_scale_colored.png",
+          "type": "image"
+        }
+      ]
+    },
+    {
+      "title": "data",
+      "slug": "data",
+      "items": [
+        {
+          "name": "FigSX.inversion_r_plot.pdf",
+          "href": "figures/data/FigSX.inversion_r_plot.pdf",
+          "preview": "figures/data/FigSX.inversion_r_plot.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "PGS_control_comparison.pdf",
+          "href": "figures/data/PGS_control_comparison.pdf",
+          "preview": "figures/data/PGS_control_comparison.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "PGS_control_volcano.pdf",
+          "href": "figures/data/PGS_control_volcano.pdf",
+          "preview": "figures/data/PGS_control_volcano.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "chr17_inversion_tag_correlation.pdf",
+          "href": "figures/data/chr17_inversion_tag_correlation.pdf",
+          "preview": "figures/data/chr17_inversion_tag_correlation.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "chr17_inversion_tag_correlation_pvalue.pdf",
+          "href": "figures/data/chr17_inversion_tag_correlation_pvalue.pdf",
+          "preview": "figures/data/chr17_inversion_tag_correlation_pvalue.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_vs_inversion_edge_bp_cap100kb_grouped_median.pdf",
+          "href": "figures/data/fst_vs_inversion_edge_bp_cap100kb_grouped_median.pdf",
+          "preview": "figures/data/fst_vs_inversion_edge_bp_cap100kb_grouped_median.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_vs_inversion_edge_bp_cap100kb_grouped_pooled.pdf",
+          "href": "figures/data/fst_vs_inversion_edge_bp_cap100kb_grouped_pooled.pdf",
+          "preview": "figures/data/fst_vs_inversion_edge_bp_cap100kb_grouped_pooled.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_vs_inversion_edge_bp_cap40kb_grouped_pooled.pdf",
+          "href": "figures/data/fst_vs_inversion_edge_bp_cap40kb_grouped_pooled.pdf",
+          "preview": "figures/data/fst_vs_inversion_edge_bp_cap40kb_grouped_pooled.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_vs_inversion_edge_proportion_cap40kb_grouped_pooled.pdf",
+          "href": "figures/data/fst_vs_inversion_edge_proportion_cap40kb_grouped_pooled.pdf",
+          "preview": "figures/data/fst_vs_inversion_edge_proportion_cap40kb_grouped_pooled.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "phewas_chr10_79542901-80217413.pdf",
+          "href": "figures/data/phewas_chr10_79542901-80217413.pdf",
+          "preview": "figures/data/phewas_chr10_79542901-80217413.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "phewas_chr12_46896694-46915975.pdf",
+          "href": "figures/data/phewas_chr12_46896694-46915975.pdf",
+          "preview": "figures/data/phewas_chr12_46896694-46915975.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "phewas_chr17_45585159-46292045.pdf",
+          "href": "figures/data/phewas_chr17_45585159-46292045.pdf",
+          "preview": "figures/data/phewas_chr17_45585159-46292045.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "phewas_chr4_33098066-33104924.pdf",
+          "href": "figures/data/phewas_chr4_33098066-33104924.pdf",
+          "preview": "figures/data/phewas_chr4_33098066-33104924.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "phewas_chr6_141866310-141898728.pdf",
+          "href": "figures/data/phewas_chr6_141866310-141898728.pdf",
+          "preview": "figures/data/phewas_chr6_141866310-141898728.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "phewas_chr6_167209001-167357782.pdf",
+          "href": "figures/data/phewas_chr6_167209001-167357782.pdf",
+          "preview": "figures/data/phewas_chr6_167209001-167357782.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "spearman_decay_raincloud.pdf",
+          "href": "figures/data/spearman_decay_raincloud.pdf",
+          "preview": "figures/data/spearman_decay_raincloud.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "spearman_decay_raincloud.png",
+          "href": "figures/data/spearman_decay_raincloud.png",
+          "preview": "figures/data/spearman_decay_raincloud.png",
+          "type": "image"
+        }
+      ]
+    },
+    {
+      "title": "final_plots",
+      "slug": "final-plots",
+      "items": [
+        {
+          "name": "PGS_control_volcano.pdf",
+          "href": "figures/final_plots/PGS_control_volcano.pdf",
+          "preview": "figures/final_plots/PGS_control_volcano.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "PGS_control_volcano.png",
+          "href": "figures/final_plots/PGS_control_volcano.png",
+          "preview": "figures/final_plots/PGS_control_volcano.png",
+          "type": "image"
+        },
+        {
+          "name": "cds_conservation_volcano.pdf",
+          "href": "figures/final_plots/cds_conservation_volcano.pdf",
+          "preview": "figures/final_plots/cds_conservation_volcano.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "cds_proportion_identical_by_category_violin.pdf",
+          "href": "figures/final_plots/cds_proportion_identical_by_category_violin.pdf",
+          "preview": "figures/final_plots/cds_proportion_identical_by_category_violin.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "comparison_violin_haplotype_overall_fst_wc.png",
+          "href": "figures/final_plots/comparison_violin_haplotype_overall_fst_wc.png",
+          "preview": "figures/final_plots/comparison_violin_haplotype_overall_fst_wc.png",
+          "type": "image"
+        },
+        {
+          "name": "distance_plot_pi_some number.png",
+          "href": "figures/final_plots/distance_plot_pi_some number.png",
+          "preview": "figures/final_plots/distance_plot_pi_some number.png",
+          "type": "image"
+        },
+        {
+          "name": "distance_plot_theta_some number.png",
+          "href": "figures/final_plots/distance_plot_theta_some number.png",
+          "preview": "figures/final_plots/distance_plot_theta_some number.png",
+          "type": "image"
+        },
+        {
+          "name": "distance_plots_10K_beautiful.png",
+          "href": "figures/final_plots/distance_plots_10K_beautiful.png",
+          "preview": "figures/final_plots/distance_plots_10K_beautiful.png",
+          "type": "image"
+        },
+        {
+          "name": "family_vs_main_forest.pdf",
+          "href": "figures/final_plots/family_vs_main_forest.pdf",
+          "preview": "figures/final_plots/family_vs_main_forest.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "family_vs_main_forest.png",
+          "href": "figures/final_plots/family_vs_main_forest.png",
+          "preview": "figures/final_plots/family_vs_main_forest.png",
+          "type": "image"
+        },
+        {
+          "name": "filtered_pi_beginning_middle_end.png",
+          "href": "figures/final_plots/filtered_pi_beginning_middle_end.png",
+          "preview": "figures/final_plots/filtered_pi_beginning_middle_end.png",
+          "type": "image"
+        },
+        {
+          "name": "frf_violin_from_url.pdf",
+          "href": "figures/final_plots/frf_violin_from_url.pdf",
+          "preview": "figures/final_plots/frf_violin_from_url.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "frf_volcano.pdf",
+          "href": "figures/final_plots/frf_volcano.pdf",
+          "preview": "figures/final_plots/frf_volcano.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_flanking_regions_bar_plot.png",
+          "href": "figures/final_plots/fst_flanking_regions_bar_plot.png",
+          "preview": "figures/final_plots/fst_flanking_regions_bar_plot.png",
+          "type": "image"
+        },
+        {
+          "name": "fst_vs_formation_rate.pdf",
+          "href": "figures/final_plots/fst_vs_formation_rate.pdf",
+          "preview": "figures/final_plots/fst_vs_formation_rate.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_vs_nrecur.pdf",
+          "href": "figures/final_plots/fst_vs_nrecur.pdf",
+          "preview": "figures/final_plots/fst_vs_nrecur.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_wc_vs_hudson_colored_by_inversion_type.png",
+          "href": "figures/final_plots/fst_wc_vs_hudson_colored_by_inversion_type.png",
+          "preview": "figures/final_plots/fst_wc_vs_hudson_colored_by_inversion_type.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_fst.pdf",
+          "href": "figures/final_plots/hudson_fst.pdf",
+          "preview": "figures/final_plots/hudson_fst.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "inversion_pi_violins.png",
+          "href": "figures/final_plots/inversion_pi_violins.png",
+          "preview": "figures/final_plots/inversion_pi_violins.png",
+          "type": "image"
+        },
+        {
+          "name": "inversion_r_plot.pdf",
+          "href": "figures/final_plots/inversion_r_plot.pdf",
+          "preview": "figures/final_plots/inversion_r_plot.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "logfc_vs_formation_rate.pdf",
+          "href": "figures/final_plots/logfc_vs_formation_rate.pdf",
+          "preview": "figures/final_plots/logfc_vs_formation_rate.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "logfc_vs_nrecur.pdf",
+          "href": "figures/final_plots/logfc_vs_nrecur.pdf",
+          "preview": "figures/final_plots/logfc_vs_nrecur.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "mapt_cds_polymorphism_heatmap.pdf",
+          "href": "figures/final_plots/mapt_cds_polymorphism_heatmap.pdf",
+          "preview": "figures/final_plots/mapt_cds_polymorphism_heatmap.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "phewas_category_heatmap.pdf",
+          "href": "figures/final_plots/phewas_category_heatmap.pdf",
+          "preview": "figures/final_plots/phewas_category_heatmap.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "phewas_forest.pdf",
+          "href": "figures/final_plots/phewas_forest.pdf",
+          "preview": "figures/final_plots/phewas_forest.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "phewas_forest.png",
+          "href": "figures/final_plots/phewas_forest.png",
+          "preview": "figures/final_plots/phewas_forest.png",
+          "type": "image"
+        },
+        {
+          "name": "phewas_heatmap.pdf",
+          "href": "figures/final_plots/phewas_heatmap.pdf",
+          "preview": "figures/final_plots/phewas_heatmap.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "phewas_heatmap.svg",
+          "href": "figures/final_plots/phewas_heatmap.svg",
+          "preview": "figures/final_plots/phewas_heatmap.svg",
+          "type": "image"
+        },
+        {
+          "name": "phewas_volcano.pdf",
+          "href": "figures/final_plots/phewas_volcano.pdf",
+          "preview": "figures/final_plots/phewas_volcano.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "phewas_volcano_ranged.pdf",
+          "href": "figures/final_plots/phewas_volcano_ranged.pdf",
+          "preview": "figures/final_plots/phewas_volcano_ranged.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_comparison_violins.pdf",
+          "href": "figures/final_plots/pi_comparison_violins.pdf",
+          "preview": "figures/final_plots/pi_comparison_violins.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "scatter_af_vs_pi_combined.png",
+          "href": "figures/final_plots/scatter_af_vs_pi_combined.png",
+          "preview": "figures/final_plots/scatter_af_vs_pi_combined.png",
+          "type": "image"
+        },
+        {
+          "name": "top_filtered_pi_smoothed.png",
+          "href": "figures/final_plots/top_filtered_pi_smoothed.png",
+          "preview": "figures/final_plots/top_filtered_pi_smoothed.png",
+          "type": "image"
+        },
+        {
+          "name": "variance_wc_vs_dxy_hudson_log_scale_colored.png",
+          "href": "figures/final_plots/variance_wc_vs_dxy_hudson_log_scale_colored.png",
+          "preview": "figures/final_plots/variance_wc_vs_dxy_hudson_log_scale_colored.png",
+          "type": "image"
+        }
+      ]
+    },
+    {
+      "title": "final_plots/fst_analysis_results_exact_mf_quadrants/total_100kb",
+      "slug": "final-plots-fst-analysis-results-exact-mf-quadrants-total-100kb",
+      "items": [
+        {
+          "name": "fst_mf_quadrant_violins_total_100kb.pdf",
+          "href": "figures/final_plots/fst_analysis_results_exact_mf_quadrants/total_100kb/fst_mf_quadrant_violins_total_100kb.pdf",
+          "preview": "figures/final_plots/fst_analysis_results_exact_mf_quadrants/total_100kb/fst_mf_quadrant_violins_total_100kb.pdf",
+          "type": "pdf"
+        }
+      ]
+    },
+    {
+      "title": "final_plots/fst_analysis_results_exact_mf_quadrants/total_200kb",
+      "slug": "final-plots-fst-analysis-results-exact-mf-quadrants-total-200kb",
+      "items": [
+        {
+          "name": "fst_mf_quadrant_violins_total_200kb.pdf",
+          "href": "figures/final_plots/fst_analysis_results_exact_mf_quadrants/total_200kb/fst_mf_quadrant_violins_total_200kb.pdf",
+          "preview": "figures/final_plots/fst_analysis_results_exact_mf_quadrants/total_200kb/fst_mf_quadrant_violins_total_200kb.pdf",
+          "type": "pdf"
+        }
+      ]
+    },
+    {
+      "title": "final_plots/fst_analysis_results_exact_mf_quadrants/total_20kb",
+      "slug": "final-plots-fst-analysis-results-exact-mf-quadrants-total-20kb",
+      "items": [
+        {
+          "name": "fst_mf_quadrant_violins_total_20kb.pdf",
+          "href": "figures/final_plots/fst_analysis_results_exact_mf_quadrants/total_20kb/fst_mf_quadrant_violins_total_20kb.pdf",
+          "preview": "figures/final_plots/fst_analysis_results_exact_mf_quadrants/total_20kb/fst_mf_quadrant_violins_total_20kb.pdf",
+          "type": "pdf"
+        }
+      ]
+    },
+    {
+      "title": "final_plots/fst_analysis_results_exact_mf_quadrants/total_40kb",
+      "slug": "final-plots-fst-analysis-results-exact-mf-quadrants-total-40kb",
+      "items": [
+        {
+          "name": "fst_mf_quadrant_violins_total_40kb.pdf",
+          "href": "figures/final_plots/fst_analysis_results_exact_mf_quadrants/total_40kb/fst_mf_quadrant_violins_total_40kb.pdf",
+          "preview": "figures/final_plots/fst_analysis_results_exact_mf_quadrants/total_40kb/fst_mf_quadrant_violins_total_40kb.pdf",
+          "type": "pdf"
+        }
+      ]
+    },
+    {
+      "title": "final_plots/fst_analysis_results_exact_mf_quadrants/total_60kb",
+      "slug": "final-plots-fst-analysis-results-exact-mf-quadrants-total-60kb",
+      "items": [
+        {
+          "name": "fst_mf_quadrant_violins_total_60kb.pdf",
+          "href": "figures/final_plots/fst_analysis_results_exact_mf_quadrants/total_60kb/fst_mf_quadrant_violins_total_60kb.pdf",
+          "preview": "figures/final_plots/fst_analysis_results_exact_mf_quadrants/total_60kb/fst_mf_quadrant_violins_total_60kb.pdf",
+          "type": "pdf"
+        }
+      ]
+    },
+    {
+      "title": "final_plots/fst_analysis_results_exact_mf_quadrants/total_80kb",
+      "slug": "final-plots-fst-analysis-results-exact-mf-quadrants-total-80kb",
+      "items": [
+        {
+          "name": "fst_mf_quadrant_violins_total_80kb.pdf",
+          "href": "figures/final_plots/fst_analysis_results_exact_mf_quadrants/total_80kb/fst_mf_quadrant_violins_total_80kb.pdf",
+          "preview": "figures/final_plots/fst_analysis_results_exact_mf_quadrants/total_80kb/fst_mf_quadrant_violins_total_80kb.pdf",
+          "type": "pdf"
+        }
+      ]
+    },
+    {
+      "title": "final_plots/length_norm_trend_fast",
+      "slug": "final-plots-length-norm-trend-fast",
+      "items": [
+        {
+          "name": "fst_vs_inversion_edge_bp_cap100kb_grouped_median.pdf",
+          "href": "figures/final_plots/length_norm_trend_fast/fst_vs_inversion_edge_bp_cap100kb_grouped_median.pdf",
+          "preview": "figures/final_plots/length_norm_trend_fast/fst_vs_inversion_edge_bp_cap100kb_grouped_median.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_vs_inversion_edge_bp_cap100kb_grouped_pooled.pdf",
+          "href": "figures/final_plots/length_norm_trend_fast/fst_vs_inversion_edge_bp_cap100kb_grouped_pooled.pdf",
+          "preview": "figures/final_plots/length_norm_trend_fast/fst_vs_inversion_edge_bp_cap100kb_grouped_pooled.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_vs_inversion_edge_bp_cap40kb_grouped_pooled.pdf",
+          "href": "figures/final_plots/length_norm_trend_fast/fst_vs_inversion_edge_bp_cap40kb_grouped_pooled.pdf",
+          "preview": "figures/final_plots/length_norm_trend_fast/fst_vs_inversion_edge_bp_cap40kb_grouped_pooled.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_vs_inversion_edge_proportion_grouped_median.pdf",
+          "href": "figures/final_plots/length_norm_trend_fast/fst_vs_inversion_edge_proportion_grouped_median.pdf",
+          "preview": "figures/final_plots/length_norm_trend_fast/fst_vs_inversion_edge_proportion_grouped_median.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_vs_inversion_edge_proportion_grouped_pooled.pdf",
+          "href": "figures/final_plots/length_norm_trend_fast/fst_vs_inversion_edge_proportion_grouped_pooled.pdf",
+          "preview": "figures/final_plots/length_norm_trend_fast/fst_vs_inversion_edge_proportion_grouped_pooled.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_vs_inversion_edge_bp_cap100kb_grouped_mean.pdf",
+          "href": "figures/final_plots/length_norm_trend_fast/pi_vs_inversion_edge_bp_cap100kb_grouped_mean.pdf",
+          "preview": "figures/final_plots/length_norm_trend_fast/pi_vs_inversion_edge_bp_cap100kb_grouped_mean.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_vs_inversion_edge_bp_cap100kb_grouped_mean_overall_only.pdf",
+          "href": "figures/final_plots/length_norm_trend_fast/pi_vs_inversion_edge_bp_cap100kb_grouped_mean_overall_only.pdf",
+          "preview": "figures/final_plots/length_norm_trend_fast/pi_vs_inversion_edge_bp_cap100kb_grouped_mean_overall_only.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_vs_inversion_edge_bp_cap100kb_grouped_median.pdf",
+          "href": "figures/final_plots/length_norm_trend_fast/pi_vs_inversion_edge_bp_cap100kb_grouped_median.pdf",
+          "preview": "figures/final_plots/length_norm_trend_fast/pi_vs_inversion_edge_bp_cap100kb_grouped_median.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_vs_inversion_edge_bp_cap100kb_grouped_median_overall_only.pdf",
+          "href": "figures/final_plots/length_norm_trend_fast/pi_vs_inversion_edge_bp_cap100kb_grouped_median_overall_only.pdf",
+          "preview": "figures/final_plots/length_norm_trend_fast/pi_vs_inversion_edge_bp_cap100kb_grouped_median_overall_only.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_vs_inversion_edge_proportion_grouped_mean.pdf",
+          "href": "figures/final_plots/length_norm_trend_fast/pi_vs_inversion_edge_proportion_grouped_mean.pdf",
+          "preview": "figures/final_plots/length_norm_trend_fast/pi_vs_inversion_edge_proportion_grouped_mean.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_vs_inversion_edge_proportion_grouped_mean_overall_only.pdf",
+          "href": "figures/final_plots/length_norm_trend_fast/pi_vs_inversion_edge_proportion_grouped_mean_overall_only.pdf",
+          "preview": "figures/final_plots/length_norm_trend_fast/pi_vs_inversion_edge_proportion_grouped_mean_overall_only.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_vs_inversion_edge_proportion_grouped_median.pdf",
+          "href": "figures/final_plots/length_norm_trend_fast/pi_vs_inversion_edge_proportion_grouped_median.pdf",
+          "preview": "figures/final_plots/length_norm_trend_fast/pi_vs_inversion_edge_proportion_grouped_median.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_vs_inversion_edge_proportion_grouped_median_overall_only.pdf",
+          "href": "figures/final_plots/length_norm_trend_fast/pi_vs_inversion_edge_proportion_grouped_median_overall_only.pdf",
+          "preview": "figures/final_plots/length_norm_trend_fast/pi_vs_inversion_edge_proportion_grouped_median_overall_only.pdf",
+          "type": "pdf"
+        }
+      ]
+    },
+    {
+      "title": "final_plots/length_norm_trend_fast_normed",
+      "slug": "final-plots-length-norm-trend-fast-normed",
+      "items": [
+        {
+          "name": "fst_vs_inversion_edge_bp_cap100kb_grouped_mean.pdf",
+          "href": "figures/final_plots/length_norm_trend_fast_normed/fst_vs_inversion_edge_bp_cap100kb_grouped_mean.pdf",
+          "preview": "figures/final_plots/length_norm_trend_fast_normed/fst_vs_inversion_edge_bp_cap100kb_grouped_mean.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_vs_inversion_edge_bp_cap100kb_grouped_median.pdf",
+          "href": "figures/final_plots/length_norm_trend_fast_normed/fst_vs_inversion_edge_bp_cap100kb_grouped_median.pdf",
+          "preview": "figures/final_plots/length_norm_trend_fast_normed/fst_vs_inversion_edge_bp_cap100kb_grouped_median.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_vs_inversion_edge_proportion_grouped_mean.pdf",
+          "href": "figures/final_plots/length_norm_trend_fast_normed/fst_vs_inversion_edge_proportion_grouped_mean.pdf",
+          "preview": "figures/final_plots/length_norm_trend_fast_normed/fst_vs_inversion_edge_proportion_grouped_mean.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_vs_inversion_edge_proportion_grouped_median.pdf",
+          "href": "figures/final_plots/length_norm_trend_fast_normed/fst_vs_inversion_edge_proportion_grouped_median.pdf",
+          "preview": "figures/final_plots/length_norm_trend_fast_normed/fst_vs_inversion_edge_proportion_grouped_median.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_vs_inversion_edge_bp_cap100kb_grouped_mean.pdf",
+          "href": "figures/final_plots/length_norm_trend_fast_normed/pi_vs_inversion_edge_bp_cap100kb_grouped_mean.pdf",
+          "preview": "figures/final_plots/length_norm_trend_fast_normed/pi_vs_inversion_edge_bp_cap100kb_grouped_mean.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_vs_inversion_edge_bp_cap100kb_grouped_median.pdf",
+          "href": "figures/final_plots/length_norm_trend_fast_normed/pi_vs_inversion_edge_bp_cap100kb_grouped_median.pdf",
+          "preview": "figures/final_plots/length_norm_trend_fast_normed/pi_vs_inversion_edge_bp_cap100kb_grouped_median.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_vs_inversion_edge_proportion_grouped_mean.pdf",
+          "href": "figures/final_plots/length_norm_trend_fast_normed/pi_vs_inversion_edge_proportion_grouped_mean.pdf",
+          "preview": "figures/final_plots/length_norm_trend_fast_normed/pi_vs_inversion_edge_proportion_grouped_mean.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_vs_inversion_edge_proportion_grouped_median.pdf",
+          "href": "figures/final_plots/length_norm_trend_fast_normed/pi_vs_inversion_edge_proportion_grouped_median.pdf",
+          "preview": "figures/final_plots/length_norm_trend_fast_normed/pi_vs_inversion_edge_proportion_grouped_median.pdf",
+          "type": "pdf"
+        }
+      ]
+    },
+    {
+      "title": "final_plots/per_inversion_trends/hudson/inversions",
+      "slug": "final-plots-per-inversion-trends-hudson-inversions",
+      "items": [
+        {
+          "name": "hudson_chr10_46983451_47468232_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr10_46983451_47468232_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr10_46983451_47468232_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr10_79542901_80217413_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr10_79542901_80217413_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr10_79542901_80217413_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr11_50154999_50324102_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr11_50154999_50324102_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr11_50154999_50324102_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr12_131312081_131644839_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr12_131312081_131644839_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr12_131312081_131644839_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr12_131333943_131623807_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr12_131333943_131623807_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr12_131333943_131623807_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr13_52344010_52502256_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr13_52344010_52502256_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr13_52344010_52502256_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr15_28298424_28623514_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr15_28298424_28623514_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr15_28298424_28623514_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr15_30618103_32153204_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr15_30618103_32153204_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr15_30618103_32153204_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr15_82360482_82515134_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr15_82360482_82515134_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr15_82360482_82515134_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr16_16721273_18073542_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr16_16721273_18073542_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr16_16721273_18073542_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr16_21583511_22432381_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr16_21583511_22432381_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr16_21583511_22432381_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr16_21864964_22432381_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr16_21864964_22432381_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr16_21864964_22432381_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr16_28471892_28637651_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr16_28471892_28637651_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr16_28471892_28637651_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr17_16823490_18384190_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr17_16823490_18384190_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr17_16823490_18384190_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr17_45585159_46292045_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr17_45585159_46292045_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr17_45585159_46292045_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr19_47959660_50091195_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr19_47959660_50091195_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr19_47959660_50091195_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr1_145160434_146154520_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr1_145160434_146154520_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr1_145160434_146154520_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr1_146298109_148672872_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr1_146298109_148672872_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr1_146298109_148672872_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr1_148893781_149265643_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr1_148893781_149265643_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr1_148893781_149265643_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr20_25846148_26009643_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr20_25846148_26009643_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr20_25846148_26009643_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr2_108527821_109733036_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr2_108527821_109733036_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr2_108527821_109733036_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr2_110095177_110276210_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr2_110095177_110276210_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr2_110095177_110276210_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr2_130138212_131200602_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr2_130138212_131200602_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr2_130138212_131200602_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr2_130138212_131530534_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr2_130138212_131530534_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr2_130138212_131530534_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr2_91832040_92012663_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr2_91832040_92012663_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr2_91832040_92012663_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr2_95800191_96024403_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr2_95800191_96024403_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr2_95800191_96024403_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr3_195692124_195956606_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr3_195692124_195956606_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr3_195692124_195956606_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr3_195749463_195980207_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr3_195749463_195980207_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr3_195749463_195980207_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr7_57641572_57838971_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr7_57641572_57838971_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr7_57641572_57838971_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr7_5989046_6735643_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr7_5989046_6735643_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr7_5989046_6735643_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr7_60911891_61578023_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr7_60911891_61578023_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr7_60911891_61578023_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr7_65219157_65531823_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr7_65219157_65531823_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr7_65219157_65531823_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr7_73113989_74799029_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr7_73113989_74799029_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr7_73113989_74799029_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr7_74869950_75058098_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr7_74869950_75058098_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr7_74869950_75058098_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr8_7301024_12598379_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr8_7301024_12598379_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/hudson/inversions/hudson_chr8_7301024_12598379_vs_dist_edge_200bins.png",
+          "type": "image"
+        }
+      ]
+    },
+    {
+      "title": "final_plots/per_inversion_trends/pi/inversions",
+      "slug": "final-plots-per-inversion-trends-pi-inversions",
+      "items": [
+        {
+          "name": "pi_chr10_46983451_47468232_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr10_46983451_47468232_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr10_46983451_47468232_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr10_46983451_47468232_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr10_46983451_47468232_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr10_46983451_47468232_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr10_79542901_80217413_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr10_79542901_80217413_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr10_79542901_80217413_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr10_79542901_80217413_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr10_79542901_80217413_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr10_79542901_80217413_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr11_50154999_50324102_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr11_50154999_50324102_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr11_50154999_50324102_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr11_50154999_50324102_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr11_50154999_50324102_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr11_50154999_50324102_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr12_131312081_131644839_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr12_131312081_131644839_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr12_131312081_131644839_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr12_131312081_131644839_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr12_131312081_131644839_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr12_131312081_131644839_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr12_131333943_131623807_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr12_131333943_131623807_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr12_131333943_131623807_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr12_131333943_131623807_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr12_131333943_131623807_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr12_131333943_131623807_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr13_52344010_52502256_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr13_52344010_52502256_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr13_52344010_52502256_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr13_52344010_52502256_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr13_52344010_52502256_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr13_52344010_52502256_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr13_53902573_54093373_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr13_53902573_54093373_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr13_53902573_54093373_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr15_22701127_23213881_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr15_22701127_23213881_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr15_22701127_23213881_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr15_23345459_28389868_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr15_23345459_28389868_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr15_23345459_28389868_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr15_28298424_28623514_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr15_28298424_28623514_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr15_28298424_28623514_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr15_28298424_28623514_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr15_28298424_28623514_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr15_28298424_28623514_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr15_30618103_32153204_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr15_30618103_32153204_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr15_30618103_32153204_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr15_30618103_32153204_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr15_30618103_32153204_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr15_30618103_32153204_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr15_82360482_82515134_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr15_82360482_82515134_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr15_82360482_82515134_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr15_82360482_82515134_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr15_82360482_82515134_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr15_82360482_82515134_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr16_15384482_16276146_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr16_15384482_16276146_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr16_15384482_16276146_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr16_16721273_18073542_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr16_16721273_18073542_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr16_16721273_18073542_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr16_16721273_18073542_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr16_16721273_18073542_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr16_16721273_18073542_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr16_21583511_22432381_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr16_21583511_22432381_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr16_21583511_22432381_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr16_21583511_22432381_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr16_21583511_22432381_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr16_21583511_22432381_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr16_21864964_22432381_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr16_21864964_22432381_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr16_21864964_22432381_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr16_21864964_22432381_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr16_21864964_22432381_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr16_21864964_22432381_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr16_28471892_28637651_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr16_28471892_28637651_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr16_28471892_28637651_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr16_28471892_28637651_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr16_28471892_28637651_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr16_28471892_28637651_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr17_16823490_18384190_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr17_16823490_18384190_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr17_16823490_18384190_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr17_16823490_18384190_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr17_16823490_18384190_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr17_16823490_18384190_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr17_18622359_18823773_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr17_18622359_18823773_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr17_18622359_18823773_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr17_45585159_46292045_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr17_45585159_46292045_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr17_45585159_46292045_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr17_45585159_46292045_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr17_45585159_46292045_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr17_45585159_46292045_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr19_47959660_50091195_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr19_47959660_50091195_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr19_47959660_50091195_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr19_47959660_50091195_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr19_47959660_50091195_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr19_47959660_50091195_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr1_120299058_120600965_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr1_120299058_120600965_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr1_120299058_120600965_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr1_120299058_120600965_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr1_120299058_120600965_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr1_120299058_120600965_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr1_144376209_144600799_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr1_144376209_144600799_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr1_144376209_144600799_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr1_144376209_144600799_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr1_144376209_144600799_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr1_144376209_144600799_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr1_145160434_146154520_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr1_145160434_146154520_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr1_145160434_146154520_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr1_145160434_146154520_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr1_145160434_146154520_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr1_145160434_146154520_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr1_146298109_148672872_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr1_146298109_148672872_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr1_146298109_148672872_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr1_146298109_148672872_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr1_146298109_148672872_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr1_146298109_148672872_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr1_148893781_149265643_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr1_148893781_149265643_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr1_148893781_149265643_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr1_148893781_149265643_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr1_148893781_149265643_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr1_148893781_149265643_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr1_248128773_248428856_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr1_248128773_248428856_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr1_248128773_248428856_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr20_25846148_26009643_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr20_25846148_26009643_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr20_25846148_26009643_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr20_25846148_26009643_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr20_25846148_26009643_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr20_25846148_26009643_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr20_29257746_29419750_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr20_29257746_29419750_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr20_29257746_29419750_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr21_19877734_20070170_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr21_19877734_20070170_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr21_19877734_20070170_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr2_108527821_109733036_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr2_108527821_109733036_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr2_108527821_109733036_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr2_108527821_109733036_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr2_108527821_109733036_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr2_108527821_109733036_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr2_110095177_110276210_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr2_110095177_110276210_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr2_110095177_110276210_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr2_110095177_110276210_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr2_110095177_110276210_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr2_110095177_110276210_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr2_130138212_131200602_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr2_130138212_131200602_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr2_130138212_131200602_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr2_130138212_131200602_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr2_130138212_131200602_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr2_130138212_131200602_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr2_130138212_131530534_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr2_130138212_131530534_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr2_130138212_131530534_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr2_130138212_131530534_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr2_130138212_131530534_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr2_130138212_131530534_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr2_87987171_111255403_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr2_87987171_111255403_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr2_87987171_111255403_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr2_87995841_88180536_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr2_87995841_88180536_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr2_87995841_88180536_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr2_91832040_92012663_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr2_91832040_92012663_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr2_91832040_92012663_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr2_91832040_92012663_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr2_91832040_92012663_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr2_91832040_92012663_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr2_95800191_96024403_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr2_95800191_96024403_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr2_95800191_96024403_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr2_95800191_96024403_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr2_95800191_96024403_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr2_95800191_96024403_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr3_195692124_195956606_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr3_195692124_195956606_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr3_195692124_195956606_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr3_195692124_195956606_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr3_195692124_195956606_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr3_195692124_195956606_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr3_195749463_195980207_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr3_195749463_195980207_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr3_195749463_195980207_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr3_195749463_195980207_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr3_195749463_195980207_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr3_195749463_195980207_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr7_57641572_57838971_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr7_57641572_57838971_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr7_57641572_57838971_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr7_57641572_57838971_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr7_57641572_57838971_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr7_57641572_57838971_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr7_57835188_58119653_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr7_57835188_58119653_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr7_57835188_58119653_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr7_5989046_6735643_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr7_5989046_6735643_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr7_5989046_6735643_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr7_5989046_6735643_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr7_5989046_6735643_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr7_5989046_6735643_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr7_60911891_61578023_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr7_60911891_61578023_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr7_60911891_61578023_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr7_60911891_61578023_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr7_60911891_61578023_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr7_60911891_61578023_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr7_65219157_65531823_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr7_65219157_65531823_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr7_65219157_65531823_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr7_65219157_65531823_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr7_65219157_65531823_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr7_65219157_65531823_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr7_73113989_74799029_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr7_73113989_74799029_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr7_73113989_74799029_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr7_73113989_74799029_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr7_73113989_74799029_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr7_73113989_74799029_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr7_74869950_75058098_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr7_74869950_75058098_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr7_74869950_75058098_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr7_74869950_75058098_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr7_74869950_75058098_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr7_74869950_75058098_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr8_7301024_12598379_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr8_7301024_12598379_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr8_7301024_12598379_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr8_7301024_12598379_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr8_7301024_12598379_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr8_7301024_12598379_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr9_38773640_42796744_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr9_38773640_42796744_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr9_38773640_42796744_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr9_87942696_88110274_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr9_87942696_88110274_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/final_plots/per_inversion_trends/pi/inversions/pi_chr9_87942696_88110274_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        }
+      ]
+    },
+    {
+      "title": "final_plots/phewas_plots",
+      "slug": "final-plots-phewas-plots",
+      "items": [
+        {
+          "name": "chr17_inversion_tag_correlation.pdf",
+          "href": "figures/final_plots/phewas_plots/chr17_inversion_tag_correlation.pdf",
+          "preview": "figures/final_plots/phewas_plots/chr17_inversion_tag_correlation.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "chr17_inversion_tag_correlation.png",
+          "href": "figures/final_plots/phewas_plots/chr17_inversion_tag_correlation.png",
+          "preview": "figures/final_plots/phewas_plots/chr17_inversion_tag_correlation.png",
+          "type": "image"
+        },
+        {
+          "name": "chr17_inversion_tag_correlation_pvalue.pdf",
+          "href": "figures/final_plots/phewas_plots/chr17_inversion_tag_correlation_pvalue.pdf",
+          "preview": "figures/final_plots/phewas_plots/chr17_inversion_tag_correlation_pvalue.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "phewas_chr10_79_542_901-80_217_413.pdf",
+          "href": "figures/final_plots/phewas_plots/phewas_chr10_79_542_901-80_217_413.pdf",
+          "preview": "figures/final_plots/phewas_plots/phewas_chr10_79_542_901-80_217_413.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "phewas_chr12_46_896_694-46_915_975.pdf",
+          "href": "figures/final_plots/phewas_plots/phewas_chr12_46_896_694-46_915_975.pdf",
+          "preview": "figures/final_plots/phewas_plots/phewas_chr12_46_896_694-46_915_975.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "phewas_chr17_45_585_159-46_292_045.pdf",
+          "href": "figures/final_plots/phewas_plots/phewas_chr17_45_585_159-46_292_045.pdf",
+          "preview": "figures/final_plots/phewas_plots/phewas_chr17_45_585_159-46_292_045.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "phewas_chr4_33_098_066-33_104_924.pdf",
+          "href": "figures/final_plots/phewas_plots/phewas_chr4_33_098_066-33_104_924.pdf",
+          "preview": "figures/final_plots/phewas_plots/phewas_chr4_33_098_066-33_104_924.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "phewas_chr6_141_866_310-141_898_728.pdf",
+          "href": "figures/final_plots/phewas_plots/phewas_chr6_141_866_310-141_898_728.pdf",
+          "preview": "figures/final_plots/phewas_plots/phewas_chr6_141_866_310-141_898_728.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "phewas_chr6_167_209_001-167_357_782.pdf",
+          "href": "figures/final_plots/phewas_plots/phewas_chr6_167_209_001-167_357_782.pdf",
+          "preview": "figures/final_plots/phewas_plots/phewas_chr6_167_209_001-167_357_782.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "qq_plot_chr10-79542902-INV-674513.pdf",
+          "href": "figures/final_plots/phewas_plots/qq_plot_chr10-79542902-INV-674513.pdf",
+          "preview": "figures/final_plots/phewas_plots/qq_plot_chr10-79542902-INV-674513.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "qq_plot_chr12-46897663-INV-16289.pdf",
+          "href": "figures/final_plots/phewas_plots/qq_plot_chr12-46897663-INV-16289.pdf",
+          "preview": "figures/final_plots/phewas_plots/qq_plot_chr12-46897663-INV-16289.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "qq_plot_chr17-45585160-INV-706887.pdf",
+          "href": "figures/final_plots/phewas_plots/qq_plot_chr17-45585160-INV-706887.pdf",
+          "preview": "figures/final_plots/phewas_plots/qq_plot_chr17-45585160-INV-706887.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "qq_plot_chr4-33098029-INV-7075.pdf",
+          "href": "figures/final_plots/phewas_plots/qq_plot_chr4-33098029-INV-7075.pdf",
+          "preview": "figures/final_plots/phewas_plots/qq_plot_chr4-33098029-INV-7075.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "qq_plot_chr6-141867315-INV-29159.pdf",
+          "href": "figures/final_plots/phewas_plots/qq_plot_chr6-141867315-INV-29159.pdf",
+          "preview": "figures/final_plots/phewas_plots/qq_plot_chr6-141867315-INV-29159.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "qq_plot_chr6-167181003-INV-209976.pdf",
+          "href": "figures/final_plots/phewas_plots/qq_plot_chr6-167181003-INV-209976.pdf",
+          "preview": "figures/final_plots/phewas_plots/qq_plot_chr6-167181003-INV-209976.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "qq_plot_overall.pdf",
+          "href": "figures/final_plots/phewas_plots/qq_plot_overall.pdf",
+          "preview": "figures/final_plots/phewas_plots/qq_plot_overall.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "qq_plot_overall.png",
+          "href": "figures/final_plots/phewas_plots/qq_plot_overall.png",
+          "preview": "figures/final_plots/phewas_plots/qq_plot_overall.png",
+          "type": "image"
+        }
+      ]
+    },
+    {
+      "title": "final_plots/pi_analysis_results_exact_mf_quadrants/total_100kb",
+      "slug": "final-plots-pi-analysis-results-exact-mf-quadrants-total-100kb",
+      "items": [
+        {
+          "name": "pi_mf_overall_violins_total_100kb.pdf",
+          "href": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_100kb/pi_mf_overall_violins_total_100kb.pdf",
+          "preview": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_100kb/pi_mf_overall_violins_total_100kb.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_mf_quadrant_violins_total_100kb.pdf",
+          "href": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_100kb/pi_mf_quadrant_violins_total_100kb.pdf",
+          "preview": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_100kb/pi_mf_quadrant_violins_total_100kb.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_mf_recurrence_violins_total_100kb.pdf",
+          "href": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_100kb/pi_mf_recurrence_violins_total_100kb.pdf",
+          "preview": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_100kb/pi_mf_recurrence_violins_total_100kb.pdf",
+          "type": "pdf"
+        }
+      ]
+    },
+    {
+      "title": "final_plots/pi_analysis_results_exact_mf_quadrants/total_200kb",
+      "slug": "final-plots-pi-analysis-results-exact-mf-quadrants-total-200kb",
+      "items": [
+        {
+          "name": "pi_mf_overall_violins_total_200kb.pdf",
+          "href": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_200kb/pi_mf_overall_violins_total_200kb.pdf",
+          "preview": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_200kb/pi_mf_overall_violins_total_200kb.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_mf_quadrant_violins_total_200kb.pdf",
+          "href": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_200kb/pi_mf_quadrant_violins_total_200kb.pdf",
+          "preview": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_200kb/pi_mf_quadrant_violins_total_200kb.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_mf_recurrence_violins_total_200kb.pdf",
+          "href": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_200kb/pi_mf_recurrence_violins_total_200kb.pdf",
+          "preview": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_200kb/pi_mf_recurrence_violins_total_200kb.pdf",
+          "type": "pdf"
+        }
+      ]
+    },
+    {
+      "title": "final_plots/pi_analysis_results_exact_mf_quadrants/total_20kb",
+      "slug": "final-plots-pi-analysis-results-exact-mf-quadrants-total-20kb",
+      "items": [
+        {
+          "name": "pi_mf_overall_violins_total_20kb.pdf",
+          "href": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_20kb/pi_mf_overall_violins_total_20kb.pdf",
+          "preview": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_20kb/pi_mf_overall_violins_total_20kb.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_mf_quadrant_violins_total_20kb.pdf",
+          "href": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_20kb/pi_mf_quadrant_violins_total_20kb.pdf",
+          "preview": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_20kb/pi_mf_quadrant_violins_total_20kb.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_mf_recurrence_violins_total_20kb.pdf",
+          "href": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_20kb/pi_mf_recurrence_violins_total_20kb.pdf",
+          "preview": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_20kb/pi_mf_recurrence_violins_total_20kb.pdf",
+          "type": "pdf"
+        }
+      ]
+    },
+    {
+      "title": "final_plots/pi_analysis_results_exact_mf_quadrants/total_40kb",
+      "slug": "final-plots-pi-analysis-results-exact-mf-quadrants-total-40kb",
+      "items": [
+        {
+          "name": "pi_mf_overall_violins_total_40kb.pdf",
+          "href": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_40kb/pi_mf_overall_violins_total_40kb.pdf",
+          "preview": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_40kb/pi_mf_overall_violins_total_40kb.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_mf_quadrant_violins_total_40kb.pdf",
+          "href": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_40kb/pi_mf_quadrant_violins_total_40kb.pdf",
+          "preview": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_40kb/pi_mf_quadrant_violins_total_40kb.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_mf_recurrence_violins_total_40kb.pdf",
+          "href": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_40kb/pi_mf_recurrence_violins_total_40kb.pdf",
+          "preview": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_40kb/pi_mf_recurrence_violins_total_40kb.pdf",
+          "type": "pdf"
+        }
+      ]
+    },
+    {
+      "title": "final_plots/pi_analysis_results_exact_mf_quadrants/total_60kb",
+      "slug": "final-plots-pi-analysis-results-exact-mf-quadrants-total-60kb",
+      "items": [
+        {
+          "name": "pi_mf_overall_violins_total_60kb.pdf",
+          "href": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_60kb/pi_mf_overall_violins_total_60kb.pdf",
+          "preview": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_60kb/pi_mf_overall_violins_total_60kb.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_mf_quadrant_violins_total_60kb.pdf",
+          "href": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_60kb/pi_mf_quadrant_violins_total_60kb.pdf",
+          "preview": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_60kb/pi_mf_quadrant_violins_total_60kb.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_mf_recurrence_violins_total_60kb.pdf",
+          "href": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_60kb/pi_mf_recurrence_violins_total_60kb.pdf",
+          "preview": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_60kb/pi_mf_recurrence_violins_total_60kb.pdf",
+          "type": "pdf"
+        }
+      ]
+    },
+    {
+      "title": "final_plots/pi_analysis_results_exact_mf_quadrants/total_80kb",
+      "slug": "final-plots-pi-analysis-results-exact-mf-quadrants-total-80kb",
+      "items": [
+        {
+          "name": "pi_mf_overall_violins_total_80kb.pdf",
+          "href": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_80kb/pi_mf_overall_violins_total_80kb.pdf",
+          "preview": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_80kb/pi_mf_overall_violins_total_80kb.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_mf_quadrant_violins_total_80kb.pdf",
+          "href": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_80kb/pi_mf_quadrant_violins_total_80kb.pdf",
+          "preview": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_80kb/pi_mf_quadrant_violins_total_80kb.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_mf_recurrence_violins_total_80kb.pdf",
+          "href": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_80kb/pi_mf_recurrence_violins_total_80kb.pdf",
+          "preview": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_80kb/pi_mf_recurrence_violins_total_80kb.pdf",
+          "type": "pdf"
+        }
+      ]
+    },
+    {
+      "title": "final_plots/recurrent_events_analysis_separate_v2",
+      "slug": "final-plots-recurrent-events-analysis-separate-v2",
+      "items": [
+        {
+          "name": "pi_vs_recurrent_events_separate_lmm_plot.png",
+          "href": "figures/final_plots/recurrent_events_analysis_separate_v2/pi_vs_recurrent_events_separate_lmm_plot.png",
+          "preview": "figures/final_plots/recurrent_events_analysis_separate_v2/pi_vs_recurrent_events_separate_lmm_plot.png",
+          "type": "image"
+        }
+      ]
+    },
+    {
+      "title": "fst_analysis_results_exact_mf_quadrants/total_100kb",
+      "slug": "fst-analysis-results-exact-mf-quadrants-total-100kb",
+      "items": [
+        {
+          "name": "fst_mf_quadrant_violins_total_100kb.pdf",
+          "href": "figures/fst_analysis_results_exact_mf_quadrants/total_100kb/fst_mf_quadrant_violins_total_100kb.pdf",
+          "preview": "figures/fst_analysis_results_exact_mf_quadrants/total_100kb/fst_mf_quadrant_violins_total_100kb.pdf",
+          "type": "pdf"
+        }
+      ]
+    },
+    {
+      "title": "fst_analysis_results_exact_mf_quadrants/total_200kb",
+      "slug": "fst-analysis-results-exact-mf-quadrants-total-200kb",
+      "items": [
+        {
+          "name": "fst_mf_quadrant_violins_total_200kb.pdf",
+          "href": "figures/fst_analysis_results_exact_mf_quadrants/total_200kb/fst_mf_quadrant_violins_total_200kb.pdf",
+          "preview": "figures/fst_analysis_results_exact_mf_quadrants/total_200kb/fst_mf_quadrant_violins_total_200kb.pdf",
+          "type": "pdf"
+        }
+      ]
+    },
+    {
+      "title": "fst_analysis_results_exact_mf_quadrants/total_20kb",
+      "slug": "fst-analysis-results-exact-mf-quadrants-total-20kb",
+      "items": [
+        {
+          "name": "fst_mf_quadrant_violins_total_20kb.pdf",
+          "href": "figures/fst_analysis_results_exact_mf_quadrants/total_20kb/fst_mf_quadrant_violins_total_20kb.pdf",
+          "preview": "figures/fst_analysis_results_exact_mf_quadrants/total_20kb/fst_mf_quadrant_violins_total_20kb.pdf",
+          "type": "pdf"
+        }
+      ]
+    },
+    {
+      "title": "fst_analysis_results_exact_mf_quadrants/total_40kb",
+      "slug": "fst-analysis-results-exact-mf-quadrants-total-40kb",
+      "items": [
+        {
+          "name": "fst_mf_quadrant_violins_total_40kb.pdf",
+          "href": "figures/fst_analysis_results_exact_mf_quadrants/total_40kb/fst_mf_quadrant_violins_total_40kb.pdf",
+          "preview": "figures/fst_analysis_results_exact_mf_quadrants/total_40kb/fst_mf_quadrant_violins_total_40kb.pdf",
+          "type": "pdf"
+        }
+      ]
+    },
+    {
+      "title": "fst_analysis_results_exact_mf_quadrants/total_60kb",
+      "slug": "fst-analysis-results-exact-mf-quadrants-total-60kb",
+      "items": [
+        {
+          "name": "fst_mf_quadrant_violins_total_60kb.pdf",
+          "href": "figures/fst_analysis_results_exact_mf_quadrants/total_60kb/fst_mf_quadrant_violins_total_60kb.pdf",
+          "preview": "figures/fst_analysis_results_exact_mf_quadrants/total_60kb/fst_mf_quadrant_violins_total_60kb.pdf",
+          "type": "pdf"
+        }
+      ]
+    },
+    {
+      "title": "fst_analysis_results_exact_mf_quadrants/total_80kb",
+      "slug": "fst-analysis-results-exact-mf-quadrants-total-80kb",
+      "items": [
+        {
+          "name": "fst_mf_quadrant_violins_total_80kb.pdf",
+          "href": "figures/fst_analysis_results_exact_mf_quadrants/total_80kb/fst_mf_quadrant_violins_total_80kb.pdf",
+          "preview": "figures/fst_analysis_results_exact_mf_quadrants/total_80kb/fst_mf_quadrant_violins_total_80kb.pdf",
+          "type": "pdf"
+        }
+      ]
+    },
+    {
+      "title": "length_norm_trend_fast",
+      "slug": "length-norm-trend-fast",
+      "items": [
+        {
+          "name": "fst_vs_inversion_edge_bp_cap100kb_grouped_median.pdf",
+          "href": "figures/length_norm_trend_fast/fst_vs_inversion_edge_bp_cap100kb_grouped_median.pdf",
+          "preview": "figures/length_norm_trend_fast/fst_vs_inversion_edge_bp_cap100kb_grouped_median.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_vs_inversion_edge_bp_cap100kb_grouped_median_overall_only.pdf",
+          "href": "figures/length_norm_trend_fast/fst_vs_inversion_edge_bp_cap100kb_grouped_median_overall_only.pdf",
+          "preview": "figures/length_norm_trend_fast/fst_vs_inversion_edge_bp_cap100kb_grouped_median_overall_only.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_vs_inversion_edge_bp_cap100kb_grouped_pooled.pdf",
+          "href": "figures/length_norm_trend_fast/fst_vs_inversion_edge_bp_cap100kb_grouped_pooled.pdf",
+          "preview": "figures/length_norm_trend_fast/fst_vs_inversion_edge_bp_cap100kb_grouped_pooled.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_vs_inversion_edge_bp_cap100kb_grouped_pooled_overall_only.pdf",
+          "href": "figures/length_norm_trend_fast/fst_vs_inversion_edge_bp_cap100kb_grouped_pooled_overall_only.pdf",
+          "preview": "figures/length_norm_trend_fast/fst_vs_inversion_edge_bp_cap100kb_grouped_pooled_overall_only.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_vs_inversion_edge_bp_cap40kb_grouped_pooled.pdf",
+          "href": "figures/length_norm_trend_fast/fst_vs_inversion_edge_bp_cap40kb_grouped_pooled.pdf",
+          "preview": "figures/length_norm_trend_fast/fst_vs_inversion_edge_bp_cap40kb_grouped_pooled.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_vs_inversion_edge_bp_cap40kb_grouped_pooled_overall_only.pdf",
+          "href": "figures/length_norm_trend_fast/fst_vs_inversion_edge_bp_cap40kb_grouped_pooled_overall_only.pdf",
+          "preview": "figures/length_norm_trend_fast/fst_vs_inversion_edge_bp_cap40kb_grouped_pooled_overall_only.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_vs_inversion_edge_proportion_cap40kb_grouped_pooled.pdf",
+          "href": "figures/length_norm_trend_fast/fst_vs_inversion_edge_proportion_cap40kb_grouped_pooled.pdf",
+          "preview": "figures/length_norm_trend_fast/fst_vs_inversion_edge_proportion_cap40kb_grouped_pooled.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_vs_inversion_edge_proportion_cap40kb_grouped_pooled_overall_only.pdf",
+          "href": "figures/length_norm_trend_fast/fst_vs_inversion_edge_proportion_cap40kb_grouped_pooled_overall_only.pdf",
+          "preview": "figures/length_norm_trend_fast/fst_vs_inversion_edge_proportion_cap40kb_grouped_pooled_overall_only.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_vs_inversion_edge_proportion_grouped_median.pdf",
+          "href": "figures/length_norm_trend_fast/fst_vs_inversion_edge_proportion_grouped_median.pdf",
+          "preview": "figures/length_norm_trend_fast/fst_vs_inversion_edge_proportion_grouped_median.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_vs_inversion_edge_proportion_grouped_median_overall_only.pdf",
+          "href": "figures/length_norm_trend_fast/fst_vs_inversion_edge_proportion_grouped_median_overall_only.pdf",
+          "preview": "figures/length_norm_trend_fast/fst_vs_inversion_edge_proportion_grouped_median_overall_only.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_vs_inversion_edge_proportion_grouped_pooled.pdf",
+          "href": "figures/length_norm_trend_fast/fst_vs_inversion_edge_proportion_grouped_pooled.pdf",
+          "preview": "figures/length_norm_trend_fast/fst_vs_inversion_edge_proportion_grouped_pooled.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_vs_inversion_edge_proportion_grouped_pooled_overall_only.pdf",
+          "href": "figures/length_norm_trend_fast/fst_vs_inversion_edge_proportion_grouped_pooled_overall_only.pdf",
+          "preview": "figures/length_norm_trend_fast/fst_vs_inversion_edge_proportion_grouped_pooled_overall_only.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_vs_inversion_edge_bp_cap100kb_grouped_mean.pdf",
+          "href": "figures/length_norm_trend_fast/pi_vs_inversion_edge_bp_cap100kb_grouped_mean.pdf",
+          "preview": "figures/length_norm_trend_fast/pi_vs_inversion_edge_bp_cap100kb_grouped_mean.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_vs_inversion_edge_bp_cap100kb_grouped_mean_overall_only.pdf",
+          "href": "figures/length_norm_trend_fast/pi_vs_inversion_edge_bp_cap100kb_grouped_mean_overall_only.pdf",
+          "preview": "figures/length_norm_trend_fast/pi_vs_inversion_edge_bp_cap100kb_grouped_mean_overall_only.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_vs_inversion_edge_bp_cap100kb_grouped_median.pdf",
+          "href": "figures/length_norm_trend_fast/pi_vs_inversion_edge_bp_cap100kb_grouped_median.pdf",
+          "preview": "figures/length_norm_trend_fast/pi_vs_inversion_edge_bp_cap100kb_grouped_median.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_vs_inversion_edge_bp_cap100kb_grouped_median_overall_only.pdf",
+          "href": "figures/length_norm_trend_fast/pi_vs_inversion_edge_bp_cap100kb_grouped_median_overall_only.pdf",
+          "preview": "figures/length_norm_trend_fast/pi_vs_inversion_edge_bp_cap100kb_grouped_median_overall_only.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_vs_inversion_edge_proportion_grouped_mean.pdf",
+          "href": "figures/length_norm_trend_fast/pi_vs_inversion_edge_proportion_grouped_mean.pdf",
+          "preview": "figures/length_norm_trend_fast/pi_vs_inversion_edge_proportion_grouped_mean.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_vs_inversion_edge_proportion_grouped_mean_overall_only.pdf",
+          "href": "figures/length_norm_trend_fast/pi_vs_inversion_edge_proportion_grouped_mean_overall_only.pdf",
+          "preview": "figures/length_norm_trend_fast/pi_vs_inversion_edge_proportion_grouped_mean_overall_only.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_vs_inversion_edge_proportion_grouped_median.pdf",
+          "href": "figures/length_norm_trend_fast/pi_vs_inversion_edge_proportion_grouped_median.pdf",
+          "preview": "figures/length_norm_trend_fast/pi_vs_inversion_edge_proportion_grouped_median.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_vs_inversion_edge_proportion_grouped_median_overall_only.pdf",
+          "href": "figures/length_norm_trend_fast/pi_vs_inversion_edge_proportion_grouped_median_overall_only.pdf",
+          "preview": "figures/length_norm_trend_fast/pi_vs_inversion_edge_proportion_grouped_median_overall_only.pdf",
+          "type": "pdf"
+        }
+      ]
+    },
+    {
+      "title": "length_norm_trend_fast_normed",
+      "slug": "length-norm-trend-fast-normed",
+      "items": [
+        {
+          "name": "fst_vs_inversion_edge_bp_cap100kb_grouped_mean.pdf",
+          "href": "figures/length_norm_trend_fast_normed/fst_vs_inversion_edge_bp_cap100kb_grouped_mean.pdf",
+          "preview": "figures/length_norm_trend_fast_normed/fst_vs_inversion_edge_bp_cap100kb_grouped_mean.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_vs_inversion_edge_bp_cap100kb_grouped_median.pdf",
+          "href": "figures/length_norm_trend_fast_normed/fst_vs_inversion_edge_bp_cap100kb_grouped_median.pdf",
+          "preview": "figures/length_norm_trend_fast_normed/fst_vs_inversion_edge_bp_cap100kb_grouped_median.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_vs_inversion_edge_proportion_grouped_mean.pdf",
+          "href": "figures/length_norm_trend_fast_normed/fst_vs_inversion_edge_proportion_grouped_mean.pdf",
+          "preview": "figures/length_norm_trend_fast_normed/fst_vs_inversion_edge_proportion_grouped_mean.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_vs_inversion_edge_proportion_grouped_median.pdf",
+          "href": "figures/length_norm_trend_fast_normed/fst_vs_inversion_edge_proportion_grouped_median.pdf",
+          "preview": "figures/length_norm_trend_fast_normed/fst_vs_inversion_edge_proportion_grouped_median.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_vs_inversion_edge_bp_cap100kb_grouped_mean.pdf",
+          "href": "figures/length_norm_trend_fast_normed/pi_vs_inversion_edge_bp_cap100kb_grouped_mean.pdf",
+          "preview": "figures/length_norm_trend_fast_normed/pi_vs_inversion_edge_bp_cap100kb_grouped_mean.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_vs_inversion_edge_bp_cap100kb_grouped_median.pdf",
+          "href": "figures/length_norm_trend_fast_normed/pi_vs_inversion_edge_bp_cap100kb_grouped_median.pdf",
+          "preview": "figures/length_norm_trend_fast_normed/pi_vs_inversion_edge_bp_cap100kb_grouped_median.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_vs_inversion_edge_proportion_grouped_mean.pdf",
+          "href": "figures/length_norm_trend_fast_normed/pi_vs_inversion_edge_proportion_grouped_mean.pdf",
+          "preview": "figures/length_norm_trend_fast_normed/pi_vs_inversion_edge_proportion_grouped_mean.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_vs_inversion_edge_proportion_grouped_median.pdf",
+          "href": "figures/length_norm_trend_fast_normed/pi_vs_inversion_edge_proportion_grouped_median.pdf",
+          "preview": "figures/length_norm_trend_fast_normed/pi_vs_inversion_edge_proportion_grouped_median.pdf",
+          "type": "pdf"
+        }
+      ]
+    },
+    {
+      "title": "length_norm_trend_fast_normed/log2fc",
+      "slug": "length-norm-trend-fast-normed-log2fc",
+      "items": [
+        {
+          "name": "fst_vs_inversion_edge_bp_cap100kb_grouped_mean_log2fc.pdf",
+          "href": "figures/length_norm_trend_fast_normed/log2fc/fst_vs_inversion_edge_bp_cap100kb_grouped_mean_log2fc.pdf",
+          "preview": "figures/length_norm_trend_fast_normed/log2fc/fst_vs_inversion_edge_bp_cap100kb_grouped_mean_log2fc.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_vs_inversion_edge_bp_cap100kb_grouped_mean_log2fc_overall_only.pdf",
+          "href": "figures/length_norm_trend_fast_normed/log2fc/fst_vs_inversion_edge_bp_cap100kb_grouped_mean_log2fc_overall_only.pdf",
+          "preview": "figures/length_norm_trend_fast_normed/log2fc/fst_vs_inversion_edge_bp_cap100kb_grouped_mean_log2fc_overall_only.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_vs_inversion_edge_bp_cap100kb_grouped_median_log2fc.pdf",
+          "href": "figures/length_norm_trend_fast_normed/log2fc/fst_vs_inversion_edge_bp_cap100kb_grouped_median_log2fc.pdf",
+          "preview": "figures/length_norm_trend_fast_normed/log2fc/fst_vs_inversion_edge_bp_cap100kb_grouped_median_log2fc.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_vs_inversion_edge_bp_cap100kb_grouped_median_log2fc_overall_only.pdf",
+          "href": "figures/length_norm_trend_fast_normed/log2fc/fst_vs_inversion_edge_bp_cap100kb_grouped_median_log2fc_overall_only.pdf",
+          "preview": "figures/length_norm_trend_fast_normed/log2fc/fst_vs_inversion_edge_bp_cap100kb_grouped_median_log2fc_overall_only.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_vs_inversion_edge_proportion_grouped_mean_log2fc.pdf",
+          "href": "figures/length_norm_trend_fast_normed/log2fc/fst_vs_inversion_edge_proportion_grouped_mean_log2fc.pdf",
+          "preview": "figures/length_norm_trend_fast_normed/log2fc/fst_vs_inversion_edge_proportion_grouped_mean_log2fc.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_vs_inversion_edge_proportion_grouped_mean_log2fc_overall_only.pdf",
+          "href": "figures/length_norm_trend_fast_normed/log2fc/fst_vs_inversion_edge_proportion_grouped_mean_log2fc_overall_only.pdf",
+          "preview": "figures/length_norm_trend_fast_normed/log2fc/fst_vs_inversion_edge_proportion_grouped_mean_log2fc_overall_only.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_vs_inversion_edge_proportion_grouped_median_log2fc.pdf",
+          "href": "figures/length_norm_trend_fast_normed/log2fc/fst_vs_inversion_edge_proportion_grouped_median_log2fc.pdf",
+          "preview": "figures/length_norm_trend_fast_normed/log2fc/fst_vs_inversion_edge_proportion_grouped_median_log2fc.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_vs_inversion_edge_proportion_grouped_median_log2fc_overall_only.pdf",
+          "href": "figures/length_norm_trend_fast_normed/log2fc/fst_vs_inversion_edge_proportion_grouped_median_log2fc_overall_only.pdf",
+          "preview": "figures/length_norm_trend_fast_normed/log2fc/fst_vs_inversion_edge_proportion_grouped_median_log2fc_overall_only.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_vs_inversion_edge_bp_cap100kb_grouped_mean_log2fc.pdf",
+          "href": "figures/length_norm_trend_fast_normed/log2fc/pi_vs_inversion_edge_bp_cap100kb_grouped_mean_log2fc.pdf",
+          "preview": "figures/length_norm_trend_fast_normed/log2fc/pi_vs_inversion_edge_bp_cap100kb_grouped_mean_log2fc.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_vs_inversion_edge_bp_cap100kb_grouped_mean_log2fc_overall_only.pdf",
+          "href": "figures/length_norm_trend_fast_normed/log2fc/pi_vs_inversion_edge_bp_cap100kb_grouped_mean_log2fc_overall_only.pdf",
+          "preview": "figures/length_norm_trend_fast_normed/log2fc/pi_vs_inversion_edge_bp_cap100kb_grouped_mean_log2fc_overall_only.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_vs_inversion_edge_bp_cap100kb_grouped_median_log2fc.pdf",
+          "href": "figures/length_norm_trend_fast_normed/log2fc/pi_vs_inversion_edge_bp_cap100kb_grouped_median_log2fc.pdf",
+          "preview": "figures/length_norm_trend_fast_normed/log2fc/pi_vs_inversion_edge_bp_cap100kb_grouped_median_log2fc.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_vs_inversion_edge_bp_cap100kb_grouped_median_log2fc_overall_only.pdf",
+          "href": "figures/length_norm_trend_fast_normed/log2fc/pi_vs_inversion_edge_bp_cap100kb_grouped_median_log2fc_overall_only.pdf",
+          "preview": "figures/length_norm_trend_fast_normed/log2fc/pi_vs_inversion_edge_bp_cap100kb_grouped_median_log2fc_overall_only.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_vs_inversion_edge_proportion_grouped_mean_log2fc.pdf",
+          "href": "figures/length_norm_trend_fast_normed/log2fc/pi_vs_inversion_edge_proportion_grouped_mean_log2fc.pdf",
+          "preview": "figures/length_norm_trend_fast_normed/log2fc/pi_vs_inversion_edge_proportion_grouped_mean_log2fc.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_vs_inversion_edge_proportion_grouped_mean_log2fc_overall_only.pdf",
+          "href": "figures/length_norm_trend_fast_normed/log2fc/pi_vs_inversion_edge_proportion_grouped_mean_log2fc_overall_only.pdf",
+          "preview": "figures/length_norm_trend_fast_normed/log2fc/pi_vs_inversion_edge_proportion_grouped_mean_log2fc_overall_only.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_vs_inversion_edge_proportion_grouped_median_log2fc.pdf",
+          "href": "figures/length_norm_trend_fast_normed/log2fc/pi_vs_inversion_edge_proportion_grouped_median_log2fc.pdf",
+          "preview": "figures/length_norm_trend_fast_normed/log2fc/pi_vs_inversion_edge_proportion_grouped_median_log2fc.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_vs_inversion_edge_proportion_grouped_median_log2fc_overall_only.pdf",
+          "href": "figures/length_norm_trend_fast_normed/log2fc/pi_vs_inversion_edge_proportion_grouped_median_log2fc_overall_only.pdf",
+          "preview": "figures/length_norm_trend_fast_normed/log2fc/pi_vs_inversion_edge_proportion_grouped_median_log2fc_overall_only.pdf",
+          "type": "pdf"
+        }
+      ]
+    },
+    {
+      "title": "length_norm_trend_fast_normed/znorm",
+      "slug": "length-norm-trend-fast-normed-znorm",
+      "items": [
+        {
+          "name": "fst_vs_inversion_edge_bp_cap100kb_grouped_mean_znorm.pdf",
+          "href": "figures/length_norm_trend_fast_normed/znorm/fst_vs_inversion_edge_bp_cap100kb_grouped_mean_znorm.pdf",
+          "preview": "figures/length_norm_trend_fast_normed/znorm/fst_vs_inversion_edge_bp_cap100kb_grouped_mean_znorm.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_vs_inversion_edge_bp_cap100kb_grouped_mean_znorm_overall_only.pdf",
+          "href": "figures/length_norm_trend_fast_normed/znorm/fst_vs_inversion_edge_bp_cap100kb_grouped_mean_znorm_overall_only.pdf",
+          "preview": "figures/length_norm_trend_fast_normed/znorm/fst_vs_inversion_edge_bp_cap100kb_grouped_mean_znorm_overall_only.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_vs_inversion_edge_bp_cap100kb_grouped_median_znorm.pdf",
+          "href": "figures/length_norm_trend_fast_normed/znorm/fst_vs_inversion_edge_bp_cap100kb_grouped_median_znorm.pdf",
+          "preview": "figures/length_norm_trend_fast_normed/znorm/fst_vs_inversion_edge_bp_cap100kb_grouped_median_znorm.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_vs_inversion_edge_bp_cap100kb_grouped_median_znorm_overall_only.pdf",
+          "href": "figures/length_norm_trend_fast_normed/znorm/fst_vs_inversion_edge_bp_cap100kb_grouped_median_znorm_overall_only.pdf",
+          "preview": "figures/length_norm_trend_fast_normed/znorm/fst_vs_inversion_edge_bp_cap100kb_grouped_median_znorm_overall_only.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_vs_inversion_edge_proportion_grouped_mean_znorm.pdf",
+          "href": "figures/length_norm_trend_fast_normed/znorm/fst_vs_inversion_edge_proportion_grouped_mean_znorm.pdf",
+          "preview": "figures/length_norm_trend_fast_normed/znorm/fst_vs_inversion_edge_proportion_grouped_mean_znorm.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_vs_inversion_edge_proportion_grouped_mean_znorm_overall_only.pdf",
+          "href": "figures/length_norm_trend_fast_normed/znorm/fst_vs_inversion_edge_proportion_grouped_mean_znorm_overall_only.pdf",
+          "preview": "figures/length_norm_trend_fast_normed/znorm/fst_vs_inversion_edge_proportion_grouped_mean_znorm_overall_only.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_vs_inversion_edge_proportion_grouped_median_znorm.pdf",
+          "href": "figures/length_norm_trend_fast_normed/znorm/fst_vs_inversion_edge_proportion_grouped_median_znorm.pdf",
+          "preview": "figures/length_norm_trend_fast_normed/znorm/fst_vs_inversion_edge_proportion_grouped_median_znorm.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "fst_vs_inversion_edge_proportion_grouped_median_znorm_overall_only.pdf",
+          "href": "figures/length_norm_trend_fast_normed/znorm/fst_vs_inversion_edge_proportion_grouped_median_znorm_overall_only.pdf",
+          "preview": "figures/length_norm_trend_fast_normed/znorm/fst_vs_inversion_edge_proportion_grouped_median_znorm_overall_only.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_vs_inversion_edge_bp_cap100kb_grouped_mean_znorm.pdf",
+          "href": "figures/length_norm_trend_fast_normed/znorm/pi_vs_inversion_edge_bp_cap100kb_grouped_mean_znorm.pdf",
+          "preview": "figures/length_norm_trend_fast_normed/znorm/pi_vs_inversion_edge_bp_cap100kb_grouped_mean_znorm.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_vs_inversion_edge_bp_cap100kb_grouped_mean_znorm_overall_only.pdf",
+          "href": "figures/length_norm_trend_fast_normed/znorm/pi_vs_inversion_edge_bp_cap100kb_grouped_mean_znorm_overall_only.pdf",
+          "preview": "figures/length_norm_trend_fast_normed/znorm/pi_vs_inversion_edge_bp_cap100kb_grouped_mean_znorm_overall_only.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_vs_inversion_edge_bp_cap100kb_grouped_median_znorm.pdf",
+          "href": "figures/length_norm_trend_fast_normed/znorm/pi_vs_inversion_edge_bp_cap100kb_grouped_median_znorm.pdf",
+          "preview": "figures/length_norm_trend_fast_normed/znorm/pi_vs_inversion_edge_bp_cap100kb_grouped_median_znorm.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_vs_inversion_edge_bp_cap100kb_grouped_median_znorm_overall_only.pdf",
+          "href": "figures/length_norm_trend_fast_normed/znorm/pi_vs_inversion_edge_bp_cap100kb_grouped_median_znorm_overall_only.pdf",
+          "preview": "figures/length_norm_trend_fast_normed/znorm/pi_vs_inversion_edge_bp_cap100kb_grouped_median_znorm_overall_only.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_vs_inversion_edge_proportion_grouped_mean_znorm.pdf",
+          "href": "figures/length_norm_trend_fast_normed/znorm/pi_vs_inversion_edge_proportion_grouped_mean_znorm.pdf",
+          "preview": "figures/length_norm_trend_fast_normed/znorm/pi_vs_inversion_edge_proportion_grouped_mean_znorm.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_vs_inversion_edge_proportion_grouped_mean_znorm_overall_only.pdf",
+          "href": "figures/length_norm_trend_fast_normed/znorm/pi_vs_inversion_edge_proportion_grouped_mean_znorm_overall_only.pdf",
+          "preview": "figures/length_norm_trend_fast_normed/znorm/pi_vs_inversion_edge_proportion_grouped_mean_znorm_overall_only.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_vs_inversion_edge_proportion_grouped_median_znorm.pdf",
+          "href": "figures/length_norm_trend_fast_normed/znorm/pi_vs_inversion_edge_proportion_grouped_median_znorm.pdf",
+          "preview": "figures/length_norm_trend_fast_normed/znorm/pi_vs_inversion_edge_proportion_grouped_median_znorm.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_vs_inversion_edge_proportion_grouped_median_znorm_overall_only.pdf",
+          "href": "figures/length_norm_trend_fast_normed/znorm/pi_vs_inversion_edge_proportion_grouped_median_znorm_overall_only.pdf",
+          "preview": "figures/length_norm_trend_fast_normed/znorm/pi_vs_inversion_edge_proportion_grouped_median_znorm_overall_only.pdf",
+          "type": "pdf"
+        }
+      ]
+    },
+    {
+      "title": "per_inversion_trends/hudson/inversions",
+      "slug": "per-inversion-trends-hudson-inversions",
+      "items": [
+        {
+          "name": "hudson_chr10_46983451_47468232_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/hudson/inversions/hudson_chr10_46983451_47468232_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/hudson/inversions/hudson_chr10_46983451_47468232_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr10_79542901_80217413_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/hudson/inversions/hudson_chr10_79542901_80217413_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/hudson/inversions/hudson_chr10_79542901_80217413_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr11_50154999_50324102_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/hudson/inversions/hudson_chr11_50154999_50324102_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/hudson/inversions/hudson_chr11_50154999_50324102_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr12_131312081_131644839_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/hudson/inversions/hudson_chr12_131312081_131644839_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/hudson/inversions/hudson_chr12_131312081_131644839_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr12_131333943_131623807_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/hudson/inversions/hudson_chr12_131333943_131623807_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/hudson/inversions/hudson_chr12_131333943_131623807_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr13_52344010_52502256_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/hudson/inversions/hudson_chr13_52344010_52502256_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/hudson/inversions/hudson_chr13_52344010_52502256_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr15_28298424_28623514_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/hudson/inversions/hudson_chr15_28298424_28623514_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/hudson/inversions/hudson_chr15_28298424_28623514_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr15_30618103_32153204_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/hudson/inversions/hudson_chr15_30618103_32153204_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/hudson/inversions/hudson_chr15_30618103_32153204_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr15_82360482_82515134_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/hudson/inversions/hudson_chr15_82360482_82515134_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/hudson/inversions/hudson_chr15_82360482_82515134_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr16_16721273_18073542_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/hudson/inversions/hudson_chr16_16721273_18073542_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/hudson/inversions/hudson_chr16_16721273_18073542_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr16_21583511_22432381_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/hudson/inversions/hudson_chr16_21583511_22432381_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/hudson/inversions/hudson_chr16_21583511_22432381_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr16_21864964_22432381_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/hudson/inversions/hudson_chr16_21864964_22432381_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/hudson/inversions/hudson_chr16_21864964_22432381_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr16_28471892_28637651_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/hudson/inversions/hudson_chr16_28471892_28637651_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/hudson/inversions/hudson_chr16_28471892_28637651_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr17_16823490_18384190_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/hudson/inversions/hudson_chr17_16823490_18384190_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/hudson/inversions/hudson_chr17_16823490_18384190_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr17_45585159_46292045_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/hudson/inversions/hudson_chr17_45585159_46292045_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/hudson/inversions/hudson_chr17_45585159_46292045_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr19_47959660_50091195_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/hudson/inversions/hudson_chr19_47959660_50091195_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/hudson/inversions/hudson_chr19_47959660_50091195_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr1_145160434_146154520_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/hudson/inversions/hudson_chr1_145160434_146154520_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/hudson/inversions/hudson_chr1_145160434_146154520_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr1_146298109_148672872_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/hudson/inversions/hudson_chr1_146298109_148672872_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/hudson/inversions/hudson_chr1_146298109_148672872_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr1_148893781_149265643_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/hudson/inversions/hudson_chr1_148893781_149265643_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/hudson/inversions/hudson_chr1_148893781_149265643_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr20_25846148_26009643_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/hudson/inversions/hudson_chr20_25846148_26009643_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/hudson/inversions/hudson_chr20_25846148_26009643_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr2_108527821_109733036_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/hudson/inversions/hudson_chr2_108527821_109733036_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/hudson/inversions/hudson_chr2_108527821_109733036_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr2_110095177_110276210_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/hudson/inversions/hudson_chr2_110095177_110276210_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/hudson/inversions/hudson_chr2_110095177_110276210_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr2_130138212_131200602_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/hudson/inversions/hudson_chr2_130138212_131200602_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/hudson/inversions/hudson_chr2_130138212_131200602_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr2_130138212_131530534_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/hudson/inversions/hudson_chr2_130138212_131530534_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/hudson/inversions/hudson_chr2_130138212_131530534_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr2_91832040_92012663_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/hudson/inversions/hudson_chr2_91832040_92012663_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/hudson/inversions/hudson_chr2_91832040_92012663_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr2_95800191_96024403_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/hudson/inversions/hudson_chr2_95800191_96024403_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/hudson/inversions/hudson_chr2_95800191_96024403_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr3_195692124_195956606_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/hudson/inversions/hudson_chr3_195692124_195956606_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/hudson/inversions/hudson_chr3_195692124_195956606_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr3_195749463_195980207_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/hudson/inversions/hudson_chr3_195749463_195980207_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/hudson/inversions/hudson_chr3_195749463_195980207_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr7_57641572_57838971_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/hudson/inversions/hudson_chr7_57641572_57838971_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/hudson/inversions/hudson_chr7_57641572_57838971_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr7_5989046_6735643_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/hudson/inversions/hudson_chr7_5989046_6735643_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/hudson/inversions/hudson_chr7_5989046_6735643_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr7_60911891_61578023_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/hudson/inversions/hudson_chr7_60911891_61578023_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/hudson/inversions/hudson_chr7_60911891_61578023_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr7_65219157_65531823_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/hudson/inversions/hudson_chr7_65219157_65531823_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/hudson/inversions/hudson_chr7_65219157_65531823_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr7_73113989_74799029_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/hudson/inversions/hudson_chr7_73113989_74799029_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/hudson/inversions/hudson_chr7_73113989_74799029_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr7_74869950_75058098_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/hudson/inversions/hudson_chr7_74869950_75058098_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/hudson/inversions/hudson_chr7_74869950_75058098_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "hudson_chr8_7301024_12598379_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/hudson/inversions/hudson_chr8_7301024_12598379_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/hudson/inversions/hudson_chr8_7301024_12598379_vs_dist_edge_200bins.png",
+          "type": "image"
+        }
+      ]
+    },
+    {
+      "title": "per_inversion_trends/pi/inversions",
+      "slug": "per-inversion-trends-pi-inversions",
+      "items": [
+        {
+          "name": "pi_chr10_46983451_47468232_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr10_46983451_47468232_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr10_46983451_47468232_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr10_46983451_47468232_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr10_46983451_47468232_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr10_46983451_47468232_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr10_79542901_80217413_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr10_79542901_80217413_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr10_79542901_80217413_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr10_79542901_80217413_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr10_79542901_80217413_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr10_79542901_80217413_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr11_50154999_50324102_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr11_50154999_50324102_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr11_50154999_50324102_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr11_50154999_50324102_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr11_50154999_50324102_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr11_50154999_50324102_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr12_131312081_131644839_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr12_131312081_131644839_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr12_131312081_131644839_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr12_131312081_131644839_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr12_131312081_131644839_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr12_131312081_131644839_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr12_131333943_131623807_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr12_131333943_131623807_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr12_131333943_131623807_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr12_131333943_131623807_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr12_131333943_131623807_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr12_131333943_131623807_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr13_52344010_52502256_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr13_52344010_52502256_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr13_52344010_52502256_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr13_52344010_52502256_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr13_52344010_52502256_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr13_52344010_52502256_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr13_53902573_54093373_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr13_53902573_54093373_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr13_53902573_54093373_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr15_22701127_23213881_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr15_22701127_23213881_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr15_22701127_23213881_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr15_23345459_28389868_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr15_23345459_28389868_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr15_23345459_28389868_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr15_28298424_28623514_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr15_28298424_28623514_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr15_28298424_28623514_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr15_28298424_28623514_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr15_28298424_28623514_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr15_28298424_28623514_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr15_30618103_32153204_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr15_30618103_32153204_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr15_30618103_32153204_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr15_30618103_32153204_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr15_30618103_32153204_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr15_30618103_32153204_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr15_82360482_82515134_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr15_82360482_82515134_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr15_82360482_82515134_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr15_82360482_82515134_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr15_82360482_82515134_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr15_82360482_82515134_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr16_15384482_16276146_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr16_15384482_16276146_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr16_15384482_16276146_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr16_16721273_18073542_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr16_16721273_18073542_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr16_16721273_18073542_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr16_16721273_18073542_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr16_16721273_18073542_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr16_16721273_18073542_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr16_21583511_22432381_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr16_21583511_22432381_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr16_21583511_22432381_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr16_21583511_22432381_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr16_21583511_22432381_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr16_21583511_22432381_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr16_21864964_22432381_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr16_21864964_22432381_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr16_21864964_22432381_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr16_21864964_22432381_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr16_21864964_22432381_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr16_21864964_22432381_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr16_28471892_28637651_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr16_28471892_28637651_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr16_28471892_28637651_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr16_28471892_28637651_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr16_28471892_28637651_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr16_28471892_28637651_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr17_16823490_18384190_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr17_16823490_18384190_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr17_16823490_18384190_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr17_16823490_18384190_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr17_16823490_18384190_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr17_16823490_18384190_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr17_18622359_18823773_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr17_18622359_18823773_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr17_18622359_18823773_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr17_45585159_46292045_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr17_45585159_46292045_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr17_45585159_46292045_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr17_45585159_46292045_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr17_45585159_46292045_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr17_45585159_46292045_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr19_47959660_50091195_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr19_47959660_50091195_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr19_47959660_50091195_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr19_47959660_50091195_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr19_47959660_50091195_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr19_47959660_50091195_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr1_120299058_120600965_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr1_120299058_120600965_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr1_120299058_120600965_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr1_120299058_120600965_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr1_120299058_120600965_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr1_120299058_120600965_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr1_144376209_144600799_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr1_144376209_144600799_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr1_144376209_144600799_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr1_144376209_144600799_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr1_144376209_144600799_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr1_144376209_144600799_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr1_145160434_146154520_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr1_145160434_146154520_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr1_145160434_146154520_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr1_145160434_146154520_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr1_145160434_146154520_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr1_145160434_146154520_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr1_146298109_148672872_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr1_146298109_148672872_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr1_146298109_148672872_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr1_146298109_148672872_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr1_146298109_148672872_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr1_146298109_148672872_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr1_148893781_149265643_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr1_148893781_149265643_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr1_148893781_149265643_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr1_148893781_149265643_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr1_148893781_149265643_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr1_148893781_149265643_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr1_248128773_248428856_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr1_248128773_248428856_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr1_248128773_248428856_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr20_25846148_26009643_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr20_25846148_26009643_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr20_25846148_26009643_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr20_25846148_26009643_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr20_25846148_26009643_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr20_25846148_26009643_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr20_29257746_29419750_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr20_29257746_29419750_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr20_29257746_29419750_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr21_19877734_20070170_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr21_19877734_20070170_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr21_19877734_20070170_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr2_108527821_109733036_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr2_108527821_109733036_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr2_108527821_109733036_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr2_108527821_109733036_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr2_108527821_109733036_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr2_108527821_109733036_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr2_110095177_110276210_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr2_110095177_110276210_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr2_110095177_110276210_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr2_110095177_110276210_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr2_110095177_110276210_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr2_110095177_110276210_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr2_130138212_131200602_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr2_130138212_131200602_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr2_130138212_131200602_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr2_130138212_131200602_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr2_130138212_131200602_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr2_130138212_131200602_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr2_130138212_131530534_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr2_130138212_131530534_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr2_130138212_131530534_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr2_130138212_131530534_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr2_130138212_131530534_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr2_130138212_131530534_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr2_87987171_111255403_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr2_87987171_111255403_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr2_87987171_111255403_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr2_87995841_88180536_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr2_87995841_88180536_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr2_87995841_88180536_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr2_91832040_92012663_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr2_91832040_92012663_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr2_91832040_92012663_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr2_91832040_92012663_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr2_91832040_92012663_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr2_91832040_92012663_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr2_95800191_96024403_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr2_95800191_96024403_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr2_95800191_96024403_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr2_95800191_96024403_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr2_95800191_96024403_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr2_95800191_96024403_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr3_195692124_195956606_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr3_195692124_195956606_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr3_195692124_195956606_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr3_195692124_195956606_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr3_195692124_195956606_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr3_195692124_195956606_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr3_195749463_195980207_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr3_195749463_195980207_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr3_195749463_195980207_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr3_195749463_195980207_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr3_195749463_195980207_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr3_195749463_195980207_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr7_57641572_57838971_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr7_57641572_57838971_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr7_57641572_57838971_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr7_57641572_57838971_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr7_57641572_57838971_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr7_57641572_57838971_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr7_57835188_58119653_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr7_57835188_58119653_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr7_57835188_58119653_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr7_5989046_6735643_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr7_5989046_6735643_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr7_5989046_6735643_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr7_5989046_6735643_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr7_5989046_6735643_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr7_5989046_6735643_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr7_60911891_61578023_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr7_60911891_61578023_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr7_60911891_61578023_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr7_60911891_61578023_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr7_60911891_61578023_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr7_60911891_61578023_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr7_65219157_65531823_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr7_65219157_65531823_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr7_65219157_65531823_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr7_65219157_65531823_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr7_65219157_65531823_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr7_65219157_65531823_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr7_73113989_74799029_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr7_73113989_74799029_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr7_73113989_74799029_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr7_73113989_74799029_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr7_73113989_74799029_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr7_73113989_74799029_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr7_74869950_75058098_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr7_74869950_75058098_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr7_74869950_75058098_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr7_74869950_75058098_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr7_74869950_75058098_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr7_74869950_75058098_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr8_7301024_12598379_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr8_7301024_12598379_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr8_7301024_12598379_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr8_7301024_12598379_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr8_7301024_12598379_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr8_7301024_12598379_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr9_38773640_42796744_group_1_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr9_38773640_42796744_group_1_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr9_38773640_42796744_group_1_vs_dist_edge_200bins.png",
+          "type": "image"
+        },
+        {
+          "name": "pi_chr9_87942696_88110274_group_0_vs_dist_edge_200bins.png",
+          "href": "figures/per_inversion_trends/pi/inversions/pi_chr9_87942696_88110274_group_0_vs_dist_edge_200bins.png",
+          "preview": "figures/per_inversion_trends/pi/inversions/pi_chr9_87942696_88110274_group_0_vs_dist_edge_200bins.png",
+          "type": "image"
+        }
+      ]
+    },
+    {
+      "title": "phewas_plots",
+      "slug": "phewas-plots",
+      "items": [
+        {
+          "name": "chr17_inversion_tag_correlation.pdf",
+          "href": "figures/phewas_plots/chr17_inversion_tag_correlation.pdf",
+          "preview": "figures/phewas_plots/chr17_inversion_tag_correlation.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "chr17_inversion_tag_correlation.png",
+          "href": "figures/phewas_plots/chr17_inversion_tag_correlation.png",
+          "preview": "figures/phewas_plots/chr17_inversion_tag_correlation.png",
+          "type": "image"
+        },
+        {
+          "name": "chr17_inversion_tag_correlation_pvalue.pdf",
+          "href": "figures/phewas_plots/chr17_inversion_tag_correlation_pvalue.pdf",
+          "preview": "figures/phewas_plots/chr17_inversion_tag_correlation_pvalue.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "chr17_inversion_tag_correlation_pvalue.png",
+          "href": "figures/phewas_plots/chr17_inversion_tag_correlation_pvalue.png",
+          "preview": "figures/phewas_plots/chr17_inversion_tag_correlation_pvalue.png",
+          "type": "image"
+        },
+        {
+          "name": "phewas_chr10_79_542_901-80_217_413.pdf",
+          "href": "figures/phewas_plots/phewas_chr10_79_542_901-80_217_413.pdf",
+          "preview": "figures/phewas_plots/phewas_chr10_79_542_901-80_217_413.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "phewas_chr10_79_542_901-80_217_413.png",
+          "href": "figures/phewas_plots/phewas_chr10_79_542_901-80_217_413.png",
+          "preview": "figures/phewas_plots/phewas_chr10_79_542_901-80_217_413.png",
+          "type": "image"
+        },
+        {
+          "name": "phewas_chr12_46_896_694-46_915_975.pdf",
+          "href": "figures/phewas_plots/phewas_chr12_46_896_694-46_915_975.pdf",
+          "preview": "figures/phewas_plots/phewas_chr12_46_896_694-46_915_975.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "phewas_chr12_46_896_694-46_915_975.png",
+          "href": "figures/phewas_plots/phewas_chr12_46_896_694-46_915_975.png",
+          "preview": "figures/phewas_plots/phewas_chr12_46_896_694-46_915_975.png",
+          "type": "image"
+        },
+        {
+          "name": "phewas_chr17_45_585_159-46_292_045.pdf",
+          "href": "figures/phewas_plots/phewas_chr17_45_585_159-46_292_045.pdf",
+          "preview": "figures/phewas_plots/phewas_chr17_45_585_159-46_292_045.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "phewas_chr17_45_585_159-46_292_045.png",
+          "href": "figures/phewas_plots/phewas_chr17_45_585_159-46_292_045.png",
+          "preview": "figures/phewas_plots/phewas_chr17_45_585_159-46_292_045.png",
+          "type": "image"
+        },
+        {
+          "name": "phewas_chr4_33_098_066-33_104_924.pdf",
+          "href": "figures/phewas_plots/phewas_chr4_33_098_066-33_104_924.pdf",
+          "preview": "figures/phewas_plots/phewas_chr4_33_098_066-33_104_924.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "phewas_chr4_33_098_066-33_104_924.png",
+          "href": "figures/phewas_plots/phewas_chr4_33_098_066-33_104_924.png",
+          "preview": "figures/phewas_plots/phewas_chr4_33_098_066-33_104_924.png",
+          "type": "image"
+        },
+        {
+          "name": "phewas_chr6_141_866_310-141_898_728.pdf",
+          "href": "figures/phewas_plots/phewas_chr6_141_866_310-141_898_728.pdf",
+          "preview": "figures/phewas_plots/phewas_chr6_141_866_310-141_898_728.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "phewas_chr6_141_866_310-141_898_728.png",
+          "href": "figures/phewas_plots/phewas_chr6_141_866_310-141_898_728.png",
+          "preview": "figures/phewas_plots/phewas_chr6_141_866_310-141_898_728.png",
+          "type": "image"
+        },
+        {
+          "name": "phewas_chr6_167_209_001-167_357_782.pdf",
+          "href": "figures/phewas_plots/phewas_chr6_167_209_001-167_357_782.pdf",
+          "preview": "figures/phewas_plots/phewas_chr6_167_209_001-167_357_782.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "phewas_chr6_167_209_001-167_357_782.png",
+          "href": "figures/phewas_plots/phewas_chr6_167_209_001-167_357_782.png",
+          "preview": "figures/phewas_plots/phewas_chr6_167_209_001-167_357_782.png",
+          "type": "image"
+        },
+        {
+          "name": "qq_plot_chr10-79542902-INV-674513.pdf",
+          "href": "figures/phewas_plots/qq_plot_chr10-79542902-INV-674513.pdf",
+          "preview": "figures/phewas_plots/qq_plot_chr10-79542902-INV-674513.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "qq_plot_chr10-79542902-INV-674513.png",
+          "href": "figures/phewas_plots/qq_plot_chr10-79542902-INV-674513.png",
+          "preview": "figures/phewas_plots/qq_plot_chr10-79542902-INV-674513.png",
+          "type": "image"
+        },
+        {
+          "name": "qq_plot_chr12-46897663-INV-16289.pdf",
+          "href": "figures/phewas_plots/qq_plot_chr12-46897663-INV-16289.pdf",
+          "preview": "figures/phewas_plots/qq_plot_chr12-46897663-INV-16289.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "qq_plot_chr12-46897663-INV-16289.png",
+          "href": "figures/phewas_plots/qq_plot_chr12-46897663-INV-16289.png",
+          "preview": "figures/phewas_plots/qq_plot_chr12-46897663-INV-16289.png",
+          "type": "image"
+        },
+        {
+          "name": "qq_plot_chr17-45585160-INV-706887.pdf",
+          "href": "figures/phewas_plots/qq_plot_chr17-45585160-INV-706887.pdf",
+          "preview": "figures/phewas_plots/qq_plot_chr17-45585160-INV-706887.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "qq_plot_chr17-45585160-INV-706887.png",
+          "href": "figures/phewas_plots/qq_plot_chr17-45585160-INV-706887.png",
+          "preview": "figures/phewas_plots/qq_plot_chr17-45585160-INV-706887.png",
+          "type": "image"
+        },
+        {
+          "name": "qq_plot_chr4-33098029-INV-7075.pdf",
+          "href": "figures/phewas_plots/qq_plot_chr4-33098029-INV-7075.pdf",
+          "preview": "figures/phewas_plots/qq_plot_chr4-33098029-INV-7075.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "qq_plot_chr4-33098029-INV-7075.png",
+          "href": "figures/phewas_plots/qq_plot_chr4-33098029-INV-7075.png",
+          "preview": "figures/phewas_plots/qq_plot_chr4-33098029-INV-7075.png",
+          "type": "image"
+        },
+        {
+          "name": "qq_plot_chr6-141867315-INV-29159.pdf",
+          "href": "figures/phewas_plots/qq_plot_chr6-141867315-INV-29159.pdf",
+          "preview": "figures/phewas_plots/qq_plot_chr6-141867315-INV-29159.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "qq_plot_chr6-141867315-INV-29159.png",
+          "href": "figures/phewas_plots/qq_plot_chr6-141867315-INV-29159.png",
+          "preview": "figures/phewas_plots/qq_plot_chr6-141867315-INV-29159.png",
+          "type": "image"
+        },
+        {
+          "name": "qq_plot_chr6-167181003-INV-209976.pdf",
+          "href": "figures/phewas_plots/qq_plot_chr6-167181003-INV-209976.pdf",
+          "preview": "figures/phewas_plots/qq_plot_chr6-167181003-INV-209976.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "qq_plot_chr6-167181003-INV-209976.png",
+          "href": "figures/phewas_plots/qq_plot_chr6-167181003-INV-209976.png",
+          "preview": "figures/phewas_plots/qq_plot_chr6-167181003-INV-209976.png",
+          "type": "image"
+        },
+        {
+          "name": "qq_plot_overall.pdf",
+          "href": "figures/phewas_plots/qq_plot_overall.pdf",
+          "preview": "figures/phewas_plots/qq_plot_overall.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "qq_plot_overall.png",
+          "href": "figures/phewas_plots/qq_plot_overall.png",
+          "preview": "figures/phewas_plots/qq_plot_overall.png",
+          "type": "image"
+        }
+      ]
+    },
+    {
+      "title": "pi_analysis_results_exact_mf_quadrants/total_100kb",
+      "slug": "pi-analysis-results-exact-mf-quadrants-total-100kb",
+      "items": [
+        {
+          "name": "pi_mf_overall_violins_total_100kb.pdf",
+          "href": "figures/pi_analysis_results_exact_mf_quadrants/total_100kb/pi_mf_overall_violins_total_100kb.pdf",
+          "preview": "figures/pi_analysis_results_exact_mf_quadrants/total_100kb/pi_mf_overall_violins_total_100kb.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_mf_quadrant_violins_total_100kb.pdf",
+          "href": "figures/pi_analysis_results_exact_mf_quadrants/total_100kb/pi_mf_quadrant_violins_total_100kb.pdf",
+          "preview": "figures/pi_analysis_results_exact_mf_quadrants/total_100kb/pi_mf_quadrant_violins_total_100kb.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_mf_recurrence_violins_total_100kb.pdf",
+          "href": "figures/pi_analysis_results_exact_mf_quadrants/total_100kb/pi_mf_recurrence_violins_total_100kb.pdf",
+          "preview": "figures/pi_analysis_results_exact_mf_quadrants/total_100kb/pi_mf_recurrence_violins_total_100kb.pdf",
+          "type": "pdf"
+        }
+      ]
+    },
+    {
+      "title": "pi_analysis_results_exact_mf_quadrants/total_200kb",
+      "slug": "pi-analysis-results-exact-mf-quadrants-total-200kb",
+      "items": [
+        {
+          "name": "pi_mf_overall_violins_total_200kb.pdf",
+          "href": "figures/pi_analysis_results_exact_mf_quadrants/total_200kb/pi_mf_overall_violins_total_200kb.pdf",
+          "preview": "figures/pi_analysis_results_exact_mf_quadrants/total_200kb/pi_mf_overall_violins_total_200kb.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_mf_quadrant_violins_total_200kb.pdf",
+          "href": "figures/pi_analysis_results_exact_mf_quadrants/total_200kb/pi_mf_quadrant_violins_total_200kb.pdf",
+          "preview": "figures/pi_analysis_results_exact_mf_quadrants/total_200kb/pi_mf_quadrant_violins_total_200kb.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_mf_recurrence_violins_total_200kb.pdf",
+          "href": "figures/pi_analysis_results_exact_mf_quadrants/total_200kb/pi_mf_recurrence_violins_total_200kb.pdf",
+          "preview": "figures/pi_analysis_results_exact_mf_quadrants/total_200kb/pi_mf_recurrence_violins_total_200kb.pdf",
+          "type": "pdf"
+        }
+      ]
+    },
+    {
+      "title": "pi_analysis_results_exact_mf_quadrants/total_20kb",
+      "slug": "pi-analysis-results-exact-mf-quadrants-total-20kb",
+      "items": [
+        {
+          "name": "pi_mf_overall_violins_total_20kb.pdf",
+          "href": "figures/pi_analysis_results_exact_mf_quadrants/total_20kb/pi_mf_overall_violins_total_20kb.pdf",
+          "preview": "figures/pi_analysis_results_exact_mf_quadrants/total_20kb/pi_mf_overall_violins_total_20kb.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_mf_quadrant_violins_total_20kb.pdf",
+          "href": "figures/pi_analysis_results_exact_mf_quadrants/total_20kb/pi_mf_quadrant_violins_total_20kb.pdf",
+          "preview": "figures/pi_analysis_results_exact_mf_quadrants/total_20kb/pi_mf_quadrant_violins_total_20kb.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_mf_recurrence_violins_total_20kb.pdf",
+          "href": "figures/pi_analysis_results_exact_mf_quadrants/total_20kb/pi_mf_recurrence_violins_total_20kb.pdf",
+          "preview": "figures/pi_analysis_results_exact_mf_quadrants/total_20kb/pi_mf_recurrence_violins_total_20kb.pdf",
+          "type": "pdf"
+        }
+      ]
+    },
+    {
+      "title": "pi_analysis_results_exact_mf_quadrants/total_40kb",
+      "slug": "pi-analysis-results-exact-mf-quadrants-total-40kb",
+      "items": [
+        {
+          "name": "pi_mf_overall_violins_total_40kb.pdf",
+          "href": "figures/pi_analysis_results_exact_mf_quadrants/total_40kb/pi_mf_overall_violins_total_40kb.pdf",
+          "preview": "figures/pi_analysis_results_exact_mf_quadrants/total_40kb/pi_mf_overall_violins_total_40kb.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_mf_quadrant_violins_total_40kb.pdf",
+          "href": "figures/pi_analysis_results_exact_mf_quadrants/total_40kb/pi_mf_quadrant_violins_total_40kb.pdf",
+          "preview": "figures/pi_analysis_results_exact_mf_quadrants/total_40kb/pi_mf_quadrant_violins_total_40kb.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_mf_recurrence_violins_total_40kb.pdf",
+          "href": "figures/pi_analysis_results_exact_mf_quadrants/total_40kb/pi_mf_recurrence_violins_total_40kb.pdf",
+          "preview": "figures/pi_analysis_results_exact_mf_quadrants/total_40kb/pi_mf_recurrence_violins_total_40kb.pdf",
+          "type": "pdf"
+        }
+      ]
+    },
+    {
+      "title": "pi_analysis_results_exact_mf_quadrants/total_60kb",
+      "slug": "pi-analysis-results-exact-mf-quadrants-total-60kb",
+      "items": [
+        {
+          "name": "pi_mf_overall_violins_total_60kb.pdf",
+          "href": "figures/pi_analysis_results_exact_mf_quadrants/total_60kb/pi_mf_overall_violins_total_60kb.pdf",
+          "preview": "figures/pi_analysis_results_exact_mf_quadrants/total_60kb/pi_mf_overall_violins_total_60kb.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_mf_quadrant_violins_total_60kb.pdf",
+          "href": "figures/pi_analysis_results_exact_mf_quadrants/total_60kb/pi_mf_quadrant_violins_total_60kb.pdf",
+          "preview": "figures/pi_analysis_results_exact_mf_quadrants/total_60kb/pi_mf_quadrant_violins_total_60kb.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_mf_recurrence_violins_total_60kb.pdf",
+          "href": "figures/pi_analysis_results_exact_mf_quadrants/total_60kb/pi_mf_recurrence_violins_total_60kb.pdf",
+          "preview": "figures/pi_analysis_results_exact_mf_quadrants/total_60kb/pi_mf_recurrence_violins_total_60kb.pdf",
+          "type": "pdf"
+        }
+      ]
+    },
+    {
+      "title": "pi_analysis_results_exact_mf_quadrants/total_80kb",
+      "slug": "pi-analysis-results-exact-mf-quadrants-total-80kb",
+      "items": [
+        {
+          "name": "pi_mf_overall_violins_total_80kb.pdf",
+          "href": "figures/pi_analysis_results_exact_mf_quadrants/total_80kb/pi_mf_overall_violins_total_80kb.pdf",
+          "preview": "figures/pi_analysis_results_exact_mf_quadrants/total_80kb/pi_mf_overall_violins_total_80kb.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_mf_quadrant_violins_total_80kb.pdf",
+          "href": "figures/pi_analysis_results_exact_mf_quadrants/total_80kb/pi_mf_quadrant_violins_total_80kb.pdf",
+          "preview": "figures/pi_analysis_results_exact_mf_quadrants/total_80kb/pi_mf_quadrant_violins_total_80kb.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pi_mf_recurrence_violins_total_80kb.pdf",
+          "href": "figures/pi_analysis_results_exact_mf_quadrants/total_80kb/pi_mf_recurrence_violins_total_80kb.pdf",
+          "preview": "figures/pi_analysis_results_exact_mf_quadrants/total_80kb/pi_mf_recurrence_violins_total_80kb.pdf",
+          "type": "pdf"
+        }
+      ]
+    },
+    {
+      "title": "recurrent_events_analysis_separate_v2",
+      "slug": "recurrent-events-analysis-separate-v2",
+      "items": [
+        {
+          "name": "pi_vs_recurrent_events_separate_lmm_plot.png",
+          "href": "figures/recurrent_events_analysis_separate_v2/pi_vs_recurrent_events_separate_lmm_plot.png",
+          "preview": "figures/recurrent_events_analysis_separate_v2/pi_vs_recurrent_events_separate_lmm_plot.png",
+          "type": "image"
+        }
+      ]
+    }
+  ]
 }
