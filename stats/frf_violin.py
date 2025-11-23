@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
+import pathlib
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -218,7 +218,7 @@ def main():
     ax.legend(handles=legend_handles, loc="upper right", frameon=True, framealpha=0.95)
 
     plt.tight_layout()
-    out_dir = Path(__file__).resolve().parents[1] / "frf"
+    out_dir = pathlib.Path(__file__).resolve().parents[1] / "frf"
     out_dir.mkdir(parents=True, exist_ok=True)
     plt.savefig(out_dir / "frf_violin_from_url.png", dpi=150)
     plt.savefig(out_dir / "frf_violin_from_url.pdf", bbox_inches="tight")
