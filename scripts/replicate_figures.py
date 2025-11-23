@@ -931,29 +931,6 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         action="store_true",
         help="Skip downloading remote artefacts (assume they are already present).",
     )
-    parser.add_argument(
-        "--only",
-        metavar="NAME",
-        help="Run only the task whose name contains the provided substring (case insensitive).",
-    )
-    parser.add_argument(
-        "--skip-long",
-        action="store_true",
-        help="Skip figure tasks that are flagged as long-running (per-site summaries).",
-    )
-    parser.add_argument(
-        "--collect-outputs",
-        nargs="?",
-        const="final_plots",
-        default=None,
-        metavar="DIR",
-        help="Copy generated outputs into DIR (default: final_plots).",
-    )
-    parser.add_argument(
-        "--open-copied",
-        action="store_true",
-        help="Open copied outputs after collection (implies --collect-outputs).",
-    )
     return parser.parse_args(argv)
 
 
@@ -964,7 +941,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parse_args(argv)
-    collection_dir = Path(args.collect_outputs) if args.collect_outputs or args.open_copied else None
+    collection_dir = REPO_ROOT / "final_plots"
 
     plan = build_download_plan(REMOTE_PATHS)
     download_results: List[DownloadResult] = []
@@ -1009,20 +986,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     env.setdefault("MPLBACKEND", "Agg")
 
     selected_tasks = FIGURE_TASKS
-    if args.only:
-        needle = args.only.lower()
-        selected_tasks = tuple(task for task in FIGURE_TASKS if needle in task.name.lower())
-        if not selected_tasks:
-            print(f"No tasks match substring '{args.only}'.")
-            return 1
-
-    if args.skip_long:
-        skipped = [task for task in selected_tasks if task.long_running]
-        selected_tasks = tuple(task for task in selected_tasks if not task.long_running)
-        if skipped:
-            print("Skipping long-running tasks: " + ", ".join(task.name for task in skipped))
-        else:
-            print("No long-running tasks matched the current selection.")
 
     summary: List[tuple[FigureTask, str, str]] = []
     for task in selected_tasks:
@@ -1058,13 +1021,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if state == "⚠️" and task.note:
             print(f"    {task.note}")
 
-    copied_paths: List[Path] = []
-    if collection_dir is not None:
-        copied_paths = collect_outputs(selected_tasks, collection_dir, summary)
-        if args.open_copied and copied_paths:
-            print("\nOpening copied outputs ...")
-            for file_path in copied_paths:
-                open_file(file_path)
+    copied_paths = collect_outputs(selected_tasks, collection_dir, summary)
+    if copied_paths:
+        print("\nOpening copied outputs ...")
+        for file_path in copied_paths:
+            open_file(file_path)
 
     failed_required = [
         (task, status, message)
