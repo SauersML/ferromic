@@ -177,7 +177,7 @@ jobs:
              REGION_ARG="--region-override $REGION_INPUT"
           fi
 
-          JSON=$(python3 cds/generate_gha_matrix.py --batch-size 4 $REGION_ARG)
+          JSON=$(python3 cds/generate_gha_matrix.py --batch-size 1 $REGION_ARG)
 
           # Parse JSON to get regions and batches
           REGIONS=$(echo "$JSON" | python3 -c "import sys, json; print(json.dumps(json.load(sys.stdin)['regions']))")
