@@ -40,11 +40,47 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python stats/replicate_manuscript_statistics.py
 
-      - name: Upload manuscript statistics artifact
+      - name: Collect replication artifacts
+        run: |
+          set -euo pipefail
+          output_dir="replicate-manuscript-statistics"
+          mkdir -p "$output_dir"
+
+          files=(
+            data/cds_identical_proportions.tsv
+            data/gene_inversion_direct_inverted.tsv
+            data/region_identical_proportions.tsv
+            data/skipped_details.tsv
+            data/replicate_manuscript_statistics.txt
+            stats/replicate_manuscript_statistics.txt
+            data/output.csv
+            data/phy_metadata.tsv
+            data/FST_data.tsv
+          )
+
+          collected=0
+          for file in "${files[@]}"; do
+            if [ -e "$file" ]; then
+              dest="$output_dir/$file"
+              mkdir -p "$(dirname "$dest")"
+              cp "$file" "$dest"
+              collected=$((collected + 1))
+              echo "Collected $file"
+            else
+              echo "Skipping $file: not found"
+            fi
+          done
+
+          if [ "$collected" -eq 0 ]; then
+            echo "No output files found to upload" >&2
+            exit 1
+          fi
+
+      - name: Upload manuscript statistics artifacts
         uses: actions/upload-artifact@v4
         with:
           name: replicate-manuscript-statistics
-          path: stats/replicate_manuscript_statistics.txt
+          path: replicate-manuscript-statistics
           if-no-files-found: error
 
       - name: Commit and push data updates
