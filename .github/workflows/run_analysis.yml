@@ -162,6 +162,46 @@ jobs:
             echo "replicate_figures.py exited with status $status but continuing to allow artifact upload."
           fi
 
+      - name: Ensure special gallery figures were generated
+        if: always()
+        run: |
+          set -euo pipefail
+
+          readarray -t REQUIRED < <(python - <<'PY'
+          import json
+          from pathlib import Path
+
+          manifest = Path("web/figures-site/data/special-figures.json")
+          data = json.loads(manifest.read_text())
+
+          filenames: list[str] = []
+          for group in data.get("groups", []):
+              for fig in group.get("figures", []):
+                  name = fig.get("filename")
+                  if name:
+                      filenames.append(name)
+
+          if not filenames:
+              raise SystemExit("No figures listed in special-figures.json")
+
+          for name in filenames:
+              print(name)
+          PY)
+
+          missing=()
+          for relpath in "${REQUIRED[@]}"; do
+            if [[ ! -f "$relpath" ]]; then
+              missing+=("$relpath")
+            fi
+          done
+
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            printf "Missing expected special gallery outputs:%s\n" " ${missing[*]}" >&2
+            exit 1
+          fi
+
+          echo "All required special gallery PDFs were generated."
+
       - name: Copy CDS GLM outputs to data directory
         if: always()
         shell: bash
