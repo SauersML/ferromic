@@ -1392,98 +1392,9 @@ def analyze_single_gene(gene_info, region_tree_path, region_label, paml_bin, cac
                 except Exception: pass
                 return None
 
-            def _parse_ctl_fields(ctl_path):
-                FINT = r'[-+]?\d+'
-                rx = {
-                    "seqfile": re.compile(r'^\s*seqfile\s*=\s*(.+?)\s*$', re.I|re.M),
-                    "treefile": re.compile(r'^\s*treefile\s*=\s*(.+?)\s*$', re.I|re.M),
-                    "model": re.compile(r'^\s*model\s*=\s*(' + FINT + r')\s*$', re.I|re.M),
-                    "NSsites": re.compile(r'^\s*NSsites\s*=\s*(' + FINT + r'(?:\s+' + FINT + r')*)\s*$', re.I|re.M),
-                    "ncatG": re.compile(r'^\s*ncatG\s*=\s*(' + FINT + r')\s*$', re.I|re.M),
-                    "fix_blength": re.compile(r'^\s*fix_blength\s*=\s*(' + FINT + r')\s*$', re.I|re.M),
-                }
-                try: s = _read_text(ctl_path)
-                except Exception: return None
-                def _pick_int(key, default=None):
-                    m = rx[key].search(s)
-                    return int(m.group(1)) if m else default
-                ns_m = rx["NSsites"].search(s)
-                ns_val = None
-                if ns_m:
-                    toks = ns_m.group(1).strip().split()
-                    if toks:
-                        try: ns_val = int(toks[0])
-                        except ValueError: ns_val = None
-                seqfile = rx["seqfile"].search(s)
-                treefile = rx["treefile"].search(s)
-                return {
-                    "seqfile": seqfile.group(1).strip() if seqfile else None,
-                    "treefile": treefile.group(1).strip() if treefile else None,
-                    "model": _pick_int("model"),
-                    "NSsites": ns_val,
-                    "ncatG": _pick_int("ncatG", None),
-                    "fix_blength": _pick_int("fix_blength", 0),
-                }
-
             def _sha_file_safe(p):
                 try: return _sha256_file(p)
                 except Exception: return None
-
-            def _legacy_find_equivalent(out_name, expect_params, expect_gene_phy_sha, expect_tree_sha):
-                cur_dir = _fanout_dir(cache_dir, key_hex)
-                candidate = os.path.join(cur_dir, "artifacts", f"{out_name}.ctl")
-                if os.path.exists(candidate):
-                    fields = _parse_ctl_fields(candidate)
-                    if fields and fields["model"] == expect_params.get("model") \
-                       and fields["NSsites"] == expect_params.get("NSsites") \
-                       and (fields["ncatG"] or None) == expect_params.get("ncatG") \
-                       and (fields["fix_blength"] or 0) == expect_params.get("fix_blength", 0):
-                        seq_sha = _sha_file_safe(fields["seqfile"]) if fields.get("seqfile") else None
-                        tree_sha = _sha_file_safe(fields["treefile"]) if fields.get("treefile") else None
-                        if seq_sha == expect_gene_phy_sha and tree_sha == expect_tree_sha:
-                            payload = cache_read_json(cache_dir, key_hex, "attempt.json")
-                            if payload: return payload, cur_dir, candidate, fields.get("treefile")
-
-                for lvl1 in (os.listdir(cache_dir) if os.path.isdir(cache_dir) else []):
-                    p1 = os.path.join(cache_dir, lvl1)
-                    if not os.path.isdir(p1) or len(lvl1) != 2: continue
-                    for lvl2 in (os.listdir(p1) if os.path.isdir(p1) else []):
-                        p2 = os.path.join(p1, lvl2)
-                        if not os.path.isdir(p2) or len(lvl2) != 2: continue
-                        for keydir in (os.listdir(p2) if os.path.isdir(p2) else []):
-                            kd = os.path.join(p2, keydir)
-                            if not os.path.isdir(kd): continue
-                            att_json = os.path.join(kd, "attempt.json")
-                            if not os.path.exists(att_json): continue
-                            ctl_candidate = os.path.join(kd, "artifacts", f"{out_name}.ctl")
-                            out_candidate = os.path.join(kd, "artifacts", out_name)
-                            if not os.path.exists(ctl_candidate) or not os.path.exists(out_candidate): continue
-                            fields = _parse_ctl_fields(ctl_candidate)
-                            if not fields: continue
-                            if fields["model"] != expect_params.get("model"): continue
-                            if fields["NSsites"] != expect_params.get("NSsites"): continue
-                            if (fields["ncatG"] or None) != expect_params.get("ncatG"): continue
-                            if (fields["fix_blength"] or 0) != expect_params.get("fix_blength", 0): continue
-                            seq_sha = _sha_file_safe(fields["seqfile"]) if fields.get("seqfile") else None
-                            if seq_sha != expect_gene_phy_sha: continue
-                            tree_sha = _sha_file_safe(fields["treefile"]) if fields.get("treefile") else None
-                            if tree_sha != expect_tree_sha: continue
-                            payload = _safe_json_load(att_json)
-                            if payload and isinstance(payload, dict) and "lnl" in payload:
-                                return payload, kd, ctl_candidate, fields.get("treefile")
-                return None, None, None, None
-
-            def _rehydrate_under_new_key(new_key_hex, payload, legacy_dir, legacy_ctl, legacy_tree):
-                target_dir = _fanout_dir(cache_dir, new_key_hex)
-                with _with_lock(target_dir):
-                    cache_write_json(cache_dir, new_key_hex, "attempt.json", payload)
-                    art_dst = os.path.join(target_dir, "artifacts")
-                    os.makedirs(art_dst, exist_ok=True)
-                    _copy_if_exists(os.path.join(legacy_dir, "artifacts", out_name), art_dst, out_name)
-                    _copy_if_exists(os.path.join(legacy_dir, "artifacts", f"{out_name}.ctl"), art_dst, f"{out_name}.ctl")
-                    _copy_if_exists(os.path.join(legacy_dir, "artifacts", "mlc"), art_dst, "mlc")
-                    if legacy_tree and os.path.exists(legacy_tree):
-                        _copy_if_exists(legacy_tree, art_dst, f"{out_name}.tree")
 
             payload = cache_read_json(cache_dir, key_hex, "attempt.json")
             if payload:
@@ -1515,22 +1426,6 @@ def analyze_single_gene(gene_info, region_tree_path, region_label, paml_bin, cac
                                 logging.info(f"[{gene_name}|{region_label}] Healed attempt.json params from artifacts for {out_name}")
                 except Exception: pass
                 return payload
-
-            expect_gene_phy_sha = gene_phy_sha
-            expect_tree_sha = _sha_file_safe(tree_path)
-            expect_params = {
-                "model": model_params.get("model"),
-                "NSsites": model_params.get("NSsites"),
-                "ncatG": model_params.get("ncatG"),
-                "fix_blength": model_params.get("fix_blength", 0),
-            }
-            legacy_payload, legacy_dir, legacy_ctl, legacy_tree = _legacy_find_equivalent(
-                out_name, expect_params, expect_gene_phy_sha, expect_tree_sha
-            )
-            if legacy_payload:
-                logging.info(f"[{gene_name}|{region_label}] Using cached ATTEMPT (legacy rehydrated): {out_name}")
-                _rehydrate_under_new_key(key_hex, legacy_payload, legacy_dir, legacy_ctl, legacy_tree)
-                return legacy_payload
 
             run_dir = os.path.join(temp_dir, out_name.replace(".out", ""))
             ctl_file = os.path.join(run_dir, f"{gene_name}_{out_name}.ctl")
