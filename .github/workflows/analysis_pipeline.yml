@@ -207,7 +207,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      max-parallel: 20
+      max-parallel: 15
       matrix:
         region: ${{ fromJson(needs.prep-and-matrix.outputs.regions) }}
     steps:
@@ -297,7 +297,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      max-parallel: 20
+      max-parallel: 15
       matrix:
         batch: ${{ fromJson(needs.prep-and-matrix.outputs.gene_batches) }}
     steps:
