@@ -65,7 +65,10 @@ def main():
         results_df = lib.compute_fdr(results_df)
 
     # 4. Write Final Output
-    results_df = results_df[ordered_columns]
+    # Preserve standard columns order first, then include any dynamically generated columns
+    remaining_cols = [c for c in results_df.columns if c not in ordered_columns]
+    ordered_with_dynamic = ordered_columns + sorted(remaining_cols)
+    results_df = results_df[ordered_with_dynamic]
 
     output_filename = f"full_paml_results_{datetime.now().strftime('%Y-%m-%d')}.tsv"
     results_df.to_csv(output_filename, sep='\t', index=False, float_format='%.6g')

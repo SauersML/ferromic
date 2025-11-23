@@ -396,7 +396,9 @@ def main():
         else:
             results_df = lib.compute_fdr(results_df)
 
-        results_df = results_df[ordered_columns]
+        remaining_cols = [c for c in results_df.columns if c not in ordered_columns]
+        ordered_with_dynamic = ordered_columns + sorted(remaining_cols)
+        results_df = results_df[ordered_with_dynamic]
         results_df.to_csv(RESULTS_TSV, sep='\t', index=False, float_format='%.6g')
         logging.info(f"Results saved to {RESULTS_TSV}")
 
