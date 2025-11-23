@@ -1,7 +1,7 @@
 use crate::process::{ConfigEntry, VcfError, ZeroBasedHalfOpen};
 use crate::progress::{
-    create_spinner, finish_step_progress, init_step_progress, log, set_stage, update_step_progress,
-    LogLevel, ProcessingStage,
+    LogLevel, ProcessingStage, create_spinner, finish_step_progress, init_step_progress, log,
+    set_stage, update_step_progress,
 };
 use crate::transcripts::TranscriptAnnotationCDS;
 
@@ -125,8 +125,10 @@ pub fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
         // Check if the record has the expected number of fields
         if record.len() != headers.len() {
             let error_msg = format!(
-                "Error: Record on line {} does not have the same number of fields as the header. Expected {}, found {}. Please check for missing tabs in the config file.", 
-                line_num + 2, headers.len(), record.len()
+                "Error: Record on line {} does not have the same number of fields as the header. Expected {}, found {}. Please check for missing tabs in the config file.",
+                line_num + 2,
+                headers.len(),
+                record.len()
             );
             log(LogLevel::Error, &error_msg);
             return Err(VcfError::Parse(format!(
@@ -222,10 +224,16 @@ pub fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
 
     let invalid_percentage = (invalid_genotypes as f64 / total_genotypes as f64) * 100.0;
 
-    log(LogLevel::Info, &format!(
-        "Finished parsing config file. Found {} entries with {} samples. Invalid genotypes: {} ({:.2}%)",
-        entries.len(), sample_names.len(), invalid_genotypes, invalid_percentage
-    ));
+    log(
+        LogLevel::Info,
+        &format!(
+            "Finished parsing config file. Found {} entries with {} samples. Invalid genotypes: {} ({:.2}%)",
+            entries.len(),
+            sample_names.len(),
+            invalid_genotypes,
+            invalid_percentage
+        ),
+    );
 
     Ok(entries)
 }
@@ -356,6 +364,31 @@ pub fn find_vcf_file(folder: &str, chr: &str) -> Result<PathBuf, VcfError> {
         }
     };
 
+    // Helper to ensure chromosome prefixes are matched with digit boundaries
+    let has_chr_prefix_with_boundary = |file_name: &str, prefix: &str| {
+        file_name
+            .strip_prefix(prefix)
+            .map_or(false, |remainder| match remainder.chars().next() {
+                None => true,
+                Some(c) => !c.is_ascii_digit(),
+            })
+    };
+
+    let matches_chr_with_boundary = |file_name: &str| {
+        let patterns = [format!("chr{}", chr), chr.to_string()];
+
+        patterns.iter().any(|pattern| {
+            file_name.match_indices(pattern).any(|(idx, _)| {
+                let after = file_name[idx + pattern.len()..].chars().next();
+                let before = file_name[..idx].chars().rev().next();
+                let after_ok = after.map_or(true, |c| !c.is_ascii_digit());
+                let before_ok = before.map_or(true, |c| !c.is_ascii_digit());
+
+                after_ok && before_ok
+            })
+        })
+    };
+
     // Find all valid VCF files for the chromosome
     let mut vcf_candidates: Vec<(PathBuf, i32)> = entries
         .filter_map(|entry| entry.ok())
@@ -371,12 +404,8 @@ pub fn find_vcf_file(folder: &str, chr: &str) -> Result<PathBuf, VcfError> {
                 .iter()
                 .any(|ext| file_name.ends_with(ext));
 
-            // Check chromosome match
-            let chr_pattern = format!("chr{}", chr);
-            let has_chr = file_name.starts_with(&chr_pattern)
-                || file_name.starts_with(chr)
-                || file_name.contains(&format!("_{}", chr))
-                || file_name.contains(&format!("_{}_", chr));
+            // Check chromosome match with boundary validation to avoid partial matches
+            let has_chr = matches_chr_with_boundary(file_name);
 
             is_vcf && not_auxiliary && has_chr
         })
@@ -402,9 +431,9 @@ pub fn find_vcf_file(folder: &str, chr: &str) -> Result<PathBuf, VcfError> {
             }
 
             // Prefer files with standard chromosome nomenclature
-            if file_name.starts_with(&format!("chr{}", chr)) {
+            if has_chr_prefix_with_boundary(file_name, &format!("chr{}", chr)) {
                 score += 10;
-            } else if file_name.starts_with(chr) {
+            } else if has_chr_prefix_with_boundary(file_name, chr) {
                 score += 5;
             }
 
@@ -415,8 +444,8 @@ pub fn find_vcf_file(folder: &str, chr: &str) -> Result<PathBuf, VcfError> {
         })
         .collect();
 
-    // Sort by score (highest first)
-    vcf_candidates.sort_by(|a, b| b.1.cmp(&a.1));
+    // Sort by score (highest first), then by path for deterministic ordering on ties
+    vcf_candidates.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
 
     if vcf_candidates.is_empty() {
         // No VCF files found for the specified chromosome
@@ -445,10 +474,13 @@ pub fn find_vcf_file(folder: &str, chr: &str) -> Result<PathBuf, VcfError> {
             .collect();
 
         if any_vcf_files.is_empty() {
-            log(LogLevel::Error, &format!(
-                "No VCF files found in directory {}. Please check path is correct and contains VCF files.", 
-                folder
-            ));
+            log(
+                LogLevel::Error,
+                &format!(
+                    "No VCF files found in directory {}. Please check path is correct and contains VCF files.",
+                    folder
+                ),
+            );
         } else {
             log(LogLevel::Info, "Available VCF files in directory:");
             for file in any_vcf_files.iter().take(5) {
