@@ -16,6 +16,11 @@
           "description": "Hudson's FST violin plot split by single-event and recurrent inversion groups."
         },
         {
+          "title": "Spearman Decay Raincloud",
+          "filename": "special/spearman_decay_raincloud.pdf",
+          "description": "Raincloud distribution of Spearman correlations for FST decay near breakpoints, split by single-event versus recurrent inversions with significance highlighted."
+        },
+        {
           "title": "Median π vs. Distance to Breakpoints (100 kb)",
           "filename": "length_norm_trend_fast/pi_vs_inversion_edge_bp_cap100kb_grouped_median.pdf",
           "description": "Median per-site nucleotide diversity as a function of distance from inversion breakpoints (100 kb window)."
