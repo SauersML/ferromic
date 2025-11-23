@@ -16,7 +16,7 @@ use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::fmt::Write as FmtWrite;
-use std::fs::{File, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufWriter, Write};
 use std::path::Path;
 use std::time::SystemTime;
@@ -636,11 +636,15 @@ pub fn prepare_to_write_cds(
             end: cds_span_end,
         };
 
+        let mut is_partial_overlap = false;
+
         if let Some(overlap) = cds_span.intersect(&inversion_interval) {
             let cds_fully_inside_inversion = cds_span.start >= inversion_interval.start
                 && cds_span.end <= inversion_interval.end;
 
             if !cds_fully_inside_inversion {
+                is_partial_overlap = true;
+
                 let cds_start_1b = cds_span.start_1based_inclusive();
                 let cds_end_1b = cds_span.get_1based_inclusive_end_coord();
                 let inv_start_1b = inversion_interval.start_1based_inclusive();
@@ -844,52 +848,70 @@ pub fn prepare_to_write_cds(
         );
         let gz_filename = format!("{}.gz", filename);
 
-        // First try to write the PHYLIP file.
-        // If this fails, we do NOT write metadata, ensuring consistency.
-        write_phylip_file(&filename, &filtered_map, &cds.transcript_id, temp_path)?;
-
-        let segment_coords_str = cds
-            .segments
-            .iter()
-            .map(|seg| {
-                format!(
-                    "{}-{}",
-                    seg.start_1based_inclusive(),
-                    seg.get_1based_inclusive_end_coord()
-                )
-            })
-            .collect::<Vec<String>>()
-            .join(";");
-
-        let spliced_length = filtered_map.values().next().map_or(0, |seq| seq.len());
-
-        let metadata = PhyMetadata {
-            phy_filename: gz_filename.clone(),
-            transcript_id: cds.transcript_id.clone(),
-            gene_name: cds.gene_name.clone(),
-            chromosome: chromosome.to_string(),
-            haplotype_group,
-            overall_start: cds_start,
-            overall_end: cds_end,
-            spliced_length,
-            segment_coords: segment_coords_str,
+        // Determine output directory based on overlap status
+        let target_dir = if is_partial_overlap {
+            let d = temp_path.join("partial_overlap");
+            // Ensure the directory exists
+            fs::create_dir_all(&d).map_err(|e| {
+                VcfError::Io(io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("Failed to create partial_overlap directory: {}", e),
+                ))
+            })?;
+            d
+        } else {
+            temp_path.to_path_buf()
         };
 
-        // Lock the shared writer and write the single record.
-        METADATA_WRITER
-            .lock()
-            .write_record(&[
-                &metadata.phy_filename,
-                &metadata.transcript_id,
-                &metadata.gene_name,
-                &metadata.chromosome,
-                &metadata.haplotype_group.to_string(),
-                &metadata.overall_start.to_string(),
-                &metadata.overall_end.to_string(),
-                &metadata.spliced_length.to_string(),
-                &metadata.segment_coords,
-            ])
-            .map_err(|e| VcfError::Parse(format!("Failed to write metadata record: {}", e)))?;
+        // First try to write the PHYLIP file.
+        // If this fails, we do NOT write metadata, ensuring consistency.
+        write_phylip_file(&filename, &filtered_map, &cds.transcript_id, &target_dir)?;
+
+        // Only write metadata if it is NOT a partial overlap
+        if !is_partial_overlap {
+            let segment_coords_str = cds
+                .segments
+                .iter()
+                .map(|seg| {
+                    format!(
+                        "{}-{}",
+                        seg.start_1based_inclusive(),
+                        seg.get_1based_inclusive_end_coord()
+                    )
+                })
+                .collect::<Vec<String>>()
+                .join(";");
+
+            let spliced_length = filtered_map.values().next().map_or(0, |seq| seq.len());
+
+            let metadata = PhyMetadata {
+                phy_filename: gz_filename.clone(),
+                transcript_id: cds.transcript_id.clone(),
+                gene_name: cds.gene_name.clone(),
+                chromosome: chromosome.to_string(),
+                haplotype_group,
+                overall_start: cds_start,
+                overall_end: cds_end,
+                spliced_length,
+                segment_coords: segment_coords_str,
+            };
+
+            // Lock the shared writer and write the single record.
+            METADATA_WRITER
+                .lock()
+                .write_record(&[
+                    &metadata.phy_filename,
+                    &metadata.transcript_id,
+                    &metadata.gene_name,
+                    &metadata.chromosome,
+                    &metadata.haplotype_group.to_string(),
+                    &metadata.overall_start.to_string(),
+                    &metadata.overall_end.to_string(),
+                    &metadata.spliced_length.to_string(),
+                    &metadata.segment_coords,
+                ])
+                .map_err(|e| VcfError::Parse(format!("Failed to write metadata record: {}", e)))?;
+        }
         // --- END OF NEW LOGIC ---
     }
     Ok(())
