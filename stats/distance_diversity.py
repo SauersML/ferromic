@@ -2,10 +2,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 from pathlib import Path
 import os
+import multiprocessing as mp
 from scipy.ndimage import gaussian_filter1d
 from numba import njit
 from tqdm import tqdm
 import time
+
+WORKER_COUNT = max(1, min(4, mp.cpu_count() or 1))
 
 DEBUG_LINE_LIMIT = 25
 DEBUG_SEQUENCE_LIMIT = 25
@@ -64,6 +67,51 @@ def load_data(file_path, max_sequences=1000):
     return (np.array(theta_labels, dtype=object), np.array(theta_data, dtype=object)), \
            (np.array(pi_labels, dtype=object), np.array(pi_data, dtype=object))
 
+
+def _process_sequence_worker(args):
+    idx, values, max_dist = args
+    seq_len = len(values)
+    positions = np.arange(seq_len, dtype=np.int32)
+    dists = compute_distances(positions, seq_len)
+
+    mask = dists <= max_dist
+    dists = dists[mask]
+    values = values[mask]
+
+    valid = ~np.isnan(values)
+    nz = valid & (values != 0)
+
+    nz_dists = dists[nz]
+    nz_vals = values[nz]
+    line_nz = (np.array([], dtype=np.float32), np.array([], dtype=np.float32))
+    closest = np.array([], dtype=bool)
+    furthest = np.array([], dtype=bool)
+    if nz_dists.size:
+        sort_idx = np.argsort(nz_dists)
+        line_nz = (nz_dists[sort_idx], nz_vals[sort_idx])
+        closest = nz_dists == np.min(nz_dists)
+        furthest = nz_dists == np.max(nz_dists)
+
+    line_zero = (np.array([], dtype=np.float32), np.array([], dtype=np.float32))
+    if np.any(valid):
+        valid_dists = dists[valid]
+        valid_vals = values[valid]
+        zero_density = (valid_vals == 0).astype(np.float32)
+        sort_idx = np.argsort(valid_dists)
+        line_zero = (valid_dists[sort_idx], zero_density[sort_idx])
+
+    return {
+        "idx": idx,
+        "seq_len": seq_len,
+        "line_nz": line_nz,
+        "line_zero": line_zero,
+        "nz_dists": nz_dists,
+        "nz_vals": nz_vals,
+        "closest": closest,
+        "furthest": furthest,
+    }
+
+
 # Process data, keeping only points within some number from edge and filtering sequences by mean
 def process_data(data_values, max_dist=5000):
     """Process sequences, keeping only points within some number from edge."""
@@ -83,57 +131,27 @@ def process_data(data_values, max_dist=5000):
     all_nz_dists, all_nz_vals = [], []
     all_closest, all_furthest = [], []
     max_seq_len = 0
-    
-    for idx, values in enumerate(tqdm(filtered_data_values, desc="Processing sequences", unit="seq")):
-        if idx < DEBUG_SEQUENCE_LIMIT:
-            print(f"DEBUG: Sequence {idx + 1}: Length = {len(values)}")
-        seq_len = len(values)
-        max_seq_len = max(max_seq_len, seq_len)
-        positions = np.arange(seq_len, dtype=np.int32)
-        dists = compute_distances(positions, seq_len)
 
-        # Filter for distances <= some number
-        mask = dists <= max_dist
-        dists = dists[mask]
-        values = values[mask]
-        if idx < DEBUG_SEQUENCE_LIMIT:
-            print(f"DEBUG: Sequence {idx + 1}: {len(dists)} points within {max_dist} from edge")
+    with mp.Pool(processes=WORKER_COUNT) as pool:
+        for res in tqdm(
+            pool.imap_unordered(
+                _process_sequence_worker,
+                ((idx, values, max_dist) for idx, values in enumerate(filtered_data_values)),
+            ),
+            total=len(filtered_data_values),
+            desc=f"Processing sequences (x{WORKER_COUNT} cores)",
+            unit="seq",
+        ):
+            max_seq_len = max(max_seq_len, res["seq_len"])
+            line_nz_data.append(res["line_nz"])
+            line_zero_data.append(res["line_zero"])
 
-        valid = ~np.isnan(values)
-        nz = valid & (values != 0)
-        zeros = valid & (values == 0)
-        if idx < DEBUG_SEQUENCE_LIMIT:
-            print(f"DEBUG: Sequence {idx + 1}: {np.sum(valid)} valid, {np.sum(nz)} non-zero, {np.sum(zeros)} zeros")
+            if res["nz_dists"].size:
+                all_nz_dists.append(res["nz_dists"])
+                all_nz_vals.append(res["nz_vals"])
+                all_closest.append(res["closest"])
+                all_furthest.append(res["furthest"])
 
-        if np.any(nz):
-            nz_dists = dists[nz]
-            nz_vals = values[nz]
-            sort_idx = np.argsort(nz_dists)
-            line_nz_data.append((nz_dists[sort_idx], nz_vals[sort_idx]))
-            all_nz_dists.append(nz_dists)
-            all_nz_vals.append(nz_vals)
-            all_closest.append(nz_dists == np.min(nz_dists))
-            all_furthest.append(nz_dists == np.max(nz_dists))
-            if idx < DEBUG_SEQUENCE_LIMIT:
-                print(f"DEBUG: Sequence {idx + 1}: Added {len(nz_dists)} non-zero points")
-        else:
-            line_nz_data.append((np.array([], dtype=np.float32), np.array([], dtype=np.float32)))
-            if idx < DEBUG_SEQUENCE_LIMIT:
-                print(f"DEBUG: Sequence {idx + 1}: No non-zero data")
-
-        if np.any(valid):
-            valid_dists = dists[valid]
-            valid_vals = values[valid]
-            zero_density = (valid_vals == 0).astype(np.float32)
-            sort_idx = np.argsort(valid_dists)
-            line_zero_data.append((valid_dists[sort_idx], zero_density[sort_idx]))
-            if idx < DEBUG_SEQUENCE_LIMIT:
-                print(f"DEBUG: Sequence {idx + 1}: Added {len(valid_dists)} zero-density points")
-        else:
-            line_zero_data.append((np.array([], dtype=np.float32), np.array([], dtype=np.float32)))
-            if idx < DEBUG_SEQUENCE_LIMIT:
-                print(f"DEBUG: Sequence {idx + 1}: No valid data for zero-density")
-    
     all_nz_dists = np.concatenate(all_nz_dists) if all_nz_dists else np.array([], dtype=np.float32)
     all_nz_vals = np.concatenate(all_nz_vals) if all_nz_vals else np.array([], dtype=np.float32)
     all_closest = np.concatenate(all_closest) if all_closest else np.array([], dtype=bool)
