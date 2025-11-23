@@ -21,6 +21,7 @@ interface SpecialPageProps {
 
 const MANIFEST_PATH = path.join(process.cwd(), 'data', 'special-figures.json');
 const PHEWAS_FIGURES_PATH = path.join(process.cwd(), 'data', 'phewas-figures.json');
+const FIGURES_MANIFEST_PATH = path.join(process.cwd(), 'data', 'figures.json');
 const SUPPLEMENTARY_FILENAME = 'supplementary_tables.xlsx';
 const SUPPLEMENTARY_PUBLIC_PATH = path.join(
   process.cwd(),
@@ -70,6 +71,22 @@ export const getStaticProps: GetStaticProps<SpecialPageProps> = async () => {
     } catch (error) {
       // If phewas-figures.json doesn't exist or can't be read, use the hardcoded list
       console.log('ℹ Using hardcoded PheWAS figure list (phewas-figures.json not found)');
+    }
+
+    try {
+      const figuresRaw = await fs.readFile(FIGURES_MANIFEST_PATH, 'utf-8');
+      const figuresManifest = JSON.parse(figuresRaw) as { generatedAt?: string | null };
+
+      if (figuresManifest.generatedAt) {
+        manifest.generatedAt = figuresManifest.generatedAt;
+        console.log(
+          `✓ Using generatedAt from figures manifest: ${figuresManifest.generatedAt}`,
+        );
+      }
+    } catch (error) {
+      console.log(
+        'ℹ No figures manifest found; using generatedAt from special-figures.json',
+      );
     }
 
     return {
