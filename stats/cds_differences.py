@@ -404,6 +404,9 @@ def main():
     print(f"    Recurrent rows: {len(rows_by_cons[1])}")
     print(f"    Single-event rows: {len(rows_by_cons[0])}")
 
+    # Build exact-match lookup for valid consensus entries
+    valid_inv_lookup = {(r["_chr_norm"], r["_Start_int"], r["_End_int"]): r["_consensus_int"] for r in rows_all}
+
     # Discover .phy
     phy_files = sorted([f for f in os.listdir(".") if f.endswith(".phy") and os.path.isfile(f)])
     print(f">>> Found {len(phy_files)} .phy files.")
@@ -512,31 +515,26 @@ def main():
                 f"Duplicate key (gene={g}, inv={inv_id}, group={'Inverted' if grp==1 else 'Direct'}); kept {kept_fn}"
             )
 
-    # Map CDS by CDS overlap
-    print(">>> Mapping CDS files to consensus categories (by CDS overlap) ...")
+    # Map CDS by EXACT inversion coordinates
+    print(">>> Mapping CDS files to consensus categories (by EXACT inversion coordinates) ...")
     it = tqdm(cds_files, desc="CDS mapping") if HAVE_TQDM else cds_files
     for rec in it:
         fn = rec["filename"]; chr_ = rec["chr"]; grp = rec["phy_group"]
-        cds_s = rec["cds_start"]; cds_e = rec["cds_end"]
         inv_s = rec["inv_start"]; inv_e = rec["inv_end"]
-        overl_1 = any((chr_ == row["_chr_norm"]) and intervals_overlap(cds_s, cds_e, row["_Start_int"], row["_End_int"])
-                      for row in rows_by_cons[1])
-        overl_0 = any((chr_ == row["_chr_norm"]) and intervals_overlap(cds_s, cds_e, row["_Start_int"], row["_End_int"])
-                      for row in rows_by_cons[0])
-        overl_na = any((chr_ == row["_chr_norm"]) and intervals_overlap(cds_s, cds_e, row["_Start_int"], row["_End_int"])
-                       for row in rows_cons_na)
-        exact_ok = 1 if (chr_, inv_s, inv_e) in exact_triplets else 0
-        cds_sanity_exact_match[fn] = exact_ok
-        if not overl_1 and not overl_0:
-            if overl_na:
+
+        inv_key = (chr_, inv_s, inv_e)
+        if inv_key in valid_inv_lookup:
+            cds_sanity_exact_match[fn] = 1
+            cons_val = valid_inv_lookup[inv_key]
+            categories[("CDS", cons_val, grp)].add(fn)
+        else:
+            cds_sanity_exact_match[fn] = 0
+            if inv_key in exact_triplets_na:
                 record_skip("CDS", None, None, fn, "CDS_CONSENSUS_NA",
-                            f"CDS [{cds_s},{cds_e}] on chr {chr_} overlaps inv_info row with NA consensus")
+                            f"File header inversion ({chr_}:{inv_s}-{inv_e}) matched inv_info row but consensus was NA")
             else:
-                record_skip("CDS", None, None, fn, "CDS_NO_OVERLAP",
-                            f"CDS [{cds_s},{cds_e}] on chr {chr_} overlaps no inv_info row")
-            continue
-        if overl_1: categories[("CDS", 1, grp)].add(fn)
-        if overl_0: categories[("CDS", 0, grp)].add(fn)
+                record_skip("CDS", None, None, fn, "CDS_NO_EXACT_MATCH",
+                            f"File header inversion ({chr_}:{inv_s}-{inv_e}) not found in inv_properties")
 
     # Deduplicate CDS per category
     print(">>> Deduplicating CDS entries per category by (phy_group, chr, cds_start, cds_end, consensus) ...")
