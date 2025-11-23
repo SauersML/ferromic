@@ -34,7 +34,7 @@ LINE_WIDTH     = 3.0
 COLOR_LINE     = "#4F46E5"  # indigo-600
 COLOR_DOTS     = "#22C55E"  # emerald-500
 
-N_CORES        = max(1, mp.cpu_count() - 1)
+N_CORES        = min(4, max(1, mp.cpu_count()))
 
 logging.basicConfig(
     level=logging.INFO,

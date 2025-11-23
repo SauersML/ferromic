@@ -4,8 +4,12 @@ on:
   workflow_dispatch:
 
 jobs:
-  run-figures:
+  generate-figures:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [CDS, Diversity, FST, Associations]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -156,54 +160,14 @@ jobs:
         shell: bash
         run: |
           status=0
-          python scripts/replicate_figures.py --skip-downloads || status=$?
+          python scripts/replicate_figures.py --skip-downloads --group "${{ matrix.group }}" || status=$?
           echo "replicate_figures_exit_code=$status" >> "$GITHUB_OUTPUT"
           if [[ $status -ne 0 ]]; then
             echo "replicate_figures.py exited with status $status but continuing to allow artifact upload."
           fi
 
-      - name: Ensure special gallery figures were generated
-        if: always()
-        run: |
-          set -euo pipefail
-
-          readarray -t REQUIRED < <(python - <<'PY'
-          import json
-          from pathlib import Path
-
-          manifest = Path("web/figures-site/data/special-figures.json")
-          data = json.loads(manifest.read_text())
-
-          filenames: list[str] = []
-          for group in data.get("groups", []):
-              for fig in group.get("figures", []):
-                  name = fig.get("filename")
-                  if name:
-                      filenames.append(name)
-
-          if not filenames:
-              raise SystemExit("No figures listed in special-figures.json")
-
-          for name in filenames:
-              print(name)
-          PY)
-
-          missing=()
-          for relpath in "${REQUIRED[@]}"; do
-            if [[ ! -f "$relpath" ]]; then
-              missing+=("$relpath")
-            fi
-          done
-
-          if [[ ${#missing[@]} -gt 0 ]]; then
-            printf "Missing expected special gallery outputs:%s\n" " ${missing[*]}" >&2
-            exit 1
-          fi
-
-          echo "All required special gallery PDFs were generated."
-
       - name: Copy CDS GLM outputs to data directory
-        if: always()
+        if: always() && matrix.group == 'CDS'
         shell: bash
         run: |
           set -euo pipefail
@@ -217,45 +181,6 @@ jobs:
               echo "Missing $f; skipping copy"
             fi
           done
-
-      - name: Commit and push data updates
-        if: always()
-        env:
-          PUSH_TOKEN: ${{ secrets.WRITE_TOKEN }}
-        run: |
-          set -euo pipefail
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git add data/cds_emm_adjusted.tsv || true
-          git add data/cds_emm_nocov.tsv || true
-          git add data/cds_pairwise_nocov.tsv || true
-
-          if git diff --staged --quiet; then
-            echo "No CDS GLM data changes to commit"
-            exit 0
-          fi
-
-          git commit -m "Update CDS GLM outputs from run-analysis workflow"
-          git pull https://${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git main --rebase --autostash --strategy=recursive -X ours
-          git push https://${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git HEAD:main
-
-      - name: Post-run diagnostics
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo '=== Repository root contents ==='
-          ls -al
-          echo '=== Generated figures (top level) ==='
-          find . -maxdepth 1 -type f \( -name '*.png' -o -name '*.pdf' -o -name '*.svg' \) -print
-          echo '=== Generated figures (within subdirectories) ==='
-          find stats -maxdepth 3 -type f \( -name '*.png' -o -name '*.pdf' -o -name '*.svg' \) -print || true
-          echo '=== Download directory structure ==='
-          find analysis_downloads -maxdepth 2 -type f -print
-          echo '=== Disk usage summary ==='
-          du -h --max-depth=1
 
       - name: Collect generated outputs
         if: always()
@@ -286,6 +211,146 @@ jobs:
               shutil.copytree(downloads_src, downloads_dest)
           PY
 
+      - name: Upload partial figures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: partial-figures-${{ matrix.group }}
+          path: artifacts/figures
+          if-no-files-found: warn
+
+      - name: Upload CDS data outputs
+        if: always() && matrix.group == 'CDS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cds-data
+          path: |
+            data/cds_emm_adjusted.tsv
+            data/cds_emm_nocov.tsv
+            data/cds_pairwise_nocov.tsv
+          if-no-files-found: warn
+
+      - name: Upload downloaded data artefacts
+        if: always() && matrix.group == 'CDS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: analysis-downloads
+          path: artifacts/downloads
+          if-no-files-found: warn
+
+  finalize-outputs:
+    runs-on: ubuntu-latest
+    needs: generate-figures
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download partial figure artefacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: partial-figures-*
+          path: partial-figures
+
+      - name: Merge figure artefacts
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/figures
+          shopt -s globstar nullglob dotglob
+          for dir in partial-figures/partial-figures-*; do
+            [[ -d "$dir" ]] || continue
+            for file in "$dir"/**/*; do
+              [[ -f "$file" ]] || continue
+              rel="${file#${dir}/}"
+              dest="artifacts/figures/$rel"
+              mkdir -p "$(dirname "$dest")"
+              cp "$file" "$dest"
+            done
+          done
+
+      - name: Ensure special gallery figures were generated
+        run: |
+          set -euo pipefail
+
+          readarray -t REQUIRED < <(python - <<'PY'
+          import json
+          from pathlib import Path
+
+          manifest = Path("web/figures-site/data/special-figures.json")
+          data = json.loads(manifest.read_text())
+
+          filenames: list[str] = []
+          for group in data.get("groups", []):
+              for fig in group.get("figures", []):
+                  name = fig.get("filename")
+                  if name:
+                      filenames.append(name)
+
+          if not filenames:
+              raise SystemExit("No figures listed in special-figures.json")
+
+          for name in filenames:
+              print(name)
+          PY)
+
+          missing=()
+          for relpath in "${REQUIRED[@]}"; do
+            if [[ ! -f "artifacts/figures/$relpath" ]]; then
+              missing+=("$relpath")
+            fi
+          done
+
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            printf "Missing expected special gallery outputs:%s\n" " ${missing[*]}" >&2
+            exit 1
+          fi
+
+          echo "All required special gallery PDFs were generated."
+
+      - name: Download CDS data artefacts
+        uses: actions/download-artifact@v4
+        with:
+          name: cds-data
+          path: cds-data
+          if-no-files-found: warn
+
+      - name: Download analysis downloads
+        uses: actions/download-artifact@v4
+        with:
+          name: analysis-downloads
+          path: artifacts/downloads
+          if-no-files-found: warn
+
+      - name: Restore CDS data into repository
+        if: always()
+        run: |
+          set -euo pipefail
+          if [[ -d cds-data ]]; then
+            mkdir -p data
+            cp cds-data/*.tsv data/ || true
+          fi
+
+      - name: Commit and push data updates
+        if: always()
+        env:
+          PUSH_TOKEN: ${{ secrets.WRITE_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add data/cds_emm_adjusted.tsv || true
+          git add data/cds_emm_nocov.tsv || true
+          git add data/cds_pairwise_nocov.tsv || true
+
+          if git diff --staged --quiet; then
+            echo "No CDS GLM data changes to commit"
+          else
+            git commit -m "Update CDS GLM outputs from run-analysis workflow"
+            git pull https://${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git main --rebase --autostash --strategy=recursive -X ours
+            git push https://${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git HEAD:main
+          fi
+
       - name: Upload figure artefacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -301,4 +366,3 @@ jobs:
           name: analysis-downloads
           path: artifacts/downloads
           if-no-files-found: warn
-
