@@ -1,15 +1,15 @@
 use clap::Parser;
+use colored::*;
 use ferromic::parse::{
     find_vcf_file, open_vcf_reader, parse_config_file, parse_region, parse_regions_file,
 };
 use ferromic::process::{
-    create_temp_dir, process_config_entries, Args, ConfigEntry, VcfError, ZeroBasedHalfOpen,
+    Args, ConfigEntry, VcfError, ZeroBasedHalfOpen, create_temp_dir, process_config_entries,
 };
 use ferromic::progress::{
-    display_status_box, finish_all, force_flush_all, init_global_progress, log,
-    update_global_progress, LogLevel, StatusBox,
+    LogLevel, StatusBox, display_status_box, finish_all, force_flush_all, init_global_progress,
+    log, update_global_progress,
 };
-use colored::*;
 use ferromic::transcripts;
 use rayon::ThreadPoolBuilder;
 use std::collections::{HashMap, HashSet};
@@ -20,6 +20,7 @@ use std::sync::Arc;
 /// Helper function to resolve exclusion requests against available samples.
 /// It checks VCF headers and (optionally) config file entries.
 /// Returns the set of FULL sample names that should be excluded.
+
 fn resolve_sample_exclusions(
     vcf_folder: &str,
     chr: &str,
@@ -30,16 +31,17 @@ fn resolve_sample_exclusions(
         return Ok(HashSet::new());
     }
 
-    // 1. Gather all known sample names
-    let mut known_samples: HashSet<String> = HashSet::new();
+    // 1. Gather all known sample names separately
+    let mut vcf_sample_ids: HashSet<String> = HashSet::new();
+    let mut config_sample_ids: HashSet<String> = HashSet::new();
 
     // From VCF
     match find_vcf_file(vcf_folder, chr) {
         Ok(vcf_file) => {
-             if let Ok(vcf_samples) = read_sample_names_from_vcf(&vcf_file) {
-                 known_samples.extend(vcf_samples);
-             }
-        },
+            if let Ok(vcf_samples) = read_sample_names_from_vcf(&vcf_file) {
+                vcf_sample_ids.extend(vcf_samples);
+            }
+        }
         Err(_) => {
             // If VCF not found, we can't validate against it, but we might have config entries.
         }
@@ -48,12 +50,12 @@ fn resolve_sample_exclusions(
     // From Config
     if let Some(entries) = config_entries {
         for entry in entries {
-            known_samples.extend(entry.samples_unfiltered.keys().cloned());
-            known_samples.extend(entry.samples_filtered.keys().cloned());
+            config_sample_ids.extend(entry.samples_unfiltered.keys().cloned());
+            config_sample_ids.extend(entry.samples_filtered.keys().cloned());
         }
     }
 
-    if known_samples.is_empty() {
+    if vcf_sample_ids.is_empty() && config_sample_ids.is_empty() {
         // If we found no samples anywhere, we can't resolve anything.
         // Return original set as a fallback to avoid dropping anything potentially valid
         // but not found in the representative check.
@@ -63,60 +65,126 @@ fn resolve_sample_exclusions(
     // 2. Resolve
     let mut resolved_set = HashSet::new();
     let mut missing = Vec::new();
+    let mut successful_requests = 0usize;
+    let mut vcf_resolved_set = HashSet::new();
+    let mut config_resolved_set = HashSet::new();
 
-    for req in requested_exclusions {
-        // A. Exact match
-        if known_samples.contains(req) {
-            resolved_set.insert(req.clone());
-            continue;
-        }
+    let mut requests: Vec<&String> = requested_exclusions.iter().collect();
+    requests.sort();
 
-        // B. Fuzzy match (Trim + Substring)
+    for req in requests {
         let trimmed = req.trim();
-        let mut substrings = Vec::new();
-        for sample in &known_samples {
-             if sample.contains(trimmed) {
-                 substrings.push(sample.clone());
-             }
-        }
 
-        if !substrings.is_empty() {
-            // Sorting for deterministic output in logs
+        // VCF matches
+        let (vcf_matches, vcf_match_type) = if vcf_sample_ids.contains(trimmed) {
+            (vec![trimmed.to_string()], "Exact Match")
+        } else {
+            let mut substrings: Vec<String> = vcf_sample_ids
+                .iter()
+                .filter(|sample| sample.contains(trimmed))
+                .cloned()
+                .collect();
             substrings.sort();
-             log(
-                LogLevel::Warning,
-                &format!("Exclusion request '{}' (trimmed: '{}') not found exactly, but matched {} samples via substring match: {:?}", req, trimmed, substrings.len(), substrings),
-            );
-            resolved_set.extend(substrings);
-            continue;
+            if substrings.is_empty() {
+                (Vec::new(), "No Match")
+            } else {
+                (substrings, "Fuzzy Match")
+            }
+        };
+
+        // Config matches
+        let (config_matches, config_match_type) = if config_sample_ids.contains(trimmed) {
+            (vec![trimmed.to_string()], "Exact Match")
+        } else {
+            let mut substrings: Vec<String> = config_sample_ids
+                .iter()
+                .filter(|sample| sample.contains(trimmed))
+                .cloned()
+                .collect();
+            substrings.sort();
+            if substrings.is_empty() {
+                (Vec::new(), "No Match")
+            } else {
+                (substrings, "Fuzzy Match")
+            }
+        };
+
+        let mut request_ids: HashSet<String> = HashSet::new();
+        for id in &vcf_matches {
+            request_ids.insert(id.clone());
+            vcf_resolved_set.insert(id.clone());
+        }
+        for id in &config_matches {
+            request_ids.insert(id.clone());
+            config_resolved_set.insert(id.clone());
         }
 
-        missing.push(req);
+        let action_message = if request_ids.is_empty() {
+            "No IDs were added to exclusion list.".to_string()
+        } else {
+            successful_requests += 1;
+            resolved_set.extend(request_ids.iter().cloned());
+            format!(
+                "Added {} specific IDs to exclusion list.",
+                request_ids.len()
+            )
+        };
+
+        let log_message = format!(
+            "[INFO] Exclusion Request: '{}'\n       - VCF Matches ({}): {:?} ({})\n       - TSV Matches ({}): {:?} ({})\n       - Action: {}",
+            trimmed,
+            vcf_matches.len(),
+            vcf_matches,
+            vcf_match_type,
+            config_matches.len(),
+            config_matches,
+            config_match_type,
+            action_message
+        );
+
+        log(LogLevel::Info, &log_message);
+
+        if request_ids.is_empty() {
+            log(
+                LogLevel::Warning,
+                &format!(
+                    "[WARN] Exclusion Request '{}' yielded no matches in VCF headers or Config columns. Marking as ghost.",
+                    trimmed
+                ),
+            );
+            missing.push(trimmed.to_string());
+        }
     }
 
     // 3. Report
-    if !resolved_set.is_empty() {
-        log(
-            LogLevel::Info,
-            &format!(
-                "Confirmed: {} unique samples will be excluded from analysis.",
-                resolved_set.len()
-            ),
-        );
-    }
+    log(
+        LogLevel::Info,
+        &format!(
+            "[INFO] Exclusion Summary:
+       - User Requests Processed: {}
+       - User Requests Resolved: {}
+       - Total IDs Banned: {}
+       - Breakdown: {} from VCF headers, {} from Config columns",
+            requested_exclusions.len(),
+            successful_requests,
+            resolved_set.len(),
+            vcf_resolved_set.len(),
+            config_resolved_set.len()
+        ),
+    );
 
     if !missing.is_empty() {
-        missing.sort();
+        let mut missing_sorted = missing.clone();
+        missing_sorted.sort();
         let msg = format!(
             "WARNING: The following samples were requested for exclusion but NOT found in VCF or Config headers (tried exact, trimmed, and substring): {:?}. Check your spelling.",
-            missing
+            missing_sorted
         );
         eprintln!("{}", msg.yellow().bold());
     }
 
     Ok(resolved_set)
 }
-
 /// A helper function to read sample names from the VCF header,
 /// returning them in the order found after the `#CHROM POS ID REF ALT ...` columns.
 fn read_sample_names_from_vcf(vcf_path: &Path) -> Result<Vec<String>, VcfError> {
@@ -255,7 +323,7 @@ fn main() -> Result<(), VcfError> {
                 &args.vcf_folder,
                 &first_entry.seqname,
                 &initial_exclusion_set,
-                Some(&config_entries)
+                Some(&config_entries),
             )?
         } else {
             initial_exclusion_set.clone()
@@ -326,12 +394,8 @@ fn main() -> Result<(), VcfError> {
     // ------------------------------------------------------------------------
     } else if let Some(chr) = args.chr.as_ref() {
         // Resolve exclusions using just the chromosome
-        let resolved_exclusion_set = resolve_sample_exclusions(
-            &args.vcf_folder,
-            chr,
-            &initial_exclusion_set,
-            None
-        )?;
+        let resolved_exclusion_set =
+            resolve_sample_exclusions(&args.vcf_folder, chr, &initial_exclusion_set, None)?;
 
         // Figure out region start/end from user input, or default to the entire chromosome
         let interval = if let Some(region_str) = args.region.as_ref() {
