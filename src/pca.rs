@@ -11,6 +11,7 @@ use faer::{
 use ndarray::Array2;
 use ndarray::ShapeBuilder;
 use ndarray::s;
+#[cfg(feature = "python")]
 use numpy::ndarray::ArrayView3;
 use rayon::prelude::*;
 
@@ -21,8 +22,7 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::Path;
 
-use crate::Variant;
-use crate::process::VcfError;
+use crate::process::{PackedGenotype, Variant, VcfError};
 use crate::progress::{
     LogLevel, ProcessingStage, StatusBox, create_spinner, display_status_box, log, set_stage,
 };
@@ -79,7 +79,8 @@ pub fn compute_chromosome_pca(
         let mut allele_sum = 0usize;
         let mut complete = true;
         for genotype in variant.genotypes.iter() {
-            let Some(alleles) = genotype else {
+            let alleles_opt: Option<PackedGenotype> = genotype;
+            let Some(alleles) = alleles_opt else {
                 complete = false;
                 break;
             };
@@ -99,7 +100,8 @@ pub fn compute_chromosome_pca(
         // Check if site is multiallelic (max allele index > 1)
         let mut is_multiallelic = false;
         for genotype in variant.genotypes.iter() {
-            if let Some(alleles) = genotype {
+            let alleles_opt: Option<PackedGenotype> = genotype;
+            if let Some(alleles) = alleles_opt {
                 for allele in alleles {
                     if allele > 1 {
                         is_multiallelic = true;
@@ -175,8 +177,8 @@ pub fn compute_chromosome_pca(
         for (column_idx, &variant_idx) in maf_filtered_indices.iter().enumerate() {
             let variant = &variants[variant_idx];
             for (sample_idx, genotype) in variant.genotypes.iter().enumerate() {
-                let alleles = genotype
-                    .as_ref()
+                let alleles_opt: Option<PackedGenotype> = genotype;
+                let alleles = alleles_opt
                     .expect("filtered variants lack missing data");
                 let left_row = sample_idx * 2;
                 let right_row = left_row + 1;
@@ -188,8 +190,8 @@ pub fn compute_chromosome_pca(
         for (column_idx, &variant_idx) in maf_filtered_indices.iter().enumerate() {
             let variant = &variants[variant_idx];
             for (sample_idx, genotype) in variant.genotypes.iter().enumerate() {
-                let alleles = genotype
-                    .as_ref()
+                let alleles_opt: Option<PackedGenotype> = genotype;
+                let alleles = alleles_opt
                     .expect("filtered variants lack missing data");
                 data_matrix[[sample_idx * 2, column_idx]] = alleles[0] as f64;
                 data_matrix[[sample_idx * 2 + 1, column_idx]] = alleles[1] as f64;
@@ -202,6 +204,7 @@ pub fn compute_chromosome_pca(
     run_pca_analysis(data_matrix, sample_names, n_components, filtered_positions)
 }
 
+#[cfg(feature = "python")]
 pub fn compute_chromosome_pca_from_dense(
     genotypes: ArrayView3<'_, i16>,
     positions: &[i64],
@@ -370,7 +373,7 @@ pub fn compute_chromosome_pca_from_dense(
     if let Some(matrix_slice) = data_matrix.as_slice_mut() {
         let cols = maf_filtered_indices.len();
         if let Some(values) = storage {
-            let src_ptr = values.as_ptr();
+            let src_ptr: *const i16 = values.as_ptr();
             unsafe {
                 for (column_idx, &variant_idx) in maf_filtered_indices.iter().enumerate() {
                     let variant_ptr = src_ptr.add(variant_idx * stride);

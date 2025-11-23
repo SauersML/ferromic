@@ -28,9 +28,9 @@ jobs:
         with:
           python-version: '3.x'
       - name: Build
-        run: cargo build --verbose --release
+        run: cargo build --verbose --release --no-default-features
       - name: Test
-        run: cargo test --verbose --release
+        run: cargo test --verbose --release --no-default-features
 
   create_release:
     name: Create Release
@@ -94,9 +94,9 @@ jobs:
       - name: Build
         run: |
           if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
-            cross build --release --target ${{ matrix.target }}
+            cross build --release --target ${{ matrix.target }} --no-default-features
           else
-            cargo build --release --target ${{ matrix.target }}
+            cargo build --release --target ${{ matrix.target }} --no-default-features
           fi
         shell: bash
 

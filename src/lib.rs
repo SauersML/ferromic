@@ -27,20 +27,29 @@ use std::convert::TryFrom;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
+#[cfg(feature = "python")]
 use numpy::ndarray::{Array3, ArrayView3};
+#[cfg(feature = "python")]
 use numpy::{PyArray1, PyArray2, PyReadonlyArray1, PyReadonlyArray3};
+#[cfg(feature = "python")]
 use pyo3::IntoPy;
+#[cfg(feature = "python")]
 use pyo3::exceptions::PyValueError;
+#[cfg(feature = "python")]
 use pyo3::prelude::*;
+#[cfg(feature = "python")]
 use pyo3::types::{PyAny, PyDict, PyIterator, PyList, PyTuple};
 
+#[cfg(feature = "python")]
 use crate::pca::{
     PcaResult, compute_chromosome_pca, compute_chromosome_pca_from_dense,
     run_chromosome_pca_analysis, run_global_pca_analysis, write_chromosome_pca_to_file,
 };
+#[cfg(feature = "python")]
 use crate::process::{
     CompressedGenotypes, HaplotypeSide, PackedGenotype, QueryRegion, Variant, VcfError,
 };
+#[cfg(feature = "python")]
 use crate::stats::{
     DenseGenotypeMatrix, DensePopulationSummary, DxyHudsonResult, FstEstimate, FstWcResults,
     HudsonFSTOutcome, PopulationContext, PopulationId, SiteDiversity, SiteFstHudson, SiteFstWc,
@@ -73,6 +82,7 @@ mod tests {
 }
 
 /// Rich description of an FST estimate, exposed as ``ferromic.FstEstimate``.
+#[cfg(feature = "python")]
 #[pyclass(module = "ferromic", name = "FstEstimate", freelist = 20)]
 #[derive(Clone)]
 struct FstEstimateInfo {
@@ -88,6 +98,7 @@ struct FstEstimateInfo {
     sites: Option<usize>,
 }
 
+#[cfg(feature = "python")]
 #[pymethods]
 impl FstEstimateInfo {
     /// Return the tuple ``(value, sum_a, sum_b, sites)``.
@@ -111,6 +122,7 @@ impl FstEstimateInfo {
     }
 }
 
+#[cfg(feature = "python")]
 impl FstEstimateInfo {
     fn from_estimate(py: Python, estimate: &FstEstimate) -> PyResult<Py<Self>> {
         let info = match estimate {
@@ -169,6 +181,7 @@ impl FstEstimateInfo {
 /// `comparable_sites` reflects the effective number of base pairs compared across all haplotype pairs
 /// (including invariant reference positions), making it an appropriate denominator for genomic
 /// divergence (differences / comparable_sites).
+#[cfg(feature = "python")]
 #[pyclass(module = "ferromic", freelist = 20)]
 #[derive(Clone)]
 struct PairwiseDifference {
@@ -182,6 +195,7 @@ struct PairwiseDifference {
     comparable_sites: usize,
 }
 
+#[cfg(feature = "python")]
 #[pymethods]
 impl PairwiseDifference {
     fn __repr__(&self) -> String {
@@ -193,6 +207,7 @@ impl PairwiseDifference {
 }
 
 /// Principal component coordinates for a single chromosome.
+#[cfg(feature = "python")]
 #[pyclass(module = "ferromic")]
 #[derive(Clone)]
 struct ChromosomePcaResult {
@@ -204,6 +219,7 @@ struct ChromosomePcaResult {
     positions: Py<PyArray1<i64>>,
 }
 
+#[cfg(feature = "python")]
 #[pymethods]
 impl ChromosomePcaResult {
     fn __repr__(&self) -> String {
@@ -221,6 +237,7 @@ impl ChromosomePcaResult {
     }
 }
 
+#[cfg(feature = "python")]
 impl ChromosomePcaResult {
     fn from_result(py: Python, result: PcaResult) -> PyResult<Py<Self>> {
         let PcaResult {
@@ -257,6 +274,7 @@ impl ChromosomePcaResult {
 }
 
 /// Per-site diversity summary containing π and Watterson's θ.
+#[cfg(feature = "python")]
 #[pyclass(module = "ferromic", freelist = 20)]
 #[derive(Clone)]
 struct DiversitySite {
@@ -268,6 +286,7 @@ struct DiversitySite {
     watterson_theta: f64,
 }
 
+#[cfg(feature = "python")]
 #[pymethods]
 impl DiversitySite {
     fn __repr__(&self) -> String {
@@ -279,6 +298,7 @@ impl DiversitySite {
 }
 
 /// Result of Hudson's Dxy statistic, exposed as ``ferromic.HudsonDxyResult``.
+#[cfg(feature = "python")]
 #[pyclass(module = "ferromic", name = "HudsonDxyResult", freelist = 20)]
 #[derive(Clone)]
 struct HudsonDxyResultPy {
@@ -286,6 +306,7 @@ struct HudsonDxyResultPy {
     d_xy: Option<f64>,
 }
 
+#[cfg(feature = "python")]
 #[pymethods]
 impl HudsonDxyResultPy {
     fn __repr__(&self) -> String {
@@ -296,6 +317,7 @@ impl HudsonDxyResultPy {
     }
 }
 
+#[cfg(feature = "python")]
 impl HudsonDxyResultPy {
     fn from_result(py: Python, result: &DxyHudsonResult) -> PyResult<Py<Self>> {
         Py::new(py, HudsonDxyResultPy { d_xy: result.d_xy })
@@ -303,6 +325,7 @@ impl HudsonDxyResultPy {
 }
 
 /// Per-site Hudson FST values and supporting components, exposed as ``ferromic.HudsonFstSite``.
+#[cfg(feature = "python")]
 #[pyclass(module = "ferromic", name = "HudsonFstSite", freelist = 20)]
 #[derive(Clone)]
 struct HudsonFstSitePy {
@@ -326,6 +349,7 @@ struct HudsonFstSitePy {
     denominator_component: Option<f64>,
 }
 
+#[cfg(feature = "python")]
 #[pymethods]
 impl HudsonFstSitePy {
     fn __repr__(&self) -> String {
@@ -342,6 +366,7 @@ impl HudsonFstSitePy {
     }
 }
 
+#[cfg(feature = "python")]
 impl HudsonFstSitePy {
     fn from_site(py: Python, site: &SiteFstHudson) -> PyResult<Py<Self>> {
         Py::new(
@@ -362,6 +387,7 @@ impl HudsonFstSitePy {
 }
 
 /// Aggregated Hudson FST result with friendly labels, exposed as ``ferromic.HudsonFstResult``.
+#[cfg(feature = "python")]
 #[pyclass(module = "ferromic", name = "HudsonFstResult", freelist = 20)]
 #[derive(Clone)]
 struct HudsonFstResultPy {
@@ -385,6 +411,7 @@ struct HudsonFstResultPy {
     population2_haplotype_group: Option<u8>,
 }
 
+#[cfg(feature = "python")]
 #[pymethods]
 impl HudsonFstResultPy {
     fn __repr__(&self) -> String {
@@ -405,6 +432,7 @@ impl HudsonFstResultPy {
     }
 }
 
+#[cfg(feature = "python")]
 impl HudsonFstResultPy {
     fn from_outcome(py: Python, outcome: &HudsonFSTOutcome) -> PyResult<Py<Self>> {
         let (pop1_label, pop1_group) = outcome
@@ -436,6 +464,7 @@ impl HudsonFstResultPy {
 }
 
 /// Per-site Weir & Cockerham FST summary, exposed as ``ferromic.WcFstSite``.
+#[cfg(feature = "python")]
 #[pyclass(module = "ferromic", name = "WcFstSite", freelist = 20)]
 #[derive(Clone)]
 struct WcFstSitePy {
@@ -455,6 +484,7 @@ struct WcFstSitePy {
     pairwise_variance_components: HashMap<String, (f64, f64)>,
 }
 
+#[cfg(feature = "python")]
 #[pymethods]
 impl WcFstSitePy {
     fn variance_components(&self) -> (f64, f64) {
@@ -471,6 +501,7 @@ impl WcFstSitePy {
     }
 }
 
+#[cfg(feature = "python")]
 impl WcFstSitePy {
     fn from_site(py: Python, site: &SiteFstWc) -> PyResult<Py<Self>> {
         let mut pairwise = HashMap::with_capacity(site.pairwise_fst.len());
@@ -498,6 +529,7 @@ impl WcFstSitePy {
 }
 
 /// Aggregated Weir & Cockerham FST result, exposed as ``ferromic.WcFstResult``.
+#[cfg(feature = "python")]
 #[pyclass(module = "ferromic", name = "WcFstResult", freelist = 20)]
 #[derive(Clone)]
 struct WcFstResultPy {
@@ -513,6 +545,7 @@ struct WcFstResultPy {
     fst_type: String,
 }
 
+#[cfg(feature = "python")]
 #[pymethods]
 impl WcFstResultPy {
     fn __repr__(&self, py: Python) -> PyResult<String> {
@@ -521,6 +554,7 @@ impl WcFstResultPy {
     }
 }
 
+#[cfg(feature = "python")]
 impl WcFstResultPy {
     fn from_results(py: Python, results: &FstWcResults) -> PyResult<Py<Self>> {
         let mut pairwise = HashMap::with_capacity(results.pairwise_fst.len());
@@ -545,12 +579,14 @@ impl WcFstResultPy {
 }
 
 /// In-memory representation of a population to be reused across statistics calls.
+#[cfg(feature = "python")]
 #[pyclass(module = "ferromic")]
 #[derive(Clone)]
 struct Population {
     inner: Arc<OwnedPopulationContext>,
 }
 
+#[cfg(feature = "python")]
 #[pymethods]
 impl Population {
     #[new]
@@ -728,6 +764,7 @@ impl Population {
 }
 
 /// Internal owned representation of a population used to build [`PopulationContext`].
+#[cfg(feature = "python")]
 struct OwnedPopulationContext {
     id: PopulationId,
     haplotypes: Arc<[(usize, HaplotypeSide)]>,
@@ -738,6 +775,7 @@ struct OwnedPopulationContext {
     dense_summary: OnceLock<Arc<DensePopulationSummary>>,
 }
 
+#[cfg(feature = "python")]
 impl OwnedPopulationContext {
     fn from_parts(
         id: PopulationId,
@@ -799,6 +837,7 @@ impl OwnedPopulationContext {
     }
 }
 
+#[cfg(feature = "python")]
 impl Clone for OwnedPopulationContext {
     fn clone(&self) -> Self {
         Self {
@@ -814,6 +853,7 @@ impl Clone for OwnedPopulationContext {
 }
 
 /// Simple helper that formats optional floats for ``__repr__`` implementations.
+#[cfg(feature = "python")]
 fn optional_float_display(value: Option<f64>) -> String {
     match value {
         Some(v) if v.is_finite() => format!("{v:.6}"),
@@ -822,15 +862,18 @@ fn optional_float_display(value: Option<f64>) -> String {
     }
 }
 
+#[cfg(feature = "python")]
 #[derive(Clone)]
 struct VariantInput(Variant);
 
+#[cfg(feature = "python")]
 impl VariantInput {
     fn into_inner(self) -> Variant {
         self.0
     }
 }
 
+#[cfg(feature = "python")]
 impl<'source> FromPyObject<'source> for VariantInput {
     fn extract(obj: &'source PyAny) -> PyResult<Self> {
         if let Ok(tuple) = obj.downcast::<PyTuple>() {
@@ -872,18 +915,21 @@ impl<'source> FromPyObject<'source> for VariantInput {
     }
 }
 
+#[cfg(feature = "python")]
 #[derive(Clone)]
 struct HaplotypeInput {
     sample_index: usize,
     side: HaplotypeSide,
 }
 
+#[cfg(feature = "python")]
 impl HaplotypeInput {
     fn into_pair(self) -> (usize, HaplotypeSide) {
         (self.sample_index, self.side)
     }
 }
 
+#[cfg(feature = "python")]
 impl<'source> FromPyObject<'source> for HaplotypeInput {
     fn extract(obj: &'source PyAny) -> PyResult<Self> {
         if let Ok(tuple) = obj.downcast::<PyTuple>() {
@@ -922,9 +968,11 @@ impl<'source> FromPyObject<'source> for HaplotypeInput {
     }
 }
 
+#[cfg(feature = "python")]
 #[derive(Clone)]
 struct PopulationIdInput(PopulationId);
 
+#[cfg(feature = "python")]
 impl<'source> FromPyObject<'source> for PopulationIdInput {
     fn extract(obj: &'source PyAny) -> PyResult<Self> {
         if let Ok(dict) = obj.downcast::<PyDict>() {
@@ -964,17 +1012,20 @@ impl<'source> FromPyObject<'source> for PopulationIdInput {
     }
 }
 
+#[cfg(feature = "python")]
 #[derive(Clone)]
 struct PopulationInput {
     inner: Arc<OwnedPopulationContext>,
 }
 
+#[cfg(feature = "python")]
 impl PopulationInput {
     fn as_context(&self) -> PopulationContext<'_> {
         self.inner.as_population_context()
     }
 }
 
+#[cfg(feature = "python")]
 impl<'source> FromPyObject<'source> for PopulationInput {
     fn extract(obj: &'source PyAny) -> PyResult<Self> {
         if let Ok(pop) = obj.extract::<PyRef<Population>>() {
@@ -991,6 +1042,7 @@ impl<'source> FromPyObject<'source> for PopulationInput {
     }
 }
 
+#[cfg(feature = "python")]
 fn parse_population_like_dict(mapping: &PyDict) -> PyResult<PopulationInput> {
     let id = extract_from_mapping(mapping, &["id", "population_id", "name"])?
         .extract::<PopulationIdInput>()?
@@ -1035,6 +1087,7 @@ fn parse_population_like_dict(mapping: &PyDict) -> PyResult<PopulationInput> {
     })
 }
 
+#[cfg(feature = "python")]
 fn parse_population_like_object(obj: &PyAny) -> PyResult<PopulationInput> {
     let id = extract_optional_field(obj, &["id", "population_id", "name"])
         .ok_or_else(|| PyValueError::new_err("population-like object missing 'id'"))?
@@ -1079,6 +1132,7 @@ fn parse_population_like_object(obj: &PyAny) -> PyResult<PopulationInput> {
     })
 }
 
+#[cfg(feature = "python")]
 fn build_variants_from_numpy(
     genotypes_obj: &PyAny,
     positions_obj: &PyAny,
@@ -1132,6 +1186,7 @@ fn build_variants_from_numpy(
     ))
 }
 
+#[cfg(feature = "python")]
 fn convert_numeric_array<T, F>(
     view: ArrayView3<'_, T>,
     positions: &[i64],
@@ -1226,6 +1281,7 @@ where
     Ok((variants, dense_matrix))
 }
 
+#[cfg(feature = "python")]
 fn extract_positions(positions_obj: &PyAny, expected_len: usize) -> PyResult<Vec<i64>> {
     if let Ok(array) = positions_obj.extract::<PyReadonlyArray1<'_, i64>>() {
         let slice = array.as_slice()?;
@@ -1298,6 +1354,7 @@ fn extract_positions(positions_obj: &PyAny, expected_len: usize) -> PyResult<Vec
     ))
 }
 
+#[cfg(feature = "python")]
 fn parse_genotypes(genotypes_obj: &PyAny) -> PyResult<CompressedGenotypes> {
     let mut genotypes = Vec::new();
     let iterator = PyIterator::from_object(genotypes_obj.py(), genotypes_obj)?;
@@ -1331,6 +1388,7 @@ fn parse_genotypes(genotypes_obj: &PyAny) -> PyResult<CompressedGenotypes> {
     Ok(CompressedGenotypes::new(genotypes))
 }
 
+#[cfg(feature = "python")]
 fn parse_side(obj: &PyAny) -> PyResult<HaplotypeSide> {
     if let Ok(value) = obj.extract::<u8>() {
         return match value {
@@ -1366,6 +1424,7 @@ fn parse_side(obj: &PyAny) -> PyResult<HaplotypeSide> {
     ))
 }
 
+#[cfg(feature = "python")]
 fn extract_optional_field<'a>(obj: &'a PyAny, names: &[&str]) -> Option<&'a PyAny> {
     for name in names {
         if let Ok(value) = obj.get_item(*name) {
@@ -1378,6 +1437,7 @@ fn extract_optional_field<'a>(obj: &'a PyAny, names: &[&str]) -> Option<&'a PyAn
     None
 }
 
+#[cfg(feature = "python")]
 fn extract_from_mapping<'a>(mapping: &'a PyDict, names: &[&str]) -> PyResult<&'a PyAny> {
     for name in names {
         if let Some(value) = mapping.get_item(*name) {
@@ -1390,6 +1450,7 @@ fn extract_from_mapping<'a>(mapping: &'a PyDict, names: &[&str]) -> PyResult<&'a
     )))
 }
 
+#[cfg(feature = "python")]
 fn population_label(id: &PopulationId) -> (Option<String>, Option<u8>) {
     match id {
         PopulationId::HaplotypeGroup(group) => {
@@ -1399,6 +1460,7 @@ fn population_label(id: &PopulationId) -> (Option<String>, Option<u8>) {
     }
 }
 
+#[cfg(feature = "python")]
 fn build_region(region: (i64, i64)) -> PyResult<QueryRegion> {
     let (start, end) = region;
     if end < start {
@@ -1409,6 +1471,7 @@ fn build_region(region: (i64, i64)) -> PyResult<QueryRegion> {
     Ok(QueryRegion { start, end })
 }
 
+#[cfg(feature = "python")]
 fn build_optional_region(
     region: Option<(i64, i64)>,
     variants: &[Variant],
@@ -1440,6 +1503,7 @@ fn build_optional_region(
     })
 }
 
+#[cfg(feature = "python")]
 fn hudson_sites_to_py(py: Python, sites: &[SiteFstHudson]) -> PyResult<Vec<Py<HudsonFstSitePy>>> {
     let mut out = Vec::with_capacity(sites.len());
     for site in sites {
@@ -1448,6 +1512,7 @@ fn hudson_sites_to_py(py: Python, sites: &[SiteFstHudson]) -> PyResult<Vec<Py<Hu
     Ok(out)
 }
 
+#[cfg(feature = "python")]
 fn diversity_sites_to_py(py: Python, sites: &[SiteDiversity]) -> PyResult<Vec<Py<DiversitySite>>> {
     let mut out = Vec::with_capacity(sites.len());
     for site in sites {
@@ -1463,6 +1528,7 @@ fn diversity_sites_to_py(py: Python, sites: &[SiteDiversity]) -> PyResult<Vec<Py
     Ok(out)
 }
 
+#[cfg(feature = "python")]
 fn pairwise_differences_to_py(
     py: Python,
     diffs: Vec<((usize, usize), usize, usize)>,
@@ -1482,6 +1548,7 @@ fn pairwise_differences_to_py(
     Ok(out)
 }
 
+#[cfg(feature = "python")]
 fn extract_sample_group_map(obj: &PyAny) -> PyResult<HashMap<String, (u8, u8)>> {
     let dict = obj.downcast::<PyDict>().map_err(|_| {
         PyValueError::new_err("sample_to_group must be a dict mapping sample -> (left, right)")
@@ -1504,6 +1571,7 @@ fn extract_sample_group_map(obj: &PyAny) -> PyResult<HashMap<String, (u8, u8)>> 
     Ok(map)
 }
 
+#[cfg(feature = "python")]
 fn extract_variants_by_chromosome(obj: &PyAny) -> PyResult<HashMap<String, Vec<Variant>>> {
     let dict = obj.downcast::<PyDict>().map_err(|_| {
         PyValueError::new_err(
@@ -1524,6 +1592,7 @@ fn extract_variants_by_chromosome(obj: &PyAny) -> PyResult<HashMap<String, Vec<V
     Ok(map)
 }
 
+#[cfg(feature = "python")]
 fn extract_interval_list(obj: Option<&PyAny>) -> PyResult<Option<Vec<(i64, i64)>>> {
     let Some(obj) = obj else { return Ok(None) };
     let mut intervals = Vec::new();
@@ -1548,11 +1617,13 @@ fn extract_interval_list(obj: Option<&PyAny>) -> PyResult<Option<Vec<(i64, i64)>
     Ok(Some(intervals))
 }
 
+#[cfg(feature = "python")]
 fn vcf_error_to_pyerr(err: VcfError) -> PyErr {
     PyValueError::new_err(format!("VCF error: {err:?}"))
 }
 
 /// Count the number of segregating (polymorphic) sites.
+#[cfg(feature = "python")]
 #[pyfunction(name = "segregating_sites", text_signature = "(variants, /)")]
 fn segregating_sites_py(py: Python, variants: Vec<VariantInput>) -> PyResult<usize> {
     let variants: Vec<Variant> = variants.into_iter().map(VariantInput::into_inner).collect();
@@ -1561,6 +1632,7 @@ fn segregating_sites_py(py: Python, variants: Vec<VariantInput>) -> PyResult<usi
 }
 
 /// Compute nucleotide diversity (π) for the provided haplotypes and region length.
+#[cfg(feature = "python")]
 #[pyfunction(
     name = "nucleotide_diversity",
     text_signature = "(variants, haplotypes, sequence_length, /)"
@@ -1586,6 +1658,7 @@ fn nucleotide_diversity_py(
 }
 
 /// Compute Watterson's θ estimator.
+#[cfg(feature = "python")]
 #[pyfunction(
     name = "watterson_theta",
     text_signature = "(segregating_sites, sample_count, sequence_length, /)"
@@ -1613,6 +1686,7 @@ fn watterson_theta_py(
 }
 
 /// Compute pairwise nucleotide differences between samples.
+#[cfg(feature = "python")]
 #[pyfunction(
     name = "pairwise_differences",
     text_signature = "(variants, sample_count, sequence_length, /)"
@@ -1636,6 +1710,7 @@ fn pairwise_differences_py(
 }
 
 /// Calculate per-site diversity statistics (π and Watterson's θ).
+#[cfg(feature = "python")]
 #[pyfunction(
     name = "per_site_diversity",
     signature = (variants, haplotypes, region=None),
@@ -1665,6 +1740,7 @@ fn per_site_diversity_py(
 }
 
 /// Compute Hudson's Dxy between two populations.
+#[cfg(feature = "python")]
 #[pyfunction(name = "hudson_dxy", text_signature = "(population1, population2, /)")]
 fn hudson_dxy_py(
     py: Python,
@@ -1682,6 +1758,7 @@ fn hudson_dxy_py(
 }
 
 /// Compute Hudson's FST and its components for two populations.
+#[cfg(feature = "python")]
 #[pyfunction(name = "hudson_fst", text_signature = "(population1, population2, /)")]
 fn hudson_fst_py(
     py: Python,
@@ -1699,6 +1776,7 @@ fn hudson_fst_py(
 }
 
 /// Compute per-site Hudson FST values across a region.
+#[cfg(feature = "python")]
 #[pyfunction(
     name = "hudson_fst_sites",
     text_signature = "(population1, population2, region, /)"
@@ -1719,6 +1797,7 @@ fn hudson_fst_sites_py(
 }
 
 /// Compute Hudson's FST together with per-site contributions.
+#[cfg(feature = "python")]
 #[pyfunction(
     name = "hudson_fst_with_sites",
     text_signature = "(population1, population2, region, /)"
@@ -1743,6 +1822,7 @@ fn hudson_fst_with_sites_py(
 }
 
 /// Compute Weir & Cockerham FST across haplotype groups.
+#[cfg(feature = "python")]
 #[pyfunction(
     name = "wc_fst",
     text_signature = "(variants, sample_names, sample_to_group, region, /)"
@@ -1770,6 +1850,7 @@ fn wc_fst_py(
 }
 
 /// Convenience helper to read the variance components from an ``FstEstimate`` object.
+#[cfg(feature = "python")]
 #[pyfunction(name = "wc_fst_components", text_signature = "(estimate, /)")]
 fn wc_fst_components_py(
     estimate: PyRef<FstEstimateInfo>,
@@ -1778,16 +1859,19 @@ fn wc_fst_components_py(
 }
 
 /// Compute principal components for variants on a single chromosome.
+#[cfg(feature = "python")]
 struct DenseChromosomePayload<'py> {
     genotypes: DenseGenotypeData<'py>,
     positions: DensePositions<'py>,
 }
 
+#[cfg(feature = "python")]
 enum DenseGenotypeData<'py> {
     Borrowed(PyReadonlyArray3<'py, i16>),
     Owned(Array3<i16>),
 }
 
+#[cfg(feature = "python")]
 impl<'py> DenseGenotypeData<'py> {
     fn from_pyobject(obj: &'py PyAny) -> PyResult<Self> {
         if let Ok(array) = obj.extract::<PyReadonlyArray3<'py, i16>>() {
@@ -1811,11 +1895,13 @@ impl<'py> DenseGenotypeData<'py> {
     }
 }
 
+#[cfg(feature = "python")]
 enum DensePositions<'py> {
     Borrowed(PyReadonlyArray1<'py, i64>),
     Owned(Vec<i64>),
 }
 
+#[cfg(feature = "python")]
 impl<'py> DensePositions<'py> {
     fn from_pyobject(obj: &'py PyAny, expected_len: usize) -> PyResult<Self> {
         if let Ok(array) = obj.extract::<PyReadonlyArray1<'py, i64>>() {
@@ -1840,6 +1926,7 @@ impl<'py> DensePositions<'py> {
     }
 }
 
+#[cfg(feature = "python")]
 fn parse_dense_chromosome_input<'py>(
     variants_obj: &'py PyAny,
     expected_samples: usize,
@@ -1868,6 +1955,7 @@ fn parse_dense_chromosome_input<'py>(
     Ok(None)
 }
 
+#[cfg(feature = "python")]
 fn try_parse_variant_sequence_to_dense<'py>(
     variants_obj: &'py PyAny,
     expected_samples: usize,
@@ -1921,6 +2009,7 @@ fn try_parse_variant_sequence_to_dense<'py>(
     }))
 }
 
+#[cfg(feature = "python")]
 fn dense_variant_components<'py>(entry: &'py PyAny) -> PyResult<(i64, &'py PyAny)> {
     if let Ok(tuple) = entry.downcast::<PyTuple>() {
         if tuple.len() != 2 {
@@ -1948,6 +2037,7 @@ fn dense_variant_components<'py>(entry: &'py PyAny) -> PyResult<(i64, &'py PyAny
     Ok((position, genotypes))
 }
 
+#[cfg(feature = "python")]
 fn extract_diploid_alleles(call: &PyAny) -> PyResult<Option<[i16; 2]>> {
     if call.is_none() {
         return Ok(Some([-1, -1]));
@@ -1996,6 +2086,7 @@ fn extract_diploid_alleles(call: &PyAny) -> PyResult<Option<[i16; 2]>> {
     Ok(None)
 }
 
+#[cfg(feature = "python")]
 fn extract_genotype_cube_i16(genotypes_obj: &PyAny) -> PyResult<Array3<i16>> {
     if let Ok(array) = genotypes_obj.extract::<PyReadonlyArray3<'_, i16>>() {
         let view = array.as_array();
@@ -2039,6 +2130,7 @@ fn extract_genotype_cube_i16(genotypes_obj: &PyAny) -> PyResult<Array3<i16>> {
     ))
 }
 
+#[cfg(feature = "python")]
 #[pyfunction(
     name = "chromosome_pca",
     signature = (variants, sample_names, n_components=10),
@@ -2089,6 +2181,7 @@ fn chromosome_pca_py(
 }
 
 /// Compute principal components for a chromosome and write them to a TSV file.
+#[cfg(feature = "python")]
 #[pyfunction(
     name = "chromosome_pca_to_file",
     signature = (variants, sample_names, chromosome, output_dir, n_components=10),
@@ -2124,6 +2217,7 @@ fn chromosome_pca_to_file_py(
 }
 
 /// Run per-chromosome PCA for a dictionary of chromosomes -> variants.
+#[cfg(feature = "python")]
 #[pyfunction(
     name = "per_chromosome_pca",
     signature = (variants_by_chromosome, sample_names, output_dir, n_components=10),
@@ -2156,6 +2250,7 @@ fn per_chromosome_pca_py(
 }
 
 /// Execute the memory-efficient multi-chromosome PCA pipeline.
+#[cfg(feature = "python")]
 #[pyfunction(
     name = "global_pca",
     signature = (variants_by_chromosome, sample_names, output_dir, n_components=10),
@@ -2188,6 +2283,7 @@ fn global_pca_py(
 }
 
 /// Adjust the effective sequence length by applying allow and mask intervals.
+#[cfg(feature = "python")]
 #[pyfunction(
     name = "adjusted_sequence_length",
     signature = (start, end, allow=None, mask=None),
@@ -2215,6 +2311,7 @@ fn adjusted_sequence_length_py(
 }
 
 /// Calculate the frequency of allele 1 (e.g. inversion allele) across haplotypes.
+#[cfg(feature = "python")]
 #[pyfunction(
     name = "inversion_allele_frequency",
     text_signature = "(sample_map, /)"
@@ -2224,6 +2321,7 @@ fn inversion_allele_frequency_py(sample_map: &PyAny) -> PyResult<Option<f64>> {
     Ok(calculate_inversion_allele_frequency(&map))
 }
 
+#[cfg(feature = "python")]
 #[pymodule]
 fn ferromic(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
