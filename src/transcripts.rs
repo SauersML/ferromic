@@ -629,6 +629,51 @@ pub fn prepare_to_write_cds(
             continue;
         }
 
+        let cds_span_start = cds.segments.iter().map(|seg| seg.start).min().unwrap_or(0);
+        let cds_span_end = cds.segments.iter().map(|seg| seg.end).max().unwrap_or(0);
+        let cds_span = ZeroBasedHalfOpen {
+            start: cds_span_start,
+            end: cds_span_end,
+        };
+
+        if let Some(overlap) = cds_span.intersect(&inversion_interval) {
+            let cds_fully_inside_inversion = cds_span.start >= inversion_interval.start
+                && cds_span.end <= inversion_interval.end;
+
+            if !cds_fully_inside_inversion {
+                let cds_start_1b = cds_span.start_1based_inclusive();
+                let cds_end_1b = cds_span.get_1based_inclusive_end_coord();
+                let inv_start_1b = inversion_interval.start_1based_inclusive();
+                let inv_end_1b = inversion_interval.get_1based_inclusive_end_coord();
+                let overlap_start_1b = overlap.start_1based_inclusive();
+                let overlap_end_1b = overlap.get_1based_inclusive_end_coord();
+
+                let warning_message = format!(
+                    "PARTIAL INVERSION OVERLAP: transcript {} (gene {}) on chr{} group {} overlaps inversion {}-{} only partially; CDS span {}-{}, overlap {}-{}.",
+                    cds.transcript_id,
+                    cds.gene_name,
+                    chromosome,
+                    haplotype_group,
+                    inv_start_1b,
+                    inv_end_1b,
+                    cds_start_1b,
+                    cds_end_1b,
+                    overlap_start_1b,
+                    overlap_end_1b
+                );
+
+                log(LogLevel::Warn, &warning_message);
+
+                let log_file_path = temp_path.join("inversion_overlap.log");
+                let now = SystemTime::now();
+                if let Err(e) =
+                    safe_append_to_log(&log_file_path, &format!("{:?} {}\n", now, warning_message))
+                {
+                    eprintln!("Failed to write to inversion_overlap.log: {}", e);
+                }
+            }
+        }
+
         let mut final_cds_map: HashMap<String, Vec<u8>> = HashMap::new();
         for (sample_name, _) in hap_sequences {
             final_cds_map.insert(sample_name.clone(), Vec::new());
