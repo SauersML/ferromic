@@ -100,13 +100,14 @@ def _spearman_folded(values: np.ndarray) -> tuple[float | None, float | None, in
     bin_centers = np.arange(folded.size, dtype=float) * 2_000 + 1_000
 
     mask = np.isfinite(folded)
-    if mask.sum() < 2:
-        return None, None, int(mask.sum())
+    bins_used = int(mask.sum())
+    if bins_used < 5:  # require at least five usable bins before testing decay
+        return None, None, bins_used
 
     rho_val, p_val = stats.spearmanr(bin_centers[mask], folded[mask])
     rho = float(rho_val) if np.isfinite(rho_val) else None
     p = float(p_val) if np.isfinite(p_val) else None
-    return rho, p, int(mask.sum())
+    return rho, p, bins_used
 
 
 def compute_fst_edge_decay(data_dir: Path) -> List[FstDecayResult]:
@@ -148,6 +149,10 @@ def compute_fst_edge_decay(data_dir: Path) -> List[FstDecayResult]:
 
         rho, p_two_sided, bins_used = _spearman_folded(values)
         if bins_used == 0:
+            return
+        if bins_used < 5:
+            return
+        if p_two_sided is None or not np.isfinite(p_two_sided):
             return
         flag, label = recurrence_map[key]
         results.append(

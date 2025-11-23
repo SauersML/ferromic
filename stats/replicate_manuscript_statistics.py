@@ -476,6 +476,7 @@ class SpearmanPoint:
     group: int
     region: tuple[str, int, int] | None = None
     q_value: float | None = None
+    bins_used: int = 0
 
 
 @dataclass
@@ -731,7 +732,8 @@ def _calc_pi_structure_metrics() -> PiStructureMetrics:
             point_rho = None
             point_p = None
             mask = np.isfinite(folded_means)
-            if np.sum(mask) >= 2:
+            bins_used = int(np.sum(mask))
+            if bins_used >= 5:
                 rho_val, p_val = stats.spearmanr(
                     spearman_distances[mask], folded_means[mask]
                 )
@@ -745,6 +747,7 @@ def _calc_pi_structure_metrics() -> PiStructureMetrics:
                     recurrence_flag=recur_flag,
                     group=group_id,
                     region=region,
+                    bins_used=bins_used,
                 )
             )
 
@@ -903,9 +906,13 @@ def _save_spearman_points(points: list[SpearmanPoint]) -> Path | None:
                 "region_chr": p.region[0] if p.region else None,
                 "region_start": p.region[1] if p.region else None,
                 "region_end": p.region[2] if p.region else None,
+                "bins_used": p.bins_used,
             }
             for p in points
             if p.rho is not None
+            and p.p_value is not None
+            and np.isfinite(p.p_value)
+            and p.bins_used >= 5
         ]
     )
 
@@ -1267,6 +1274,9 @@ def summarize_fst_edge_decay() -> List[str]:
         return [header, "  No qualifying inversions (length > 100kbp with recurrence labels)."]
 
     lines = [header]
+    lines.append(
+        "  Reporting only inversions with ≥5 usable bins and finite two-sided p-values; others are omitted."
+    )
     results = sorted(
         results,
         key=lambda r: (r.chrom, r.start, r.end, r.recurrence_flag),
