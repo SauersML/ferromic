@@ -17,38 +17,38 @@ Sample sizes for diversity analyses:
 DIVERSITY
 Nucleotide diversity (π) by orientation and recurrence:
   Total loci with finite π estimates: 62.
-  Across all loci: mean π(inverted) = 0.000307, mean π(direct) = 0.000415.
-    Median π(inverted) = 0.000238, median π(direct) = 0.000364.
-    Median π(inverted) is 1.529-fold lower than median π(direct).
-    Two-sided paired t-test comparing orientations: t = -2.581, p = 0.012.
-  Single-event inversions: median π(inverted) = 0.000021, median π(direct) = 0.000313.
-  Recurrent inversions: median π(inverted) = 0.000356, median π(direct) = 0.000447.
-  Within inverted haplotypes: recurrent median π = 0.000356; single-event median π = 0.000021.
+  Across all loci: mean π(inverted) = 0.000358, mean π(direct) = 0.000486.
+    Median π(inverted) = 0.000257, median π(direct) = 0.000438.
+    Median π(inverted) is 1.706-fold lower than median π(direct).
+    Two-sided paired t-test comparing orientations: t = -2.977, p = 4.169e-03.
+  Single-event inversions: median π(inverted) = 0.000065, median π(direct) = 0.000376.
+  Recurrent inversions: median π(inverted) = 0.000382, median π(direct) = 0.000465.
+  Within inverted haplotypes: recurrent median π = 0.000382; single-event median π = 0.000065.
 
 PI STRUCTURE
 Nucleotide diversity structure (Edge vs Middle and Internal Decay), filtered by consensus inversion status:
-  Qualifying regions (≥40kbp): 46 unique inversions.
-  [Edge vs Middle] Direct/Group 0: n=46 regions. Haplotypes (N): Total=2791, Mean=60.7 [Min 6, Max 81]. Flank Mean = 4.250e-04, Middle Mean = 5.391e-04.
-  [Edge vs Middle] Inverted/Group 1: n=33 regions. Haplotypes (N): Total=627, Mean=19.0 [Min 2, Max 58]. Flank Mean = 2.033e-04, Middle Mean = 3.139e-04.
-  [Edge vs Middle] Overall: n=79 regions. Haplotypes (N): Total=3418, Mean=43.3 [Min 2, Max 81]. Flank Mean = 3.324e-04, Middle Mean = 4.450e-04.
-    - Single-event Inverted (Group 1, Recurrence 0): n=10 regions. Haplotypes (N): Total=85, Mean=8.5 [Min 2, Max 52]. Flank Mean = 6.702e-05, Middle Mean = 1.462e-04.
-    - Recurrent Direct (Group 0, Recurrence 1): n=23 regions. Haplotypes (N): Total=1100, Mean=47.8 [Min 16, Max 77]. Flank Mean = 2.705e-04, Middle Mean = 4.630e-04.
-    - Single-event Direct (Group 0, Recurrence 0): n=23 regions. Haplotypes (N): Total=1691, Mean=73.5 [Min 6, Max 81]. Flank Mean = 5.796e-04, Middle Mean = 6.153e-04.
-    - Recurrent Inverted (Group 1, Recurrence 1): n=23 regions. Haplotypes (N): Total=542, Mean=23.6 [Min 2, Max 58]. Flank Mean = 2.626e-04, Middle Mean = 3.868e-04.
+  Qualifying regions (≥40kbp): 57 unique inversions.
+  [Edge vs Middle] Direct/Group 0: n=57 regions. Haplotypes (N): Total=3544, Mean=62.2 [Min 6, Max 81]. Flank Mean = 4.012e-04, Middle Mean = 4.844e-04.
+  [Edge vs Middle] Inverted/Group 1: n=39 regions. Haplotypes (N): Total=765, Mean=19.6 [Min 2, Max 58]. Flank Mean = 2.388e-04, Middle Mean = 2.726e-04.
+  [Edge vs Middle] Overall: n=96 regions. Haplotypes (N): Total=4309, Mean=44.9 [Min 2, Max 81]. Flank Mean = 3.352e-04, Middle Mean = 3.984e-04.
+    - Single-event Inverted (Group 1, Recurrence 0): n=13 regions. Haplotypes (N): Total=138, Mean=10.6 [Min 2, Max 52]. Flank Mean = 2.400e-04, Middle Mean = 1.163e-04.
+    - Recurrent Direct (Group 0, Recurrence 1): n=26 regions. Haplotypes (N): Total=1259, Mean=48.4 [Min 16, Max 77]. Flank Mean = 2.463e-04, Middle Mean = 4.156e-04.
+    - Single-event Direct (Group 0, Recurrence 0): n=31 regions. Haplotypes (N): Total=2285, Mean=73.7 [Min 6, Max 81]. Flank Mean = 5.312e-04, Middle Mean = 5.421e-04.
+    - Recurrent Inverted (Group 1, Recurrence 1): n=26 regions. Haplotypes (N): Total=627, Mean=24.1 [Min 2, Max 58]. Flank Mean = 2.382e-04, Middle Mean = 3.508e-04.
 
 Internal decay (Spearman's ρ of diversity vs distance from start for first 100kb, loci ≥100kb):
-  Overall (All Consensus 0+1): ρ = 0.092 (p(two-sided) = 8.329e-06, n = 47).
-  Single-Event Inverted (G1, R0): ρ = 0.184 (p(two-sided) = 3.498e-03, n = 5).
-  Recurrent Direct (G0, R1): ρ = 0.060 (p(two-sided) = 0.112, n = 14).
-  Recurrent Inverted (G1, R1): ρ = 0.080 (p(two-sided) = 0.035, n = 14).
-  Single-Event Direct (G0, R0): ρ = 0.119 (p(two-sided) = 1.674e-03, n = 14).
+  Overall (All Consensus 0+1): ρ = 0.080 (p(two-sided) = 1.054e-05, n = 60).
+  Single-Event Inverted (G1, R0): ρ = 0.104 (p(two-sided) = 0.038, n = 8).
+  Recurrent Direct (G0, R1): ρ = 0.036 (p(two-sided) = 0.306, n = 16).
+  Recurrent Inverted (G1, R1): ρ = 0.067 (p(two-sided) = 0.058, n = 16).
+  Single-Event Direct (G0, R0): ρ = 0.131 (p(two-sided) = 3.069e-05, n = 20).
 
 Internal decay (median within 2kb bins, Spearman's ρ for first 100kb, loci ≥100kb):
-  Overall (All Consensus 0+1): ρ = NA (p(two-sided) = NA, n = 47).
-  Single-Event Inverted (G1, R0): ρ = NA (p(two-sided) = NA, n = 5).
-  Recurrent Direct (G0, R1): ρ = NA (p(two-sided) = NA, n = 14).
-  Recurrent Inverted (G1, R1): ρ = NA (p(two-sided) = NA, n = 14).
-  Single-Event Direct (G0, R0): ρ = NA (p(two-sided) = NA, n = 14).
+  Overall (All Consensus 0+1): ρ = NA (p(two-sided) = NA, n = 60).
+  Single-Event Inverted (G1, R0): ρ = NA (p(two-sided) = NA, n = 8).
+  Recurrent Direct (G0, R1): ρ = NA (p(two-sided) = NA, n = 16).
+  Recurrent Inverted (G1, R1): ρ = NA (p(two-sided) = NA, n = 16).
+  Single-Event Direct (G0, R0): ρ = NA (p(two-sided) = NA, n = 20).
 
   Saved Spearman decay points (including q-values) to: data/spearman_decay_points.tsv.
 
@@ -169,27 +169,27 @@ Orientation × recurrence linear models (replicated strict logic):
     [Model A] Outcome Δlogπ = log(π_inverted+ε) − log(π_direct+ε); predictor is a Recurrent indicator (Single-event baseline); HC3 robust SEs; contrasts report single-event, recurrent, interaction, and pooled inversion effects.
     [Model B] Rows duplicated per orientation with outcome log(π+ε); OLS with design log_pi ~ Inverted + Inverted:Recurrent + C(region_id); cluster-robust by region_id; recurrence main effect absorbed by fixed effects; contrasts compare orientation within recurrence groups and their interaction.
     [Model C] Outcome Δlogπ as in Model A with predictors Recurrent + z-scored covariates ln1p(Number_recurrent_events), ln(Size_kbp), Inverted_AF (raw z), ln(Formation_rate_per_generation); HC3 robust SEs; rows with missing covariates are dropped and effects are per +1 SD.
-  Detection floor applied before logs: ε = 6.360000e-06.
+  Detection floor applied before logs: ε = 6.500000e-06.
   [Model A] Δ-logπ = log(π_inv+ε) – log(π_dir+ε) ~ 1 + Recurrent (HC3 SEs). No weights or covariates; effects reported for single-event, recurrent, interaction, and pooled Δ-logπ.
-    Single-event: Inverted vs Direct: fold-change = 0.279 (95% CI 0.143–0.546), p = 1.949e-04.
-    Recurrent: Inverted vs Direct: fold-change = 1.107 (95% CI 0.920–1.332), p = 0.280.
-    Interaction (difference between those two): fold-change = 3.965 (95% CI 1.977–7.953), p = 1.050e-04.
-    Overall inversion effect (pooled Δ-logπ): fold-change = 0.569 (95% CI 0.391–0.828), p = 3.198e-03.
+    Single-event: Inverted vs Direct: fold-change = 0.263 (95% CI 0.136–0.509), p = 7.416e-05.
+    Recurrent: Inverted vs Direct: fold-change = 1.090 (95% CI 0.902–1.317), p = 0.372.
+    Interaction (difference between those two): fold-change = 4.149 (95% CI 2.086–8.254), p = 5.015e-05.
+    Overall inversion effect (pooled Δ-logπ): fold-change = 0.548 (95% CI 0.376–0.796), p = 1.631e-03.
   [Model B] log(π+ε) ~ Inverted + Inverted:Recurrent + C(region_id); cluster-robust by region_id. Recurrence main effect absorbed by fixed effects; contrasts give single-event, recurrent, and interaction pairs.
-    Single-event: Inverted vs Direct: fold-change = 0.279 (95% CI 0.109–0.712), p = 7.586e-03.
-    Recurrent: Inverted vs Direct: fold-change = 1.107 (95% CI 0.855–1.434), p = 0.440.
-    Interaction (difference between those two): fold-change = 3.965 (95% CI 1.501–10.474), p = 5.446e-03.
+    Single-event: Inverted vs Direct: fold-change = 0.263 (95% CI 0.104–0.661), p = 4.514e-03.
+    Recurrent: Inverted vs Direct: fold-change = 1.090 (95% CI 0.836–1.421), p = 0.524.
+    Interaction (difference between those two): fold-change = 4.149 (95% CI 1.589–10.836), p = 3.666e-03.
   [Model C] Δ-logπ ~ 1 + Recurrent + z-scored covariates from inv_properties.tsv (Number_recurrent_events ln1p, Size_.kbp. ln, Inverted_AF, Formation_rate_per_generation ln). HC3 SEs; rows require complete covariates with missingness dummies excluded.
     Covariates included in fit: Covariate: Number_recurrent_events (ln1p, z), Covariate: Size_.kbp. (ln, z), Covariate: Inverted_AF (z), Covariate: Formation_rate_per_generation (ln, z)
-    Single-event: Inverted vs Direct (adjusted): fold-change = 0.364 (95% CI 0.212–0.624), p = 2.390e-04.
-    Recurrent: Inverted vs Direct (adjusted): fold-change = 0.398 (95% CI 0.181–0.875), p = 0.022.
-    Interaction (difference between those two): fold-change = 1.095 (95% CI 0.430–2.784), p = 0.850.
-    Covariate: Number_recurrent_events (ln1p, z): fold-change = 0.533 (95% CI 0.227–1.252), p = 0.149.
-    Covariate: Size_.kbp. (ln, z): fold-change = 1.252 (95% CI 0.825–1.900), p = 0.292.
-    Covariate: Inverted_AF (z): fold-change = 1.729 (95% CI 1.008–2.967), p = 0.047.
-    Covariate: Formation_rate_per_generation (ln, z): fold-change = 3.053 (95% CI 0.961–9.697), p = 0.058.
+    Single-event: Inverted vs Direct (adjusted): fold-change = 0.355 (95% CI 0.210–0.598), p = 1.011e-04.
+    Recurrent: Inverted vs Direct (adjusted): fold-change = 0.353 (95% CI 0.166–0.753), p = 7.071e-03.
+    Interaction (difference between those two): fold-change = 0.996 (95% CI 0.403–2.464), p = 0.993.
+    Covariate: Number_recurrent_events (ln1p, z): fold-change = 0.479 (95% CI 0.203–1.127), p = 0.092.
+    Covariate: Size_.kbp. (ln, z): fold-change = 1.303 (95% CI 0.870–1.952), p = 0.200.
+    Covariate: Inverted_AF (z): fold-change = 1.758 (95% CI 1.031–2.996), p = 0.038.
+    Covariate: Formation_rate_per_generation (ln, z): fold-change = 3.618 (95% CI 1.145–11.429), p = 0.028.
   [Permutation] Model A interaction (n=10000):
-    Observed Δ(mean log-ratio) = 1.3775, p = 2.9997e-04.
+    Observed Δ(mean log-ratio) = 1.4230, p = 1.9998e-04.
 
 CDS CONSERVATION
 CDS conservation GLM (proportion of identical CDS pairs):
@@ -202,10 +202,10 @@ CDS conservation GLM (proportion of identical CDS pairs):
 
 DIFFERENTIATION
 Differentiation between orientations (Hudson's FST):
-  Single-event: median FST = 0.352 (n = 22).
-  Recurrent: median FST = 0.107 (n = 28).
-  Mann–Whitney U test (single-event vs recurrent): U = 465.000, p = 2.223e-03.
-  Highly differentiated loci: 24 with FST > 0.2 and 9 with FST > 0.5.
+  Single-event: median FST = 0.257 (n = 27).
+  Recurrent: median FST = 0.085 (n = 32).
+  Mann–Whitney U test (single-event vs recurrent): U = 617.000, p = 4.999e-03.
+  Highly differentiated loci: 25 with FST > 0.2 and 10 with FST > 0.5.
 
 BREAKPOINT FRF
 Breakpoint enrichment (Flat–Ramp–Flat Model):
