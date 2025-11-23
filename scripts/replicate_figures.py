@@ -13,7 +13,6 @@ import textwrap
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple, Union
-from urllib.parse import urljoin, urlparse
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -33,7 +32,6 @@ def _detect_repo_root(start: Path) -> Path:
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = _detect_repo_root(SCRIPT_DIR)
 DOWNLOAD_ROOT = REPO_ROOT / "analysis_downloads"
-BASE_URL = "https://sharedspace.s3.msi.umn.edu/"
 
 # Repository-local directories that may already contain required data files.
 LOCAL_DATA_DIRECTORIES: Sequence[Path] = (
@@ -61,17 +59,11 @@ RemoteResource = Union[str, Tuple[str, str]]
 REMOTE_PATHS: Sequence[RemoteResource] = [
     "public_internet/paml_results.checkpoint.tsv",
     "public_internet/hudson_fst_results.tsv.gz",
-    (
-        "data/imputation_results.tsv",
-        "https://raw.githubusercontent.com/SauersML/ferromic/refs/heads/main/data/imputation_results.tsv",
-    ),
+    "data/imputation_results.tsv",
     "public_internet/inversion_fst_estimates.tsv",
     "public_internet/inv_info.csv",
     "public_internet/output.csv",
-    (
-        "phecodeX.csv",
-        "https://raw.githubusercontent.com/PheWAS/PhecodeX/refs/heads/main/phecodeX_R_labels.csv",
-    ),
+    "phecodeX.csv",
     # Additional large derived artefacts referenced by multiple figure scripts.
     "public_internet/per_site_diversity_output.falsta",
     "public_internet/per_site_fst_output.falsta",
@@ -79,15 +71,8 @@ REMOTE_PATHS: Sequence[RemoteResource] = [
     "public_internet/group0_MAPT_ENSG00000186868.18_ENST00000262410.10_chr17_cds_start45962338_cds_end46024168_inv_start45585159_inv_end46292045.phy",
     "public_internet/group1_MAPT_ENSG00000186868.18_ENST00000262410.10_chr17_cds_start45962338_cds_end46024168_inv_start45585159_inv_end46292045.phy",
     # FRF data
-    (
-        "data/per_inversion_frf_effects.tsv",
-        "https://raw.githubusercontent.com/SauersML/ferromic/refs/heads/main/data/per_inversion_frf_effects.tsv",
-    ),
+    "data/per_inversion_frf_effects.tsv",
 ]
-
-# URL for bulk CDS PHYLIP files
-PHY_FILES_BASE_URL = "https://sharedspace.s3.msi.umn.edu/public_internet/all_phy/"
-PHY_FILES_LIST_URL = "https://sharedspace.s3.msi.umn.edu/public_internet/cds_identical_proportions.tsv"
 
 
 @dataclass
@@ -185,6 +170,13 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         outputs=(Path("frf/frf_violin_from_url.pdf"),),
         dependencies=("data/per_inversion_frf_effects.tsv",),
         note="Generates violin plots for FRF edge vs middle regions.",
+    ),
+    FigureTask(
+        name="FRF breakpoint enrichment strip-box plot",
+        script=Path("stats/old/frf_delta_strip_box.py"),
+        outputs=(Path("frf/frf_delta_strip_box.pdf"),),
+        dependencies=("data/per_inversion_frf_effects.tsv",),
+        note="Precision-weighted strip-plus-box view of frf_delta_centered by inversion type.",
     ),
     FigureTask(
         name="Inversion imputation performance",
@@ -507,42 +499,14 @@ def open_file(file_path: Path) -> None:
 
 
 def build_download_plan(paths: Sequence[RemoteResource]) -> Dict[str, str]:
-    """Create a mapping from relative path (under PUBLIC_PREFIX) to URL."""
+    """Create a mapping from relative path (under PUBLIC_PREFIX) to a local source."""
 
     plan: Dict[str, str] = {}
     for entry in paths:
-        if isinstance(entry, tuple):
-            rel_path, url = entry
-        else:
-            rel_path = entry
-            url = urljoin(BASE_URL, entry)
-
+        rel_path = entry[0] if isinstance(entry, tuple) else entry
         key = str(Path(rel_path).as_posix()).lstrip("/")
-        if not key:
-            parsed = urlparse(url)
-            key = parsed.path.lstrip("/")
-        plan[key] = url
+        plan[key] = str(DOWNLOAD_ROOT / key)
     return plan
-
-
-def download_file(url: str, dest: Path) -> DownloadResult:
-    """Download ``url`` to ``dest`` using urllib with streaming."""
-
-    import urllib.error
-    import urllib.request
-
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    try:
-        with urllib.request.urlopen(request) as response, dest.open("wb") as fh:
-            shutil.copyfileobj(response, fh)
-        return DownloadResult(url=url, destination=dest, ok=True, message="downloaded")
-    except urllib.error.HTTPError as exc:  # noqa: PERF203 - explicit status handling
-        return DownloadResult(url=url, destination=dest, ok=False, message=f"HTTP {exc.code}: {exc.reason}")
-    except urllib.error.URLError as exc:
-        return DownloadResult(url=url, destination=dest, ok=False, message=f"URL error: {exc.reason}")
-    except Exception as exc:  # pragma: no cover - defensive programming
-        return DownloadResult(url=url, destination=dest, ok=False, message=str(exc))
 
 
 def is_valid_data_file(path: Path) -> bool:
@@ -973,27 +937,37 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     download_results: List[DownloadResult] = []
 
     if not args.skip_downloads:
-        log_boxed("Downloading analysis artefacts")
-        for rel_path, url in plan.items():
+        log_boxed("Staging analysis artefacts from local cache")
+        for rel_path, source in plan.items():
             target = DOWNLOAD_ROOT / Path(rel_path)
-            if target.exists():
-                download_results.append(DownloadResult(url=url, destination=target, ok=True, message="cached"))
+            if target.exists() and is_valid_data_file(target):
+                download_results.append(DownloadResult(url=source, destination=target, ok=True, message="found"))
+                print(f"[CACHED] {rel_path} already present under analysis_downloads")
                 continue
+
             local_copy = find_local_data_file(Path(rel_path).name)
             if local_copy is not None:
+                download_results.append(
+                    DownloadResult(url=source, destination=local_copy, ok=True, message="using local copy")
+                )
                 try:
                     local_display = local_copy.relative_to(REPO_ROOT)
                 except ValueError:
                     local_display = local_copy
-                download_results.append(
-                    DownloadResult(url=url, destination=local_copy, ok=True, message="using local copy")
-                )
-                print(f"[LOCAL] {url} -> {local_display} (using local copy)")
+                print(f"[LOCAL] {rel_path} satisfied by {local_display}")
                 continue
-            result = download_file(url, target)
-            download_results.append(result)
-            status = "OK" if result.ok else "FAIL"
-            print(f"[{status}] {url} -> {target.relative_to(REPO_ROOT)} ({result.message})")
+
+            download_results.append(
+                DownloadResult(
+                    url=source,
+                    destination=target,
+                    ok=False,
+                    message="not found; place under data/ or analysis_downloads/",
+                )
+            )
+            print(
+                f"[MISSING] {rel_path} not located. Populate data/ or analysis_downloads/ from the manual workflow artefacts."
+            )
     else:
         print("Skipping downloads as requested; assuming artefacts are already present.")
 
