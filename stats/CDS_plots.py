@@ -1147,12 +1147,8 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
 
     label_rows = []
     if not sig.empty:
-        top_by_q    = sig.nsmallest(8, "q_val")
-        extreme_pos = sig.nlargest(4, "delta_val")
-        extreme_neg = sig.nsmallest(4, "delta_val")
-        label_df = pd.concat([top_by_q, extreme_pos, extreme_neg]).drop_duplicates(subset="gene_name")
-        # Mild sort for stable placement; exact order doesn't matter for solver
-        label_rows = list(label_df.sort_values(["q_val", "delta_val"]).itertuples(index=False))
+        # Label all genes that are FDR significant
+        label_rows = list(sig.sort_values(["q_val", "delta_val"]).itertuples(index=False))
 
     # -----------------------------------------
     # Place labels (offset points) then resolve overlaps
