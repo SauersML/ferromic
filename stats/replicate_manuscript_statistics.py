@@ -1446,8 +1446,8 @@ def summarize_cds_conservation_glm() -> List[str]:
         lines.append(f"  {label}: standardized marginal means (equal inversion weight):")
         for row in emm.sort_values("p_hat", ascending=False).itertuples():
             lines.append(
-                f"    {row.category}: p̂ = {row.p_hat * 100:.1f}% "
-                f"(95% CI {row.p_lcl95 * 100:.1f}–{row.p_ucl95 * 100:.1f}%)."
+                f"    {row.category}: p̂ = {row.p_hat * 100:.4f}% "
+                f"(95% CI {row.p_lcl95 * 100:.4f}–{row.p_ucl95 * 100:.4f}%)."
             )
 
     def _append_pairs(label: str, pairwise: pd.DataFrame | None):
