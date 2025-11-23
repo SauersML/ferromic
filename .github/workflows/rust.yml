@@ -92,6 +92,8 @@ jobs:
           python-version: '3.x'
 
       - name: Build
+        env:
+          PYO3_CROSS_PYTHON_VERSION: 3.9
         run: |
           if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
             cross build --release --target ${{ matrix.target }}
