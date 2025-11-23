@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import glob
 import importlib
+import multiprocessing as mp
 import os
 import platform
 import shutil
@@ -75,6 +76,14 @@ REMOTE_PATHS: Sequence[RemoteResource] = [
 ]
 
 
+TASK_GROUPS: Sequence[str] = (
+    "CDS",
+    "Diversity",
+    "FST",
+    "Associations",
+)
+
+
 @dataclass
 class DownloadResult:
     """Represents the outcome of a single remote download."""
@@ -98,6 +107,7 @@ class FigureTask:
     required: bool = True
     note: str = ""
     long_running: bool = False
+    group: str = ""
 
 
 FIGURE_TASKS: Sequence[FigureTask] = (
@@ -108,6 +118,7 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         dependencies=("inv_properties.tsv",),
         note="Downloads all CDS PHYLIP files from S3 bucket for CDS conservation analysis.",
         long_running=True,
+        group="CDS",
     ),
     FigureTask(
         name="CDS pairwise identity computation",
@@ -116,6 +127,7 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         dependencies=("inv_properties.tsv", "*.phy"),
         note="Computes pairwise identity for all CDS alignments. Requires .phy files.",
         long_running=True,
+        group="CDS",
     ),
     FigureTask(
         name="CDS conservation GLM analysis",
@@ -128,6 +140,7 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         ),
         dependencies=("cds_identical_proportions.tsv", "pairs_CDS__*.tsv"),
         note="Runs binomial GLM with cluster-robust standard errors for CDS conservation test.",
+        group="CDS",
     ),
     FigureTask(
         name="Per-gene CDS conservation tests",
@@ -136,12 +149,14 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         dependencies=("cds_identical_proportions.tsv", "pairs_CDS__*.tsv"),
         note="Performs jackknife-based per-gene conservation tests.",
         long_running=True,
+        group="CDS",
     ),
     FigureTask(
         name="Inversion nucleotide diversity violins",
         script=Path("stats/recur_diversity.py"),
         outputs=(Path("inversion_pi_violins.png"),),
         dependencies=("output.csv", "inv_properties.tsv"),
+        group="Diversity",
     ),
     FigureTask(
         name="Hudson FST violin plot",
@@ -149,6 +164,7 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         outputs=(Path("hudson_fst.pdf"),),
         dependencies=("output.csv", "inv_properties.tsv"),
         optional_dependencies=("map.tsv",),
+        group="FST",
     ),
     FigureTask(
         name="Spearman Decay Raincloud",
@@ -156,6 +172,7 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         outputs=(Path("special/spearman_decay_raincloud.pdf"),),
         dependencies=("data/spearman_decay_points.tsv",),
         note="Generates raincloud plot for Spearman decay correlations.",
+        group="Diversity",
     ),
     FigureTask(
         name="FRF Volcano Plot",
@@ -163,6 +180,7 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         outputs=(Path("frf/frf_volcano.pdf"),),
         dependencies=("data/per_inversion_frf_effects.tsv",),
         note="Generates volcano plot for FRF effects.",
+        group="Diversity",
     ),
     FigureTask(
         name="FRF Edge vs Middle Violins",
@@ -170,6 +188,7 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         outputs=(Path("frf/frf_violin_from_url.pdf"),),
         dependencies=("data/per_inversion_frf_effects.tsv",),
         note="Generates violin plots for FRF edge vs middle regions.",
+        group="Diversity",
     ),
     FigureTask(
         name="FRF breakpoint enrichment strip-box plot",
@@ -177,12 +196,14 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         outputs=(Path("frf/frf_delta_strip_box.pdf"),),
         dependencies=("data/per_inversion_frf_effects.tsv",),
         note="Precision-weighted strip-plus-box view of frf_delta_centered by inversion type.",
+        group="Diversity",
     ),
     FigureTask(
         name="Inversion imputation performance",
         script=Path("stats/imputation_plot.py"),
         outputs=(Path("inversion_r_plot.pdf"),),
         dependencies=("imputation_results.tsv", "inv_properties.tsv"),
+        group="Associations",
     ),
     FigureTask(
         name="Weir vs Hudson FST scatterplots",
@@ -192,12 +213,14 @@ FIGURE_TASKS: Sequence[FigureTask] = (
             Path("variance_wc_vs_dxy_hudson_log_scale_colored.png"),
         ),
         dependencies=("output.csv", "inv_properties.tsv"),
+        group="FST",
     ),
     FigureTask(
         name="Inversion allele frequency vs nucleotide diversity",
         script=Path("stats/af_pi.py"),
         outputs=(Path("scatter_af_vs_pi_combined.png"),),
         dependencies=("output.csv", "inv_properties.tsv"),
+        group="Diversity",
     ),
     FigureTask(
         name="Recurrent event diversity mixed models",
@@ -206,6 +229,7 @@ FIGURE_TASKS: Sequence[FigureTask] = (
             Path("recurrent_events_analysis_separate_v2/pi_vs_recurrent_events_separate_lmm_plot.png"),
         ),
         dependencies=("output.csv", "inv_properties.tsv"),
+        group="Diversity",
     ),
     FigureTask(
         name="PheWAS forest plot",
@@ -214,6 +238,7 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         dependencies=("phewas_results.tsv",),
         required=False,
         note="Requires exported phewas_results.tsv from the BigQuery-backed pipeline.",
+        group="Associations",
     ),
     FigureTask(
         name="PheWAS QQ plot",
@@ -225,6 +250,7 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         dependencies=("data/phewas_results.tsv",),
         required=False,
         note="Generates QQ plots for PheWAS results with genomic inflation factor.",
+        group="Associations",
     ),
     FigureTask(
         name="Chr17 inversion vs tag SNP correlation",
@@ -236,6 +262,7 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         dependencies=("data/phewas_results.tsv", "data/all_pop_phewas_tag.tsv"),
         required=False,
         note="Correlates effect sizes between chr17 inversion and tag SNP for significant phenotypes.",
+        group="Associations",
     ),
     FigureTask(
         name="CDS identity and conservation panels",
@@ -252,6 +279,7 @@ FIGURE_TASKS: Sequence[FigureTask] = (
             "inv_properties.tsv",
         ),
         long_running=True,
+        group="CDS",
     ),
     FigureTask(
         name="Hudson FST flanking region bar plot",
@@ -260,6 +288,7 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         dependencies=("per_site_fst_output.falsta", "inv_properties.tsv"),
         required=False,
         note="Requires per_site_fst_output.falsta emitted by the ferromic CLI run.",
+        group="FST",
     ),
     FigureTask(
         name="FST violin and scatter summary",
@@ -269,6 +298,7 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         optional_dependencies=("map.tsv",),
         required=False,
         note="Generates a suite of plots when Weir & Cockerham summaries are available in output.csv.",
+        group="FST",
     ),
     FigureTask(
         name="Per-site diversity/FST trends by category",
@@ -294,6 +324,7 @@ FIGURE_TASKS: Sequence[FigureTask] = (
             "inv_properties.tsv",
         ),
         long_running=True,
+        group="Diversity",
     ),
     FigureTask(
         name="Per-site diversity scatterplot",
@@ -304,6 +335,7 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         required=False,
         note="Requires the tqdm Python package; install it to generate this figure.",
         long_running=True,
+        group="Diversity",
     ),
     FigureTask(
         name="Per-site diversity top-N sequences",
@@ -311,6 +343,7 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         outputs=(HOME / "top_filtered_pi_smoothed.png",),
         dependencies=("per_site_diversity_output.falsta",),
         long_running=True,
+        group="Diversity",
     ),
     FigureTask(
         name="Per-site diversity vs distance",
@@ -324,6 +357,7 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         required=False,
         note="Requires optional Python packages numba and tqdm to accelerate processing.",
         long_running=True,
+        group="Diversity",
     ),
     FigureTask(
         name="Normalized per-site diversity/FST trends",
@@ -344,6 +378,7 @@ FIGURE_TASKS: Sequence[FigureTask] = (
             "inv_properties.tsv",
         ),
         long_running=True,
+        group="Diversity",
     ),
     FigureTask(
         name="Long-region per-site π overview",
@@ -353,6 +388,7 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         required=False,
         note="Requires per_site_diversity_output.falsta, which is not included in the public archive.",
         long_running=True,
+        group="Diversity",
     ),
     FigureTask(
         name="Per-inversion distance trends",
@@ -363,6 +399,7 @@ FIGURE_TASKS: Sequence[FigureTask] = (
             "per_site_fst_output.falsta",
         ),
         long_running=True,
+        group="Diversity",
     ),
     FigureTask(
         name="Middle vs flank π quadrant violins",
@@ -370,6 +407,7 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         outputs=("pi_analysis_results_exact_mf_quadrants/total_*/pi_mf_quadrant_violins_total_*.pdf",),
         dependencies=("per_site_diversity_output.falsta", "inv_properties.tsv"),
         long_running=True,
+        group="Diversity",
     ),
     FigureTask(
         name="Middle vs flank π recurrence violins",
@@ -380,6 +418,7 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         ),
         dependencies=("per_site_diversity_output.falsta", "inv_properties.tsv"),
         long_running=True,
+        group="Diversity",
     ),
     FigureTask(
         name="Middle vs flank FST quadrant violins",
@@ -387,12 +426,14 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         outputs=("fst_analysis_results_exact_mf_quadrants/total_*/fst_mf_quadrant_violins_total_*.pdf",),
         dependencies=("per_site_fst_output.falsta", "inv_properties.tsv"),
         long_running=True,
+        group="FST",
     ),
     FigureTask(
         name="Direct vs inverted recurrence violins",
         script=Path("stats/inv_dir_recur_violins.py"),
         outputs=(Path("pi_comparison_violins.pdf"),),
         dependencies=("output.csv", "inv_properties.tsv"),
+        group="FST",
     ),
     FigureTask(
         name="Inversion event rate vs diversity",
@@ -404,6 +445,7 @@ FIGURE_TASKS: Sequence[FigureTask] = (
             Path("fst_vs_nrecur.pdf"),
         ),
         dependencies=("output.csv", "inv_properties.tsv"),
+        group="Associations",
     ),
     FigureTask(
         name="PheWAS volcano plot",
@@ -412,6 +454,7 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         dependencies=("phewas_results.tsv", "inv_properties.tsv"),
         required=False,
         note="Requires phewas_results.tsv, which is produced by the BigQuery-backed PheWAS pipeline.",
+        group="Associations",
     ),
     FigureTask(
         name="PheWAS category summary heatmap",
@@ -423,6 +466,7 @@ FIGURE_TASKS: Sequence[FigureTask] = (
             "Downloads supplementary category summary files from GitHub. "
             "Ensure internet access is available when running this task."
         ),
+        group="Associations",
     ),
     FigureTask(
         name="PheWAS ranged volcano plot",
@@ -431,6 +475,7 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         dependencies=("phewas_results.tsv",),
         required=False,
         note="Requires phewas_results.tsv, which is produced by the BigQuery-backed PheWAS pipeline.",
+        group="Associations",
     ),
     FigureTask(
         name="PheWAS Manhattan panels",
@@ -440,6 +485,7 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         optional_dependencies=("inv_properties.tsv",),
         required=False,
         note="Requires phewas_results.tsv exported from the production pipeline.",
+        group="Associations",
     ),
     FigureTask(
         name="PheWAS odds ratio matrix",
@@ -448,6 +494,7 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         dependencies=("phewas_results.tsv",),
         required=False,
         note="Requires phewas_results.tsv exported from the production pipeline.",
+        group="Associations",
     ),
     FigureTask(
         name="PGS control volcano plot",
@@ -456,6 +503,7 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         dependencies=("PGS_controls.tsv",),
         required=False,
         note="Requires PGS_controls.tsv showing effect of polygenic score adjustment.",
+        group="Associations",
     ),
     FigureTask(
         name="Family History vs Main PheWAS Forest",
@@ -463,6 +511,7 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         outputs=(Path("family_vs_main_forest.pdf"), Path("family_vs_main_forest.png")),
         dependencies=("family_phewas.tsv", "phewas_results.tsv"),
         required=True,
+        group="Associations",
     ),
 )
 
@@ -921,6 +970,11 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         action="store_true",
         help="Skip downloading remote artefacts (assume they are already present).",
     )
+    parser.add_argument(
+        "--group",
+        choices=TASK_GROUPS,
+        help="Restrict execution to a single task group for parallel workflows.",
+    )
     return parser.parse_args(argv)
 
 
@@ -986,6 +1040,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     env.setdefault("MPLBACKEND", "Agg")
 
     selected_tasks = FIGURE_TASKS
+    if args.group:
+        selected_tasks = tuple(task for task in FIGURE_TASKS if task.group == args.group)
+        print(f"Selected task group: {args.group} ({len(selected_tasks)} tasks)")
+        if not selected_tasks:
+            print("No tasks matched the requested group; exiting.")
+            return 0
 
     summary: List[tuple[FigureTask, str, str]] = []
     for task in selected_tasks:
@@ -1023,9 +1083,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     copied_paths = collect_outputs(selected_tasks, collection_dir, summary)
     if copied_paths:
-        print("\nOpening copied outputs ...")
-        for file_path in copied_paths:
-            open_file(file_path)
+        if os.environ.get("CI"):
+            print("\nCI environment detected; skipping file open prompts.")
+        else:
+            print("\nOpening copied outputs ...")
+            for file_path in copied_paths:
+                open_file(file_path)
 
     failed_required = [
         (task, status, message)
@@ -1064,4 +1127,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
 
 if __name__ == "__main__":
+    if mp.get_start_method(allow_none=True) is None:
+        mp.set_start_method("fork")
     sys.exit(main())
