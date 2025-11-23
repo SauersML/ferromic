@@ -54,12 +54,7 @@ Internal decay (median within 2kb bins, Spearman's ρ for first 100kb, loci ≥1
 
 HUDSON FST EDGE DECAY
 Folded Hudson FST decay (two-sided Spearman testing for changes from edge to center):
-  chr1:144376209-144600799 (Single-event):
-    rho=-1.000, p(two-sided)=NA, q=NA, bins=2
-  chr1:144376209-144600799 (Single-event):
-    rho=-1.000, p(two-sided)=NA, q=NA, bins=2
-  chr1:144376209-144600799 (Single-event):
-    rho=1.000, p(two-sided)=NA, q=NA, bins=2
+  Reporting only inversions with ≥5 usable bins and finite two-sided p-values; others are omitted.
   chr10:46983451-47468232 (Recurrent):
     rho=0.601, p(two-sided)=1.01470054432865e-05, q=0.000643955398996532, bins=46
   chr10:46983451-47468232 (Recurrent):
