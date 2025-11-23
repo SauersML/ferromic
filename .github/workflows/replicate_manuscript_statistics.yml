@@ -54,20 +54,41 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # Add result files AND updated artifacts
-          # Using git add data/ to catch all changes in data directory (including artifacts)
-          # We removed *.tsv, *.txt, *.csv from .gitignore so they are tracked
-          git add data/cds_identical_proportions.tsv || true
-          git add data/gene_inversion_direct_inverted.tsv || true
-          git add data/region_identical_proportions.tsv || true
-          git add data/skipped_details.tsv || true
-          git add data/replicate_manuscript_statistics.txt || true
-          git add stats/replicate_manuscript_statistics.txt || true
+          files=(
+            data/cds_identical_proportions.tsv
+            data/gene_inversion_direct_inverted.tsv
+            data/region_identical_proportions.tsv
+            data/skipped_details.tsv
+            data/replicate_manuscript_statistics.txt
+            stats/replicate_manuscript_statistics.txt
+            data/output.csv
+            data/phy_metadata.tsv
+            data/FST_data.tsv
+          )
 
-          # Add updated artifacts (which are now considered data to commit)
-          git add data/output.csv || true
-          git add data/phy_metadata.tsv || true
-          git add data/FST_data.tsv || true
+          for file in "${files[@]}"; do
+            if [ ! -e "$file" ]; then
+              if git ls-files --error-unmatch "$file" >/dev/null 2>&1; then
+                echo "Skipping $file: tracked in repository but missing in workspace (not produced in this run)."
+              else
+                echo "Skipping $file: file not found in workspace and not tracked in repository."
+              fi
+              continue
+            fi
+
+            if git ls-files --error-unmatch "$file" >/dev/null 2>&1; then
+              if git diff --quiet HEAD -- "$file"; then
+                echo "Skipping $file: exists but is byte-for-byte identical to the version in repository HEAD (nothing to commit)."
+                continue
+              else
+                echo "Staging $file: tracked file changed relative to repository HEAD."
+              fi
+            else
+              echo "Staging $file: newly generated file not currently tracked in repository."
+            fi
+
+            git add "$file"
+          done
 
           if git diff --staged --quiet; then
             echo "No data changes to commit"
