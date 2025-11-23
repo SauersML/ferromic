@@ -5,3 +5,11 @@ OPENSSL_NO_PKG_CONFIG = { value = "1", force = true }
 
 [target.s390x-unknown-linux-gnu.env]
 OPENSSL_NO_ASM = "1"
+
+# Allow unresolved Python symbols on macOS to be resolved at runtime by the
+# interpreter when building the PyO3 extension module.
+[target.x86_64-apple-darwin]
+rustflags = ["-C", "link-arg=-undefined", "-C", "link-arg=dynamic_lookup"]
+
+[target.aarch64-apple-darwin]
+rustflags = ["-C", "link-arg=-undefined", "-C", "link-arg=dynamic_lookup"]
