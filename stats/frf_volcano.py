@@ -186,8 +186,10 @@ def main():
     )
     ax.add_artist(size_legend)
 
-    out_png = "frf_volcano.png"
-    out_pdf = "frf_volcano.pdf"
+    out_dir = Path(__file__).resolve().parents[1] / "frf"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_png = out_dir / "frf_volcano.png"
+    out_pdf = out_dir / "frf_volcano.pdf"
     fig.savefig(out_png, dpi=300)
     fig.savefig(out_pdf)
     plt.close(fig)

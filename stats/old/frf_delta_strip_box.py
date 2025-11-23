@@ -165,8 +165,10 @@ def main():
         title_fontsize=9,
     )
 
-    fig.savefig("frf_delta_strip_box.png", dpi=300)
-    fig.savefig("frf_delta_strip_box.pdf")
+    out_dir = Path(__file__).resolve().parents[1] / "frf"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_dir / "frf_delta_strip_box.png", dpi=300)
+    fig.savefig(out_dir / "frf_delta_strip_box.pdf")
     plt.close(fig)
 
 
