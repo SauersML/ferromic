@@ -65,6 +65,12 @@ def load_data() -> pd.DataFrame:
     if "inv_exact_match" not in df.columns:
         sys.exit("ERROR: inv_exact_match column missing (needed for exact-only).")
 
+    # Enforce consensus to be strictly 0 (single-event) or 1 (recurrent)
+    # This aligns with the logic in inv_dir_recur_model.py and fst_edge_decay.py
+    df = df[df["consensus"].isin([0, 1])].copy()
+    if df.empty:
+        sys.exit("No rows remaining after filtering consensus to [0, 1].")
+
     # ids (computed early so we can track exclusions consistently)
     df["cds_id"] = df["transcript_id"].astype(str)
 
