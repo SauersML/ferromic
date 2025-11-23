@@ -14,10 +14,21 @@ DATA_DIR = REPO_ROOT / "data"
 
 def _load_points(path: Path) -> pd.DataFrame:
     if not path.exists():
-        raise FileNotFoundError(
-            "Missing Spearman decay points. Run stats/replicate_manuscript_statistics.py first "
-            f"to populate {path}."
-        )
+        # Fallback for when the pipeline runs in pieces: try to find it in the repo root or
+        # default data directory if passed a relative path that doesn't resolve.
+        alternatives = [
+            path.resolve().parent / "data" / path.name,
+            REPO_ROOT / "data" / path.name,
+            Path.cwd() / path.name
+        ]
+        found = next((p for p in alternatives if p.exists()), None)
+        if found:
+            path = found
+        else:
+            raise FileNotFoundError(
+                "Missing Spearman decay points. Run stats/replicate_manuscript_statistics.py first "
+                f"to populate {path}."
+            )
 
     df = pd.read_csv(path, sep="\t")
     if df.empty:

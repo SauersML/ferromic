@@ -1,14 +1,13 @@
 
 from __future__ import annotations
 
+import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch, Rectangle
 
 # ---------- Configuration ----------
-DATA_URL = "https://raw.githubusercontent.com/SauersML/ferromic/refs/heads/main/data/per_inversion_frf_effects.tsv"
-
 # Colors for regions and overlay hatches for groups
 EDGE_COLOR = "#15616d"       # teal for Edge region
 MIDDLE_COLOR = "#d1495b"     # rose for Middle region
@@ -42,7 +41,24 @@ def _find_column(df: pd.DataFrame, options: list[str]) -> str:
 
 
 def load_data() -> pd.DataFrame:
-    df = pd.read_csv(DATA_URL, sep="\t")
+    # Attempt to locate the input file locally
+    filename = "per_inversion_frf_effects.tsv"
+    candidates = [
+        filename,
+        os.path.join("data", filename),
+        os.path.join(os.path.dirname(__file__), "..", "data", filename),
+    ]
+
+    local_path = None
+    for cand in candidates:
+        if os.path.exists(cand):
+            local_path = cand
+            break
+
+    if not local_path:
+        raise FileNotFoundError(f"Could not find {filename}. Ensure it is present in CWD or data/.")
+
+    df = pd.read_csv(local_path, sep="\t")
     group_col = _find_column(df, ["STATUS", "0_single_1_recur_consensus"])
     edge_col  = _find_column(df, ["frf_mu_edge"])
     mid_col   = _find_column(df, ["frf_mu_mid"])
