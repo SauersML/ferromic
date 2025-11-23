@@ -221,9 +221,33 @@ CDS conservation GLM (proportion of identical CDS pairs):
   Model definition: Binomial GLM with logit link and frequency weights = n_pairs, cluster-robust by inversion; formula prop ~ C(consensus) * C(phy_group) + log_m + log_L + log_k (log of n_sites, inversion length, and n_sequences).
   Categories use Single/Recurrent × Direct/Inverted encoding; estimated marginal means are standardized with equal inversion weight and covariates set to their weighted means before pairwise contrasts.
   Source: loaded from cds_identical_proportions.tsv.
-  Single/Inverted vs Single/Direct: Δlogit = 3.192, Δp = 0.187, p = 7.776e-03, BH q = 0.016.
-  Single/Inverted vs Recurrent/Inverted: Δlogit = 3.626, Δp = 0.264, p = 2.529e-03, BH q = 0.015.
-  Single/Inverted vs Recurrent/Direct: Δlogit = 3.381, Δp = 0.218, p = 4.935e-03, BH q = 0.015.
+  Input summary: n_rows = 422, n_inversions = 26.
+  Unadjusted model: logLik = -2.144e+05, null deviance = 2.377e+05, residual deviance = 2.362e+05, pseudo-R² = 6.205e-03.
+  Unadjusted model: standardized marginal means (equal inversion weight):
+    Single/Inverted: p̂ = 98.9% (95% CI 91.1–99.9%).
+    Recurrent/Inverted: p̂ = 79.5% (95% CI 72.2–85.3%).
+    Single/Direct: p̂ = 76.9% (95% CI 72.5–80.7%).
+    Recurrent/Direct: p̂ = 76.3% (95% CI 66.6–83.9%).
+  Unadjusted model: pairwise contrasts (BH-FDR):
+    Recurrent/Direct vs Single/Inverted: Δlogit = -3.316, Δp = -22.6%, p = 3.400e-03, BH q = 0.010.
+    Single/Direct vs Single/Inverted: Δlogit = -3.285, Δp = -22.0%, p = 3.006e-03, BH q = 0.010.
+    Recurrent/Inverted vs Single/Inverted: Δlogit = -3.128, Δp = -19.3%, p = 5.388e-03, BH q = 0.011.
+    Recurrent/Direct vs Recurrent/Inverted: Δlogit = -0.188, Δp = -3.2%, p = 0.444, BH q = 0.608.
+    Recurrent/Inverted vs Single/Direct: Δlogit = 0.157, Δp = 2.7%, p = 0.506, BH q = 0.608.
+    Recurrent/Direct vs Single/Direct: Δlogit = -0.031, Δp = -0.6%, p = 0.909, BH q = 0.909.
+  Adjusted model: logLik = -2.008e+05, null deviance = 2.377e+05, residual deviance = 2.091e+05, pseudo-R² = 0.121.
+  Adjusted model: standardized marginal means (equal inversion weight):
+    Single/Inverted: p̂ = 99.0% (95% CI 90.1–99.9%).
+    Single/Direct: p̂ = 80.3% (95% CI 56.8–92.7%).
+    Recurrent/Direct: p̂ = 77.2% (95% CI 55.5–90.2%).
+    Recurrent/Inverted: p̂ = 72.6% (95% CI 53.3–86.0%).
+  Adjusted model: pairwise contrasts (BH-FDR):
+    Recurrent/Direct vs Single/Inverted: Δlogit = -3.381, Δp = -21.8%, p = 4.935e-03, BH q = 0.015.
+    Recurrent/Inverted vs Single/Inverted: Δlogit = -3.626, Δp = -26.4%, p = 2.529e-03, BH q = 0.015.
+    Single/Direct vs Single/Inverted: Δlogit = -3.192, Δp = -18.7%, p = 7.776e-03, BH q = 0.016.
+    Recurrent/Direct vs Recurrent/Inverted: Δlogit = 0.245, Δp = 4.6%, p = 0.134, BH q = 0.160.
+    Recurrent/Inverted vs Single/Direct: Δlogit = -0.435, Δp = -7.8%, p = 0.123, BH q = 0.160.
+    Recurrent/Direct vs Single/Direct: Δlogit = -0.190, Δp = -3.2%, p = 0.508, BH q = 0.508.
 
 DIFFERENTIATION
 Differentiation between orientations (Hudson's FST):
