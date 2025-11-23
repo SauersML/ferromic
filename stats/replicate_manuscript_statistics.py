@@ -1384,7 +1384,12 @@ def summarize_cds_conservation_glm() -> List[str]:
         "weighted means before pairwise contrasts.",
     ]
 
-    pairwise_df: pd.DataFrame | None = None
+    res_nocov: object | None = None
+    res_adj: object | None = None
+    emm_nocov: pd.DataFrame | None = None
+    emm_adj: pd.DataFrame | None = None
+    pw_nocov: pd.DataFrame | None = None
+    pw_adj: pd.DataFrame | None = None
     source_label: str | None = None
     errors: List[str] = []
 
@@ -1394,9 +1399,17 @@ def summarize_cds_conservation_glm() -> List[str]:
         try:
             with _temporary_workdir(cds_input.parent):
                 cds_df = CDS_identical_model.load_data()
-                res = CDS_identical_model.fit_glm_binom(cds_df, include_covariates=True)
-                _, pairwise_df = CDS_identical_model.emms_and_pairs(
-                    res, cds_df, include_covariates=True
+                res_nocov = CDS_identical_model.fit_glm_binom(
+                    cds_df, include_covariates=False
+                )
+                emm_nocov, pw_nocov = CDS_identical_model.emms_and_pairs(
+                    res_nocov, cds_df, include_covariates=False
+                )
+                res_adj = CDS_identical_model.fit_glm_binom(
+                    cds_df, include_covariates=True
+                )
+                emm_adj, pw_adj = CDS_identical_model.emms_and_pairs(
+                    res_adj, cds_df, include_covariates=True
                 )
             source_label = f"loaded from {_relative_to_repo(cds_input)}"
         except SystemExit as exc:
@@ -1404,9 +1417,9 @@ def summarize_cds_conservation_glm() -> List[str]:
         except Exception as exc:
             errors.append(f"Failed to compute GLM: {exc}")
     else:
-         errors.append("cds_identical_proportions.tsv not found (Pipeline failure?)")
+        errors.append("cds_identical_proportions.tsv not found (Pipeline failure?)")
 
-    if pairwise_df is None:
+    if pw_adj is None and pw_nocov is None:
         lines.append(
             "  FATAL: CDS GLM inputs unavailable. The pipeline should have generated cds_identical_proportions.tsv."
         )
@@ -1417,56 +1430,76 @@ def summarize_cds_conservation_glm() -> List[str]:
     if source_label:
         lines.append(f"  Source: {source_label}.")
 
-    required = {
-        "A",
-        "B",
-        "diff_logit",
-        "diff_prob",
-        "p_value",
-        "q_value_fdr",
-    }
-    if not required.issubset(pairwise_df.columns):
-        missing = ", ".join(sorted(required - set(pairwise_df.columns)))
-        lines.append(f"  Pairwise contrast table missing required columns: {missing}.")
-        return lines
+    if errors:
+        lines.extend(f"  WARNING: {msg}" for msg in errors)
 
-    target_label = "Single/Inverted"
-    comparisons = [
-        (target_label, "Single/Direct"),
-        (target_label, "Recurrent/Inverted"),
-        (target_label, "Recurrent/Direct"),
-    ]
-
-    def _extract_contrast(a: str, b: str) -> pd.Series | None:
-        mask = (
-            ((pairwise_df["A"] == a) & (pairwise_df["B"] == b))
-            | ((pairwise_df["A"] == b) & (pairwise_df["B"] == a))
+    if "cds_df" in locals():
+        lines.append(
+            "  Input summary: "
+            + f"n_rows = {_fmt(len(cds_df), 0)}, n_inversions = {_fmt(cds_df['inv_id'].nunique(), 0)}."
         )
-        subset = pairwise_df.loc[mask]
-        if subset.empty:
-            return None
-        return subset.iloc[0]
 
-    found_any = False
-    for target, other in comparisons:
-        row = _extract_contrast(target, other)
-        if row is None:
-            lines.append(f"  Contrast {target} vs {other} not present in CDS pairwise table.")
-            continue
-        found_any = True
-        diff_prob = float(row["diff_prob"])
-        diff_logit = float(row["diff_logit"])
-        if row["A"] != target:
-            diff_prob *= -1
-            diff_logit *= -1
+    def _append_means(label: str, emm: pd.DataFrame | None):
+        if emm is None:
+            lines.append(f"  {label}: marginal means unavailable.")
+            return
+        lines.append(f"  {label}: standardized marginal means (equal inversion weight):")
+        for row in emm.sort_values("p_hat", ascending=False).itertuples():
+            lines.append(
+                f"    {row.category}: p̂ = {row.p_hat * 100:.1f}% "
+                f"(95% CI {row.p_lcl95 * 100:.1f}–{row.p_ucl95 * 100:.1f}%)."
+            )
+
+    def _append_pairs(label: str, pairwise: pd.DataFrame | None):
+        if pairwise is None:
+            lines.append(f"  {label}: pairwise contrasts unavailable.")
+            return
+        required = {
+            "A",
+            "B",
+            "diff_logit",
+            "diff_prob",
+            "p_value",
+            "q_value_fdr",
+        }
+        if not required.issubset(pairwise.columns):
+            missing = ", ".join(sorted(required - set(pairwise.columns)))
+            lines.append(f"  {label}: contrast table missing required columns: {missing}.")
+            return
+
+        lines.append(f"  {label}: pairwise contrasts (BH-FDR):")
+        for row in pairwise.itertuples():
+            lines.append(
+                "    "
+                + f"{row.A} vs {row.B}: Δlogit = {_fmt(row.diff_logit, 3)}, "
+                + f"Δp = {row.diff_prob * 100:.1f}%, p = {_fmt(row.p_value, 3)}, "
+                + f"BH q = {_fmt(row.q_value_fdr, 3)}."
+            )
+
+    def _append_fit(label: str, res) -> None:
+        if res is None:
+            lines.append(f"  {label}: model fit unavailable.")
+            return
+        pseudo_r2 = None
+        try:
+            pseudo_r2 = 1 - float(res.deviance) / float(res.null_deviance)
+        except Exception:
+            pseudo_r2 = None
         lines.append(
             "  "
-            + f"{target} vs {other}: Δlogit = {_fmt(diff_logit, 3)}, Δp = {_fmt(diff_prob, 3)}, "
-            + f"p = {_fmt(row['p_value'], 3)}, BH q = {_fmt(row['q_value_fdr'], 3)}."
+            + f"{label}: logLik = {_fmt(getattr(res, 'llf', None), 3)}, "
+            + f"null deviance = {_fmt(getattr(res, 'null_deviance', None), 3)}, "
+            + f"residual deviance = {_fmt(getattr(res, 'deviance', None), 3)}, "
+            + f"pseudo-R² = {_fmt(pseudo_r2, 3)}."
         )
 
-    if not found_any:
-        lines.append("  No pairwise contrasts reported for Single/Inverted haplotypes.")
+    _append_fit("Unadjusted model", res_nocov)
+    _append_means("Unadjusted model", emm_nocov)
+    _append_pairs("Unadjusted model", pw_nocov)
+
+    _append_fit("Adjusted model", res_adj)
+    _append_means("Adjusted model", emm_adj)
+    _append_pairs("Adjusted model", pw_adj)
 
     return lines
 
