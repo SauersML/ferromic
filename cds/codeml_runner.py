@@ -7,7 +7,6 @@ import traceback
 import pandas as pd
 import time
 import re
-from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # Ensure pipeline_lib is importable
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -216,27 +215,20 @@ def main():
     logging.info(f"Mapped {len(gene_labels)} genes to {len(tasks)} gene-region pairs.")
 
     # 5. Execute sequentially to allow per-gene restart parallelism inside pipeline_lib
-    with ProcessPoolExecutor(max_workers=1) as executor:
-        future_to_task = {
-            executor.submit(_execute_task, (gene_info, region_label, paml_bin)): (gene_info, region_label)
-            for gene_info, region_label in tasks
-        }
-
-        for future in as_completed(future_to_task):
-            gene_info, region_label = future_to_task[future]
-            gene_name = gene_info['label']
-            try:
-                res = future.result()
-                results.append(res)
-            except Exception as e:
-                logging.error(f"[{gene_name}] Worker crashed: {e}")
-                clean_reason = str(e).replace('\n', ' | ').replace('\r', '').replace('\t', ' ')
-                results.append({
-                    'gene': gene_name,
-                    'region': region_label,
-                    'status': 'runtime_error',
-                    'reason': f'Worker failure: {clean_reason}'
-                })
+    for gene_info, region_label in tasks:
+        gene_name = gene_info['label']
+        try:
+            res = _execute_task((gene_info, region_label, paml_bin))
+            results.append(res)
+        except Exception as e:
+            logging.error(f"[{gene_name}] Worker crashed: {e}")
+            clean_reason = str(e).replace('\n', ' | ').replace('\r', '').replace('\t', ' ')
+            results.append({
+                'gene': gene_name,
+                'region': region_label,
+                'status': 'runtime_error',
+                'reason': f'Worker failure: {clean_reason}'
+            })
 
     # 6. Save Results
     if results:
