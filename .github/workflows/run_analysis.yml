@@ -21,41 +21,6 @@ jobs:
           pip install .[test]
           pip install seaborn matplotlib adjustText requests
 
-      - name: Download analysis artefacts
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          base='https://sharedspace.s3.msi.umn.edu'
-
-          mapfile -t URLS <<'EOF'
-          https://sharedspace.s3.msi.umn.edu/public_internet/paml_results.checkpoint.tsv
-          https://sharedspace.s3.msi.umn.edu/public_internet/inversion_fst_estimates.tsv
-          https://sharedspace.s3.msi.umn.edu/public_internet/inv_info.csv
-          EOF
-
-          mkdir -p analysis_downloads
-          : > analysis_downloads/.downloaded_files
-
-          for url in "${URLS[@]}"; do
-            rel="${url#${base}/}"
-            out="analysis_downloads/${rel}"
-            mkdir -p "$(dirname "$out")"
-            echo "Fetching $url"
-            if ! curl -fSL --retry 3 "$url" -o "$out"; then
-              echo "Warning: failed to fetch $url; continuing"
-              rm -f "$out"
-              continue
-            fi
-            echo "$out" >> analysis_downloads/.downloaded_files
-          done
-
-          while IFS= read -r f; do
-            echo "===== HEAD: $f ====="
-            head -n 10 "$f" || true
-            echo
-          done < analysis_downloads/.downloaded_files
-
       - name: Download manual VCF workflow artefacts
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
