@@ -53,115 +53,115 @@ Internal decay (median within 2kb bins, Spearman's ρ for first 100kb, loci ≥1
   Saved Spearman decay points (including q-values) to: data/spearman_decay_points.tsv.
 
 HUDSON FST EDGE DECAY
-Folded Hudson FST decay (one-sided Spearman testing for decreases from edge to center):
+Folded Hudson FST decay (two-sided Spearman testing for changes from edge to center):
   chr10:46983451-47468232 (Recurrent):
-    rho=0.601, p(one-sided)=1.000, q=1.000, bins=46
+    rho=0.601, p(two-sided)=1.01470054432865e-05, q=0.000526872599178981, bins=46
   chr10:46983451-47468232 (Recurrent):
-    rho=0.585, p(one-sided)=1.000, q=1.000, bins=46
+    rho=0.585, p(two-sided)=1.95137999695919e-05, q=0.000526872599178981, bins=46
   chr10:46983451-47468232 (Recurrent):
-    rho=-0.252, p(one-sided)=0.046, q=0.495, bins=46
+    rho=-0.252, p(two-sided)=0.0917130083847862, q=0.412708537731538, bins=46
   chr10:79542901-80217413 (Single-event):
-    rho=0.044, p(one-sided)=0.615, q=1.000, bins=46
+    rho=0.044, p(two-sided)=0.769199683620293, q=0.917221164346982, bins=46
   chr10:79542901-80217413 (Single-event):
-    rho=-0.059, p(one-sided)=0.348, q=1.000, bins=46
+    rho=-0.059, p(two-sided)=0.69561664458308, q=0.917221164346982, bins=46
   chr10:79542901-80217413 (Single-event):
-    rho=0.046, p(one-sided)=0.618, q=1.000, bins=46
+    rho=0.046, p(two-sided)=0.763601461403526, q=0.917221164346982, bins=46
   chr11:50154999-50324102 (Recurrent):
-    rho=-0.046, p(one-sided)=0.386, q=1.000, bins=42
+    rho=-0.046, p(two-sided)=0.771081125009427, q=0.917221164346982, bins=42
   chr11:50154999-50324102 (Recurrent):
-    rho=-0.014, p(one-sided)=0.466, q=1.000, bins=42
+    rho=-0.014, p(two-sided)=0.931407480097165, q=0.948981206136734, bins=42
   chr11:50154999-50324102 (Recurrent):
-    rho=-0.066, p(one-sided)=0.339, q=1.000, bins=42
+    rho=-0.066, p(two-sided)=0.678504720513372, q=0.917221164346982, bins=42
   chr12:131312081-131644839 (Single-event):
-    rho=0.182, p(one-sided)=0.897, q=1.000, bins=50
+    rho=0.182, p(two-sided)=0.206262046202554, q=0.624651064081079, bins=50
   chr12:131312081-131644839 (Single-event):
-    rho=0.177, p(one-sided)=0.890, q=1.000, bins=50
+    rho=0.177, p(two-sided)=0.219463358173547, q=0.624651064081079, bins=50
   chr12:131312081-131644839 (Single-event):
-    rho=0.148, p(one-sided)=0.847, q=1.000, bins=50
+    rho=0.148, p(two-sided)=0.305202457781846, q=0.688848317282501, bins=50
   chr15:30618103-32153204 (Recurrent):
-    rho=0.053, p(one-sided)=0.643, q=1.000, bins=50
+    rho=0.053, p(two-sided)=0.713399511698228, q=0.917221164346982, bins=50
   chr15:30618103-32153204 (Recurrent):
-    rho=0.193, p(one-sided)=0.911, q=1.000, bins=50
+    rho=0.193, p(two-sided)=0.178900213779884, q=0.615146896839669, bins=50
   chr15:30618103-32153204 (Recurrent):
-    rho=0.063, p(one-sided)=0.669, q=1.000, bins=50
+    rho=0.063, p(two-sided)=0.662130151953696, q=0.917221164346982, bins=50
   chr16:14954790-15100859 (Recurrent):
-    rho=0.213, p(one-sided)=0.890, q=1.000, bins=35
+    rho=0.213, p(two-sided)=0.219784633658158, q=0.624651064081079, bins=35
   chr16:14954790-15100859 (Recurrent):
-    rho=0.134, p(one-sided)=0.778, q=1.000, bins=35
+    rho=0.134, p(two-sided)=0.444087570981947, q=0.729696721285237, bins=35
   chr16:14954790-15100859 (Recurrent):
-    rho=0.187, p(one-sided)=0.859, q=1.000, bins=35
+    rho=0.187, p(two-sided)=0.281781795274797, q=0.688848317282501, bins=35
   chr16:16721273-18073542 (Recurrent):
-    rho=0.402, p(one-sided)=0.998, q=1.000, bins=50
+    rho=0.402, p(two-sided)=0.0037629440317353, q=0.0406397955427412, bins=50
   chr16:16721273-18073542 (Recurrent):
-    rho=0.359, p(one-sided)=0.995, q=1.000, bins=50
+    rho=0.359, p(two-sided)=0.0105605385854438, q=0.0814670119448519, bins=50
   chr16:16721273-18073542 (Recurrent):
-    rho=-0.306, p(one-sided)=0.015, q=0.209, bins=50
+    rho=-0.306, p(two-sided)=0.0308889934990196, q=0.166800564894706, bins=50
   chr16:28471892-28637651 (Recurrent):
-    rho=0.276, p(one-sided)=0.930, q=1.000, bins=30
+    rho=0.276, p(two-sided)=0.140394657803136, q=0.583177809336105, bins=30
   chr16:28471892-28637651 (Recurrent):
-    rho=0.246, p(one-sided)=0.909, q=1.000, bins=31
+    rho=0.246, p(two-sided)=0.182265747211754, q=0.615146896839669, bins=31
   chr16:28471892-28637651 (Recurrent):
-    rho=0.190, p(one-sided)=0.847, q=1.000, bins=31
+    rho=0.190, p(two-sided)=0.306154807681112, q=0.688848317282501, bins=31
   chr17:16823490-18384190 (Single-event):
-    rho=-0.378, p(one-sided)=6.847e-03, q=0.123, bins=42
+    rho=-0.378, p(two-sided)=0.0136941273852229, q=0.0924353598502543, bins=42
   chr17:16823490-18384190 (Single-event):
-    rho=-0.502, p(one-sided)=3.556e-04, q=0.018, bins=42
+    rho=-0.502, p(two-sided)=0.000711143233335707, q=0.0128005782000427, bins=42
   chr17:16823490-18384190 (Single-event):
-    rho=0.422, p(one-sided)=0.997, q=1.000, bins=42
+    rho=0.422, p(two-sided)=0.00541453392800131, q=0.0487308053520118, bins=42
   chr17:45585159-46292045 (Single-event):
-    rho=0.108, p(one-sided)=0.770, q=1.000, bins=49
+    rho=0.108, p(two-sided)=0.459438676364779, q=0.729696721285237, bins=49
   chr17:45585159-46292045 (Single-event):
-    rho=0.328, p(one-sided)=0.989, q=1.000, bins=49
+    rho=0.328, p(two-sided)=0.0212925755058234, q=0.12775545303494, bins=49
   chr17:45585159-46292045 (Single-event):
-    rho=0.126, p(one-sided)=0.806, q=1.000, bins=49
+    rho=0.126, p(two-sided)=0.388625349942544, q=0.723647203341289, bins=49
   chr3:195749463-195980207 (Recurrent):
-    rho=0.031, p(one-sided)=0.584, q=1.000, bins=48
+    rho=0.031, p(two-sided)=0.832070148612193, q=0.917221164346982, bins=48
   chr3:195749463-195980207 (Recurrent):
-    rho=0.026, p(one-sided)=0.570, q=1.000, bins=48
+    rho=0.026, p(two-sided)=0.860757045806475, q=0.920113273609779, bins=48
   chr3:195749463-195980207 (Recurrent):
-    rho=-0.039, p(one-sided)=0.396, q=1.000, bins=48
+    rho=-0.039, p(two-sided)=0.792000112953159, q=0.917221164346982, bins=48
   chr6:167209001-167357782 (Single-event):
-    rho=-0.158, p(one-sided)=0.175, q=1.000, bins=37
+    rho=-0.158, p(two-sided)=0.350642118616878, q=0.723647203341289, bins=37
   chr6:167209001-167357782 (Single-event):
-    rho=-0.147, p(one-sided)=0.193, q=1.000, bins=37
+    rho=-0.147, p(two-sided)=0.386092362239459, q=0.723647203341289, bins=37
   chr6:167209001-167357782 (Single-event):
-    rho=-0.130, p(one-sided)=0.222, q=1.000, bins=37
+    rho=-0.130, p(two-sided)=0.444276826377444, q=0.729696721285237, bins=37
   chr7:5989046-6735643 (Recurrent):
-    rho=0.160, p(one-sided)=0.866, q=1.000, bins=50
+    rho=0.160, p(two-sided)=0.267468204682572, q=0.688848317282501, bins=50
   chr7:5989046-6735643 (Recurrent):
-    rho=0.043, p(one-sided)=0.617, q=1.000, bins=50
+    rho=0.043, p(two-sided)=0.765448458884893, q=0.917221164346982, bins=50
   chr7:5989046-6735643 (Recurrent):
-    rho=-0.441, p(one-sided)=6.731e-04, q=0.018, bins=50
+    rho=-0.441, p(two-sided)=0.00134610805726845, q=0.0181724587731241, bins=50
   chr7:60911891-61578023 (Recurrent):
-    rho=0.226, p(one-sided)=0.911, q=1.000, bins=37
+    rho=0.226, p(two-sided)=0.178283509000257, q=0.615146896839669, bins=37
   chr7:60911891-61578023 (Recurrent):
-    rho=0.131, p(one-sided)=0.780, q=1.000, bins=37
+    rho=0.131, p(two-sided)=0.439253036286709, q=0.729696721285237, bins=37
   chr7:60911891-61578023 (Recurrent):
-    rho=4.505e-03, p(one-sided)=0.511, q=1.000, bins=37
+    rho=4.505e-03, p(two-sided)=0.978890839458511, q=0.978890839458511, bins=37
   chr7:65219157-65531823 (Recurrent):
-    rho=0.024, p(one-sided)=0.563, q=1.000, bins=47
+    rho=0.024, p(two-sided)=0.873115722428036, q=0.920113273609779, bins=47
   chr7:65219157-65531823 (Recurrent):
-    rho=0.032, p(one-sided)=0.585, q=1.000, bins=47
+    rho=0.032, p(two-sided)=0.82955218580991, q=0.917221164346982, bins=47
   chr7:65219157-65531823 (Recurrent):
-    rho=0.111, p(one-sided)=0.771, q=1.000, bins=47
+    rho=0.111, p(two-sided)=0.457577150190108, q=0.729696721285237, bins=47
   chr7:73113989-74799029 (Recurrent):
-    rho=0.153, p(one-sided)=0.699, q=1.000, bins=14
+    rho=0.153, p(two-sided)=0.602150946993499, q=0.903226420490248, bins=14
   chr7:73113989-74799029 (Recurrent):
-    rho=0.171, p(one-sided)=0.721, q=1.000, bins=14
+    rho=0.171, p(two-sided)=0.558114530685507, q=0.861090990200497, bins=14
   chr7:73113989-74799029 (Recurrent):
-    rho=-0.042, p(one-sided)=0.443, q=1.000, bins=14
+    rho=-0.042, p(two-sided)=0.886035004216825, q=0.920113273609779, bins=14
   chr7:74869950-75058098 (Recurrent):
-    rho=-0.171, p(one-sided)=0.166, q=1.000, bins=34
+    rho=-0.171, p(two-sided)=0.33263115290762, q=0.718483290280459, bins=34
   chr7:74869950-75058098 (Recurrent):
-    rho=-0.160, p(one-sided)=0.184, q=1.000, bins=34
+    rho=-0.160, p(two-sided)=0.367349549540859, q=0.723647203341289, bins=34
   chr7:74869950-75058098 (Recurrent):
-    rho=0.332, p(one-sided)=0.973, q=1.000, bins=34
+    rho=0.332, p(two-sided)=0.0549112197664065, q=0.269564169762359, bins=34
   chrX:153149748-153250226 (Recurrent):
-    rho=0.087, p(one-sided)=0.660, q=1.000, bins=25
+    rho=0.087, p(two-sided)=0.679498024677208, q=0.917221164346982, bins=25
   chrX:153149748-153250226 (Recurrent):
-    rho=0.217, p(one-sided)=0.851, q=1.000, bins=25
+    rho=0.217, p(two-sided)=0.297618255146521, q=0.688848317282501, bins=25
   chrX:153149748-153250226 (Recurrent):
-    rho=0.045, p(one-sided)=0.584, q=1.000, bins=25
+    rho=0.045, p(two-sided)=0.832293278759298, q=0.917221164346982, bins=25
 
 LINEAR MODEL
 Orientation × recurrence linear models (replicated strict logic):

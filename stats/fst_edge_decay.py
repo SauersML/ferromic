@@ -1,4 +1,4 @@
-"""One-sided Spearman decay of FST from inversion edges toward the center."""
+"""Two-sided Spearman decay of FST from inversion edges toward the center."""
 from __future__ import annotations
 
 import gzip
@@ -26,7 +26,7 @@ class FstDecayResult:
     recurrence_flag: int
     recurrence_label: str
     rho: float | None
-    p_one_sided: float | None
+    p_two_sided: float | None
     q_value: float | None
     bins_used: int
 
@@ -75,16 +75,6 @@ def _load_inv_properties(data_dir: Path) -> pd.DataFrame:
     df = df[df["recurrence_flag"].isin([0, 1])].copy()
     df["recurrence_label"] = df["recurrence_flag"].map({0: "Single-event", 1: "Recurrent"})
     return df
-
-
-def _one_sided_p(rho: float | None, p_two_sided: float | None) -> float | None:
-    if rho is None or p_two_sided is None or not np.isfinite([rho, p_two_sided]).all():
-        return None
-    if rho < 0:
-        return float(p_two_sided / 2.0)
-    if rho > 0:
-        return float(1.0 - p_two_sided / 2.0)
-    return 0.5
 
 
 def _spearman_folded(values: np.ndarray) -> tuple[float | None, float | None, int]:
@@ -159,8 +149,6 @@ def compute_fst_edge_decay(data_dir: Path) -> List[FstDecayResult]:
         rho, p_two_sided, bins_used = _spearman_folded(values)
         if bins_used == 0:
             return
-
-        p_one_sided = _one_sided_p(rho, p_two_sided)
         flag, label = recurrence_map[key]
         results.append(
             FstDecayResult(
@@ -170,7 +158,7 @@ def compute_fst_edge_decay(data_dir: Path) -> List[FstDecayResult]:
                 recurrence_flag=flag,
                 recurrence_label=label,
                 rho=rho,
-                p_one_sided=p_one_sided,
+                p_two_sided=p_two_sided,
                 q_value=None,
                 bins_used=bins_used,
             )
@@ -195,7 +183,7 @@ def compute_fst_edge_decay(data_dir: Path) -> List[FstDecayResult]:
     if not results:
         return []
 
-    pvals = [r.p_one_sided for r in results]
+    pvals = [r.p_two_sided for r in results]
     valid_mask = [p is not None and np.isfinite(p) for p in pvals]
     if any(valid_mask):
         valid_p = [p for p, keep in zip(pvals, valid_mask) if keep]
