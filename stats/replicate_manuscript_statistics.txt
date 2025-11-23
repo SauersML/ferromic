@@ -37,18 +37,20 @@ Nucleotide diversity structure (Edge vs Middle and Internal Decay), filtered by 
     - Recurrent Inverted (Group 1, Recurrence 1): n=23 regions. Haplotypes (N): Total=542, Mean=23.6 [Min 2, Max 58]. Flank Mean = 2.626e-04, Middle Mean = 3.868e-04.
 
 Internal decay (Spearman's ρ of diversity vs distance from start for first 100kb, loci ≥100kb):
-  Overall (All Consensus 0+1): ρ = 0.092 (p = 8.329e-06, n = 47).
-  Single-Event Inverted (G1, R0): ρ = 0.184 (p = 3.498e-03, n = 5).
-  Recurrent Direct (G0, R1): ρ = 0.060 (p = 0.112, n = 14).
-  Recurrent Inverted (G1, R1): ρ = 0.080 (p = 0.035, n = 14).
-  Single-Event Direct (G0, R0): ρ = 0.119 (p = 1.674e-03, n = 14).
+  Overall (All Consensus 0+1): ρ = 0.092 (p(two-sided) = 8.329e-06, n = 47).
+  Single-Event Inverted (G1, R0): ρ = 0.184 (p(two-sided) = 3.498e-03, n = 5).
+  Recurrent Direct (G0, R1): ρ = 0.060 (p(two-sided) = 0.112, n = 14).
+  Recurrent Inverted (G1, R1): ρ = 0.080 (p(two-sided) = 0.035, n = 14).
+  Single-Event Direct (G0, R0): ρ = 0.119 (p(two-sided) = 1.674e-03, n = 14).
 
 Internal decay (median within 2kb bins, Spearman's ρ for first 100kb, loci ≥100kb):
-  Overall (All Consensus 0+1): ρ = NA (p = NA, n = 47).
-  Single-Event Inverted (G1, R0): ρ = NA (p = NA, n = 5).
-  Recurrent Direct (G0, R1): ρ = NA (p = NA, n = 14).
-  Recurrent Inverted (G1, R1): ρ = NA (p = NA, n = 14).
-  Single-Event Direct (G0, R0): ρ = NA (p = NA, n = 14).
+  Overall (All Consensus 0+1): ρ = NA (p(two-sided) = NA, n = 47).
+  Single-Event Inverted (G1, R0): ρ = NA (p(two-sided) = NA, n = 5).
+  Recurrent Direct (G0, R1): ρ = NA (p(two-sided) = NA, n = 14).
+  Recurrent Inverted (G1, R1): ρ = NA (p(two-sided) = NA, n = 14).
+  Single-Event Direct (G0, R0): ρ = NA (p(two-sided) = NA, n = 14).
+
+  Saved Spearman decay points (including q-values) to: data/spearman_decay_points.tsv.
 
 HUDSON FST EDGE DECAY
 Folded Hudson FST decay (one-sided Spearman testing for decreases from edge to center):
