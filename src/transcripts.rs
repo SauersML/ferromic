@@ -662,7 +662,7 @@ pub fn prepare_to_write_cds(
                     overlap_end_1b
                 );
 
-                log(LogLevel::Warn, &warning_message);
+                log(LogLevel::Warning, &warning_message);
 
                 let log_file_path = temp_path.join("inversion_overlap.log");
                 let now = SystemTime::now();
