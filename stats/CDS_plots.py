@@ -1204,8 +1204,9 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
             return pairs
 
         # Cap movements to prevent runaway offsets that fling labels off-canvas.
-        MAX_OFFSET_PT = 144.0  # total offset cap (±2 inches)
-        MAX_STEP_PT   = 24.0   # per-step cap (<= 24 pt)
+        MAX_OFFSET_PT     = 144.0  # total offset cap (±2 inches)
+        MAX_STEP_PT       = 24.0   # per-step cap (<= 24 pt)
+        MAX_LINE_LEN_PT   = 96.0   # arrow line length cap (<= 1.33 inches)
 
         def _px_to_pt(px):
             return px * 72.0 / fig.dpi
@@ -1213,6 +1214,13 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
         def _clamp_offset(ox, oy):
             ox = float(np.clip(ox, -MAX_OFFSET_PT, MAX_OFFSET_PT))
             oy = float(np.clip(oy, -MAX_OFFSET_PT, MAX_OFFSET_PT))
+
+            # Enforce a maximum overall line length from point to label.
+            r = math.hypot(ox, oy)
+            if r > MAX_LINE_LEN_PT and r > 0:
+                scale = MAX_LINE_LEN_PT / r
+                ox *= scale
+                oy *= scale
             return ox, oy
 
         def _apply_delta(idx: int, dx_px: float, dy_px: float):
@@ -1226,6 +1234,8 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
         max_iters = 80  # generous cap; converges quickly in practice
         padding_px = 2.0
 
+        move_vertical = True  # alternate move axis each iteration for stability
+
         for _ in range(max_iters):
             renderer = _draw_and_renderer()
             bbs = _bboxes(renderer, expand=(1.0, 1.0))
@@ -1234,31 +1244,27 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
             if not pairs:
                 break  # done
 
-            moved_any = False
-            for i, j, _area, w_px, h_px in pairs:
-                bi, bj = bbs[i], bbs[j]
-                cx_i = 0.5 * (bi.x0 + bi.x1)
-                cy_i = 0.5 * (bi.y0 + bi.y1)
-                cx_j = 0.5 * (bj.x0 + bj.x1)
-                cy_j = 0.5 * (bj.y0 + bj.y1)
+            i, j, _area, w_px, h_px = pairs[0]  # resolve one pair per iteration
+            bi, bj = bbs[i], bbs[j]
+            cx_i = 0.5 * (bi.x0 + bi.x1)
+            cy_i = 0.5 * (bi.y0 + bi.y1)
+            cx_j = 0.5 * (bj.x0 + bj.x1)
+            cy_j = 0.5 * (bj.y0 + bj.y1)
 
-                if w_px >= h_px:
-                    shift = 0.5 * w_px + padding_px
-                    dx_i = -shift if cx_i <= cx_j else shift
-                    dx_j = -dx_i
-                    _apply_delta(i, dx_i, 0.0)
-                    _apply_delta(j, dx_j, 0.0)
-                else:
-                    shift = 0.5 * h_px + padding_px
-                    dy_i = -shift if cy_i <= cy_j else shift
-                    dy_j = -dy_i
-                    _apply_delta(i, 0.0, dy_i)
-                    _apply_delta(j, 0.0, dy_j)
+            if move_vertical:
+                shift = 0.5 * h_px + padding_px
+                # Move the label that is already higher even higher.
+                target = i if cy_i >= cy_j else j
+                dy = shift if target == i else -shift
+                _apply_delta(target, 0.0, dy)
+            else:
+                shift = 0.5 * w_px + padding_px
+                # Move the label that is already left even further left.
+                target = i if cx_i <= cx_j else j
+                dx = -shift if target == i else shift
+                _apply_delta(target, dx, 0.0)
 
-                moved_any = True
-
-            if not moved_any:
-                break
+            move_vertical = not move_vertical
 
         _draw_and_renderer()
 
