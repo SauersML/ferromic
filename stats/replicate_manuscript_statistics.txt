@@ -224,10 +224,10 @@ CDS conservation GLM (proportion of identical CDS pairs):
   Input summary: n_rows = 422, n_inversions = 26.
   Unadjusted model: logLik = -2.144e+05, null deviance = 2.377e+05, residual deviance = 2.362e+05, pseudo-R² = 6.205e-03.
   Unadjusted model: standardized marginal means (equal inversion weight):
-    Single/Inverted: p̂ = 98.9% (95% CI 91.1–99.9%).
-    Recurrent/Inverted: p̂ = 79.5% (95% CI 72.2–85.3%).
-    Single/Direct: p̂ = 76.9% (95% CI 72.5–80.7%).
-    Recurrent/Direct: p̂ = 76.3% (95% CI 66.6–83.9%).
+    Single/Inverted: p̂ = 98.8860% (95% CI 91.0527–99.8710%).
+    Recurrent/Inverted: p̂ = 79.5470% (95% CI 72.2340–85.3252%).
+    Single/Direct: p̂ = 76.8741% (95% CI 72.5442–80.7028%).
+    Recurrent/Direct: p̂ = 76.3153% (95% CI 66.5520–83.9174%).
   Unadjusted model: pairwise contrasts (BH-FDR):
     Recurrent/Direct vs Single/Inverted: Δlogit = -3.316, Δp = -22.6%, p = 3.400e-03, BH q = 0.010.
     Single/Direct vs Single/Inverted: Δlogit = -3.285, Δp = -22.0%, p = 3.006e-03, BH q = 0.010.
@@ -237,10 +237,10 @@ CDS conservation GLM (proportion of identical CDS pairs):
     Recurrent/Direct vs Single/Direct: Δlogit = -0.031, Δp = -0.6%, p = 0.909, BH q = 0.909.
   Adjusted model: logLik = -2.008e+05, null deviance = 2.377e+05, residual deviance = 2.091e+05, pseudo-R² = 0.121.
   Adjusted model: standardized marginal means (equal inversion weight):
-    Single/Inverted: p̂ = 99.0% (95% CI 90.1–99.9%).
-    Single/Direct: p̂ = 80.3% (95% CI 56.8–92.7%).
-    Recurrent/Direct: p̂ = 77.2% (95% CI 55.5–90.2%).
-    Recurrent/Inverted: p̂ = 72.6% (95% CI 53.3–86.0%).
+    Single/Inverted: p̂ = 99.0044% (95% CI 90.1197–99.9078%).
+    Single/Direct: p̂ = 80.3418% (95% CI 56.8228–92.6964%).
+    Recurrent/Direct: p̂ = 77.1761% (95% CI 55.4729–90.1746%).
+    Recurrent/Inverted: p̂ = 72.5739% (95% CI 53.2933–85.9881%).
   Adjusted model: pairwise contrasts (BH-FDR):
     Recurrent/Direct vs Single/Inverted: Δlogit = -3.381, Δp = -21.8%, p = 4.935e-03, BH q = 0.015.
     Recurrent/Inverted vs Single/Inverted: Δlogit = -3.626, Δp = -26.4%, p = 2.529e-03, BH q = 0.015.
