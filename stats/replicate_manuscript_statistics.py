@@ -344,55 +344,20 @@ def run_fresh_cds_pipeline():
     Force regeneration of CDS statistics from raw .phy files.
     """
 
-    print("\n" + "=" * 80)
-    print(">>> PIPELINE: REGENERATING CDS DATA FROM RAW .PHY FILES <<<")
-    print("=" * 80)
-
-    expected_outputs = [
+    # Always start from a clean slate for CDS summary outputs
+    for filename in [
         "cds_identical_proportions.tsv",
         "gene_inversion_direct_inverted.tsv",
         "region_identical_proportions.tsv",
         "skipped_details.tsv",
-    ]
+    ]:
+        target = DATA_DIR / filename
+        if target.exists():
+            target.unlink()
 
-    # If all outputs already exist (either in the repo root or data/), reuse them
-    # instead of attempting to regenerate from the raw PHYLIP archives. This is
-    # helpful in environments without the large .phy bundles (for example when
-    # Git LFS artifacts are not available).
-    missing_outputs: list[str] = []
-    for filename in expected_outputs:
-        root_path = REPO_ROOT / filename
-        data_path = DATA_DIR / filename
-
-        # Special check for cds_identical_proportions.tsv: must have 'n_sites'
-        if filename == "cds_identical_proportions.tsv":
-            valid = False
-            for candidate in (root_path, data_path):
-                if candidate.exists():
-                    try:
-                        with open(candidate, "r") as f:
-                            header = f.readline()
-                        if "n_sites" in header:
-                            valid = True
-                            break
-                        else:
-                            print(f"Note: {candidate} exists but lacks 'n_sites' column. Regeneration forced.")
-                    except Exception:
-                        pass
-            if valid:
-                print(f"... {filename} found (and valid), using cached copy ...")
-                continue
-        else:
-            if root_path.exists():
-                continue
-            if data_path.exists():
-                print(f"... {filename} found in data/, using cached copy ...")
-                continue
-        missing_outputs.append(filename)
-
-    if not missing_outputs:
-        print("All CDS summary outputs already present; skipping regeneration.")
-        return
+    print("\n" + "=" * 80)
+    print(">>> PIPELINE: REGENERATING CDS DATA FROM RAW .PHY FILES <<<")
+    print("=" * 80)
 
     with _temporary_workdir(REPO_ROOT):
         # 1. Clean up old intermediate files to ensure we are using raw data
