@@ -11,6 +11,7 @@ from typing import List, Dict, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+import multiprocessing as mp
 from scipy.stats import shapiro
 
 import matplotlib as mpl
@@ -34,6 +35,8 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger("pi_flanking_analysis_exact_mf_quadrants")
+
+WORKER_COUNT = max(1, min(4, mp.cpu_count() or 1))
 
 # ------------------------------------------------------------------------------
 # Matplotlib base config (embed fonts, no TeX)
@@ -488,6 +491,52 @@ def load_pi_data(file_path: str | Path, min_total_length: int) -> List[dict]:
     return pi_sequences
 
 
+def _calculate_flanking_for_sequence(args: tuple[dict, WindowSpec]):
+    seq, spec = args
+    data = seq["data"]
+    L = len(data)
+    if L < spec.total_length:
+        return None, 1, 0, 0
+
+    beginning_flank = data[:spec.flank_size]
+    ending_flank = data[-spec.flank_size:]
+
+    start_middle = (L - spec.middle_size) // 2
+    end_middle = start_middle + spec.middle_size
+    middle_region = data[start_middle:end_middle]
+
+    if not (
+        spec.flank_size <= start_middle and end_middle <= (L - spec.flank_size)
+    ):
+        return None, 0, 0, 0
+
+    stats = {
+        "header": seq["header"],
+        "coords": seq["coords"],
+        "is_inverted": seq["is_inverted"],
+        "length": seq["length"],
+        "window_total_bp": spec.total_length,
+        "window_flank_bp": spec.flank_size,
+        "window_middle_bp": spec.middle_size,
+        "beginning_mean": np.nanmean(beginning_flank),
+        "ending_mean": np.nanmean(ending_flank),
+        "middle_mean": np.nanmean(middle_region),
+        "beginning_median": np.nanmedian(beginning_flank),
+        "ending_median": np.nanmedian(ending_flank),
+        "middle_median": np.nanmedian(middle_region),
+    }
+
+    stats["flanking_mean"] = np.nanmean([stats["beginning_mean"], stats["ending_mean"]])
+    stats["flanking_median"] = np.nanmean([stats["beginning_median"], stats["ending_median"]])
+
+    skipped_nan_middle = int(np.isnan(stats["middle_mean"]))
+    skipped_nan_flanks = int(np.isnan(stats["flanking_mean"]))
+    if skipped_nan_middle or skipped_nan_flanks:
+        return None, 0, skipped_nan_middle, skipped_nan_flanks
+
+    return stats, 0, 0, 0
+
+
 def calculate_flanking_stats(pi_sequences: List[dict], spec: WindowSpec) -> List[dict]:
     """
     EXACT windows defined by ``spec``:
@@ -509,58 +558,16 @@ def calculate_flanking_stats(pi_sequences: List[dict], spec: WindowSpec) -> List
     skipped_nan_middle = 0
     skipped_nan_flanks = 0
 
-    for seq in pi_sequences:
-        data = seq["data"]
-        L = len(data)
-        if L < spec.total_length:
-            skipped_too_short_total += 1
-            continue
-
-        # Exact windows
-        beginning_flank = data[:spec.flank_size]
-        ending_flank = data[-spec.flank_size:]
-
-        # Centered middle window
-        start_middle = (L - spec.middle_size) // 2
-        end_middle = start_middle + spec.middle_size
-        middle_region = data[start_middle:end_middle]
-
-        if not (
-            spec.flank_size <= start_middle
-            and end_middle <= (L - spec.flank_size)
+    with mp.Pool(processes=WORKER_COUNT) as pool:
+        for stats, short, nan_mid, nan_flank in pool.imap_unordered(
+            _calculate_flanking_for_sequence,
+            ((seq, spec) for seq in pi_sequences),
         ):
-            logger.warning(
-                f"Middle window overlaps flanks (len={L}, start_mid={start_middle}, end_mid={end_middle}). Skipping."
-            )
-            continue
-
-        stats = {
-            "header": seq["header"],
-            "coords": seq["coords"],
-            "is_inverted": seq["is_inverted"],
-            "length": seq["length"],
-            "window_total_bp": spec.total_length,
-            "window_flank_bp": spec.flank_size,
-            "window_middle_bp": spec.middle_size,
-            "beginning_mean": np.nanmean(beginning_flank),
-            "ending_mean": np.nanmean(ending_flank),
-            "middle_mean": np.nanmean(middle_region),
-            "beginning_median": np.nanmedian(beginning_flank),
-            "ending_median": np.nanmedian(ending_flank),
-            "middle_median": np.nanmedian(middle_region),
-        }
-
-        stats["flanking_mean"] = np.nanmean([stats["beginning_mean"], stats["ending_mean"]])
-        stats["flanking_median"] = np.nanmean([stats["beginning_median"], stats["ending_median"]])
-
-        if np.isnan(stats["middle_mean"]):
-            skipped_nan_middle += 1
-            continue
-        if np.isnan(stats["flanking_mean"]):
-            skipped_nan_flanks += 1
-            continue
-
-        results.append(stats)
+            skipped_too_short_total += short
+            skipped_nan_middle += nan_mid
+            skipped_nan_flanks += nan_flank
+            if stats is not None:
+                results.append(stats)
 
     elapsed_time = time.time() - start_time
     logger.info(f"Calculated stats for {len(results)} sequences in {elapsed_time:.2f}s.")
