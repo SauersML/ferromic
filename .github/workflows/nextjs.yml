@@ -104,17 +104,15 @@ jobs:
           fi
 
           if [ -z "$RUN_ID" ]; then
-            echo "restored=false" >> "$GITHUB_OUTPUT"
-            echo "No successful run-analysis workflow runs found; leaving existing manifest in place."
-            exit 0
+            echo "No successful run-analysis workflow runs found; cannot build site without figure artifacts."
+            exit 1
           fi
 
           echo "Downloading artifacts from run-analysis run $RUN_ID"
           WORK_DIR=$(mktemp -d)
           if ! gh run download "$RUN_ID" --name figure-outputs --dir "$WORK_DIR"; then
-            echo "restored=false" >> "$GITHUB_OUTPUT"
-            echo "Unable to download figure-outputs artifact; skipping restoration."
-            exit 0
+            echo "Failed to download figure-outputs artifact for run $RUN_ID"
+            exit 1
           fi
 
           SEARCH_ROOT="$WORK_DIR"
@@ -141,8 +139,8 @@ jobs:
           fi
 
           if [ -z "$FIGURES_ROOT" ]; then
-            echo "Figures directory not found in artifact; generating empty manifest."
-            FIGURES_ROOT=$(mktemp -d)
+            echo "Figures directory not found in artifact; failing build."
+            exit 1
           else
             echo "Using figures root: $FIGURES_ROOT"
           fi

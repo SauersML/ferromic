@@ -179,8 +179,10 @@ def _plot(df: pd.DataFrame, png_path: Path, pdf_path: Path) -> None:
 def main() -> None:
     points_path = DATA_DIR / "spearman_decay_points.tsv"
     df = _load_points(points_path)
-    png_path = points_path.with_name("spearman_decay_raincloud.png")
-    pdf_path = points_path.with_name("spearman_decay_raincloud.pdf")
+    output_dir = REPO_ROOT / "special"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    png_path = output_dir / "spearman_decay_raincloud.png"
+    pdf_path = output_dir / "spearman_decay_raincloud.pdf"
     _plot(df, png_path, pdf_path)
     print(f"Saved raincloud plot to {png_path} and {pdf_path}.")
 
