@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import glob
+import fnmatch
 import importlib
 import multiprocessing as mp
 import os
@@ -111,15 +112,6 @@ class FigureTask:
 
 
 FIGURE_TASKS: Sequence[FigureTask] = (
-    FigureTask(
-        name="Download CDS PHYLIP files",
-        script=Path("scripts/download_phy_files.py"),
-        outputs=("*.phy",),
-        dependencies=("inv_properties.tsv",),
-        note="Downloads all CDS PHYLIP files from S3 bucket for CDS conservation analysis.",
-        long_running=True,
-        group="CDS",
-    ),
     FigureTask(
         name="CDS pairwise identity computation",
         script=Path("stats/cds_differences.py"),
@@ -675,6 +667,36 @@ def ensure_local_copy(name: str, index: Dict[str, List[Path]]) -> Optional[Path]
     paths.
     """
 
+    if glob.has_magic(name):
+        pattern = Path(name)
+        first_linked: Optional[Path] = None
+
+        for paths in index.values():
+            for candidate in paths:
+                try:
+                    resolved = candidate.resolve()
+                except FileNotFoundError:
+                    continue
+                if not fnmatch.fnmatch(candidate.name, pattern.name):
+                    continue
+
+                target = REPO_ROOT / candidate.name
+                if target.exists() and is_valid_data_file(target):
+                    first_linked = first_linked or target
+                    continue
+                if target.is_symlink() and not target.exists():
+                    target.unlink()
+
+                try:
+                    target.symlink_to(resolved)
+                except OSError:
+                    shutil.copy2(resolved, target)
+
+                if is_valid_data_file(target):
+                    first_linked = first_linked or target
+
+        return first_linked
+
     target = REPO_ROOT / name
     if target.exists() and is_valid_data_file(target):
         return target
@@ -834,6 +856,22 @@ def run_task(task: FigureTask, env: Dict[str, str]) -> tuple[str, str]:
     missing: List[str] = []
     invalid: List[str] = []
     for dep in task.dependencies:
+        if glob.has_magic(dep):
+            matches = [p for p in REPO_ROOT.glob(dep)]
+            if not matches:
+                pattern = Path(dep).name
+                for directory in LOCAL_DATA_DIRECTORIES:
+                    if not directory.exists():
+                        continue
+                    matches.extend(directory.rglob(pattern))
+
+            valid_matches = [p for p in matches if p.is_file() and is_valid_data_file(p)]
+            if not valid_matches:
+                missing.append(dep)
+            elif len(valid_matches) < len(matches):
+                invalid.append(dep)
+            continue
+
         dep_path = REPO_ROOT / dep
         if not dep_path.exists():
             missing.append(dep)
