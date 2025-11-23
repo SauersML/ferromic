@@ -9,7 +9,7 @@ import logging
 import traceback
 from datetime import datetime
 import shutil
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 import time
 import urllib.request
 import tarfile
@@ -151,6 +151,14 @@ PAML_TIMEOUT   = int(os.environ.get("PAML_TIMEOUT", "20880"))
 RUN_BRANCH_MODEL_TEST = False
 RUN_CLADE_MODEL_TEST = True
 PROCEED_ON_TERMINAL_ONLY = False
+
+# --- Tournament seeds for PAML restarts ---
+SEED_BANK = {
+    "s1_def": {"kappa": 2.0, "omega": 0.4},
+    "s2_pur": {"kappa": 1.0, "omega": 0.05},
+    "s3_pos": {"kappa": 3.0, "omega": 2.5},
+    "s4_mix": {"kappa": 5.0, "omega": 0.8},
+}
 
 
 # ==============================================================================
@@ -826,7 +834,7 @@ def _with_lock(cache_dir: str):
             if self.locked: _unlock(self.d)
     return _LockCtx(cache_dir)
 
-def _hash_key_attempt(gene_phy_sha, tree_str, taxa_used_list, ctl_str, exe_fp):
+def _hash_key_attempt(gene_phy_sha, tree_str, taxa_used_list, ctl_str, exe_fp, init_kappa=None, init_omega=None):
     key_dict = {
         "schema": CACHE_SCHEMA_VERSION,
         "gene_phy_sha": gene_phy_sha,
@@ -834,6 +842,8 @@ def _hash_key_attempt(gene_phy_sha, tree_str, taxa_used_list, ctl_str, exe_fp):
         "taxa_used": sorted(taxa_used_list),
         "ctl_sha": _sha256_bytes(ctl_str.encode("utf-8")),
         "codeml": exe_fp["sha256"],
+        "init_kappa": init_kappa,
+        "init_omega": init_omega,
     }
     return _sha256_bytes(json.dumps(key_dict, sort_keys=True).encode("utf-8")), key_dict
 
@@ -848,6 +858,96 @@ def _hash_key_pair(h0_key_hex: str, h1_key_hex: str, test_label: str, df: int, e
         "codeml": exe_fp["sha256"],
     }
     return _sha256_bytes(json.dumps(key_dict, sort_keys=True).encode("utf-8")), key_dict
+
+def _paml_attempt_worker(task: dict):
+    """Execute a single codeml attempt with specific seeds and caching."""
+    gene_name = task["gene_name"]
+    region_label = task["region_label"]
+    cache_dir = task["cache_dir"]
+    key_hex = task["key_hex"]
+    timeout = task["timeout"]
+    parser_func = globals().get(task.get("parser_func_name")) if task.get("parser_func_name") else None
+    run_dir = task["run_dir"]
+    out_name = task["out_name"]
+
+    def _copy_if_exists(src, dst_dir, dst_name=None):
+        try:
+            if src and os.path.exists(src):
+                os.makedirs(dst_dir, exist_ok=True)
+                dst = os.path.join(dst_dir, (dst_name if dst_name else os.path.basename(src)))
+                shutil.copy(src, dst)
+                return dst
+        except Exception:
+            pass
+        return None
+
+    try:
+        payload = cache_read_json(cache_dir, key_hex, "attempt.json")
+        if payload:
+            return {
+                "seed": task["seed"],
+                "lnl": payload.get("lnl", np.nan),
+                "params": payload.get("params", {}),
+                "status": "success" if np.isfinite(payload.get("lnl", np.nan)) else "fail",
+                "key": key_hex,
+                "init_kappa": task["init_kappa"],
+                "init_omega": task["init_omega"],
+            }
+
+        os.makedirs(run_dir, exist_ok=True)
+        ctl_file = os.path.join(run_dir, f"{gene_name}_{out_name}.ctl")
+        out_file = os.path.join(run_dir, f"{gene_name}_{out_name}")
+
+        generate_paml_ctl(
+            ctl_file,
+            task["phy_abs"],
+            task["tree_path"],
+            out_file,
+            **task["model_params"],
+            init_kappa=task["init_kappa"],
+            init_omega=task["init_omega"],
+        )
+        run_codeml_in(run_dir, ctl_file, task["paml_bin"], timeout)
+        lnl = parse_paml_lnl(out_file)
+        parsed = parser_func(out_file) if parser_func else {}
+
+        payload = {
+            "lnl": float(lnl),
+            "params": parsed,
+            "init_kappa": task["init_kappa"],
+            "init_omega": task["init_omega"],
+        }
+
+        target_dir = _fanout_dir(cache_dir, key_hex)
+        with _with_lock(target_dir):
+            cache_write_json(cache_dir, key_hex, "attempt.json", payload)
+            artifact_dir = os.path.join(target_dir, "artifacts")
+            os.makedirs(artifact_dir, exist_ok=True)
+            _copy_if_exists(out_file, artifact_dir, out_name)
+            _copy_if_exists(ctl_file, artifact_dir, f"{out_name}.ctl")
+            _copy_if_exists(os.path.join(run_dir, "mlc"), artifact_dir, "mlc")
+            _copy_if_exists(task["tree_path"], artifact_dir, f"{out_name}.tree")
+
+        return {
+            "seed": task["seed"],
+            "lnl": float(lnl),
+            "params": parsed,
+            "status": "success",
+            "key": key_hex,
+            "init_kappa": task["init_kappa"],
+            "init_omega": task["init_omega"],
+        }
+    except Exception as exc:
+        return {
+            "seed": task["seed"],
+            "lnl": np.nan,
+            "params": {},
+            "status": "fail",
+            "reason": str(exc),
+            "key": key_hex,
+            "init_kappa": task["init_kappa"],
+            "init_omega": task["init_omega"],
+        }
 
 def cache_read_json(root: str, key_hex: str, name: str):
     path = os.path.join(_fanout_dir(root, key_hex), name)
@@ -1165,7 +1265,10 @@ def generate_paml_ctl(ctl_path, phy_file, tree_file, out_file, *,
                       init_kappa=None, init_omega=None, fix_blength=0):
     os.makedirs(os.path.dirname(ctl_path), exist_ok=True)
     kappa = 2.0 if init_kappa is None else init_kappa
-    omega = 0.5 if init_omega is None else init_omega
+    omega = 0.4 if init_omega is None else init_omega
+
+    ncat_line = f"ncatG = {ncatG}" if ncatG is not None else ""
+
     content = f"""
 seqfile = {phy_file}
 treefile = {tree_file}
@@ -1177,7 +1280,7 @@ seqtype = 1
 CodonFreq = 2
 model = {model}
 NSsites = {NSsites}
-{('ncatG = ' + str(ncatG)) if ncatG is not None else ''}
+{ncat_line}
 icode = 0
 cleandata = 0
 fix_kappa = 0
@@ -1272,11 +1375,6 @@ def analyze_single_gene(gene_info, region_tree_path, region_label, paml_bin, cac
         ctl_bm_h1 = _ctl_string(phy_abs, h1_tree, "H1_bm.out", model=2, NSsites=0)
         h0_bm_key, _ = _hash_key_attempt(gene_phy_sha, h0_tree_str, taxa_used, ctl_bm_h0, exe_fp)
         h1_bm_key, _ = _hash_key_attempt(gene_phy_sha, h1_tree_str, taxa_used, ctl_bm_h1, exe_fp)
-
-        ctl_cmc_h0 = _ctl_string(phy_abs, h0_tree, "H0_cmc.out", model=3, NSsites=2, ncatG=3)
-        ctl_cmc_h1 = _ctl_string(phy_abs, h1_tree, "H1_cmc.out", model=3, NSsites=2, ncatG=3)
-        h0_cmc_key, _ = _hash_key_attempt(gene_phy_sha, h0_tree_str, taxa_used, ctl_cmc_h0, exe_fp)
-        h1_cmc_key, _ = _hash_key_attempt(gene_phy_sha, h1_tree_str, taxa_used, ctl_cmc_h1, exe_fp)
 
         def get_attempt_result(key_hex, tree_path, out_name, model_params, parser_func):
             def _safe_json_load(p):
@@ -1506,87 +1604,153 @@ def analyze_single_gene(gene_info, region_tree_path, region_label, paml_bin, cac
 
         cmc_result = {}
         if run_clade_model:
-            pair_key_cmc, pair_key_dict_cmc = _hash_key_pair(h0_cmc_key, h1_cmc_key, "clade_model_c", 1, exe_fp)
-            pair_payload_cmc = cache_read_json(cache_dir, pair_key_cmc, "pair.json")
-            if pair_payload_cmc:
-                logging.info(f"[{gene_name}|{region_label}] Using cached PAIR result for clade_model_c")
-                cmc_result = dict(pair_payload_cmc["result"])
-                h1_key = cmc_result.get("cmc_h1_key") or pair_payload_cmc.get("key", {}).get("h1_attempt_key")
-                def _bad(x): return (x is None) or (isinstance(x, float) and np.isnan(x))
-                healed = {}
-                if h1_key:
-                    art_dir_h1 = os.path.join(_fanout_dir(cache_dir, h1_key), "artifacts")
-                    candidates = [os.path.join(art_dir_h1, "H1_cmc.out"), os.path.join(art_dir_h1, "mlc")]
-                    for raw_h1 in candidates:
-                        if os.path.exists(raw_h1):
-                            try: healed = parse_h1_cmc_paml_output(raw_h1) or {}
-                            except Exception: pass
-                            if healed: break
+            def _build_attempts(tree_path, tree_str, out_name, parser_func_name=None):
+                attempts = []
+                for seed_name, cfg in SEED_BANK.items():
+                    ctl_str = _ctl_string(
+                        phy_abs,
+                        tree_path,
+                        out_name,
+                        model=3,
+                        NSsites=2,
+                        ncatG=3,
+                        init_kappa=cfg["kappa"],
+                        init_omega=cfg["omega"],
+                    )
+                    key_hex, _ = _hash_key_attempt(
+                        gene_phy_sha,
+                        tree_str,
+                        taxa_used,
+                        ctl_str,
+                        exe_fp,
+                        init_kappa=cfg["kappa"],
+                        init_omega=cfg["omega"],
+                    )
+                    attempts.append({
+                        "seed": seed_name,
+                        "gene_name": gene_name,
+                        "region_label": region_label,
+                        "cache_dir": cache_dir,
+                        "key_hex": key_hex,
+                        "phy_abs": phy_abs,
+                        "tree_path": tree_path,
+                        "out_name": out_name,
+                        "model_params": {"model": 3, "NSsites": 2, "ncatG": 3},
+                        "paml_bin": paml_bin,
+                        "timeout": timeout,
+                        "init_kappa": cfg["kappa"],
+                        "init_omega": cfg["omega"],
+                        "parser_func_name": parser_func_name,
+                        "run_dir": os.path.join(temp_dir, f"{out_name.replace('.out', '')}_{seed_name}"),
+                    })
+                return attempts
 
-                if healed:
-                    changed = False
-                    for k, v in healed.items():
-                        if k.startswith("cmc_") and (_bad(cmc_result.get(k)) or (k not in cmc_result)):
-                            cmc_result[k] = v
-                            changed = True
-                    if changed:
-                        with _with_lock(_fanout_dir(cache_dir, pair_key_cmc)):
-                            cache_write_json(cache_dir, pair_key_cmc, "pair.json",
-                                             {"key": pair_payload_cmc["key"], "result": cmc_result})
-                        logging.info(f"[{gene_name}|{region_label}] Back-filled cmc_* in cached pair.json")
-                    try:
-                        if h1_key:
-                            att = cache_read_json(cache_dir, h1_key, "attempt.json")
-                            if isinstance(att, dict):
-                                aparams = att.get("params", {}) or {}
-                                a_changed = False
-                                for k, v in healed.items():
-                                    if k.startswith("cmc_") and (_bad(aparams.get(k)) or (k not in aparams)):
-                                        aparams[k] = v
-                                        a_changed = True
-                                if a_changed:
-                                    att["params"] = aparams
-                                    cache_write_json(cache_dir, h1_key, "attempt.json", att)
-                                    logging.info(f"[{gene_name}|{region_label}] Back-filled cmc_* in H1 attempt.json")
-                    except Exception: pass
-            else:
-                with ThreadPoolExecutor(max_workers=2) as ex:
-                    fut_h0 = ex.submit(get_attempt_result, h0_cmc_key, h0_tree, "H0_cmc.out",
-                                       {"model": 3, "NSsites": 2, "ncatG": 3}, None)
-                    fut_h1 = ex.submit(get_attempt_result, h1_cmc_key, h1_tree, "H1_cmc.out",
-                                       {"model": 3, "NSsites": 2, "ncatG": 3}, parse_h1_cmc_paml_output)
-                    h0_payload = fut_h0.result()
-                    h1_payload = fut_h1.result()
+            def _run_tournament(attempts):
+                if not attempts:
+                    return []
+                workers = min(len(attempts), max(1, os.cpu_count() or len(attempts)), 4)
+                results = []
+                with ProcessPoolExecutor(max_workers=workers) as ex:
+                    futures = {ex.submit(_paml_attempt_worker, att): att for att in attempts}
+                    for fut in as_completed(futures):
+                        try:
+                            results.append(fut.result())
+                        except Exception as exc:
+                            att = futures[fut]
+                            results.append({
+                                "seed": att.get("seed"),
+                                "lnl": np.nan,
+                                "params": {},
+                                "status": "fail",
+                                "reason": str(exc),
+                                "key": att.get("key_hex"),
+                                "init_kappa": att.get("init_kappa"),
+                                "init_omega": att.get("init_omega"),
+                            })
+                return results
 
-                lnl0, lnl1 = h0_payload.get("lnl", -np.inf), h1_payload.get("lnl", -np.inf)
-                if np.isfinite(lnl0) and np.isfinite(lnl1) and lnl1 >= lnl0:
-                    lrt = 2 * (lnl1 - lnl0)
-                    p = chi2.sf(lrt, df=1)
-                    cmc_result = {
-                        "cmc_lnl_h0": lnl0,
-                        "cmc_lnl_h1": lnl1,
-                        "cmc_lrt_stat": float(lrt),
-                        "cmc_p_value": float(p),
-                        **h1_payload.get("params", {}),
-                        "cmc_h0_key": h0_cmc_key,
-                        "cmc_h1_key": h1_cmc_key,
-                    }
-                    with _with_lock(_fanout_dir(cache_dir, pair_key_cmc)):
-                        cache_write_json(cache_dir, pair_key_cmc, "pair.json",
-                                         {"key": pair_key_dict_cmc, "result": cmc_result})
-                    logging.info(f"[{gene_name}|{region_label}] Cached LRT pair 'clade_model_c' (df=1)")
+            h0_attempts = _build_attempts(h0_tree, h0_tree_str, "H0_cmc.out")
+            h1_attempts = _build_attempts(h1_tree, h1_tree_str, "H1_cmc.out", parser_func_name="parse_h1_cmc_paml_output")
+
+            h0_results = _run_tournament(h0_attempts)
+            h1_results = _run_tournament(h1_attempts)
+
+            def _record_attempts(results, prefix):
+                for res in results:
+                    base = f"{prefix}_{res['seed']}_"
+                    final_result[f"{base}status"] = res.get("status")
+                    final_result[f"{base}lnl"] = res.get("lnl", np.nan)
+                    final_result[f"{base}init_kappa"] = res.get("init_kappa")
+                    final_result[f"{base}init_omega"] = res.get("init_omega")
+                    final_result[f"{base}key"] = res.get("key")
+                    if res.get("reason"):
+                        final_result[f"{base}reason"] = res.get("reason")
+                    for k, v in (res.get("params") or {}).items():
+                        final_result[f"{base}{k}"] = v
+
+            _record_attempts(h0_results, "h0")
+            _record_attempts(h1_results, "h1")
+
+            def _best_result(results):
+                successes = [r for r in results if r.get("status") == "success" and np.isfinite(r.get("lnl", np.nan))]
+                if not successes:
+                    return None
+                return max(successes, key=lambda r: r.get("lnl", -np.inf))
+
+            h0_best = _best_result(h0_results)
+            h1_best = _best_result(h1_results)
+
+            final_result["h0_winner_seed"] = h0_best.get("seed") if h0_best else None
+            final_result["h1_winner_seed"] = h1_best.get("seed") if h1_best else None
+
+            if h0_best and h1_best:
+                pair_key_cmc, pair_key_dict_cmc = _hash_key_pair(h0_best["key"], h1_best["key"], "clade_model_c", 1, exe_fp)
+                pair_payload_cmc = cache_read_json(cache_dir, pair_key_cmc, "pair.json")
+                if pair_payload_cmc:
+                    logging.info(f"[{gene_name}|{region_label}] Using cached PAIR result for clade_model_c")
+                    cmc_result = dict(pair_payload_cmc["result"])
                 else:
-                    cmc_result = {
-                        "cmc_p_value": np.nan,
-                        "cmc_lrt_stat": np.nan,
-                        "cmc_lnl_h0": lnl0,
-                        "cmc_lnl_h1": lnl1,
-                        "cmc_h0_key": h0_cmc_key,
-                        "cmc_h1_key": h1_cmc_key
-                    }
-                    with _with_lock(_fanout_dir(cache_dir, pair_key_cmc)):
-                        cache_write_json(cache_dir, pair_key_cmc, "pair.json", {"key": pair_key_dict_cmc, "result": cmc_result})
-                    logging.info(f"[{gene_name}|{region_label}] Cached LRT pair 'clade_model_c' (invalid or non-improvement)")
+                    lnl0, lnl1 = h0_best.get("lnl", -np.inf), h1_best.get("lnl", -np.inf)
+                    if np.isfinite(lnl0) and np.isfinite(lnl1) and lnl1 >= lnl0:
+                        lrt = 2 * (lnl1 - lnl0)
+                        p = chi2.sf(lrt, df=1)
+                        cmc_result = {
+                            "cmc_lnl_h0": lnl0,
+                            "cmc_lnl_h1": lnl1,
+                            "cmc_lrt_stat": float(lrt),
+                            "cmc_p_value": float(p),
+                            **(h1_best.get("params") or {}),
+                            "cmc_h0_key": h0_best.get("key"),
+                            "cmc_h1_key": h1_best.get("key"),
+                        }
+                        with _with_lock(_fanout_dir(cache_dir, pair_key_cmc)):
+                            cache_write_json(cache_dir, pair_key_cmc, "pair.json", {"key": pair_key_dict_cmc, "result": cmc_result})
+                        logging.info(f"[{gene_name}|{region_label}] Cached LRT pair 'clade_model_c' (df=1)")
+                    else:
+                        cmc_result = {
+                            "cmc_p_value": np.nan,
+                            "cmc_lrt_stat": np.nan,
+                            "cmc_lnl_h0": lnl0,
+                            "cmc_lnl_h1": lnl1,
+                            "cmc_h0_key": h0_best.get("key"),
+                            "cmc_h1_key": h1_best.get("key"),
+                        }
+                        with _with_lock(_fanout_dir(cache_dir, pair_key_cmc)):
+                            cache_write_json(cache_dir, pair_key_cmc, "pair.json", {"key": pair_key_dict_cmc, "result": cmc_result})
+                        logging.info(f"[{gene_name}|{region_label}] Cached LRT pair 'clade_model_c' (invalid or non-improvement)")
+                cmc_result["h0_winner_seed"] = h0_best.get("seed")
+                cmc_result["h1_winner_seed"] = h1_best.get("seed")
+            else:
+                cmc_result = {
+                    "cmc_p_value": np.nan,
+                    "cmc_lrt_stat": np.nan,
+                    "cmc_lnl_h0": np.nan,
+                    "cmc_lnl_h1": np.nan,
+                    "cmc_h0_key": h0_best.get("key") if h0_best else None,
+                    "cmc_h1_key": h1_best.get("key") if h1_best else None,
+                    "h0_winner_seed": h0_best.get("seed") if h0_best else None,
+                    "h1_winner_seed": h1_best.get("seed") if h1_best else None,
+                }
         else:
             logging.info(f"[{gene_name}|{region_label}] Skipping clade-model test as per configuration.")
             cmc_result = {"cmc_p_value": np.nan, "cmc_lrt_stat": np.nan}
