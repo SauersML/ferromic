@@ -1295,7 +1295,7 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
         frameon=False,
         title="Recurrence",
         loc="upper left",
-        bbox_to_anchor=(0.02, 0.98),
+        bbox_to_anchor=(0.02, 0.82),  # positioned just above the size legend
         borderaxespad=0.0,
         fontsize=8,
         bbox_transform=ax.transAxes,
