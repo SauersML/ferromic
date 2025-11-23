@@ -48,7 +48,7 @@ def _plot(df: pd.DataFrame, png_path: Path, pdf_path: Path) -> None:
         ax=ax,
     )
 
-    y_jitter = -0.035 + np.random.normal(loc=0.0, scale=0.005, size=len(df))
+    y_jitter = -0.035 + np.random.normal(loc=0.0, scale=0.01, size=len(df))
     sig = df["is_significant"].to_numpy()
 
     ax.scatter(
