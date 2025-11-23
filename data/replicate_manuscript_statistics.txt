@@ -220,10 +220,10 @@ CDS CONSERVATION
 CDS conservation GLM (proportion of identical CDS pairs):
   Model definition: Binomial GLM with logit link and frequency weights = n_pairs, cluster-robust by inversion; formula prop ~ C(consensus) * C(phy_group) + log_m + log_L + log_k (log of n_sites, inversion length, and n_sequences).
   Categories use Single/Recurrent × Direct/Inverted encoding; estimated marginal means are standardized with equal inversion weight and covariates set to their weighted means before pairwise contrasts.
-  Source: loaded from data/cds_identical_proportions.tsv.
-  Single/Inverted vs Single/Direct: Δlogit = 1.979, Δp = 0.190, p = 1.092e-03, BH q = 2.287e-03.
-  Single/Inverted vs Recurrent/Inverted: Δlogit = 2.206, Δp = 0.232, p = 2.874e-04, BH q = 1.724e-03.
-  Single/Inverted vs Recurrent/Direct: Δlogit = 2.024, Δp = 0.198, p = 1.144e-03, BH q = 2.287e-03.
+  Source: loaded from cds_identical_proportions.tsv.
+  Single/Inverted vs Single/Direct: Δlogit = 0.436, Δp = 0.059, p = 0.634, BH q = 0.634.
+  Single/Inverted vs Recurrent/Inverted: Δlogit = 0.945, Δp = 0.151, p = 0.304, BH q = 0.506.
+  Single/Inverted vs Recurrent/Direct: Δlogit = 0.695, Δp = 0.103, p = 0.453, BH q = 0.543.
 
 DIFFERENTIATION
 Differentiation between orientations (Hudson's FST):
