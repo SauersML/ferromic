@@ -7,7 +7,7 @@
 
 import os
 import math
-from pathlib import Path
+import pathlib
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -188,7 +188,7 @@ def main():
     )
     ax.add_artist(size_legend)
 
-    out_dir = Path(__file__).resolve().parents[1] / "frf"
+    out_dir = pathlib.Path(__file__).resolve().parents[1] / "frf"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_png = out_dir / "frf_volcano.png"
     out_pdf = out_dir / "frf_volcano.pdf"
