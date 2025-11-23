@@ -358,11 +358,3 @@ jobs:
           name: figure-outputs
           path: artifacts/figures
           if-no-files-found: warn
-
-      - name: Upload downloaded data artefacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: analysis-downloads
-          path: artifacts/downloads
-          if-no-files-found: warn
