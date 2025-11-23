@@ -391,12 +391,12 @@ def load_cds_summary() -> pd.DataFrame:
             print("[✔] All CDS entries pass the 'inv_exact_match == 1' check.")
         print("-" * 60)
     
-    # --- Step 2: Report on 'n_pairs > 0' filter (on the REMAINING data) ---
-    print(f"[Step 2] Analyzing 'n_pairs > 0' filter on the remaining {len(df_for_reporting)} rows...")
-    mask_not_enough_haps = ~(df_for_reporting['n_pairs'] > 0)
+    # --- Step 2: Report on 'n_pairs >= 3' filter (on the REMAINING data) ---
+    print(f"[Step 2] Analyzing 'n_pairs >= 3' filter on the remaining {len(df_for_reporting)} rows...")
+    mask_not_enough_haps = df_for_reporting['n_pairs'].isna() | (df_for_reporting['n_pairs'] < 3)
     if mask_not_enough_haps.any():
         dropped_for_haps = df_for_reporting[mask_not_enough_haps]
-        print(f"\n[!] Found {len(dropped_for_haps)} CDSs that will be dropped due to having < 2 haplotypes (n_pairs <= 0).")
+        print(f"\n[!] Found {len(dropped_for_haps)} CDSs that will be dropped due to having < 3 haplotypes (n_pairs < 3).")
         
         # Aggregate by inversion AND orientation
         counts_table = (dropped_for_haps.groupby(['inv_id', 'orientation'])
@@ -421,7 +421,7 @@ def load_cds_summary() -> pd.DataFrame:
         else:
             print("   (No specific inversion data to show for this filter)")
     else:
-        print("\n[✔] All remaining CDS entries have sufficient haplotypes (>= 2).")
+        print("\n[✔] All remaining CDS entries have sufficient haplotypes (>= 3).")
 
     print("\n[load_cds_summary] --- End of Pre-Filter Report ---\n")
     
@@ -434,8 +434,8 @@ def load_cds_summary() -> pd.DataFrame:
         print("[load_cds_summary] NOTE: no 'inv_exact_match' column; skipping that filter")
 
     before = len(df)
-    df = df[df["n_pairs"] > 0]
-    print(f"[load_cds_summary] filter n_pairs>0: kept {len(df)}/{before} (dropped {before-len(df)})")
+    df = df[df["n_pairs"] >= 3]
+    print(f"[load_cds_summary] filter n_pairs>=3: kept {len(df)}/{before} (dropped {before-len(df)})")
 
     # category as ordered categorical
     df["category"] = pd.Categorical(df["category"], categories=CATEGORY_ORDER, ordered=True)
