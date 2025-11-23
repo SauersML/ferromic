@@ -215,8 +215,8 @@ def main():
 
     logging.info(f"Mapped {len(gene_labels)} genes to {len(tasks)} gene-region pairs.")
 
-    # 5. Execute (run up to four jobs in parallel)
-    with ProcessPoolExecutor(max_workers=4) as executor:
+    # 5. Execute sequentially to allow per-gene restart parallelism inside pipeline_lib
+    with ProcessPoolExecutor(max_workers=1) as executor:
         future_to_task = {
             executor.submit(_execute_task, (gene_info, region_label, paml_bin)): (gene_info, region_label)
             for gene_info, region_label in tasks

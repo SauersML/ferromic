@@ -108,7 +108,7 @@ def scan_regions(region_override=None):
 
     return final_regions
 
-def scan_genes_and_batch(batch_size=4, region_override=None):
+def scan_genes_and_batch(batch_size=1, region_override=None):
     """Scans for gene files, filters them, and groups them into batches."""
     glob_pattern = 'combined_*.phy'
     print(f"[Genes] Scanning genes with glob: {glob_pattern}", file=sys.stderr)
@@ -179,7 +179,7 @@ def scan_genes_and_batch(batch_size=4, region_override=None):
 
 def main():
     parser = argparse.ArgumentParser(description="Generate GHA Matrix JSON")
-    parser.add_argument("--batch-size", type=int, default=4, help="Number of genes per PAML job")
+    parser.add_argument("--batch-size", type=int, default=1, help="Number of genes per PAML job")
     parser.add_argument("--region-override", type=str, help="Specific region override (e.g., chr22:100-200)")
     args = parser.parse_args()
 
