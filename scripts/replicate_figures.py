@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import argparse
+import glob
 import importlib
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -458,6 +460,26 @@ def log_boxed(message: str) -> None:
     print(f"\n{border}\n{message}\n{border}")
 
 
+def open_file(file_path: Path) -> None:
+    """Open a file using the platform default application."""
+
+    system = platform.system()
+    try:
+        if system == "Windows":
+            os.startfile(file_path)  # type: ignore[attr-defined]
+        elif system == "Darwin":
+            subprocess.run(["open", str(file_path)], check=True)
+        else:
+            subprocess.run(["xdg-open", str(file_path)], check=True)
+    except FileNotFoundError:
+        print(
+            f"ERROR: Could not find application to open '{file_path.name}'. "
+            f"Is a default viewer installed for '{file_path.suffix}' files?"
+        )
+    except Exception as exc:  # pragma: no cover - defensive programming
+        print(f"ERROR: Failed to open '{file_path.name}': {exc}")
+
+
 def build_download_plan(paths: Sequence[RemoteResource]) -> Dict[str, str]:
     """Create a mapping from relative path (under PUBLIC_PREFIX) to URL."""
 
@@ -838,6 +860,67 @@ def run_task(task: FigureTask, env: Dict[str, str]) -> tuple[str, str]:
     return "success", "ok"
 
 
+def _resolve_output_paths(target: Union[Path, str]) -> List[Path]:
+    """Return existing files matching the declared output target."""
+
+    path = target if isinstance(target, Path) else Path(target)
+    pattern = path if path.is_absolute() else REPO_ROOT / path
+    text = str(pattern)
+
+    matches: List[Path] = []
+    if any(ch in text for ch in "*?[]"):
+        for match in glob.glob(text, recursive=True):
+            candidate = Path(match)
+            if candidate.is_file() and is_valid_data_file(candidate):
+                matches.append(candidate)
+        return matches
+
+    if pattern.is_dir():
+        for candidate in pattern.rglob("*"):
+            if candidate.is_file() and is_valid_data_file(candidate):
+                matches.append(candidate)
+        return matches
+
+    if pattern.is_file() and is_valid_data_file(pattern):
+        matches.append(pattern)
+    return matches
+
+
+def collect_outputs(tasks: Sequence[FigureTask], destination: Path, summary: Sequence[tuple[FigureTask, str, str]]) -> List[Path]:
+    """Copy resolved outputs for successful tasks into ``destination``.
+
+    Returns the list of copied file paths (within ``destination``).
+    """
+
+    destination.mkdir(parents=True, exist_ok=True)
+    copied: List[Path] = []
+
+    success_lookup = {task.name: status for task, status, _ in summary}
+    for task in tasks:
+        if success_lookup.get(task.name) != "success":
+            continue
+        for output in task.outputs:
+            for resolved in _resolve_output_paths(output):
+                try:
+                    relative = resolved.relative_to(REPO_ROOT)
+                except ValueError:
+                    relative = Path(resolved.name)
+                target_path = destination / relative
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    shutil.copy2(resolved, target_path)
+                    copied.append(target_path)
+                except Exception as exc:  # pragma: no cover - defensive programming
+                    print(f"WARNING: Failed to copy {resolved} -> {target_path}: {exc}")
+
+    if copied:
+        print(f"\nCollected {len(copied)} artefacts into {destination}")
+    else:
+        print("\nNo outputs were copied; check earlier logs for missing artefacts.")
+
+    return copied
+
+
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Download analysis artefacts and replicate Ferromic figures.",
@@ -858,6 +941,19 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         action="store_true",
         help="Skip figure tasks that are flagged as long-running (per-site summaries).",
     )
+    parser.add_argument(
+        "--collect-outputs",
+        nargs="?",
+        const="final_plots",
+        default=None,
+        metavar="DIR",
+        help="Copy generated outputs into DIR (default: final_plots).",
+    )
+    parser.add_argument(
+        "--open-copied",
+        action="store_true",
+        help="Open copied outputs after collection (implies --collect-outputs).",
+    )
     return parser.parse_args(argv)
 
 
@@ -868,6 +964,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parse_args(argv)
+    collection_dir = Path(args.collect_outputs) if args.collect_outputs or args.open_copied else None
 
     plan = build_download_plan(REMOTE_PATHS)
     download_results: List[DownloadResult] = []
@@ -960,6 +1057,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"{state} {task.name}: {message}")
         if state == "⚠️" and task.note:
             print(f"    {task.note}")
+
+    copied_paths: List[Path] = []
+    if collection_dir is not None:
+        copied_paths = collect_outputs(selected_tasks, collection_dir, summary)
+        if args.open_copied and copied_paths:
+            print("\nOpening copied outputs ...")
+            for file_path in copied_paths:
+                open_file(file_path)
 
     failed_required = [
         (task, status, message)
