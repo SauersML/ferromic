@@ -96,6 +96,9 @@ jobs:
           PYO3_CROSS_PYTHON_VERSION: 3.9
         run: |
           if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
+            # Ensure PYO3_CROSS_PYTHON_VERSION is passed to the container
+            echo '[build.env]' >> Cross.toml
+            echo 'passthrough = ["PYO3_CROSS_PYTHON_VERSION"]' >> Cross.toml
             cross build --release --target ${{ matrix.target }}
           else
             cargo build --release --target ${{ matrix.target }}
