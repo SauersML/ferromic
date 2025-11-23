@@ -2883,6 +2883,36 @@ fn process_single_config_entry(
         mask_regions_chr,
     );
 
+    // Drop regions that are overwhelmingly masked (>=99% masked).
+    let callable_fraction_threshold = 0.99_f64;
+    let callable_fraction = if sequence_length > 0 {
+        (adjusted_sequence_length as f64) / (sequence_length as f64)
+    } else {
+        f64::NAN
+    };
+    let masked_fraction = 1.0 - callable_fraction;
+
+    if !callable_fraction.is_finite() || masked_fraction >= callable_fraction_threshold {
+        let region = format!(
+            "{}:{}-{}",
+            entry.seqname, entry.interval.start, entry.interval.end
+        );
+        let percent_masked = masked_fraction * 100.0;
+        let threshold_percent = callable_fraction_threshold * 100.0;
+        log(
+            LogLevel::Warning,
+            &format!(
+                "DROPPED: Region {} is {:.2}% masked (callable: {}/{}). Threshold is {:.0}%.",
+                region,
+                percent_masked,
+                adjusted_sequence_length,
+                sequence_length,
+                threshold_percent,
+            ),
+        );
+        return Ok(None);
+    }
+
     let filtered_adjusted_sequence_length =
         adjusted_sequence_length.saturating_sub(num_excluded_sites);
 
@@ -3257,9 +3287,8 @@ fn process_single_config_entry(
                 );
             }
         } else {
-            hudson_falsta_status = FalstaStatus::Skipped(
-                "failed to resolve haplotype indices for one or both groups",
-            );
+            hudson_falsta_status =
+                FalstaStatus::Skipped("failed to resolve haplotype indices for one or both groups");
             log(
                 LogLevel::Error,
                 &format!(
@@ -3491,8 +3520,9 @@ fn process_single_config_entry(
             num_informative: per_site_diversity_records.len(), // All records here are informative (sites with diversity)
         };
     } else {
-        pi_falsta_status =
-            FalstaStatus::Skipped("no per-site diversity records (likely 0 haplotypes or no variants)");
+        pi_falsta_status = FalstaStatus::Skipped(
+            "no per-site diversity records (likely 0 haplotypes or no variants)",
+        );
     }
 
     // Collect per-site FST records specifically for the haplotype group analysis (0 vs. 1)
