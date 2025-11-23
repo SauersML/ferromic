@@ -26,7 +26,7 @@ def _load_points(path: Path) -> pd.DataFrame:
     df["label"] = df["recurrence_flag"].map({0: "Single-event", 1: "Recurrent"})
     df["is_significant"] = df["q_value"].apply(lambda q: pd.notna(q) and q < 0.05)
     df["alpha"] = np.where(df["is_significant"], 0.6, 0.3)
-    df["size"] = np.where(df["is_significant"], 220, 160)
+    df["size"] = np.where(df["is_significant"], 320, 160)
     return df
 
 
@@ -49,26 +49,38 @@ def _plot(df: pd.DataFrame, png_path: Path, pdf_path: Path) -> None:
     )
 
     y_jitter = -0.035 + np.random.normal(loc=0.0, scale=0.005, size=len(df))
+    sig = df["is_significant"].to_numpy()
+
     ax.scatter(
-        df["rho"],
-        y_jitter,
-        c=df["label"].map(palette),
-        alpha=df["alpha"],
-        s=df["size"],
+        df.loc[~sig, "rho"],
+        y_jitter[~sig],
+        c=df.loc[~sig, "label"].map(palette),
+        alpha=df.loc[~sig, "alpha"],
+        s=df.loc[~sig, "size"],
         edgecolors="black",
         linewidths=1.1,
         marker="o",
         zorder=5,
     )
 
+    ax.scatter(
+        df.loc[sig, "rho"],
+        y_jitter[sig],
+        c=df.loc[sig, "label"].map(palette),
+        alpha=df.loc[sig, "alpha"],
+        s=df.loc[sig, "size"],
+        edgecolors="black",
+        linewidths=1.3,
+        marker="x",
+        zorder=6,
+    )
+
+
     ax.set_xlabel("Spearman correlation", fontsize=20)
     ax.set_ylabel("Density", fontsize=20)
     ax.tick_params(axis="both", which="major", labelsize=16)
     ax.set_ylim(bottom=min(ax.get_ylim()[0], -0.08))
     ax.grid(False)
-    ax.set_title(
-        "Spearman decay across inversions", fontsize=22, pad=20, weight="bold"
-    )
 
     ax.axhline(0, color="gray", lw=1.0, alpha=0.6)
     ax.spines["bottom"].set_linewidth(1.3)
@@ -80,7 +92,7 @@ def _plot(df: pd.DataFrame, png_path: Path, pdf_path: Path) -> None:
     y_max = ax.get_ylim()[1]
     arrow_y = y_max * 0.92
     ax.annotate(
-        "Higher FST near breakpoints →",
+        "Higher FST near breakpoints ",
         xy=(x_max * 0.95, arrow_y),
         xytext=(x_min + (x_max - x_min) * 0.55, arrow_y),
         arrowprops={"arrowstyle": "->", "color": "gray", "lw": 2.2},
@@ -118,13 +130,13 @@ def _plot(df: pd.DataFrame, png_path: Path, pdf_path: Path) -> None:
         Line2D(
             [0],
             [0],
-            marker="o",
+            marker="x",
             color="w",
             label="FDR < 0.05",
-            markerfacecolor="gray",
+            markerfacecolor="none",
             markeredgecolor="black",
             markersize=22,
-            alpha=0.6,
+            alpha=0.8,
         ),
     ]
     ax.legend(
