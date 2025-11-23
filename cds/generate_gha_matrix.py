@@ -121,6 +121,9 @@ def scan_genes_and_batch(batch_size=1, region_override=None):
     metadata = lib.load_gene_metadata()
     print(f"[Genes] Loaded {len(metadata)} gene metadata entries", file=sys.stderr)
 
+    allowed_regions = lib.ALLOWED_REGIONS
+    print(f"[Genes] Loaded {len(allowed_regions)} allowed regions from whitelist", file=sys.stderr)
+
     target_region_info = None
     if region_override:
         target_label, t_chrom, t_start, t_end = normalize_region_override(region_override)
@@ -128,11 +131,21 @@ def scan_genes_and_batch(batch_size=1, region_override=None):
         print(f"[Genes] Filtering genes to overlap with {target_label} ({t_chrom}:{t_start}-{t_end})", file=sys.stderr)
 
     valid_genes = []
-    rejections = {"metadata": 0, "overlap": 0, "error": 0}
+    rejections = {"metadata": 0, "overlap": 0, "error": 0, "whitelist": 0}
 
     for f in files:
         try:
             info = lib.parse_gene_filename(f, metadata)
+
+            overlaps_whitelist = False
+            for a_chrom, a_start, a_end in allowed_regions:
+                if info['chrom'] == a_chrom and not (info['end'] < a_start or info['start'] > a_end):
+                    overlaps_whitelist = True
+                    break
+
+            if not overlaps_whitelist:
+                rejections["whitelist"] += 1
+                continue
 
             if target_region_info:
                 # Check overlap
@@ -140,7 +153,7 @@ def scan_genes_and_batch(batch_size=1, region_override=None):
                 if info['chrom'] == t_chrom:
                     # Overlap check: not (End < Start OR Start > End)
                     if not (info['end'] < t_start or info['start'] > t_end):
-                         valid_genes.append(info['label'])
+                        valid_genes.append(info['label'])
                     else:
                         rejections["overlap"] += 1
                 else:
@@ -158,6 +171,8 @@ def scan_genes_and_batch(batch_size=1, region_override=None):
 
     if rejections["metadata"] > 0:
         print(f"[Genes] Skipped {rejections['metadata']} files due to missing metadata/coordinates.", file=sys.stderr)
+    if rejections["whitelist"] > 0:
+        print(f"[Genes] Skipped {rejections['whitelist']} files outside the allowed regions whitelist.", file=sys.stderr)
     if rejections["overlap"] > 0:
         print(f"[Genes] Skipped {rejections['overlap']} files due to non-overlap with override region.", file=sys.stderr)
     if rejections["error"] > 0:
