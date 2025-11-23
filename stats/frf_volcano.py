@@ -7,10 +7,12 @@
 
 import os
 import math
+from pathlib import Path
+
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-from math import erfc, sqrt, isfinite
+from math import erfc, isfinite, sqrt
 
 def main():
     # Attempt to locate the input file locally (provided by replicate_figures.py or existing in data/)
