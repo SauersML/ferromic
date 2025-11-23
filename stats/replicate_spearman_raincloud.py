@@ -23,6 +23,17 @@ def _load_points(path: Path) -> pd.DataFrame:
     if df.empty:
         raise ValueError("Spearman decay points table is empty; nothing to plot.")
 
+    df["bins_used"] = df.get("bins_used", pd.Series(dtype=float))
+
+    df = df[pd.notna(df["p_value"])]
+    df = df[np.isfinite(df["p_value"].astype(float))]
+    df = df[df["bins_used"].fillna(0).astype(int) >= 5]
+
+    if df.empty:
+        raise ValueError(
+            "No Spearman decay points have finite p-values and at least five usable bins; nothing to plot."
+        )
+
     df["label"] = df["recurrence_flag"].map({0: "Single-event", 1: "Recurrent"})
     df["is_significant"] = df["q_value"].apply(lambda q: pd.notna(q) and q < 0.05)
     df["alpha"] = np.where(df["is_significant"], 0.6, 0.3)
