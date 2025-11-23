@@ -1,5 +1,4 @@
 import math
-import warnings
 from pathlib import Path
 
 import numpy as np
@@ -9,9 +8,6 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import TwoSlopeNorm
 from matplotlib.patches import Patch, Rectangle
 from matplotlib.legend_handler import HandlerPatch
-
-from scipy.stats import wilcoxon
-SCIPY_OK = True
 
 # -----------------------------------------------------------------------------
 # Configuration / aesthetics
@@ -273,34 +269,6 @@ def _paired_lines_and_points(ax, matched: pd.DataFrame, cmap, norm):
             ax.scatter([x_d], [d], s=POINT_SIZE, c=COLOR_DIRECT,   edgecolors="black", linewidths=0.5, alpha=ALPHA_POINTS, zorder=6)
             ax.scatter([x_i], [i], s=POINT_SIZE, c=COLOR_INVERTED, edgecolors="black", linewidths=0.5, alpha=ALPHA_POINTS, zorder=6)
 
-def _wilcoxon_and_annotate(ax, matched: pd.DataFrame, y_for_brackets: float):
-    """Compute paired Wilcoxon tests and place compact p-value annotations above each section."""
-    def annotate(center_x, label, pval):
-        y = y_for_brackets
-        # bracket
-        ax.plot([center_x - 0.55, center_x + 0.55], [y, y], color="#444444", linewidth=1.3)
-        ax.plot([center_x - 0.55, center_x - 0.55], [y, y * 0.998], color="#444444", linewidth=1.3)
-        ax.plot([center_x + 0.55, center_x + 0.55], [y, y * 0.998], color="#444444", linewidth=1.3)
-        # label (omit “signed-rank”)
-        ptxt = _sci_notation_tex(pval) if np.isfinite(pval) else "NA"
-        ax.text(center_x, y * 1.008, f"{label} Wilcoxon p = {ptxt}",
-                ha="center", va="bottom", fontsize=11, color=AX_TEXT)
-
-    for grp in ["Single-event", "Recurrent"]:
-        sub = matched.loc[matched["Recurrence"] == grp].dropna(subset=["pi_direct", "pi_inverted"]).copy()
-        pval = float("nan")
-        if SCIPY_OK and len(sub) >= 2:
-            try:
-                _, pval = wilcoxon(sub["pi_direct"].values, sub["pi_inverted"].values,
-                                   alternative="two-sided", zero_method="wilcox")
-            except Exception:
-                try:
-                    _, pval = wilcoxon(sub["pi_direct"].values, sub["pi_inverted"].values,
-                                       alternative="two-sided", zero_method="zsplit")
-                except Exception:
-                    pval = float("nan")
-        annotate(SECTION_CENTERS[grp], grp, pval)
-
 def _draw_right_key(rax):
     """
     Draw a manual, large-square group key on the right panel (top area).
@@ -426,9 +394,6 @@ def main():
     # Subtle separator between sections
     ax.axvline(x=(POS[("Single-event", "Inverted")] + POS[("Recurrent", "Direct")]) / 2,
                color="#dddddd", linewidth=1.0, zorder=1)
-
-    # P-values (brackets & text; omit “signed-rank” wording)
-    _wilcoxon_and_annotate(ax, matched, y_for_brackets=ax.get_ylim()[1] / 1.15)
 
     # ---------- RIGHT COLUMN ----------
     # Large-square group key (manual) at top-right
