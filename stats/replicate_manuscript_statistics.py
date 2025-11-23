@@ -69,6 +69,27 @@ def _fmt(value: float | int | None, digits: int = 3) -> str:
     return f"{val:.{digits}f}"
 
 
+def _fmt_pvalue(value: float | int | None) -> str:
+    """Render p-values without aggressive rounding.
+
+    Uses up to 15 significant digits so extremely small probabilities stay
+    visible instead of collapsing to 0.000. Falls back to scientific notation
+    automatically for tiny values.
+    """
+
+    if value is None:
+        return "NA"
+    try:
+        val = float(value)
+    except (TypeError, ValueError):
+        return "NA"
+    if math.isnan(val) or math.isinf(val):
+        return "NA"
+    if val == 0.0:
+        return "0"
+    return f"{val:.15g}"
+
+
 def _safe_mean(series: pd.Series) -> float | None:
     if series is None:
         return None
@@ -1233,7 +1254,7 @@ def summarize_pi_structure() -> List[str]:
 
 def summarize_fst_edge_decay() -> List[str]:
     header = (
-        "Folded Hudson FST decay (one-sided Spearman testing for decreases from edge to center):"
+        "Folded Hudson FST decay (two-sided Spearman testing for changes from edge to center):"
     )
     try:
         results = fst_edge_decay.compute_fst_edge_decay(DATA_DIR)
@@ -1255,8 +1276,8 @@ def summarize_fst_edge_decay() -> List[str]:
         lines.append(
             "    "
             f"rho={_fmt(res.rho)}, "
-            f"p(one-sided)={_fmt(res.p_one_sided)}, "
-            f"q={_fmt(res.q_value)}, "
+            f"p(two-sided)={_fmt_pvalue(res.p_two_sided)}, "
+            f"q={_fmt_pvalue(res.q_value)}, "
             f"bins={_fmt(res.bins_used, 0)}"
         )
     return lines
