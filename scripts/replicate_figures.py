@@ -274,15 +274,6 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         group="CDS",
     ),
     FigureTask(
-        name="Hudson FST flanking region bar plot",
-        script=Path("stats/dist_fst_by_type.py"),
-        outputs=(Path("fst_flanking_regions_bar_plot.png"),),
-        dependencies=("per_site_fst_output.falsta", "inv_properties.tsv"),
-        required=False,
-        note="Requires per_site_fst_output.falsta emitted by the ferromic CLI run.",
-        group="FST",
-    ),
-    FigureTask(
         name="FST violin and scatter summary",
         script=Path("stats/overall_fst_by_type.py"),
         outputs=(Path("comparison_violin_haplotype_overall_fst_wc.png"),),
