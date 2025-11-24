@@ -916,6 +916,30 @@ def build_workbook(output_path: Path) -> None:
 
     register(
         SheetInfo(
+            name="dN/dS (ω) results",
+            description=(
+                "Results of the dN/dS (ω) analysis testing for genes with significantly different selective regimes between "
+                "direct and inverted orientations. (Placeholder: data will be added in a future release.)"
+            ),
+            column_defs=OrderedDict(),
+            loader=lambda: pd.DataFrame(),
+        )
+    )
+
+    register(
+        SheetInfo(
+            name="Imputation results",
+            description=(
+                "Performance metrics for the machine learning models (Partial Least Squares regression) used to impute inversion "
+                "dosage from flanking SNP genotypes. Models were trained on the 88 phased haplotypes from the reference panel."
+            ),
+            column_defs=IMPUTATION_COLUMN_DEFS,
+            loader=_load_imputation_results,
+        )
+    )
+
+    register(
+        SheetInfo(
             name="PheWAS results",
             description=(
                 "Phenome-wide association study (PheWAS) results linking imputed inversion dosages to electronic health record "
@@ -924,19 +948,6 @@ def build_workbook(output_path: Path) -> None:
             ),
             column_defs=PHEWAS_COLUMN_DEFS,
             loader=_load_phewas_results,
-        )
-    )
-
-    register(
-        SheetInfo(
-            name="17q21 tagging PheWAS",
-            description=(
-                "Validation PheWAS for the 17q21 inversion locus using a tagging SNP (rs105255341) instead of imputed dosage. "
-                "This ensures that the pleiotropic effects observed (e.g., obesity vs. breast cancer protection) are robust to "
-                "the method of genotype determination."
-            ),
-            column_defs=TAG_PHEWAS_COLUMN_DEFS,
-            loader=_load_phewas_tagging,
         )
     )
 
@@ -955,18 +966,6 @@ def build_workbook(output_path: Path) -> None:
 
     register(
         SheetInfo(
-            name="Imputation results",
-            description=(
-                "Performance metrics for the machine learning models (Partial Least Squares regression) used to impute inversion "
-                "dosage from flanking SNP genotypes. Models were trained on the 88 phased haplotypes from the reference panel."
-            ),
-            column_defs=IMPUTATION_COLUMN_DEFS,
-            loader=_load_imputation_results,
-        )
-    )
-
-    register(
-        SheetInfo(
             name="AGES trajectory 12_47296118",
             description=(
                 "Allele frequency trajectory data for SNP 12_47296118_A_G (tagging the 12q13 inversion) derived from the "
@@ -975,6 +974,19 @@ def build_workbook(output_path: Path) -> None:
             ),
             column_defs=TRAJECTORY_COLUMN_DEFS,
             loader=_load_trajectory_data,
+        )
+    )
+
+    register(
+        SheetInfo(
+            name="17q21 tagging PheWAS",
+            description=(
+                "Validation PheWAS for the 17q21 inversion locus using a tagging SNP (rs105255341) instead of imputed dosage. "
+                "This ensures that the pleiotropic effects observed (e.g., obesity vs. breast cancer protection) are robust to "
+                "the method of genotype determination."
+            ),
+            column_defs=TAG_PHEWAS_COLUMN_DEFS,
+            loader=_load_phewas_tagging,
         )
     )
 
