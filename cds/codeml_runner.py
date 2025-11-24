@@ -21,7 +21,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 
 def _execute_task(args):
-    gene_info, region_label, paml_bin = args
+    gene_info, region_label, paml_bin, target_model = args
     gene_name = gene_info['label']
 
     tree_file = os.path.join(lib.REGION_TREE_DIR, f"{region_label}.treefile")
@@ -58,7 +58,8 @@ def _execute_task(args):
             proceed_on_terminal_only=lib.PROCEED_ON_TERMINAL_ONLY,
             keep_paml_out=lib.KEEP_PAML_OUT,
             paml_out_dir=lib.PAML_OUT_DIR,
-            make_figures=False  # No figures for batch runs usually, or maybe yes? prompt said "And logs."
+            make_figures=False,  # No figures for batch runs usually, or maybe yes? prompt said "And logs."
+            target_clade_model=target_model,
         )
     except Exception as e:
         logging.error(f"[{gene_name}] Unexpected error: {e}")
@@ -84,7 +85,16 @@ def main():
         sys.exit(0)
 
     gene_labels = [g.strip() for g in batch_str.split(',') if g.strip()]
-    logging.info(f"Starting PAML Runner for Batch: {gene_labels}")
+    target_model = os.environ.get("PAML_MODEL")
+    if not target_model:
+        logging.error("Environment variable PAML_MODEL is not set. Expected 'h0', 'h1', or 'both'.")
+        sys.exit(1)
+    target_model = target_model.lower()
+    if target_model not in {"h0", "h1", "both"}:
+        logging.error(f"Invalid PAML_MODEL value '{target_model}'. Expected one of ['h0', 'h1', 'both'].")
+        sys.exit(1)
+
+    logging.info(f"Starting PAML Runner for Batch: {gene_labels} | model={target_model}")
 
     # 2. Setup Tools
     base_dir = os.getcwd()
@@ -218,7 +228,7 @@ def main():
     for gene_info, region_label in tasks:
         gene_name = gene_info['label']
         try:
-            res = _execute_task((gene_info, region_label, paml_bin))
+            res = _execute_task((gene_info, region_label, paml_bin, target_model))
             results.append(res)
         except Exception as e:
             logging.error(f"[{gene_name}] Worker crashed: {e}")
