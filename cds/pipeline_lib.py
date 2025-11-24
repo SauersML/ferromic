@@ -1312,10 +1312,18 @@ def analyze_single_gene(gene_info, region_tree_path, region_label, paml_bin, cac
                         keep_paml_out=False,
                         paml_out_dir="paml_runs",
                         make_figures=True,
-                        annotated_figure_dir=ANNOTATED_FIGURE_DIR):
+                        annotated_figure_dir=ANNOTATED_FIGURE_DIR,
+                        target_clade_model=None):
     """Run codeml for a gene using the provided region tree."""
     gene_name = gene_info['label']
-    final_result = {'gene': gene_name, 'region': region_label, 'status': 'runtime_error', 'reason': 'Unknown failure'}
+    normalized_target = (target_clade_model or "both").lower()
+    final_result = {
+        'gene': gene_name,
+        'region': region_label,
+        'status': 'runtime_error',
+        'reason': 'Unknown failure',
+        'paml_model': normalized_target,
+    }
     temp_dir = None
     start_time = datetime.now()
     logging.info(f"[{gene_name}|{region_label}] START codeml")
@@ -1499,6 +1507,10 @@ def analyze_single_gene(gene_info, region_tree_path, region_label, paml_bin, cac
 
         cmc_result = {}
         if run_clade_model:
+            target = normalized_target
+            run_h0 = target in ("both", "h0")
+            run_h1 = target in ("both", "h1")
+
             def _build_attempts(tree_path, tree_str, out_name, parser_func_name=None):
                 attempts = []
                 for seed_name, cfg in SEED_BANK.items():
@@ -1564,8 +1576,8 @@ def analyze_single_gene(gene_info, region_tree_path, region_label, paml_bin, cac
                             })
                 return results
 
-            h0_attempts = _build_attempts(h0_tree, h0_tree_str, "H0_cmc.out")
-            h1_attempts = _build_attempts(h1_tree, h1_tree_str, "H1_cmc.out", parser_func_name="parse_h1_cmc_paml_output")
+            h0_attempts = _build_attempts(h0_tree, h0_tree_str, "H0_cmc.out") if run_h0 else []
+            h1_attempts = _build_attempts(h1_tree, h1_tree_str, "H1_cmc.out", parser_func_name="parse_h1_cmc_paml_output") if run_h1 else []
 
             h0_results = _run_tournament(h0_attempts)
             h1_results = _run_tournament(h1_attempts)
@@ -1598,7 +1610,7 @@ def analyze_single_gene(gene_info, region_tree_path, region_label, paml_bin, cac
             final_result["h0_winner_seed"] = h0_best.get("seed") if h0_best else None
             final_result["h1_winner_seed"] = h1_best.get("seed") if h1_best else None
 
-            if h0_best and h1_best:
+            if run_h0 and run_h1 and h0_best and h1_best:
                 pair_key_cmc, pair_key_dict_cmc = _hash_key_pair(h0_best["key"], h1_best["key"], "clade_model_c", 1, exe_fp)
                 pair_payload_cmc = cache_read_json(cache_dir, pair_key_cmc, "pair.json")
                 if pair_payload_cmc:
@@ -1635,6 +1647,29 @@ def analyze_single_gene(gene_info, region_tree_path, region_label, paml_bin, cac
                         logging.info(f"[{gene_name}|{region_label}] Cached LRT pair 'clade_model_c' (invalid or non-improvement)")
                 cmc_result["h0_winner_seed"] = h0_best.get("seed")
                 cmc_result["h1_winner_seed"] = h1_best.get("seed")
+            elif run_h0 and h0_best:
+                cmc_result = {
+                    "cmc_lnl_h0": h0_best.get("lnl", np.nan),
+                    "cmc_lnl_h1": np.nan,
+                    "cmc_p_value": np.nan,
+                    "cmc_lrt_stat": np.nan,
+                    "cmc_h0_key": h0_best.get("key"),
+                    "cmc_h1_key": None,
+                    "h0_winner_seed": h0_best.get("seed"),
+                    "h1_winner_seed": None,
+                }
+            elif run_h1 and h1_best:
+                cmc_result = {
+                    "cmc_lnl_h0": np.nan,
+                    "cmc_lnl_h1": h1_best.get("lnl", np.nan),
+                    "cmc_p_value": np.nan,
+                    "cmc_lrt_stat": np.nan,
+                    **(h1_best.get("params") or {}),
+                    "cmc_h0_key": None,
+                    "cmc_h1_key": h1_best.get("key"),
+                    "h0_winner_seed": None,
+                    "h1_winner_seed": h1_best.get("seed"),
+                }
             else:
                 cmc_result = {
                     "cmc_p_value": np.nan,
@@ -1651,11 +1686,24 @@ def analyze_single_gene(gene_info, region_tree_path, region_label, paml_bin, cac
             cmc_result = {"cmc_p_value": np.nan, "cmc_lrt_stat": np.nan}
 
         bm_ok = not run_branch_model or not np.isnan(bm_result.get("bm_p_value", np.nan))
+        clade_has_partial = run_clade_model and (
+            (cmc_result.get("cmc_h0_key") is not None) or (cmc_result.get("cmc_h1_key") is not None)
+        )
         cmc_ok = not run_clade_model or not np.isnan(cmc_result.get("cmc_p_value", np.nan))
 
         if bm_ok and cmc_ok:
             final_result.update({
                 "status": "success", **bm_result, **cmc_result,
+                "n_leaves_region": len(region_taxa), "n_leaves_gene": len(gene_taxa), "n_leaves_pruned": len(taxa_used),
+                "chimp_in_region": any('pantro' in n.lower() for n in region_taxa),
+                "chimp_in_pruned": any('pantro' in n.lower() for n in t.get_leaf_names()),
+                "taxa_used": ';'.join(taxa_used)
+            })
+        elif bm_ok or clade_has_partial:
+            final_result.update({
+                "status": "partial_success",
+                "reason": "Only one clade model hypothesis executed; deferring LRT to final aggregation.",
+                **bm_result, **cmc_result,
                 "n_leaves_region": len(region_taxa), "n_leaves_gene": len(gene_taxa), "n_leaves_pruned": len(taxa_used),
                 "chimp_in_region": any('pantro' in n.lower() for n in region_taxa),
                 "chimp_in_pruned": any('pantro' in n.lower() for n in t.get_leaf_names()),
