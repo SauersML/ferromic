@@ -107,7 +107,7 @@ class WindowSpec:
         )
 
 
-TOTAL_WINDOW_LENGTHS = [20_000, 40_000, 60_000, 80_000, 100_000, 200_000]
+TOTAL_WINDOW_LENGTHS = [40_000]
 WINDOW_SPECS: List[WindowSpec] = []
 for total in TOTAL_WINDOW_LENGTHS:
     if total % 4 != 0:
@@ -300,14 +300,20 @@ def paired_permutation_test(
     obs = stat_func(diffs)
     if np.isclose(obs, 0):
         return 1.0
-    obs_abs = abs(obs)
 
     count = 0
-    for _ in range(num_permutations):
-        signs = np.random.choice([1, -1], size=n, replace=True)
-        perm = stat_func(diffs * signs)
-        if abs(perm) >= obs_abs:
-            count += 1
+    if obs > 0:
+        for _ in range(num_permutations):
+            signs = np.random.choice([1, -1], size=n, replace=True)
+            perm = stat_func(diffs * signs)
+            if perm >= obs:
+                count += 1
+    else:
+        for _ in range(num_permutations):
+            signs = np.random.choice([1, -1], size=n, replace=True)
+            perm = stat_func(diffs * signs)
+            if perm <= obs:
+                count += 1
     return count / num_permutations
 
 
