@@ -134,7 +134,7 @@ def ensure_output_dir(spec: WindowSpec) -> Path:
 # ------------------------------------------------------------------------------
 # Other Constants & File Paths
 # ------------------------------------------------------------------------------
-PERMUTATIONS = 10_000
+PERMUTATIONS = 100_000
 
 PI_DATA_FILE = "per_site_diversity_output.falsta"
 INVERSION_FILE = "inv_properties.tsv"
@@ -253,10 +253,15 @@ def extract_coordinates_from_header(header: str) -> Optional[dict]:
     return {"chrom": chrom, "start": start, "end": end, "group": group}
 
 
-def map_regions_to_inversions(inversion_df: pd.DataFrame) -> Tuple[dict, dict]:
-    logger.info("Creating inversion region mappings...")
-    recurrent_regions: Dict[str, List[Tuple[int, int, str]]] = {}
-    single_event_regions: Dict[str, List[Tuple[int, int, str]]] = {}
+def map_regions_to_inversions(inversion_df: pd.DataFrame) -> Dict[Tuple[str, int, int], dict]:
+    """
+    Build an exact-match lookup table for inversion regions.
+
+    Keys are normalized chromosome/start/end tuples pulled directly from
+    ``inv_properties.tsv``; values store the inversion ID and recurrence class.
+    """
+    logger.info("Creating inversion region mappings (exact coordinates)...")
+    exact_match_map: Dict[Tuple[str, int, int], dict] = {}
 
     inversion_df["Start"] = pd.to_numeric(inversion_df["Start"], errors="coerce")
     inversion_df["End"] = pd.to_numeric(inversion_df["End"], errors="coerce")
@@ -281,46 +286,13 @@ def map_regions_to_inversions(inversion_df: pd.DataFrame) -> Tuple[dict, dict]:
         end = int(row["End"])
         inv_id = str(row.get("OrigID") or f"{chrom}:{start}-{end}")
         is_recurrent = int(row["0_single_1_recur_consensus"]) == 1
-        target = recurrent_regions if is_recurrent else single_event_regions
-        target.setdefault(chrom, []).append((start, end, inv_id))
+        exact_match_map[(chrom, start, end)] = {
+            "inv_id": inv_id,
+            "inv_type": "recurrent" if is_recurrent else "single_event",
+        }
 
-    logger.info(
-        f"Mapped {sum(len(v) for v in recurrent_regions.values())} recurrent and "
-        f"{sum(len(v) for v in single_event_regions.values())} single-event regions."
-    )
-    return recurrent_regions, single_event_regions
-
-
-def is_overlapping(s1: int, e1: int, s2: int, e2: int) -> bool:
-    # Overlap / adjacency / <=1bp separation (inclusive coords)
-    return (e1 + 2) >= s2 and (e2 + 2) >= s1
-
-
-def determine_inversion_info(
-    coords: dict, recurrent_regions: dict, single_event_regions: dict
-) -> Tuple[str, Optional[str]]:
-    chrom, start, end = coords.get("chrom"), coords.get("start"), coords.get("end")
-    if not all([chrom, isinstance(start, int), isinstance(end, int)]):
-        return "unknown", None
-
-    matches: List[Tuple[str, str]] = []
-    for rs, re, inv_id in recurrent_regions.get(chrom, []):
-        if is_overlapping(start, end, rs, re):
-            matches.append(("recurrent", inv_id))
-    for ss, se, inv_id in single_event_regions.get(chrom, []):
-        if is_overlapping(start, end, ss, se):
-            matches.append(("single_event", inv_id))
-
-    if not matches:
-        return "unknown", None
-
-    match_types = {m[0] for m in matches}
-    match_ids = {m[1] for m in matches}
-    if len(match_types) > 1 or len(match_ids) > 1:
-        return "ambiguous", None
-
-    inv_type, inv_id = matches[0]
-    return inv_type, inv_id
+    logger.info(f"Mapped {len(exact_match_map)} inversion regions for exact lookup.")
+    return exact_match_map
 
 
 def paired_permutation_test(
@@ -640,8 +612,8 @@ def calculate_flanking_stats(pi_sequences: List[dict], spec: WindowSpec) -> List
     return results
 
 
-def categorize_sequences(flanking_stats: List[dict], recurrent_regions: dict, single_event_regions: dict) -> dict:
-    logger.info("Categorizing sequences based on overlap with inversion regions...")
+def categorize_sequences(flanking_stats: List[dict], inversion_map: Dict[Tuple[str, int, int], dict]) -> dict:
+    logger.info("Categorizing sequences based on exact inversion coordinates...")
     categories = {
         "single_event": [],
         "recurrent": [],
@@ -654,7 +626,15 @@ def categorize_sequences(flanking_stats: List[dict], recurrent_regions: dict, si
             seq_stats["inv_id"] = None
             continue
 
-        inv_type, inv_id = determine_inversion_info(coords, recurrent_regions, single_event_regions)
+        inv_key = (coords.get("chrom"), coords.get("start"), coords.get("end"))
+        inv_info = inversion_map.get(inv_key)
+        if not inv_info:
+            seq_stats["inv_class"] = "unknown"
+            seq_stats["inv_id"] = None
+            continue
+
+        inv_type = inv_info["inv_type"]
+        inv_id = inv_info["inv_id"]
         seq_stats["inv_class"] = inv_type
         seq_stats["inv_id"] = inv_id
 
@@ -1258,7 +1238,7 @@ def main():
     except Exception as e:
         logger.error(f"Failed reading inversion file: {e}")
         return
-    recurrent_regions, single_event_regions = map_regions_to_inversions(inv_df)
+    inversion_map = map_regions_to_inversions(inv_df)
 
     pi_path = Path(PI_DATA_FILE)
     if not pi_path.is_file():
@@ -1288,9 +1268,7 @@ def main():
             )
             continue
 
-        categories = categorize_sequences(
-            flanking_stats, recurrent_regions, single_event_regions
-        )
+        categories = categorize_sequences(flanking_stats, inversion_map)
 
         filtered_flanking_stats: List[dict] = []
         for key in CATEGORY_KEYS:
