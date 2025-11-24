@@ -188,14 +188,25 @@ def main():
     # 5. Statistics
     print("Calculating LRT, P-values, and FDR Q-values...")
     
-    # LRT Statistic: 2 * (L1 - L0)
-    # Use numpy for vector math; handle NaNs automatically
-    df['overall_lrt_stat'] = 2 * (df['overall_h1_lnl'] - df['overall_h0_lnl'])
-    # Clip negative LRTs (numerical noise) to 0
-    df['overall_lrt_stat'] = df['overall_lrt_stat'].clip(lower=0)
+    # Calculate differences to check for optimization consistency
+    diffs = df['overall_h1_lnl'] - df['overall_h0_lnl']
+    
+    # Identify optimization failures: H1 significantly less than H0 (e.g. < -1e-6)
+    # We treat these as invalid tests (NaN p-value), not valid null results.
+    epsilon = 1e-6
+    optim_fail_mask = diffs < -epsilon
+
+    # Calculate LRT statistic
+    lrt_stats = 2 * diffs
+    # Mask failures as NaN
+    lrt_stats[optim_fail_mask] = np.nan
+    # Clip valid small negatives (noise) to 0
+    lrt_stats = lrt_stats.clip(lower=0)
+    
+    df['overall_lrt_stat'] = lrt_stats
     
     # P-Value (Chi-squared, df=1)
-    # Only where LRT is valid
+    # Only where LRT is valid (not NaN)
     mask_valid = df['overall_lrt_stat'].notna()
     df.loc[mask_valid, 'overall_p_value'] = chi2.sf(df.loc[mask_valid, 'overall_lrt_stat'], df=1)
     
