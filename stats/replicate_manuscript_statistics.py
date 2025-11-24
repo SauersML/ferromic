@@ -12,7 +12,7 @@ import shutil
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, List, Tuple
+from typing import Callable, Iterable, List, Tuple
 import tempfile
 
 import shutil
@@ -515,20 +515,34 @@ class _MetricAccumulator:
             self.haplotype_counts.append(int(hap_count))
 
 
-def _calc_spearman(window_data: list[np.ndarray]) -> SpearmanResult:
+def _calc_spearman(
+    window_data: list[np.ndarray],
+    agg_func: Callable[[np.ndarray, int], np.ndarray] = np.nanmedian,
+    min_inv_per_bin: int = 5,
+) -> SpearmanResult:
+    """Calculate Spearman rho using aggregated 2kb windows across inversions.
+
+    The manuscript aggregates diversity values per 2kb bin across inversions and
+    applies a minimum inversion-per-bin threshold before computing the
+    correlation. This mirrors the visualization logic (50 bins spanning 0–100kb).
+    """
+
     if not window_data:
         return SpearmanResult(rho=None, p_value=None, n=0)
 
-    # 50 windows per entry (100kb / 2kb)
-    window_values = np.concatenate(window_data)
+    window_matrix = np.vstack(window_data)
     base_distances = np.arange(0, 100_000, 2_000, dtype=float)
-    distances = np.tile(base_distances, len(window_data))
 
-    mask = np.isfinite(window_values)
+    # Aggregate per-bin values across inversions, masking bins with sparse data.
+    per_bin_counts = np.sum(np.isfinite(window_matrix), axis=0)
+    aggregated = agg_func(window_matrix, axis=0)
+    aggregated = np.where(per_bin_counts >= min_inv_per_bin, aggregated, np.nan)
+
+    mask = np.isfinite(aggregated)
     if mask.sum() < 2:
         return SpearmanResult(rho=None, p_value=None, n=len(window_data))
 
-    rho_val, p_val = stats.spearmanr(distances[mask], window_values[mask])
+    rho_val, p_val = stats.spearmanr(base_distances[mask], aggregated[mask])
 
     rho = float(rho_val) if np.isfinite(rho_val) else None
     p = float(p_val) if np.isfinite(p_val) else None
@@ -649,13 +663,15 @@ def _calc_pi_structure_metrics() -> PiStructureMetrics:
         if group_id not in (0, 1):
             return
 
-        # Duplicate check
+        # Duplicate check (warn but still process to mirror manuscript counts)
         if (region, group_id) in processed_entries:
-            return
+            print(
+                f"WARNING: Duplicate inversion {region} in group {group_id}; processing again."
+            )
         processed_entries.add((region, group_id))
 
         values = _parse_values(body_lines)
-        if values.size == 0 or not np.isfinite(values).any():
+        if values.size == 0:
             return
 
         # --- Logic for Edge/Middle (Threshold 40kb) ---
@@ -808,28 +824,28 @@ def _calc_pi_structure_metrics() -> PiStructureMetrics:
         acc_spearman_mean[(0, 0)] + acc_spearman_mean[(0, 1)] +
         acc_spearman_mean[(1, 0)] + acc_spearman_mean[(1, 1)]
     )
-    res_overall = _calc_spearman(all_spearman_data)
+    res_overall = _calc_spearman(all_spearman_data, agg_func=np.nanmedian)
     all_spearman_median_data = (
         acc_spearman_median[(0, 0)] + acc_spearman_median[(0, 1)] +
         acc_spearman_median[(1, 0)] + acc_spearman_median[(1, 1)]
     )
-    res_overall_median = _calc_spearman(all_spearman_median_data)
+    res_overall_median = _calc_spearman(all_spearman_median_data, agg_func=np.nanmedian)
 
     # 2. Single-Inv (G1, R0)
-    res_single_inv = _calc_spearman(acc_spearman_mean[(1, 0)])
-    res_single_inv_median = _calc_spearman(acc_spearman_median[(1, 0)])
+    res_single_inv = _calc_spearman(acc_spearman_mean[(1, 0)], agg_func=np.nanmedian)
+    res_single_inv_median = _calc_spearman(acc_spearman_median[(1, 0)], agg_func=np.nanmedian)
 
     # 3. Recur-Dir (G0, R1)
-    res_recur_dir = _calc_spearman(acc_spearman_mean[(0, 1)])
-    res_recur_dir_median = _calc_spearman(acc_spearman_median[(0, 1)])
+    res_recur_dir = _calc_spearman(acc_spearman_mean[(0, 1)], agg_func=np.nanmedian)
+    res_recur_dir_median = _calc_spearman(acc_spearman_median[(0, 1)], agg_func=np.nanmedian)
 
     # 4. Recur-Inv (G1, R1)
-    res_recur_inv = _calc_spearman(acc_spearman_mean[(1, 1)])
-    res_recur_inv_median = _calc_spearman(acc_spearman_median[(1, 1)])
+    res_recur_inv = _calc_spearman(acc_spearman_mean[(1, 1)], agg_func=np.nanmedian)
+    res_recur_inv_median = _calc_spearman(acc_spearman_median[(1, 1)], agg_func=np.nanmedian)
 
     # 5. Single-Dir (G0, R0)
-    res_single_dir = _calc_spearman(acc_spearman_mean[(0, 0)])
-    res_single_dir_median = _calc_spearman(acc_spearman_median[(0, 0)])
+    res_single_dir = _calc_spearman(acc_spearman_mean[(0, 0)], agg_func=np.nanmedian)
+    res_single_dir_median = _calc_spearman(acc_spearman_median[(0, 0)], agg_func=np.nanmedian)
 
     return PiStructureMetrics(
         dir_stats=stats_0,
