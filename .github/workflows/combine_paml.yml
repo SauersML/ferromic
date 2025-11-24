@@ -58,8 +58,7 @@ jobs:
         run: |
           echo "Fetching artifact list for Run ID: $TARGET_RUN_ID..."
           
-          # 1. Get list of artifacts that match 'paml-results-*'
-          # We use the API because 'gh run download' with patterns is tricky across versions
+          # 1. Get list of artifacts
           gh api "/repos/${{ github.repository }}/actions/runs/$TARGET_RUN_ID/artifacts" --paginate \
             --jq '.artifacts[] | select(.name | startswith("paml-results")) | .name' > artifact_list.txt
           
@@ -79,15 +78,12 @@ jobs:
           done < artifact_list.txt
 
           # 3. Flatten directory structure
-          # finalize_results.py expects glob("partial_results_*.tsv") in the CWD.
-          # The download creates temp_artifacts/paml-results-X/partial_results_X.tsv
           echo "Flattening artifact structure..."
           find temp_artifacts -name "partial_results_*.tsv" -exec mv {} . \;
                     
-          echo "Download and extraction complete. TSV files ready:"
-          ls -lh partial_results_*.tsv | head -n 5
-          echo "... (list truncated)"
-
+          echo "Download and extraction complete. TSV files ready (head):"
+          ls -lh partial_results_*.tsv | head -n 500 || true
+    
       - name: Run Final Stats
         run: |
           # The script looks for partial_results_*.tsv in CWD
