@@ -21,6 +21,11 @@
           "description": "Raincloud distribution of Spearman correlations for FST decay near breakpoints, split by single-event versus recurrent inversions with significance highlighted."
         },
         {
+          "title": "Mean π Overall Violins (40 kb)",
+          "filename": "pi_analysis_results_exact_mf_quadrants/total_40kb/pi_mf_overall_violins_total_40kb.pdf",
+          "description": "Overall violin-and-line comparison of mean nucleotide diversity across inversion categories using 40 kb windows."
+        },
+        {
           "title": "Median π vs. Distance to Breakpoints (100 kb)",
           "filename": "length_norm_trend_fast/pi_vs_inversion_edge_bp_cap100kb_grouped_median.pdf",
           "description": "Median per-site nucleotide diversity as a function of distance from inversion breakpoints (100 kb window)."
