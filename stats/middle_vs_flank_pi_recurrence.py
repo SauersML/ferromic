@@ -225,10 +225,11 @@ def normalize_chromosome(chrom: str) -> Optional[str]:
 
 
 def extract_coordinates_from_header(header: str) -> Optional[dict]:
-    if "filtered_pi" not in header.lower():
+    lower_header = header.lower()
+    if not lower_header.startswith(">filtered_pi"):
         return None
     pattern = re.compile(
-        r">.*?filtered_pi.*?_chr_?([\w\.\-]+)_start_(\d+)_end_(\d+)(?:_group_([01]))?",
+        r">filtered_pi.*?_chr_?([\w\.\-]+)_start_(\d+)_end_(\d+)(?:_group_([01]))?",
         re.IGNORECASE,
     )
     match = pattern.search(header)
@@ -360,7 +361,7 @@ def parse_pi_data_line(line: str) -> Optional[np.ndarray]:
 def load_pi_data(file_path: str | Path, min_total_length: int) -> List[dict]:
     logger.info(f"Loading pi data from {file_path}")
     logger.info(
-        f"Applying filters: Header must contain 'filtered_pi', Sequence length ≥ {min_total_length:,} (total)"
+        f"Applying filters: Header must start with 'filtered_pi', Sequence length ≥ {min_total_length:,} (total)"
     )
     start_time = time.time()
 
@@ -417,7 +418,8 @@ def load_pi_data(file_path: str | Path, min_total_length: int) -> List[dict]:
                     current_sequence_parts = []
                     is_current_header_valid = False
 
-                    if "filtered_pi" in current_header.lower():
+                    lower_header = current_header.lower()
+                    if lower_header.startswith(">filtered_pi"):
                         coords_check = extract_coordinates_from_header(current_header)
                         if coords_check:
                             is_current_header_valid = True

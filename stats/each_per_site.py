@@ -47,7 +47,7 @@ log = logging.getLogger("per_inversion_trends")
 
 # Capture optional group for pi
 _RE_PI = re.compile(
-    r">.*?filtered_pi.*?_chr_?([\w.\-]+)_start_(\d+)_end_(\d+)(?:_group_([0-9]+))?",
+    r">filtered_pi.*?_chr_?([\w.\-]+)_start_(\d+)_end_(\d+)(?:_group_([0-9]+))?",
     re.IGNORECASE,
 )
 _RE_HUD = re.compile(

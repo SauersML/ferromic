@@ -10,7 +10,7 @@ EDGE_SIZE = 100_000     # Number of positions from each edge
 
 def parse_header(line):
     """Parse header line for filtered pi sequences only."""
-    if not line.startswith(">") or "filtered_pi" not in line.lower():
+    if not line.lower().startswith(">filtered_pi"):
         return None
     header = line[1:].strip()
     parts = header.split('_')
