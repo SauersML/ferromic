@@ -99,7 +99,7 @@ log = logging.getLogger("len_norm_fast_grouped_normed")
 
 # IMPORTANT: use only FILTERED π and capture orientation group (_0 = direct, _1 = inverted)
 _RE_PI = re.compile(
-    r">.*?filtered_pi.*?_chr_?([\w.\-]+)_start_(\d+)_end_(\d+)(?:_group_([01]))?",
+    r">filtered_pi.*?_chr_?([\w.\-]+)_start_(\d+)_end_(\d+)(?:_group_([01]))?",
     re.IGNORECASE,
 )
 _RE_HUD = re.compile(

@@ -188,7 +188,7 @@ def match_regions(summary_df: pd.DataFrame, inv_df: pd.DataFrame) -> pd.DataFram
     return merged
 
 # ---------- 4) Parse per-site arrays ----------
-_RE_PI = re.compile(r">.*?filtered_pi.*?_chr_?([\w.\-]+)_start_(\d+)_end_(\d+)_group_(0|1)", re.IGNORECASE)
+_RE_PI = re.compile(r">filtered_pi.*?_chr_?([\w.\-]+)_start_(\d+)_end_(\d+)_group_(0|1)", re.IGNORECASE)
 _RE_FH = re.compile(r">.*?hudson_pairwise_fst.*?_chr_?([\w.\-]+)_start_(\d+)_end_(\d+)", re.IGNORECASE)
 
 def parse_pi_falsta(pi_path: Path) -> Dict[Tuple[str,int,int,str], np.ndarray]:
