@@ -243,8 +243,8 @@ def extract_fst_coordinates_from_header(header: str) -> Optional[dict]:
 
 def map_regions_to_inversions(inversion_df: pd.DataFrame) -> Tuple[dict, dict]:
     logger.info("Creating inversion region mappings...")
-    recurrent_regions: Dict[str, List[Tuple[int, int]]] = {}
-    single_event_regions: Dict[str, List[Tuple[int, int]]] = {}
+    recurrent_regions: Dict[str, List[Tuple[int, int, str]]] = {}
+    single_event_regions: Dict[str, List[Tuple[int, int, str]]] = {}
 
     inversion_df["Start"] = pd.to_numeric(inversion_df["Start"], errors="coerce")
     inversion_df["End"] = pd.to_numeric(inversion_df["End"], errors="coerce")
@@ -267,9 +267,10 @@ def map_regions_to_inversions(inversion_df: pd.DataFrame) -> Tuple[dict, dict]:
             continue
         start = int(row["Start"])
         end = int(row["End"])
+        inv_id = str(row.get("OrigID") or f"{chrom}:{start}-{end}")
         is_recurrent = int(row["0_single_1_recur_consensus"]) == 1
         target = recurrent_regions if is_recurrent else single_event_regions
-        target.setdefault(chrom, []).append((start, end))
+        target.setdefault(chrom, []).append((start, end, inv_id))
 
     logger.info(
         f"Mapped {sum(len(v) for v in recurrent_regions.values())} recurrent and "
@@ -283,19 +284,31 @@ def is_overlapping(s1: int, e1: int, s2: int, e2: int) -> bool:
     return (e1 + 2) >= s2 and (e2 + 2) >= s1
 
 
-def determine_inversion_type(coords: dict, recurrent_regions: dict, single_event_regions: dict) -> str:
+def determine_inversion_info(
+    coords: dict, recurrent_regions: dict, single_event_regions: dict
+) -> Tuple[str, Optional[str]]:
     chrom, start, end = coords.get("chrom"), coords.get("start"), coords.get("end")
     if not all([chrom, isinstance(start, int), isinstance(end, int)]):
-        return "unknown"
-    is_recur = any(is_overlapping(start, end, rs, re) for rs, re in recurrent_regions.get(chrom, []))
-    is_single = any(is_overlapping(start, end, rs, re) for rs, re in single_event_regions.get(chrom, []))
-    if is_recur and is_single:
-        return "ambiguous"
-    if is_recur:
-        return "recurrent"
-    if is_single:
-        return "single_event"
-    return "unknown"
+        return "unknown", None
+
+    matches: List[Tuple[str, str]] = []
+    for rs, re, inv_id in recurrent_regions.get(chrom, []):
+        if is_overlapping(start, end, rs, re):
+            matches.append(("recurrent", inv_id))
+    for ss, se, inv_id in single_event_regions.get(chrom, []):
+        if is_overlapping(start, end, ss, se):
+            matches.append(("single_event", inv_id))
+
+    if not matches:
+        return "unknown", None
+
+    match_types = {m[0] for m in matches}
+    match_ids = {m[1] for m in matches}
+    if len(match_types) > 1 or len(match_ids) > 1:
+        return "ambiguous", None
+
+    inv_type, inv_id = matches[0]
+    return inv_type, inv_id
 
 
 def paired_permutation_test(
@@ -324,6 +337,61 @@ def paired_permutation_test(
         if abs(perm) >= obs_abs:
             count += 1
     return count / num_permutations
+
+
+def run_cluster_rank_test(
+    sequences: List[dict], num_permutations: int = PERMUTATIONS
+) -> Tuple[float, int, int]:
+    valid_records: List[Tuple[str, float, float]] = []
+    for seq in sequences:
+        inv_id = seq.get("inv_id")
+        flank = seq.get("flanking_ratio")
+        middle = seq.get("middle_ratio")
+        if inv_id is None or np.isnan(flank) or np.isnan(middle):
+            continue
+        valid_records.append((str(inv_id), float(flank), float(middle)))
+
+    if len(valid_records) < 2:
+        return np.nan, len(valid_records), 0
+
+    inv_ids, flank_vals, middle_vals = zip(*valid_records)
+    flank_ranks = []
+    middle_ranks = []
+    for f_val, m_val in zip(flank_vals, middle_vals):
+        if m_val > f_val:
+            middle_ranks.append(2.0)
+            flank_ranks.append(1.0)
+        elif m_val < f_val:
+            middle_ranks.append(1.0)
+            flank_ranks.append(2.0)
+        else:
+            middle_ranks.append(1.5)
+            flank_ranks.append(1.5)
+
+    middle_ranks = np.asarray(middle_ranks, dtype=float)
+    flank_ranks = np.asarray(flank_ranks, dtype=float)
+    obs_stat = float(np.sum(middle_ranks))
+
+    inv_to_indices: Dict[str, List[int]] = {}
+    for idx, inv in enumerate(inv_ids):
+        inv_to_indices.setdefault(inv, []).append(idx)
+
+    count = 0
+    for _ in range(num_permutations):
+        perm_middle = middle_ranks.copy()
+        perm_flank = flank_ranks.copy()
+        for indices in inv_to_indices.values():
+            if np.random.rand() < 0.5:
+                perm_middle[indices], perm_flank[indices] = (
+                    perm_flank[indices].copy(),
+                    perm_middle[indices].copy(),
+                )
+        perm_stat = float(np.sum(perm_middle))
+        if perm_stat >= obs_stat:
+            count += 1
+
+    p_value = count / num_permutations
+    return p_value, len(valid_records), len(inv_to_indices)
 
 
 def parse_falsta_data_line(line: str) -> Optional[np.ndarray]:
@@ -578,12 +646,10 @@ def calculate_flanking_stats(fst_sequences: List[dict], spec: WindowSpec) -> Lis
         end_ratio, end_num_sum, end_den_sum, end_cnt = _ratio_of_sums(ending_num, ending_den)
         middle_ratio, middle_num_sum, middle_den_sum, middle_cnt = _ratio_of_sums(middle_num, middle_den)
 
+        flanking_ratio = np.nanmean([begin_ratio, end_ratio])
         flank_num_sum = begin_num_sum + end_num_sum
         flank_den_sum = begin_den_sum + end_den_sum
         flank_cnt = begin_cnt + end_cnt
-        flanking_ratio = np.nan
-        if flank_den_sum > EPS_DENOM:
-            flanking_ratio = flank_num_sum / flank_den_sum
 
         if np.isnan(middle_ratio):
             skipped_nan_middle += 1
@@ -643,10 +709,12 @@ def categorize_sequences(flanking_stats: List[dict], recurrent_regions: dict, si
         coords = seq_stats.get("coords")
         if not coords:
             seq_stats["inv_class"] = "unknown"
+            seq_stats["inv_id"] = None
             continue
 
-        inv_type = determine_inversion_type(coords, recurrent_regions, single_event_regions)
+        inv_type, inv_id = determine_inversion_info(coords, recurrent_regions, single_event_regions)
         seq_stats["inv_class"] = inv_type
+        seq_stats["inv_id"] = inv_id
 
         if inv_type == "single_event":
             categories["single_event"].append(seq_stats)
@@ -767,7 +835,7 @@ def pooled_group_estimates(categories: dict, reps: int = 2000, seed: int = 1337)
 
 
 def perform_statistical_tests(categories: dict, all_sequences_stats: List[dict]) -> dict:
-    logger.info("Performing paired permutation tests (Middle vs Flanking FST; ratio diffs)...")
+    logger.info("Performing cluster-based rank permutation tests (Middle vs Flanking FST)...")
     test_results: Dict[str, dict] = {}
 
     # Build map with display names
@@ -778,28 +846,12 @@ def perform_statistical_tests(categories: dict, all_sequences_stats: List[dict])
     }
 
     for name, seqs in display_map.items():
-        test_results[name] = {"mean_p": np.nan, "mean_normality_p": np.nan, "n_valid_pairs": 0}
-        if len(seqs) < 2:
-            continue
-        f_means = np.array([s["flanking_ratio"] for s in seqs], dtype=float)
-        m_means = np.array([s["middle_ratio"] for s in seqs], dtype=float)
-        valid = ~np.isnan(f_means) & ~np.isnan(m_means)
-        n_valid = int(np.sum(valid))
-        test_results[name]["n_valid_pairs"] = n_valid
-        if n_valid < 2:
-            continue
-
-        p = paired_permutation_test(m_means[valid], f_means[valid], use_median=False)
-        test_results[name]["mean_p"] = p
-
-        if n_valid >= 3:
-            diffs = m_means[valid] - f_means[valid]
-            if len(np.unique(diffs)) > 1:
-                try:
-                    _, sh_p = shapiro(diffs)
-                    test_results[name]["mean_normality_p"] = sh_p
-                except ValueError:
-                    pass
+        p_val, n_valid, n_clusters = run_cluster_rank_test(seqs)
+        test_results[name] = {
+            "mean_p": p_val,
+            "n_valid_pairs": n_valid,
+            "n_clusters": n_clusters,
+        }
 
     return test_results
 
@@ -1316,9 +1368,9 @@ def main():
         ]:
             tr = tests.get(name, {})
             logger.info(
-                f"[{name}] n={tr.get('n_valid_pairs', 0)}  "
-                f"perm_p={_format_p_value_for_annotation(tr.get('mean_p', np.nan))}  "
-                f"shapiro_p={_format_p_value_for_annotation(tr.get('mean_normality_p', np.nan))}"
+                f"[{name}] n_pairs={tr.get('n_valid_pairs', 0)}  "
+                f"n_clusters={tr.get('n_clusters', 0)}  "
+                f"perm_p={_format_p_value_for_annotation(tr.get('mean_p', np.nan))}"
             )
 
         logger.info(
