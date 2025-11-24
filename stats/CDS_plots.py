@@ -524,11 +524,18 @@ def compute_group_distributions(cds_summary: pd.DataFrame):
     out = {}
     for cat in CATEGORY_ORDER:
         sub = cds_summary[cds_summary["category"] == cat]
-        vals = sub["prop_identical_pairs"].dropna().astype(float).values
+        valid_mask = sub["prop_identical_pairs"].notna()
+        vals = sub.loc[valid_mask, "prop_identical_pairs"].astype(float).values
+        pair_counts = (
+            pd.to_numeric(sub.loc[valid_mask, "n_pairs"], errors="coerce")
+            .fillna(0)
+            .astype(float)
+            .values
+        )
         if len(vals) == 0:
             out[cat] = dict(values_all=np.array([]), values_core=np.array([]),
                             share_at_1=0.0, n_cds=0, n_pairs_total=0,
-                            n_at1=0, box_stats=dict(
+                            n_at1=0, pair_counts=np.array([]), box_stats=dict(
                                 median=np.nan,
                                 q1=np.nan,
                                 q3=np.nan,
@@ -561,6 +568,7 @@ def compute_group_distributions(cds_summary: pd.DataFrame):
             n_cds=n_total,
             n_pairs_total=int(sub["n_pairs"].sum()),
             n_at1=n_at1,
+            pair_counts=pair_counts,
             box_stats=dict(
                 median=float(med),
                 q1=float(q1),
@@ -678,9 +686,24 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
     # Swarm plot parameters
     swarm_width = 0.85  # Total width for swarm (increased for better spread)
 
+    # Point sizes scale with the number of CDS pairs contributing to each observation
+    all_pair_counts = np.concatenate([dist[cat]["pair_counts"] for cat in CATEGORY_ORDER])
+    positive_pairs = all_pair_counts[all_pair_counts > 0]
+    min_pairs = float(positive_pairs.min()) if positive_pairs.size else 1.0
+    max_pairs = float(all_pair_counts.max()) if all_pair_counts.size else min_pairs
+    size_min, size_max = 24.0, 180.0
+
+    def scale_size(n_pairs: float) -> float:
+        if max_pairs <= min_pairs:
+            return size_min
+        n_clamped = max(n_pairs, min_pairs)
+        frac = (n_clamped - min_pairs) / (max_pairs - min_pairs)
+        return size_min + frac * (size_max - size_min)
+
     for i, cat in enumerate(CATEGORY_ORDER, start=1):
         d = dist[cat]
         all_vals = d["values_all"]
+        pair_counts = d["pair_counts"]
         box_stats = d["box_stats"]
         median = box_stats["median"]
 
@@ -692,6 +715,7 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
             # Sort by y-value for bottom-up placement
             y_sorted_idx = np.argsort(all_vals)
             y_sorted = all_vals[y_sorted_idx].copy()
+            pairs_sorted = pair_counts[y_sorted_idx].copy()
             x_positions = np.zeros(len(y_sorted))
             y_adjusted = y_sorted.copy()
 
@@ -798,12 +822,12 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
                     placed_points.append((0, y_val))
 
             # Plot all swarm points - bigger and more transparent
-            point_size = 28 if len(y_sorted) < 50 else 24 if len(y_sorted) < 100 else 20
-            
+            sizes = np.array([scale_size(n) for n in pairs_sorted])
+
             ax.scatter(
                 i + x_positions,
                 y_adjusted,
-                s=point_size, alpha=0.5, color=face,
+                s=sizes, alpha=0.5, color=face,
                 edgecolor="white", linewidths=0.4, zorder=2,
             )
 
@@ -850,6 +874,34 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
     )
     if leg and leg.get_title():
         leg.get_title().set_fontsize(8.5)
+
+    # Size legend for number of CDS pairs
+    if max_pairs > 0:
+        # choose 4 representative values spanning the observed range
+        legend_pairs = np.linspace(min_pairs, max_pairs, 4)
+        legend_pairs = np.unique(np.round(legend_pairs).astype(int))
+        legend_sizes = [scale_size(v) for v in legend_pairs]
+        size_handles = [
+            plt.scatter([], [], s=s, color="#555555", alpha=0.5, edgecolor="white", linewidths=0.4)
+            for s in legend_sizes
+        ]
+        size_labels = [f"{v:,} pairs" for v in legend_pairs]
+        size_leg = ax.legend(
+            handles=size_handles,
+            labels=size_labels,
+            title="Pairs per CDS",
+            frameon=False,
+            scatterpoints=1,
+            labelspacing=0.75,
+            handletextpad=0.8,
+            borderpad=0.2,
+            loc="lower left",
+            bbox_to_anchor=(0.02, -0.28),
+            fontsize=8,
+        )
+        if size_leg and size_leg.get_title():
+            size_leg.get_title().set_fontsize(8.5)
+        ax.add_artist(size_leg)
 
     fig.tight_layout()
     ensure_dir(outfile)
