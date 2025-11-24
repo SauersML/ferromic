@@ -113,7 +113,7 @@ def _norm_chr(s: str) -> str:
 
 def _parse_values_fast(line: str) -> np.ndarray:
     """Fast parser: replace 'NA' with 'nan' and use np.fromstring with sep=','."""
-    return np.fromstring(line.strip().replace("NA", "nan"), sep=",", dtype=np.float32)
+    return np.fromstring(line.strip().replace("NA", "nan"), sep=",", dtype=np.float64)
 
 # -------------------- INVERSION MAPPING --------------
 
