@@ -550,6 +550,49 @@ def _calc_spearman(
     return SpearmanResult(rho=rho, p_value=p, n=len(window_data))
 
 
+def _distance_fold_binning(
+    values: np.ndarray, *, bin_size: int = 2_000, max_distance: int = 100_000
+) -> tuple[np.ndarray, np.ndarray]:
+    """Fold values around the inversion midpoint and bin by distance to edge.
+
+    Distances are computed as ``min(idx, len(values) - 1 - idx)`` so that both
+    edges map to 0 and bins beyond half the inversion length remain empty. The
+    function returns per-bin means and medians over *sites*, leaving bins with
+    no coverage as NaN.
+    """
+
+    if values.size == 0:
+        bins = max_distance // bin_size
+        return np.full(bins, np.nan), np.full(bins, np.nan)
+
+    n_bins = max_distance // bin_size
+    folded_distances = np.minimum(
+        np.arange(values.size, dtype=int), values.size - 1 - np.arange(values.size, dtype=int)
+    )
+
+    finite_mask = np.isfinite(values)
+    usable_mask = finite_mask & (folded_distances < max_distance)
+    if not np.any(usable_mask):
+        return np.full(n_bins, np.nan), np.full(n_bins, np.nan)
+
+    dist_subset = folded_distances[usable_mask]
+    val_subset = values[usable_mask]
+    bin_indices = (dist_subset // bin_size).astype(int)
+
+    bin_means = np.full(n_bins, np.nan, dtype=float)
+    bin_medians = np.full(n_bins, np.nan, dtype=float)
+
+    for idx in range(n_bins):
+        mask = bin_indices == idx
+        if not np.any(mask):
+            continue
+        bin_vals = val_subset[mask]
+        bin_means[idx] = np.nanmean(bin_vals)
+        bin_medians[idx] = np.nanmedian(bin_vals)
+
+    return bin_means, bin_medians
+
+
 def _calc_pi_structure_metrics() -> PiStructureMetrics:
     """Parse per-site diversity tracks to replicate π structure metrics.
 
@@ -691,32 +734,15 @@ def _calc_pi_structure_metrics() -> PiStructureMetrics:
         # --- Logic for Spearman (Threshold 100kb) ---
         # "folded" 100 kbp ... (average of start and reversed end)
         if values.size >= 100_000:
-            # 1. Left 100kb
-            left_100k = values[:100_000]
-            left_wins_mean = np.nanmean(left_100k.reshape(50, 2_000), axis=1)
-            left_wins_median = np.nanmedian(left_100k.reshape(50, 2_000), axis=1)
-
-            # 2. Right 100kb (Reversed so index 0 is the breakpoint)
-            right_100k = values[-100_000:][::-1]
-            right_wins_mean = np.nanmean(right_100k.reshape(50, 2_000), axis=1)
-            right_wins_median = np.nanmedian(right_100k.reshape(50, 2_000), axis=1)
-
-            # 3. Fold (Average) them
-            # This treats both edges as distance=0
-            folded_means = np.nanmean(
-                np.vstack([left_wins_mean, right_wins_mean]), axis=0
-            )
-            folded_medians = np.nanmean(
-                np.vstack([left_wins_median, right_wins_median]), axis=0
-            )
+            window_means, window_medians = _distance_fold_binning(values)
 
             point_rho = None
             point_p = None
-            mask = np.isfinite(folded_means)
+            mask = np.isfinite(window_means)
             bins_used = int(np.sum(mask))
             if bins_used >= 5:
                 rho_val, p_val = stats.spearmanr(
-                    spearman_distances[mask], folded_means[mask]
+                    spearman_distances[mask], window_means[mask]
                 )
                 point_rho = float(rho_val) if np.isfinite(rho_val) else None
                 point_p = float(p_val) if np.isfinite(p_val) else None
@@ -734,8 +760,10 @@ def _calc_pi_structure_metrics() -> PiStructureMetrics:
 
             key = (group_id, recur_flag)
             if key in acc_spearman_mean:
-                acc_spearman_mean[key].append(folded_means)
-                acc_spearman_median[key].append(folded_medians)
+                acc_spearman_mean[key].append(window_means)
+                # Use per-bin means for both statistics to mirror the manuscript logic
+                # (median of per-bin means across inversions).
+                acc_spearman_median[key].append(window_means)
 
     current_header: str | None = None
     sequence_lines: list[str] = []
