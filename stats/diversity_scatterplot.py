@@ -22,7 +22,11 @@ def load_data(file_path, max_dist=10000, max_sequences=500):
             if not header:
                 break
             line_count += 1
-            if 'filtered_theta' not in header and 'filtered_pi' not in header:
+            lower_header = header.lower()
+            if not (
+                lower_header.startswith('>filtered_theta')
+                or lower_header.startswith('>filtered_pi')
+            ):
                 continue
 
             data_line = f.readline()
@@ -39,7 +43,7 @@ def load_data(file_path, max_dist=10000, max_sequences=500):
             dists = np.minimum(positions, seq_len - 1 - positions)
             mask = dists <= max_dist
 
-            if 'filtered_theta' in header:
+            if lower_header.startswith('>filtered_theta'):
                 theta_dists.extend(dists[mask])
                 theta_vals.extend(values[mask])
             else:

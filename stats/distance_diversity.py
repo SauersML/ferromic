@@ -39,7 +39,11 @@ def load_data(file_path, max_sequences=1000):
                 if not header:
                     break
                 line_count += 1
-                if 'filtered_theta' not in header and 'filtered_pi' not in header:
+                lower_header = header.lower()
+                if not (
+                    lower_header.startswith('>filtered_theta')
+                    or lower_header.startswith('>filtered_pi')
+                ):
                     continue
 
                 data_line = f.readline()
@@ -48,7 +52,7 @@ def load_data(file_path, max_sequences=1000):
                 line_count += 1
 
                 values = data_line.strip().replace('NA', 'nan')
-                if 'filtered_theta' in header:
+                if lower_header.startswith('>filtered_theta'):
                     theta_labels.append(header[1:].strip())
                     theta_data.append(np.fromstring(values, sep=',', dtype=np.float32))
                     if len(theta_labels) <= DEBUG_LINE_LIMIT:
