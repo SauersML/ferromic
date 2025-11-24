@@ -292,7 +292,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 3
 
-  paml-phase:
+  paml-phase-h0:
     needs: [prep-and-matrix, iqtree-phase]
     runs-on: ubuntu-latest
     strategy:
@@ -344,18 +344,82 @@ jobs:
           PAML_TIMEOUT: 21100
           REGION_OVERRIDE_FILTER: ${{ inputs.region_override }}
           KEEP_PAML_OUT: 1
+          PAML_MODEL: h0
 
       - name: Upload Partial Results
         uses: actions/upload-artifact@v4
         with:
-          name: paml-results-${{ strategy.job-index }}
+          name: paml-results-h0-${{ strategy.job-index }}
+          path: |
+            partial_results_*.tsv
+            paml_runs/
+          retention-days: 3
+
+  paml-phase-h1:
+    needs: [prep-and-matrix, iqtree-phase]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 15
+      matrix:
+        batch: ${{ fromJson(needs.prep-and-matrix.outputs.gene_batches) }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: pip install numpy pandas scipy statsmodels ete3 lxml requests tqdm
+
+      - name: Download Tools
+        uses: actions/download-artifact@v4
+        with:
+          name: tools-zip
+
+      - name: Unzip Tools
+        run: unzip tools.zip
+
+      - name: Restore PHY Cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            combined_*.phy
+            outgroup_*.phy
+          key: ${{ needs.prep-and-matrix.outputs.cache_key }}
+          fail-on-cache-miss: true
+
+      - name: Download All Region Trees
+        uses: actions/download-artifact@v4
+        with:
+          pattern: region-tree-*
+          merge-multiple: true
+          path: region_trees
+
+      - name: Run PAML (Batch)
+        run: python3 cds/codeml_runner.py
+        env:
+          GENE_BATCH: ${{ matrix.batch }}
+          # Optional: configure timeouts etc
+          PAML_TIMEOUT: 21100
+          REGION_OVERRIDE_FILTER: ${{ inputs.region_override }}
+          KEEP_PAML_OUT: 1
+          PAML_MODEL: h1
+
+      - name: Upload Partial Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: paml-results-h1-${{ strategy.job-index }}
           path: |
             partial_results_*.tsv
             paml_runs/
           retention-days: 3
 
   finalize-phase:
-    needs: paml-phase
+    needs: [paml-phase-h0, paml-phase-h1]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -369,10 +433,16 @@ jobs:
       - name: Install dependencies
         run: pip install numpy pandas scipy statsmodels ete3 lxml requests tqdm
 
-      - name: Download Partial Results
+      - name: Download H0 Partial Results
         uses: actions/download-artifact@v4
         with:
-          pattern: paml-results-*
+          pattern: paml-results-h0-*
+          merge-multiple: true
+
+      - name: Download H1 Partial Results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: paml-results-h1-*
           merge-multiple: true
 
       - name: Run Final Stats
