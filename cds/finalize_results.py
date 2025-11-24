@@ -83,11 +83,20 @@ def _merge_seed_data(record, row, seed_columns):
 def _finalize_record(record):
     # Compute clade statistics when both lnL values are present
     if np.isfinite(record.get('cmc_lnl_h0', np.nan)) and np.isfinite(record.get('cmc_lnl_h1', np.nan)):
-        lrt = 2 * (record['cmc_lnl_h1'] - record['cmc_lnl_h0'])
-        record['cmc_lrt_stat'] = lrt
-        record['cmc_p_value'] = float(lib.chi2.sf(lrt, df=1))
+        diff = record['cmc_lnl_h1'] - record['cmc_lnl_h0']
+        # If H1 is significantly worse than H0, it is an optimization failure, not a valid test.
+        if diff < -1e-6:
+            record['cmc_lrt_stat'] = np.nan
+            record['cmc_p_value'] = np.nan
+            record['reasons'].append(f"Optimization failure: H1 < H0 (diff={diff:.4g})")
+        else:
+            # Clip small negative noise to 0 for valid tests
+            lrt = 2 * max(0.0, diff)
+            record['cmc_lrt_stat'] = lrt
+            record['cmc_p_value'] = float(lib.chi2.sf(lrt, df=1))
 
     branch_ready = not pd.isna(record.get('bm_p_value')) or all(pd.isna(record.get(col)) for col in ['bm_p_value', 'bm_lrt_stat'])
+
     clade_ready = np.isfinite(record.get('cmc_lnl_h0', np.nan)) or np.isfinite(record.get('cmc_lnl_h1', np.nan))
     clade_complete = np.isfinite(record.get('cmc_lnl_h0', np.nan)) and np.isfinite(record.get('cmc_lnl_h1', np.nan)) and not pd.isna(record.get('cmc_p_value'))
 
