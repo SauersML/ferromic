@@ -155,6 +155,114 @@ jobs:
                       fh.write(str(path) + "\n")
           PY
 
+      - name: Download and stage PHYLIP inputs for CDS
+        if: matrix.group == 'CDS'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          python - <<'PY'
+          import gzip
+          import io
+          import os
+          import zipfile
+          from pathlib import Path
+
+          import requests
+
+          repo = os.environ.get("GITHUB_REPOSITORY")
+          token = os.environ.get("GITHUB_TOKEN")
+
+          if not repo:
+              raise SystemExit("GITHUB_REPOSITORY environment variable is required")
+          if not token:
+              raise SystemExit("GITHUB_TOKEN environment variable is required to download artefacts")
+
+          workflow_file = "manual_run_vcf.yml"
+          session = requests.Session()
+          session.headers.update(
+              {
+                  "Authorization": f"Bearer {token}",
+                  "Accept": "application/vnd.github+json",
+                  "X-GitHub-Api-Version": "2022-11-28",
+              }
+          )
+
+          def api_get(url: str, **params):
+              response = session.get(url, params=params)
+              response.raise_for_status()
+              return response
+
+          runs_url = f"https://api.github.com/repos/{repo}/actions/workflows/{workflow_file}/runs"
+          runs = api_get(runs_url, status="success", exclude_pull_requests="true", per_page=1).json().get("workflow_runs", [])
+          if not runs:
+              raise SystemExit("No successful runs found for manual_run_vcf.yml")
+
+          run = runs[0]
+          run_id = run["id"]
+          print(f"Using manual_run_vcf.yml artefacts from run {run_id} ({run['html_url']})")
+
+          artifacts_url = f"https://api.github.com/repos/{repo}/actions/runs/{run_id}/artifacts"
+          artifacts = {
+              artifact["name"]: artifact
+              for artifact in api_get(artifacts_url, per_page=100).json().get("artifacts", [])
+          }
+
+          if "run-vcf-phy-outputs" not in artifacts:
+              raise SystemExit("Missing required artefact: run-vcf-phy-outputs")
+
+          repo_root = Path(".").resolve()
+          data_dir = repo_root / "data"
+          data_dir.mkdir(parents=True, exist_ok=True)
+
+          phy_zip_path = data_dir / "phy_outputs.zip"
+
+          def download_artifact(artifact):
+              url = artifact["archive_download_url"]
+              print(f"Downloading artefact: {artifact['name']}")
+              resp = session.get(url)
+              resp.raise_for_status()
+              return zipfile.ZipFile(io.BytesIO(resp.content))
+
+          # Extract inner phy_outputs.zip from the artifact
+          with download_artifact(artifacts["run-vcf-phy-outputs"]) as zf:
+              inner_zip_name = None
+              for member in zf.namelist():
+                  if member.endswith("phy_outputs.zip"):
+                      inner_zip_name = member
+                      break
+              if inner_zip_name is None:
+                  raise SystemExit("phy_outputs.zip not found inside run-vcf-phy-outputs artefact")
+
+              with zf.open(inner_zip_name) as src, open(phy_zip_path, "wb") as dst:
+                  dst.write(src.read())
+              print(f"Saved {phy_zip_path.relative_to(repo_root)}")
+
+          # Stage .phy files from the saved archive into the working directory
+          extracted_any = False
+          with zipfile.ZipFile(phy_zip_path) as archive:
+              for member in archive.namelist():
+                  if not (member.endswith(".phy") or member.endswith(".phy.gz")):
+                      continue
+                  extracted_any = True
+                  target_name = Path(member).name
+                  if target_name.endswith(".gz"):
+                      target_name = target_name[:-3]
+                  target_path = repo_root / target_name
+                  with archive.open(member) as zipped_member:
+                      if member.endswith(".gz"):
+                          with gzip.open(zipped_member) as gz_member:
+                              data = gz_member.read()
+                      else:
+                          data = zipped_member.read()
+                  target_path.write_bytes(data)
+                  print(f"Wrote {target_path.relative_to(repo_root)}")
+
+          if not extracted_any:
+              raise SystemExit("No .phy or .phy.gz files found inside phy_outputs.zip")
+          PY
+
       - name: Run replicate_figures.py
         id: run-figures
         shell: bash
