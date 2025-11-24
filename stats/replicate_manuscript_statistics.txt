@@ -37,11 +37,11 @@ Nucleotide diversity structure (Edge vs Middle and Internal Decay), filtered by 
     - Recurrent Inverted (Group 1, Recurrence 1): n=26 regions. Haplotypes (N): Total=627, Mean=24.1 [Min 2, Max 58]. Flank Mean = 2.382e-04, Middle Mean = 3.508e-04.
 
 Internal decay (Spearman's ρ of diversity vs distance from start for first 100kb, loci ≥100kb):
-  Overall (All Consensus 0+1): ρ = 0.080 (p(two-sided) = 1.054e-05, n = 60).
-  Single-Event Inverted (G1, R0): ρ = 0.104 (p(two-sided) = 0.038, n = 8).
-  Recurrent Direct (G0, R1): ρ = 0.036 (p(two-sided) = 0.306, n = 16).
-  Recurrent Inverted (G1, R1): ρ = 0.067 (p(two-sided) = 0.058, n = 16).
-  Single-Event Direct (G0, R0): ρ = 0.131 (p(two-sided) = 3.069e-05, n = 20).
+  Overall (All Consensus 0+1): ρ = 0.539 (p(two-sided) = 5.358e-05, n = 60).
+  Single-Event Inverted (G1, R0): ρ = 0.349 (p(two-sided) = 0.013, n = 8).
+  Recurrent Direct (G0, R1): ρ = 0.248 (p(two-sided) = 0.083, n = 16).
+  Recurrent Inverted (G1, R1): ρ = 0.381 (p(two-sided) = 6.406e-03, n = 16).
+  Single-Event Direct (G0, R0): ρ = 0.593 (p(two-sided) = 5.687e-06, n = 20).
 
 Internal decay (median within 2kb bins, Spearman's ρ for first 100kb, loci ≥100kb):
   Overall (All Consensus 0+1): ρ = NA (p(two-sided) = NA, n = 60).
