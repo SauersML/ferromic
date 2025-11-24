@@ -33,8 +33,8 @@ ORDERED_COLUMNS = [
 ]
 
 
-def _default_record(region, gene):
-    rec = {c: np.nan for c in ORDERED_COLUMNS}
+def _default_record(region, gene, seed_columns):
+    rec = {c: np.nan for c in ORDERED_COLUMNS + list(seed_columns)}
     rec.update({
         'region': region,
         'gene': gene,
@@ -71,6 +71,12 @@ def _merge_clade_info(record, row, model):
 def _merge_metadata(record, row):
     for col in ['n_leaves_region', 'n_leaves_gene', 'n_leaves_pruned', 'chimp_in_region', 'chimp_in_pruned', 'taxa_used']:
         if pd.isna(record.get(col)) and col in row:
+            record[col] = row.get(col)
+
+
+def _merge_seed_data(record, row, seed_columns):
+    for col in seed_columns:
+        if col in row and not pd.isna(row.get(col)):
             record[col] = row.get(col)
 
 
@@ -122,13 +128,15 @@ def main():
     raw['paml_model'] = raw.get('paml_model', pd.Series(['both'] * len(raw))).fillna('both').str.lower()
     logging.info(f"Aggregated {len(raw)} total rows across models.")
 
+    seed_columns = [c for c in raw.columns if c.startswith(('h0_s', 'h1_s'))]
+
     combined = {}
     for _, row in raw.iterrows():
         region = row.get('region')
         gene = row.get('gene')
         key = (region, gene)
         model = row.get('paml_model', 'both')
-        rec = combined.setdefault(key, _default_record(region, gene))
+        rec = combined.setdefault(key, _default_record(region, gene, seed_columns))
         rec['models_present'].add(model)
 
         if str(row.get('status')).startswith('runtime') or str(row.get('status')).startswith('paml_optim'):
@@ -137,6 +145,7 @@ def main():
 
         _merge_branch_info(rec, row)
         _merge_metadata(rec, row)
+        _merge_seed_data(rec, row, seed_columns)
 
         if model in ('h0', 'h1', 'both'):
             if model == 'both':
@@ -155,7 +164,25 @@ def main():
     results_df = lib.compute_fdr(results_df)
 
     remaining_cols = [c for c in results_df.columns if c not in ORDERED_COLUMNS]
-    ordered_with_dynamic = ORDERED_COLUMNS + sorted(remaining_cols)
+
+    seed_sort_order = {'h0': 0, 'h1': 1}
+
+    def _seed_key(col):
+        parts = col.split('_')
+        hypothesis = parts[0] if parts else ''
+        seed = parts[1] if len(parts) > 1 else ''
+        metric = '_'.join(parts[2:]) if len(parts) > 2 else ''
+
+        seed_num = 0
+        if seed.startswith('s') and seed[1:].isdigit():
+            seed_num = int(seed[1:])
+
+        return (seed_sort_order.get(hypothesis, 99), seed_num, metric, col)
+
+    seed_cols_sorted = sorted((c for c in seed_columns if c in results_df.columns), key=_seed_key)
+    other_cols = sorted(c for c in remaining_cols if c not in seed_columns)
+
+    ordered_with_dynamic = ORDERED_COLUMNS + seed_cols_sorted + other_cols
     results_df = results_df[ordered_with_dynamic]
 
     output_filename = f"full_paml_results_{datetime.now().strftime('%Y-%m-%d')}.tsv"
