@@ -311,61 +311,6 @@ def paired_permutation_test(
     return count / num_permutations
 
 
-def run_cluster_rank_test(
-    sequences: List[dict], num_permutations: int = PERMUTATIONS
-) -> Tuple[float, int, int]:
-    valid_records: List[Tuple[str, float, float]] = []
-    for seq in sequences:
-        inv_id = seq.get("inv_id")
-        flank = seq.get("flanking_ratio")
-        middle = seq.get("middle_ratio")
-        if inv_id is None or np.isnan(flank) or np.isnan(middle):
-            continue
-        valid_records.append((str(inv_id), float(flank), float(middle)))
-
-    if len(valid_records) < 2:
-        return np.nan, len(valid_records), 0
-
-    inv_ids, flank_vals, middle_vals = zip(*valid_records)
-    flank_ranks = []
-    middle_ranks = []
-    for f_val, m_val in zip(flank_vals, middle_vals):
-        if m_val > f_val:
-            middle_ranks.append(2.0)
-            flank_ranks.append(1.0)
-        elif m_val < f_val:
-            middle_ranks.append(1.0)
-            flank_ranks.append(2.0)
-        else:
-            middle_ranks.append(1.5)
-            flank_ranks.append(1.5)
-
-    middle_ranks = np.asarray(middle_ranks, dtype=float)
-    flank_ranks = np.asarray(flank_ranks, dtype=float)
-    obs_stat = float(np.sum(middle_ranks))
-
-    inv_to_indices: Dict[str, List[int]] = {}
-    for idx, inv in enumerate(inv_ids):
-        inv_to_indices.setdefault(inv, []).append(idx)
-
-    count = 0
-    for _ in range(num_permutations):
-        perm_middle = middle_ranks.copy()
-        perm_flank = flank_ranks.copy()
-        for indices in inv_to_indices.values():
-            if np.random.rand() < 0.5:
-                perm_middle[indices], perm_flank[indices] = (
-                    perm_flank[indices].copy(),
-                    perm_middle[indices].copy(),
-                )
-        perm_stat = float(np.sum(perm_middle))
-        if perm_stat >= obs_stat:
-            count += 1
-
-    p_value = count / num_permutations
-    return p_value, len(valid_records), len(inv_to_indices)
-
-
 def parse_falsta_data_line(line: str) -> Optional[np.ndarray]:
     try:
         values = line.split(",")
@@ -618,10 +563,12 @@ def calculate_flanking_stats(fst_sequences: List[dict], spec: WindowSpec) -> Lis
         end_ratio, end_num_sum, end_den_sum, end_cnt = _ratio_of_sums(ending_num, ending_den)
         middle_ratio, middle_num_sum, middle_den_sum, middle_cnt = _ratio_of_sums(middle_num, middle_den)
 
-        flanking_ratio = np.nanmean([begin_ratio, end_ratio])
         flank_num_sum = begin_num_sum + end_num_sum
         flank_den_sum = begin_den_sum + end_den_sum
         flank_cnt = begin_cnt + end_cnt
+        flanking_ratio = np.nan
+        if flank_den_sum > EPS_DENOM:
+            flanking_ratio = flank_num_sum / flank_den_sum
 
         if np.isnan(middle_ratio):
             skipped_nan_middle += 1
@@ -815,7 +762,7 @@ def pooled_group_estimates(categories: dict, reps: int = 2000, seed: int = 1337)
 
 
 def perform_statistical_tests(categories: dict, all_sequences_stats: List[dict]) -> dict:
-    logger.info("Performing cluster-based rank permutation tests (Middle vs Flanking FST)...")
+    logger.info("Performing paired permutation tests (Middle vs Flanking FST; ratio diffs)...")
     test_results: Dict[str, dict] = {}
 
     # Build map with display names
@@ -826,12 +773,28 @@ def perform_statistical_tests(categories: dict, all_sequences_stats: List[dict])
     }
 
     for name, seqs in display_map.items():
-        p_val, n_valid, n_clusters = run_cluster_rank_test(seqs)
-        test_results[name] = {
-            "mean_p": p_val,
-            "n_valid_pairs": n_valid,
-            "n_clusters": n_clusters,
-        }
+        test_results[name] = {"mean_p": np.nan, "mean_normality_p": np.nan, "n_valid_pairs": 0}
+        if len(seqs) < 2:
+            continue
+        f_means = np.array([s["flanking_ratio"] for s in seqs], dtype=float)
+        m_means = np.array([s["middle_ratio"] for s in seqs], dtype=float)
+        valid = ~np.isnan(f_means) & ~np.isnan(m_means)
+        n_valid = int(np.sum(valid))
+        test_results[name]["n_valid_pairs"] = n_valid
+        if n_valid < 2:
+            continue
+
+        p = paired_permutation_test(m_means[valid], f_means[valid], use_median=False)
+        test_results[name]["mean_p"] = p
+
+        if n_valid >= 3:
+            diffs = m_means[valid] - f_means[valid]
+            if len(np.unique(diffs)) > 1:
+                try:
+                    _, sh_p = shapiro(diffs)
+                    test_results[name]["mean_normality_p"] = sh_p
+                except ValueError:
+                    pass
 
     return test_results
 
@@ -1346,9 +1309,9 @@ def main():
         ]:
             tr = tests.get(name, {})
             logger.info(
-                f"[{name}] n_pairs={tr.get('n_valid_pairs', 0)}  "
-                f"n_clusters={tr.get('n_clusters', 0)}  "
-                f"perm_p={_format_p_value_for_annotation(tr.get('mean_p', np.nan))}"
+                f"[{name}] n={tr.get('n_valid_pairs', 0)}  "
+                f"perm_p={_format_p_value_for_annotation(tr.get('mean_p', np.nan))}  "
+                f"shapiro_p={_format_p_value_for_annotation(tr.get('mean_normality_p', np.nan))}"
             )
 
         logger.info(
