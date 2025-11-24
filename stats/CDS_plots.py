@@ -876,6 +876,7 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
         leg.get_title().set_fontsize(8.5)
 
     # Size legend for number of CDS pairs
+    size_leg = None
     if max_pairs > 0:
         # choose 4 representative values spanning the observed range
         legend_pairs = np.linspace(min_pairs, max_pairs, 4)
@@ -902,6 +903,9 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
         if size_leg and size_leg.get_title():
             size_leg.get_title().set_fontsize(8.5)
         ax.add_artist(size_leg)
+
+    # Re-attach the category legend after any additional legend calls
+    ax.add_artist(leg)
 
     fig.tight_layout()
     ensure_dir(outfile)
