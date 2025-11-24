@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2025-11-24T05:39:30.228651+00:00",
+  "generatedAt": "2025-11-24T05:56:03.764756+00:00",
   "groups": [
     {
       "title": "Top-level figures",
@@ -105,12 +105,6 @@
           "name": "filtered_pi_beginning_middle_end.png",
           "href": "figures/filtered_pi_beginning_middle_end.png",
           "preview": "figures/filtered_pi_beginning_middle_end.png",
-          "type": "image"
-        },
-        {
-          "name": "fst_flanking_regions_bar_plot.png",
-          "href": "figures/fst_flanking_regions_bar_plot.png",
-          "preview": "figures/fst_flanking_regions_bar_plot.png",
           "type": "image"
         },
         {
@@ -459,12 +453,6 @@
           "name": "filtered_pi_beginning_middle_end.png",
           "href": "figures/final_plots/filtered_pi_beginning_middle_end.png",
           "preview": "figures/final_plots/filtered_pi_beginning_middle_end.png",
-          "type": "image"
-        },
-        {
-          "name": "fst_flanking_regions_bar_plot.png",
-          "href": "figures/final_plots/fst_flanking_regions_bar_plot.png",
-          "preview": "figures/final_plots/fst_flanking_regions_bar_plot.png",
           "type": "image"
         },
         {
