@@ -1,0 +1,101 @@
+name: Rescue Results
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'Specific Run ID to rescue (leave empty for latest Analysis Pipeline run)'
+        required: false
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  rescue-and-finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install Dependencies
+        run: pip install numpy pandas scipy statsmodels ete3 lxml requests tqdm
+
+      - name: Identify Target Run
+        id: find-run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_ID: ${{ inputs.run_id }}
+          WORKFLOW_FILENAME: analysis_pipeline.yml
+        run: |
+          if [[ -n "$INPUT_ID" ]]; then
+            echo "Using manually provided Run ID: $INPUT_ID"
+            echo "run_id=$INPUT_ID" >> $GITHUB_OUTPUT
+          else
+            echo "Searching for latest run of $WORKFLOW_FILENAME..."
+            # Fetch the most recent run regardless of status (success, failure, cancelled)
+            LATEST_ID=$(gh run list --workflow "$WORKFLOW_FILENAME" --limit 1 --json databaseId --jq '.[0].databaseId')
+            
+            if [[ -z "$LATEST_ID" || "$LATEST_ID" == "null" ]]; then
+              echo "::error::No runs found for workflow $WORKFLOW_FILENAME"
+              exit 1
+            fi
+            
+            echo "Found latest Run ID: $LATEST_ID"
+            echo "run_id=$LATEST_ID" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Download PAML Artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_RUN_ID: ${{ steps.find-run.outputs.run_id }}
+        run: |
+          echo "Fetching artifact list for Run ID: $TARGET_RUN_ID..."
+          
+          # 1. Get list of artifacts that match 'paml-results-*'
+          # We use the API because 'gh run download' with patterns is tricky across versions
+          gh api "/repos/${{ github.repository }}/actions/runs/$TARGET_RUN_ID/artifacts" --paginate \
+            --jq '.artifacts[] | select(.name | startswith("paml-results")) | .name' > artifact_list.txt
+          
+          COUNT=$(wc -l < artifact_list.txt)
+          echo "Found $COUNT matching artifacts."
+          
+          if [[ "$COUNT" -eq 0 ]]; then
+            echo "::error::No 'paml-results-*' artifacts found in run $TARGET_RUN_ID."
+            exit 1
+          fi
+
+          # 2. Download loop
+          mkdir -p temp_artifacts
+          while read -r name; do
+            echo "Downloading $name..."
+            gh run download "$TARGET_RUN_ID" -n "$name" --dir "temp_artifacts/$name"
+          done < artifact_list.txt
+
+          # 3. Flatten directory structure
+          # finalize_results.py expects glob("partial_results_*.tsv") in the CWD.
+          # The download creates temp_artifacts/paml-results-X/partial_results_X.tsv
+          echo "Flattening artifact structure..."
+          find temp_artifacts -name "partial_results_*.tsv" -exec mv {} . \;
+                    
+          echo "Download and extraction complete. TSV files ready:"
+          ls -lh partial_results_*.tsv | head -n 5
+          echo "... (list truncated)"
+
+      - name: Run Final Stats
+        run: |
+          # The script looks for partial_results_*.tsv in CWD
+          python3 cds/finalize_results.py
+
+      - name: Upload Rescued Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: rescued-paml-results
+          path: full_paml_results_*.tsv
+          retention-days: 5
