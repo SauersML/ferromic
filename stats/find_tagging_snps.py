@@ -452,23 +452,14 @@ def analyze_inversion_pair(key: InversionKey, files: Dict[int, str]) -> List[dic
                 "allele_freq_inverted": float(f_inv),
                 "allele_freq_difference": float(abs(f_dir - f_inv)),
                 "correlation": float(corr),
-                "A_inv_freq_hg38": allele_freqs_inv.get("A"),
-                "C_inv_freq_hg38": allele_freqs_inv.get("C"),
-                "G_inv_freq_hg38": allele_freqs_inv.get("G"),
-                "A_dir_freq_hg38": allele_freqs_dir.get("A"),
-                "T_dir_freq_hg38": allele_freqs_dir.get("T"),
-                "C_dir_freq_hg38": allele_freqs_dir.get("C"),
-                "G_dir_freq_hg38": allele_freqs_dir.get("G"),
-                # Filled from hg38 values only after successful liftover to avoid
-                # implying hg19 availability when a site cannot be mapped.
-                "A_inv_freq_hg19": None,
-                "T_inv_freq_hg19": None,
-                "C_inv_freq_hg19": None,
-                "G_inv_freq_hg19": None,
-                "A_dir_freq_hg19": None,
-                "T_dir_freq_hg19": None,
-                "C_dir_freq_hg19": None,
-                "G_dir_freq_hg19": None,
+                "A_inv_freq": allele_freqs_inv.get("A"),
+                "C_inv_freq": allele_freqs_inv.get("C"),
+                "G_inv_freq": allele_freqs_inv.get("G"),
+                "T_inv_freq": allele_freqs_inv.get("T"),
+                "A_dir_freq": allele_freqs_dir.get("A"),
+                "C_dir_freq": allele_freqs_dir.get("C"),
+                "G_dir_freq": allele_freqs_dir.get("G"),
+                "T_dir_freq": allele_freqs_dir.get("T"),
             }
         )
 
@@ -594,21 +585,6 @@ def find_tagging_snps(
         for idx, coords in lifted.items():
             df.at[idx, "chromosome_hg37"] = coords["chrom"]
             df.at[idx, "position_hg37"] = coords["start"] + 1
-            # Frequencies are identical between builds, but only populate hg19
-            # columns when the site successfully liftovered so unmapped entries
-            # remain blank.
-            for hg19_col in (
-                "A_inv_freq_hg19",
-                "T_inv_freq_hg19",
-                "C_inv_freq_hg19",
-                "G_inv_freq_hg19",
-                "A_dir_freq_hg19",
-                "T_dir_freq_hg19",
-                "C_dir_freq_hg19",
-                "G_dir_freq_hg19",
-            ):
-                hg38_col = hg19_col.replace("_hg19", "_hg38")
-                df.at[idx, hg19_col] = df.at[idx, hg38_col]
         print(
             f"Liftover completed for {len(lifted)} site(s); {len(liftover_regions) - len(lifted)} remained unmapped.",
             flush=True,
