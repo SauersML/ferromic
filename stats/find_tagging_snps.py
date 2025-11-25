@@ -366,9 +366,14 @@ def analyze_inversion_pair(key: InversionKey, files: Dict[int, str]) -> List[dic
     major_base_indices = informative_indices[major_rel_indices]
     sites = np.arange(n_sites)
 
-    major_counts_total = combined_counts[major_base_indices, sites]
-    major_counts_direct = base_counts_direct[major_base_indices, sites]
-    major_counts_inverted = base_counts_inverted[major_base_indices, sites]
+    # Use ``take_along_axis`` to gather per-site major allele counts. Advanced
+    # indexing with two index arrays can raise "invalid index to scalar"
+    # when NumPy treats one of the indices as a scalar; the explicit gather
+    # keeps the shape stable for both single-site and multi-site inputs.
+    gather_idx = major_base_indices[np.newaxis, :]
+    major_counts_total = np.take_along_axis(combined_counts, gather_idx, axis=0)[0]
+    major_counts_direct = np.take_along_axis(base_counts_direct, gather_idx, axis=0)[0]
+    major_counts_inverted = np.take_along_axis(base_counts_inverted, gather_idx, axis=0)[0]
 
     missing_direct = base_counts_direct[MISSING_BASE_INDICES].sum(axis=0)
     missing_inverted = base_counts_inverted[MISSING_BASE_INDICES].sum(axis=0)
