@@ -131,7 +131,8 @@ def parse_phylip(path: str) -> Alignment:
                 except ValueError as exc:
                     raise PhylipError(f"Malformed sequence line in {path!r}: {line!r}") from exc
 
-                seq_str = sequence.strip()
+                # Accept lowercase bases by normalizing to uppercase before encoding.
+                seq_str = sequence.strip().upper()
                 if len(seq_str) != expected_sites:
                     raise PhylipError(
                         f"Sequence length mismatch in {path}: got {len(seq_str)}, expected {expected_sites}"
@@ -426,7 +427,12 @@ def process_inversion_pair(item: Tuple[InversionKey, Dict[int, str]]):
         return False, key.label, str(exc)
 
 
-def find_tagging_snps(phy_dir: str, output_file: str, workers: int | None = None) -> None:
+def find_tagging_snps(
+    phy_dir: str,
+    output_file: str,
+    workers: int | None = None,
+    chromosomes: Iterable[str] | None = None,
+) -> None:
     if workers is None:
         workers = os.cpu_count() or 1
     elif workers < 1:
@@ -435,6 +441,18 @@ def find_tagging_snps(phy_dir: str, output_file: str, workers: int | None = None
     print(f"Using {workers} worker(s) for inversion processing.", flush=True)
 
     grouped = discover_inversion_files(phy_dir)
+
+    if chromosomes:
+        allowed = {chrom.strip() for chrom in chromosomes if chrom.strip()}
+        if not allowed:
+            raise ValueError("No valid chromosomes provided for filtering")
+
+        grouped = {key: files for key, files in grouped.items() if key.chrom in allowed}
+
+        print(
+            f"Filtering to {len(grouped)} inversion region(s) on chromosomes: {', '.join(sorted(allowed))}.",
+            flush=True,
+        )
 
     if not grouped:
         print(f"No inversion PHYLIP files found in '{phy_dir}'.")
@@ -546,9 +564,21 @@ def main() -> None:
         default=None,
         help="Number of worker processes to use (default: system CPU count).",
     )
+    parser.add_argument(
+        "--chromosomes",
+        type=str,
+        default=None,
+        help=(
+            "Comma-separated list of chromosomes to include; filters alignments before processing."
+        ),
+    )
     args = parser.parse_args()
 
-    find_tagging_snps(args.phy_dir, args.output, workers=args.workers)
+    chrom_list = None
+    if args.chromosomes:
+        chrom_list = [c.strip() for c in args.chromosomes.split(",") if c.strip()]
+
+    find_tagging_snps(args.phy_dir, args.output, workers=args.workers, chromosomes=chrom_list)
 
 
 if __name__ == "__main__":

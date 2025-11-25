@@ -6,6 +6,50 @@ on:
 jobs:
   find-tagging-snps:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: 1
+            chromosomes: "1"
+          - shard: 2
+            chromosomes: "2"
+          - shard: 3
+            chromosomes: "3"
+          - shard: 4
+            chromosomes: "4"
+          - shard: 5
+            chromosomes: "5"
+          - shard: 6
+            chromosomes: "6"
+          - shard: 7
+            chromosomes: "7"
+          - shard: 8
+            chromosomes: "8"
+          - shard: 9
+            chromosomes: "9"
+          - shard: 10
+            chromosomes: "10"
+          - shard: 11
+            chromosomes: "11"
+          - shard: 12
+            chromosomes: "12"
+          - shard: 13
+            chromosomes: "13"
+          - shard: 14
+            chromosomes: "14"
+          - shard: 15
+            chromosomes: "15"
+          - shard: 16
+            chromosomes: "16"
+          - shard: 17
+            chromosomes: "17,18"
+          - shard: 18
+            chromosomes: "19,20"
+          - shard: 19
+            chromosomes: "21,22"
+          - shard: 20
+            chromosomes: "X,Y"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -54,11 +98,65 @@ jobs:
 
           echo "Decompression complete."
 
-      - name: Run find_tagging_snps.py
+      - name: Run find_tagging_snps.py for shard ${{ matrix.shard }}
         run: |
-          python3 stats/find_tagging_snps.py ./phy_files --output tagging_snps.tsv
+          python3 stats/find_tagging_snps.py ./phy_files \
+            --output tagging_snps_shard_${{ matrix.shard }}.tsv \
+            --chromosomes "${{ matrix.chromosomes }}" \
+            --workers 4
 
-      - name: Upload tagging SNPs report
+      - name: Upload tagging SNPs shard report
+        uses: actions/upload-artifact@v4
+        with:
+          name: tagging-snps-shard-${{ matrix.shard }}
+          path: tagging_snps_shard_${{ matrix.shard }}.tsv
+
+  merge-tagging-snps:
+    runs-on: ubuntu-latest
+    needs: find-tagging-snps
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download tagging SNP shard artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: tagging-snps-shard-*
+          path: tagging-snps-shards
+          merge-multiple: true
+
+      - name: Merge shard reports
+        run: |
+          python - <<'PY'
+          import csv
+          import pathlib
+
+          shards_dir = pathlib.Path('tagging-snps-shards')
+          shard_files = sorted(shards_dir.glob('*.tsv'))
+          if not shard_files:
+              raise SystemExit('No shard outputs found to merge')
+
+          output = pathlib.Path('tagging_snps.tsv')
+          header_written = False
+
+          with output.open('w', newline='') as out_f:
+              writer = None
+              for shard in shard_files:
+                  with shard.open() as shard_f:
+                      reader = csv.reader(shard_f, delimiter='\t')
+                      for i, row in enumerate(reader):
+                          if i == 0:
+                              if not header_written:
+                                  writer = csv.writer(out_f, delimiter='\t')
+                                  writer.writerow(row)
+                                  header_written = True
+                          else:
+                              writer.writerow(row)
+
+          print(f'Combined {len(shard_files)} shard(s) into {output}')
+          PY
+
+      - name: Upload merged tagging SNPs report
         uses: actions/upload-artifact@v4
         with:
           name: tagging-snps-report
