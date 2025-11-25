@@ -369,28 +369,43 @@ def analyze_inversion_pair(key: InversionKey, files: Dict[int, str]) -> List[dic
     major_counts_direct = base_counts_direct[major_base_indices, sites]
     major_counts_inverted = base_counts_inverted[major_base_indices, sites]
 
+    missing_direct = base_counts_direct[MISSING_BASE_INDICES].sum(axis=0)
+    missing_inverted = base_counts_inverted[MISSING_BASE_INDICES].sum(axis=0)
+    valid_direct = n_direct - missing_direct
+    valid_inverted = n_inverted - missing_inverted
+    valid_total = valid_direct + valid_inverted
+
     # Skip monomorphic or wholly missing sites.
+    has_informative = informative_totals > 0
+    has_major = major_counts_total > 0
+    polymorphic_major = major_counts_total < valid_total
+    has_direct_calls = valid_direct > 0
+    has_inverted_calls = valid_inverted > 0
     valid = (
-        informative_totals > 0
-        & (major_counts_total > 0)
-        & (major_counts_total < n_total)
+        has_informative
+        & has_major
+        & polymorphic_major
+        & has_direct_calls
+        & has_inverted_calls
     )
 
     if not np.any(valid):
         return []
 
+    valid_total = valid_total[valid].astype(np.float64)
+    valid_direct = valid_direct[valid].astype(np.float64)
+    valid_inverted = valid_inverted[valid].astype(np.float64)
     sum_x = major_counts_total[valid].astype(np.float64)
     sum_xg = major_counts_inverted[valid].astype(np.float64)
 
-    numerator = n_total * sum_xg - sum_x * n_inverted
-    denom_constant = float(n_direct * n_inverted)
-    denom = np.sqrt((n_total * sum_x - sum_x * sum_x) * denom_constant)
+    numerator = valid_total * sum_xg - sum_x * valid_inverted
+    denom = np.sqrt(sum_x * (valid_total - sum_x) * valid_inverted * valid_direct)
 
     with np.errstate(divide="ignore", invalid="ignore"):
         correlations = numerator / denom
 
-    freq_direct = major_counts_direct[valid] / n_direct
-    freq_inverted = major_counts_inverted[valid] / n_inverted
+    freq_direct = major_counts_direct[valid] / valid_direct
+    freq_inverted = major_counts_inverted[valid] / valid_inverted
 
     valid_sites = sites[valid]
     results: List[dict] = []
