@@ -17,11 +17,19 @@ except ModuleNotFoundError as exc:  # pragma: no cover - import guard for runtim
         "matplotlib is required to plot trajectories. Install it with 'pip install matplotlib'."
     ) from exc
 
-TRAJECTORY_URL = (
+TRAJECTORY_1_URL = (
     "https://raw.githubusercontent.com/SauersML/ferromic/refs/heads/main/data/"
     "Trajectory-12_47296118_A_G.tsv"
 )
-OUTPUT_IMAGE = Path("allele_frequency_trajectory.png")
+TRAJECTORY_1_OUTPUT = Path("data/allele_frequency_trajectory_rs34666797.pdf")
+TRAJECTORY_1_LABEL = 'Derived allele "G" frequency (rs34666797)'
+
+TRAJECTORY_2_URL = (
+    "https://raw.githubusercontent.com/SauersML/ferromic/refs/heads/main/data/"
+    "Trajectory-17_44073889_A_G.tsv"
+)
+TRAJECTORY_2_OUTPUT = Path("data/allele_frequency_trajectory_rs1052553.pdf")
+TRAJECTORY_2_LABEL = 'Inverted allele "G" frequency (rs1052553)'
 
 # Column descriptions supplied by the AGES project. These comments double as
 # in-code documentation for anyone reusing the downloaded table.
@@ -60,7 +68,7 @@ OUTPUT_IMAGE = Path("allele_frequency_trajectory.png")
 #   fitted trajectory’s lower/upper interval).
 
 
-def download_trajectory(url: str = TRAJECTORY_URL) -> List[Dict[str, float]]:
+def download_trajectory(url: str) -> List[Dict[str, float]]:
     """Download the allele-frequency trajectory TSV file and parse it."""
 
     with urlopen(url) as response:
@@ -89,6 +97,38 @@ def rows_to_columns(rows: Iterable[Dict[str, float]]) -> Dict[str, List[float]]:
         for key, value in row.items():
             columns.setdefault(key, []).append(value)
     return columns
+
+
+def invert_allele_frequencies(columns: Dict[str, List[float]]) -> Dict[str, List[float]]:
+    """Invert allele frequencies to show the complement allele (1 - frequency).
+
+    This is used when the data shows the non-inverted allele but we want to plot
+    the inverted allele frequency. Note that confidence intervals are swapped:
+    the new lower bound is 1 - old upper bound, and vice versa.
+    """
+    inverted = columns.copy()
+
+    # Invert empirical frequencies
+    if "af" in inverted:
+        inverted["af"] = [1.0 - x for x in inverted["af"]]
+    if "af_low" in inverted and "af_up" in inverted:
+        # Swap and invert the confidence bounds
+        old_low = inverted["af_low"]
+        old_up = inverted["af_up"]
+        inverted["af_low"] = [1.0 - x for x in old_up]
+        inverted["af_up"] = [1.0 - x for x in old_low]
+
+    # Invert model-predicted frequencies
+    if "pt" in inverted:
+        inverted["pt"] = [1.0 - x for x in inverted["pt"]]
+    if "pt_low" in inverted and "pt_up" in inverted:
+        # Swap and invert the confidence bounds
+        old_low = inverted["pt_low"]
+        old_up = inverted["pt_up"]
+        inverted["pt_low"] = [1.0 - x for x in old_up]
+        inverted["pt_up"] = [1.0 - x for x in old_low]
+
+    return inverted
 
 
 def _prepare_interpolator(
@@ -167,7 +207,7 @@ def _find_largest_window_change(
 
 
 def plot_trajectory(
-    columns: Dict[str, List[float]], output: Path
+    columns: Dict[str, List[float]], output: Path, ylabel: str
 ) -> Optional[Tuple[float, float, float]]:
     """Plot empirical and model allele-frequency trajectories with uncertainty."""
 
@@ -220,7 +260,7 @@ def plot_trajectory(
         return formatted
 
     ax.xaxis.set_major_formatter(FuncFormatter(_format_year))
-    ax.set_ylabel('Derived allele "G" frequency (rs34666797)', fontsize=20, fontweight='bold')
+    ax.set_ylabel(ylabel, fontsize=20, fontweight='bold')
 
     series_for_ylim = [
         columns["af_low"],
@@ -253,6 +293,7 @@ def plot_trajectory(
     ax.tick_params(axis="both", labelsize=18)
 
     fig.tight_layout()
+    output.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output, dpi=300)
     plt.close(fig)
 
@@ -260,18 +301,38 @@ def plot_trajectory(
 
 
 def main() -> None:
-    rows = download_trajectory()
-    columns = rows_to_columns(rows)
-    highlight = plot_trajectory(columns, OUTPUT_IMAGE)
-    if highlight is not None:
-        start_year, end_year, change = highlight
+    # Process trajectory 1 (rs34666797)
+    print("Processing trajectory 1: rs34666797 (12:47296118)")
+    rows_1 = download_trajectory(TRAJECTORY_1_URL)
+    columns_1 = rows_to_columns(rows_1)
+    highlight_1 = plot_trajectory(columns_1, TRAJECTORY_1_OUTPUT, TRAJECTORY_1_LABEL)
+    if highlight_1 is not None:
+        start_year, end_year, change = highlight_1
         print(
-            "Largest 1,000-year change window: "
+            "  Largest 1,000-year change window: "
             f"start={start_year:g} BP ({start_year/1000:.3f} kya), "
             f"end={end_year:g} BP ({end_year/1000:.3f} kya), "
             f"|Δf|={change:.4f}"
         )
-    print(f"Saved allele frequency trajectory to {OUTPUT_IMAGE.resolve()}")
+    print(f"  Saved to {TRAJECTORY_1_OUTPUT.resolve()}")
+
+    # Process trajectory 2 (rs1052553)
+    # Note: The data tracks the non-inverted allele "A", but we plot inverted allele "G"
+    print("\nProcessing trajectory 2: rs1052553 (17:44073889)")
+    print("  (Data shows non-inverted 'A' frequency; plotting inverted 'G' as 1 - frequency)")
+    rows_2 = download_trajectory(TRAJECTORY_2_URL)
+    columns_2 = rows_to_columns(rows_2)
+    columns_2 = invert_allele_frequencies(columns_2)  # Invert to show inverted allele "G"
+    highlight_2 = plot_trajectory(columns_2, TRAJECTORY_2_OUTPUT, TRAJECTORY_2_LABEL)
+    if highlight_2 is not None:
+        start_year, end_year, change = highlight_2
+        print(
+            "  Largest 1,000-year change window: "
+            f"start={start_year:g} BP ({start_year/1000:.3f} kya), "
+            f"end={end_year:g} BP ({end_year/1000:.3f} kya), "
+            f"|Δf|={change:.4f}"
+        )
+    print(f"  Saved to {TRAJECTORY_2_OUTPUT.resolve()}")
 
 
 if __name__ == "__main__":
