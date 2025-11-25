@@ -85,6 +85,10 @@ class PhylipError(Exception):
     pass
 
 
+class MissingInversionGroupError(PhylipError):
+    """Raised when only one orientation is available for an inversion."""
+
+
 def open_text_maybe_gzip(path: str):
     if path.endswith(".gz"):
         return gzip.open(path, "rt")
@@ -323,7 +327,7 @@ def analyze_inversion_pair(key: InversionKey, files: Dict[int, str]) -> List[dic
             for group in (DIRECT_GROUP, INVERTED_GROUP)
             if group not in files
         ]
-        raise PhylipError(
+        raise MissingInversionGroupError(
             f"Missing inversion group(s) {', '.join(missing)} for {key.label}"
         )
 
@@ -422,9 +426,11 @@ def process_inversion_pair(item: Tuple[InversionKey, Dict[int, str]]):
 
     key, files = item
     try:
-        return True, key.label, analyze_inversion_pair(key, files)
+        return "ok", key.label, analyze_inversion_pair(key, files)
+    except MissingInversionGroupError as exc:
+        return "skip", key.label, str(exc)
     except Exception as exc:  # noqa: BLE001 - user-facing script
-        return False, key.label, str(exc)
+        return "error", key.label, str(exc)
 
 
 def find_tagging_snps(
@@ -476,7 +482,7 @@ def find_tagging_snps(
         for processed, future in enumerate(as_completed(future_to_key), start=1):
             key = future_to_key[future]
             try:
-                success, label, result = future.result()
+                status, label, result = future.result()
             except Exception as exc:  # noqa: BLE001 - user-facing script
                 has_errors = True
                 print(
@@ -486,10 +492,15 @@ def find_tagging_snps(
                 )
                 continue
 
-            if success:
+            if status == "ok":
                 aggregated.extend(result)
                 print(
                     f"[{processed}/{total_regions}] Completed {label} with {len(result)} SNP(s).",
+                    flush=True,
+                )
+            elif status == "skip":
+                print(
+                    f"[{processed}/{total_regions}] Skipping {label}: {result}",
                     flush=True,
                 )
             else:
