@@ -892,7 +892,7 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
     ]
     patches = [
         mpatches.Circle((0, 0), 0.5,
-                       facecolor=face, edgecolor='white', linewidth=0.4,
+                       facecolor=face, edgecolor='#666666', linewidth=0,
                        alpha=0.5, hatch=hatch)
         for (_, face, hatch, _) in legend_entries
     ]
