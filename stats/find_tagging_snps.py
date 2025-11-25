@@ -29,6 +29,7 @@ import subprocess
 import sys
 import tempfile
 import urllib.request
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -363,22 +364,71 @@ def analyze_inversion_pair(key: InversionKey, files: Dict[int, str]) -> List[dic
     return results
 
 
-def find_tagging_snps(phy_dir: str, output_file: str) -> None:
+def process_inversion_pair(item: Tuple[InversionKey, Dict[int, str]]):
+    """Wrapper suitable for running ``analyze_inversion_pair`` in a worker."""
+
+    key, files = item
+    try:
+        return True, key.label, analyze_inversion_pair(key, files)
+    except Exception as exc:  # noqa: BLE001 - user-facing script
+        return False, key.label, str(exc)
+
+
+def find_tagging_snps(phy_dir: str, output_file: str, workers: int | None = None) -> None:
+    if workers is None:
+        workers = os.cpu_count() or 1
+    elif workers < 1:
+        raise ValueError("workers must be at least 1")
+
+    print(f"Using {workers} worker(s) for inversion processing.", flush=True)
+
     grouped = discover_inversion_files(phy_dir)
 
     if not grouped:
         print(f"No inversion PHYLIP files found in '{phy_dir}'.")
         sys.exit(1)
 
+    print(
+        f"Discovered {len(grouped)} inversion region(s) with paired alignments under {phy_dir}.",
+        flush=True,
+    )
+
     has_errors = False
     aggregated: List[dict] = []
+    total_regions = len(grouped)
+    grouped_items = list(grouped.items())
 
-    for key, files in grouped.items():
-        try:
-            aggregated.extend(analyze_inversion_pair(key, files))
-        except Exception as exc:  # noqa: BLE001 - user-facing script
-            has_errors = True
-            print(f"Error processing {key.label}: {exc}", file=sys.stderr)
+    with ProcessPoolExecutor(max_workers=workers) as executor:
+        future_to_key = {
+            executor.submit(process_inversion_pair, item): item[0] for item in grouped_items
+        }
+
+        for processed, future in enumerate(as_completed(future_to_key), start=1):
+            key = future_to_key[future]
+            try:
+                success, label, result = future.result()
+            except Exception as exc:  # noqa: BLE001 - user-facing script
+                has_errors = True
+                print(
+                    f"[{processed}/{total_regions}] Unexpected failure processing {key.label}: {exc}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                continue
+
+            if success:
+                aggregated.extend(result)
+                print(
+                    f"[{processed}/{total_regions}] Completed {label} with {len(result)} SNP(s).",
+                    flush=True,
+                )
+            else:
+                has_errors = True
+                print(
+                    f"[{processed}/{total_regions}] Error processing {label}: {result}",
+                    file=sys.stderr,
+                    flush=True,
+                )
 
     if not aggregated:
         print("No variable SNPs found across all inversion regions.")
@@ -401,10 +451,18 @@ def find_tagging_snps(phy_dir: str, output_file: str) -> None:
     ]
 
     try:
+        print(
+            f"Lifting over {len(liftover_regions)} site(s) from hg38 to hg19 (best effort)...",
+            flush=True,
+        )
         lifted = liftover_sites(liftover_regions, "hg38", "hg19")
         for idx, coords in lifted.items():
             df.at[idx, "chromosome_hg37"] = coords["chrom"]
             df.at[idx, "position_hg37"] = coords["start"] + 1
+        print(
+            f"Liftover completed for {len(lifted)} site(s); {len(liftover_regions) - len(lifted)} remained unmapped.",
+            flush=True,
+        )
     except Exception as exc:  # noqa: BLE001 - best-effort liftover
         print(f"Warning: failed to liftover hg38→hg19: {exc}", file=sys.stderr)
 
@@ -430,9 +488,15 @@ def main() -> None:
         default="tagging_snps.tsv",
         help="Path to the output TSV file (default: tagging_snps.tsv).",
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        help="Number of worker processes to use (default: system CPU count).",
+    )
     args = parser.parse_args()
 
-    find_tagging_snps(args.phy_dir, args.output)
+    find_tagging_snps(args.phy_dir, args.output, workers=args.workers)
 
 
 if __name__ == "__main__":
