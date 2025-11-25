@@ -99,6 +99,38 @@ def rows_to_columns(rows: Iterable[Dict[str, float]]) -> Dict[str, List[float]]:
     return columns
 
 
+def invert_allele_frequencies(columns: Dict[str, List[float]]) -> Dict[str, List[float]]:
+    """Invert allele frequencies to show the complement allele (1 - frequency).
+
+    This is used when the data shows the non-inverted allele but we want to plot
+    the inverted allele frequency. Note that confidence intervals are swapped:
+    the new lower bound is 1 - old upper bound, and vice versa.
+    """
+    inverted = columns.copy()
+
+    # Invert empirical frequencies
+    if "af" in inverted:
+        inverted["af"] = [1.0 - x for x in inverted["af"]]
+    if "af_low" in inverted and "af_up" in inverted:
+        # Swap and invert the confidence bounds
+        old_low = inverted["af_low"]
+        old_up = inverted["af_up"]
+        inverted["af_low"] = [1.0 - x for x in old_up]
+        inverted["af_up"] = [1.0 - x for x in old_low]
+
+    # Invert model-predicted frequencies
+    if "pt" in inverted:
+        inverted["pt"] = [1.0 - x for x in inverted["pt"]]
+    if "pt_low" in inverted and "pt_up" in inverted:
+        # Swap and invert the confidence bounds
+        old_low = inverted["pt_low"]
+        old_up = inverted["pt_up"]
+        inverted["pt_low"] = [1.0 - x for x in old_up]
+        inverted["pt_up"] = [1.0 - x for x in old_low]
+
+    return inverted
+
+
 def _prepare_interpolator(
     dates: List[float], values: List[float]
 ) -> Tuple[List[float], List[float]]:
@@ -285,9 +317,12 @@ def main() -> None:
     print(f"  Saved to {TRAJECTORY_1_OUTPUT.resolve()}")
 
     # Process trajectory 2 (rs1052553)
+    # Note: The data tracks the non-inverted allele "A", but we plot inverted allele "G"
     print("\nProcessing trajectory 2: rs1052553 (17:44073889)")
+    print("  (Data shows non-inverted 'A' frequency; plotting inverted 'G' as 1 - frequency)")
     rows_2 = download_trajectory(TRAJECTORY_2_URL)
     columns_2 = rows_to_columns(rows_2)
+    columns_2 = invert_allele_frequencies(columns_2)  # Invert to show inverted allele "G"
     highlight_2 = plot_trajectory(columns_2, TRAJECTORY_2_OUTPUT, TRAJECTORY_2_LABEL)
     if highlight_2 is not None:
         start_year, end_year, change = highlight_2
