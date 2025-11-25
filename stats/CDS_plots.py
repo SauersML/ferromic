@@ -839,7 +839,7 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
 
             # Then overlay transparent hatching as a separate layer
             is_recurrent = 'Recurrent' in cat
-            hatch_pattern = '//' if is_recurrent else '.'  # dense patterns
+            hatch_pattern = '////' if is_recurrent else '....'  # fine-grained, dense patterns
 
             # Draw transparent hatched overlay circles
             for x_pos, y_pos, size in zip(x_positions, y_adjusted, sizes):
@@ -885,10 +885,10 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
     ax.tick_params(axis="both", labelsize=9)
 
     legend_entries = [
-        ("Single-event, direct",   COLOR_DIRECT,   ".",  OVERLAY_SINGLE),
-        ("Single-event, inverted", COLOR_INVERTED, ".",  OVERLAY_SINGLE),
-        ("Recurrent, direct",      COLOR_DIRECT,   "//", OVERLAY_RECUR),
-        ("Recurrent, inverted",    COLOR_INVERTED, "//", OVERLAY_RECUR),
+        ("Single-event, direct",   COLOR_DIRECT,   "....",  OVERLAY_SINGLE),
+        ("Single-event, inverted", COLOR_INVERTED, "....",  OVERLAY_SINGLE),
+        ("Recurrent, direct",      COLOR_DIRECT,   "////", OVERLAY_RECUR),
+        ("Recurrent, inverted",    COLOR_INVERTED, "////", OVERLAY_RECUR),
     ]
     patches = [
         mpatches.Circle((0, 0), 0.5,
