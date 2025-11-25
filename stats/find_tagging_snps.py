@@ -48,7 +48,8 @@ INVERTED_GROUP = 1
 
 # Limit base handling to the common alignment characters to keep memory overhead small.
 BASE_CODES = np.array([ord("A"), ord("C"), ord("G"), ord("T"), ord("N"), ord("-")], dtype=np.uint8)
-MISSING_BASE_INDICES = {4, 5}  # indices within BASE_CODES corresponding to N and '-'
+# Use an ordered tuple so downstream numpy indexing receives a sequence of ints rather than a set.
+MISSING_BASE_INDICES = (4, 5)  # indices within BASE_CODES corresponding to N and '-'
 BASE_TO_INDEX = np.full(256, -1, dtype=np.int8)
 for i, code in enumerate(BASE_CODES):
     BASE_TO_INDEX[code] = i
