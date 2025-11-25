@@ -907,7 +907,6 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
         )
         if size_leg and size_leg.get_title():
             size_leg.get_title().set_fontsize(8.5)
-        ax.add_artist(size_leg)
 
     # Re-attach the category legend after any additional legend calls
     ax.add_artist(leg)
