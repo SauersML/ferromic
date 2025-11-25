@@ -342,12 +342,11 @@ def analyze_inversion_pair(key: InversionKey, files: Dict[int, str]) -> List[dic
             )
         )
 
-    n_sites = alignment_direct.n_sites
     n_direct = alignment_direct.n_samples
     n_inverted = alignment_inverted.n_samples
     n_total = n_direct + n_inverted
 
-    base_counts_direct = np.empty((len(BASE_CODES), n_sites), dtype=np.int32)
+    base_counts_direct = np.empty((len(BASE_CODES), alignment_direct.n_sites), dtype=np.int32)
     base_counts_inverted = np.empty_like(base_counts_direct)
     for i, base_code in enumerate(BASE_CODES):
         base_counts_direct[i] = (alignment_direct.sequences == base_code).sum(axis=0)
@@ -357,26 +356,29 @@ def analyze_inversion_pair(key: InversionKey, files: Dict[int, str]) -> List[dic
 
     informative_indices = np.array([i for i in range(len(BASE_CODES)) if i not in MISSING_BASE_INDICES])
     informative_counts = combined_counts[informative_indices]
+    if informative_counts.ndim == 1:
+        informative_counts = informative_counts.reshape(len(informative_indices), 1)
+
+    n_sites = informative_counts.shape[1]
+    sites = np.arange(n_sites, dtype=np.int64)
 
     informative_totals = informative_counts.sum(axis=0)
     if not np.any(informative_totals):
         return []
 
-    major_rel_indices = np.argmax(informative_counts, axis=0)
+    major_rel_indices = np.asarray(np.argmax(informative_counts, axis=0), dtype=np.intp)
+    if major_rel_indices.ndim == 0:
+        major_rel_indices = major_rel_indices.reshape(1)
     major_base_indices = informative_indices[major_rel_indices]
-    sites = np.arange(n_sites)
 
-    # Use ``take_along_axis`` to gather per-site major allele counts. Advanced
-    # indexing with two index arrays can raise "invalid index to scalar"
-    # when NumPy treats one of the indices as a scalar; the explicit gather
-    # keeps the shape stable for both single-site and multi-site inputs.
-    gather_idx = major_base_indices[np.newaxis, :]
-    major_counts_total = np.take_along_axis(combined_counts, gather_idx, axis=0)[0]
-    major_counts_direct = np.take_along_axis(base_counts_direct, gather_idx, axis=0)[0]
-    major_counts_inverted = np.take_along_axis(base_counts_inverted, gather_idx, axis=0)[0]
+    site_indices = np.arange(n_sites, dtype=np.int64)
+    major_counts_total = combined_counts[major_base_indices, site_indices]
+    major_counts_direct = base_counts_direct[major_base_indices, site_indices]
+    major_counts_inverted = base_counts_inverted[major_base_indices, site_indices]
 
-    missing_direct = base_counts_direct[MISSING_BASE_INDICES].sum(axis=0)
-    missing_inverted = base_counts_inverted[MISSING_BASE_INDICES].sum(axis=0)
+    missing_indices = np.array(MISSING_BASE_INDICES, dtype=np.intp)
+    missing_direct = base_counts_direct[missing_indices].sum(axis=0)
+    missing_inverted = base_counts_inverted[missing_indices].sum(axis=0)
     valid_direct = n_direct - missing_direct
     valid_inverted = n_inverted - missing_inverted
     valid_total = valid_direct + valid_inverted
@@ -394,6 +396,8 @@ def analyze_inversion_pair(key: InversionKey, files: Dict[int, str]) -> List[dic
         & has_direct_calls
         & has_inverted_calls
     )
+    if valid.ndim == 0:
+        valid = valid.reshape(1)
 
     if not np.any(valid):
         return []
