@@ -366,9 +366,14 @@ def analyze_inversion_pair(key: InversionKey, files: Dict[int, str]) -> List[dic
     major_base_indices = informative_indices[major_rel_indices]
     sites = np.arange(n_sites)
 
-    major_counts_total = combined_counts[major_base_indices, sites]
-    major_counts_direct = base_counts_direct[major_base_indices, sites]
-    major_counts_inverted = base_counts_inverted[major_base_indices, sites]
+    # Use ``take_along_axis`` to gather per-site major allele counts. Advanced
+    # indexing with two index arrays can raise "invalid index to scalar"
+    # when NumPy treats one of the indices as a scalar; the explicit gather
+    # keeps the shape stable for both single-site and multi-site inputs.
+    gather_idx = major_base_indices[np.newaxis, :]
+    major_counts_total = np.take_along_axis(combined_counts, gather_idx, axis=0)[0]
+    major_counts_direct = np.take_along_axis(base_counts_direct, gather_idx, axis=0)[0]
+    major_counts_inverted = np.take_along_axis(base_counts_inverted, gather_idx, axis=0)[0]
 
     missing_direct = base_counts_direct[MISSING_BASE_INDICES].sum(axis=0)
     missing_inverted = base_counts_inverted[MISSING_BASE_INDICES].sum(axis=0)
@@ -408,12 +413,28 @@ def analyze_inversion_pair(key: InversionKey, files: Dict[int, str]) -> List[dic
     freq_direct = major_counts_direct[valid] / valid_direct
     freq_inverted = major_counts_inverted[valid] / valid_inverted
 
+    allele_labels = ("A", "C", "G", "T")
+    allele_indices = np.arange(len(allele_labels))
+    per_allele_direct = base_counts_direct[allele_indices][:, valid] / valid_direct
+    per_allele_inverted = base_counts_inverted[allele_indices][:, valid] / valid_inverted
+
     valid_sites = sites[valid]
     results: List[dict] = []
 
-    for site_index, corr, f_dir, f_inv in zip(valid_sites, correlations, freq_direct, freq_inverted):
+    for pos, corr, f_dir, f_inv, idx in zip(
+        valid_sites,
+        correlations,
+        freq_direct,
+        freq_inverted,
+        range(per_allele_direct.shape[1]),
+    ):
         if np.isnan(corr):
             continue
+
+        allele_freqs_dir = {label: float(per_allele_direct[i, idx]) for i, label in enumerate(allele_labels)}
+        allele_freqs_inv = {
+            label: float(per_allele_inverted[i, idx]) for i, label in enumerate(allele_labels)
+        }
 
         results.append(
             {
@@ -421,9 +442,9 @@ def analyze_inversion_pair(key: InversionKey, files: Dict[int, str]) -> List[dic
                 "chromosome": key.chrom,
                 "region_start": key.start,
                 "region_end": key.end,
-                "site_index": int(site_index),
-                "position": key.start + int(site_index),
-                "position_hg38": key.start + int(site_index),
+                "site_index": int(pos),
+                "position": key.start + int(pos),
+                "position_hg38": key.start + int(pos),
                 "chromosome_hg38": key.chrom,
                 "direct_group_size": n_direct,
                 "inverted_group_size": n_inverted,
@@ -431,6 +452,14 @@ def analyze_inversion_pair(key: InversionKey, files: Dict[int, str]) -> List[dic
                 "allele_freq_inverted": float(f_inv),
                 "allele_freq_difference": float(abs(f_dir - f_inv)),
                 "correlation": float(corr),
+                "A_inv_freq": allele_freqs_inv.get("A"),
+                "C_inv_freq": allele_freqs_inv.get("C"),
+                "G_inv_freq": allele_freqs_inv.get("G"),
+                "T_inv_freq": allele_freqs_inv.get("T"),
+                "A_dir_freq": allele_freqs_dir.get("A"),
+                "C_dir_freq": allele_freqs_dir.get("C"),
+                "G_dir_freq": allele_freqs_dir.get("G"),
+                "T_dir_freq": allele_freqs_dir.get("T"),
             }
         )
 
