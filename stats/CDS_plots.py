@@ -902,7 +902,7 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
             handletextpad=0.8,
             borderpad=0.2,
             loc="lower left",
-            bbox_to_anchor=(0.02, -0.28),
+            bbox_to_anchor=(-0.02, -0.28),
             fontsize=8,
         )
         if size_leg and size_leg.get_title():
