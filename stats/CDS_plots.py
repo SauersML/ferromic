@@ -863,8 +863,8 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
                 # Transparent overlay with hatching only (no fill)
                 ellipse = mpatches.Ellipse(
                     (i + x_pos, y_pos), width, height,
-                    facecolor='none', edgecolor='black', linewidth=0,
-                    alpha=0.3, zorder=2.5,
+                    facecolor='none', edgecolor='#666666', linewidth=0,
+                    alpha=0.5, zorder=2.5,
                     hatch=hatch_pattern,
                 )
                 ax.add_patch(ellipse)
