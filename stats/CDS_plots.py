@@ -710,9 +710,6 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
         # Orientation-based face color
         face = CATEGORY_FACE[cat]
 
-        # Marker shape based on recurrence (single-event vs recurrent)
-        marker = 'o' if 'Single-event' in cat else 'D'
-
         # Beeswarm plot: hexagonal packing with both x and y adjustment
         if all_vals.size > 0:
             # Sort by y-value for bottom-up placement
@@ -837,7 +834,6 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
                 y_adjusted,
                 s=sizes, alpha=0.5, color=face,
                 edgecolor="white", linewidths=0.4, zorder=2,
-                marker=marker,
             )
 
         # Draw median line
@@ -856,15 +852,15 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
     ax.tick_params(axis="both", labelsize=9)
 
     legend_entries = [
-        ("Single-event, direct",   COLOR_DIRECT,   "o"),
-        ("Single-event, inverted", COLOR_INVERTED, "o"),
-        ("Recurrent, direct",      COLOR_DIRECT,   "D"),
-        ("Recurrent, inverted",    COLOR_INVERTED, "D"),
+        ("Single-event, direct",   COLOR_DIRECT),
+        ("Single-event, inverted", COLOR_INVERTED),
+        ("Recurrent, direct",      COLOR_DIRECT),
+        ("Recurrent, inverted",    COLOR_INVERTED),
     ]
     patches = [
         plt.scatter([], [], s=100, color=face, alpha=0.5,
-                   edgecolor="white", linewidths=0.4, marker=marker)
-        for (_, face, marker) in legend_entries
+                   edgecolor="white", linewidths=0.4, marker='o')
+        for (_, face) in legend_entries
     ]
     labels = [lbl for (lbl, *_rest) in legend_entries]
 
