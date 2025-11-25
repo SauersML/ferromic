@@ -46,6 +46,13 @@ INVERSION_PHY_RE = re.compile(
 DIRECT_GROUP = 0
 INVERTED_GROUP = 1
 
+# Limit base handling to the common alignment characters to keep memory overhead small.
+BASE_CODES = np.array([ord("A"), ord("C"), ord("G"), ord("T"), ord("N"), ord("-")], dtype=np.uint8)
+MISSING_BASE_INDICES = {4, 5}  # indices within BASE_CODES corresponding to N and '-'
+BASE_TO_INDEX = np.full(256, -1, dtype=np.int8)
+for i, code in enumerate(BASE_CODES):
+    BASE_TO_INDEX[code] = i
+
 CHAIN_CACHE = Path(__file__).resolve().parent / "liftover_chains"
 
 
@@ -62,7 +69,7 @@ class InversionKey:
 
 @dataclass
 class Alignment:
-    sequences: np.ndarray  # shape (n_samples, n_sites)
+    sequences: np.ndarray  # shape (n_samples, n_sites), dtype=np.uint8
     sample_names: List[str]
 
     @property
@@ -89,52 +96,65 @@ def parse_phylip(path: str) -> Alignment:
 
     The writer emits a header ``"{n} {m}"`` followed by one line per sequence in the
     form ``"{sample_name}  {sequence}"``. Sample names can include underscores and the
-    sequences are uppercase DNA characters.
+    sequences are uppercase DNA characters. Sequences are stored as a dense uint8
+    matrix to minimize memory overhead while enabling fast vectorized operations.
     """
 
     try:
         with open_text_maybe_gzip(path) as handle:
-            lines = [line.rstrip("\n") for line in handle if line.strip()]
+            header = None
+            for line in handle:
+                if line.strip():
+                    header = line.rstrip("\n")
+                    break
+            if header is None:
+                raise PhylipError(f"{path} is empty")
+
+            try:
+                header_parts = header.split()
+                expected_samples, expected_sites = int(header_parts[0]), int(header_parts[1])
+            except (IndexError, ValueError) as exc:
+                raise PhylipError(f"Invalid PHYLIP header in {path!r}: {header!r}") from exc
+
+            if expected_samples <= 0 or expected_sites <= 0:
+                raise PhylipError(f"Invalid dimensions in {path!r}: {expected_samples}x{expected_sites}")
+
+            sequences = np.empty((expected_samples, expected_sites), dtype=np.uint8)
+            sample_names: List[str] = []
+            row = 0
+
+            for line in handle:
+                if not line.strip():
+                    continue
+                try:
+                    sample, sequence = line.split(None, 1)
+                except ValueError as exc:
+                    raise PhylipError(f"Malformed sequence line in {path!r}: {line!r}") from exc
+
+                seq_str = sequence.strip()
+                if len(seq_str) != expected_sites:
+                    raise PhylipError(
+                        f"Sequence length mismatch in {path}: got {len(seq_str)}, expected {expected_sites}"
+                    )
+
+                seq_arr = np.frombuffer(seq_str.encode("ascii"), dtype=np.uint8)
+                if np.any(BASE_TO_INDEX[seq_arr] < 0):
+                    raise PhylipError(
+                        f"Unexpected character in sequence from {path!r}: {seq_str}"
+                    )
+
+                sequences[row] = seq_arr
+                sample_names.append(sample)
+                row += 1
+
+            if row != expected_samples:
+                raise PhylipError(
+                    f"Sample count mismatch in {path}: got {row}, expected {expected_samples}"
+                )
     except OSError as exc:
         raise PhylipError(f"Failed to read {path}: {exc}") from exc
 
-    if not lines:
-        raise PhylipError(f"{path} is empty")
-
-    try:
-        header_parts = lines[0].split()
-        expected_samples, expected_sites = int(header_parts[0]), int(header_parts[1])
-    except (IndexError, ValueError) as exc:
-        raise PhylipError(f"Invalid PHYLIP header in {path!r}: {lines[0]!r}") from exc
-
-    sample_names: List[str] = []
-    sequences: List[List[str]] = []
-
-    for line in lines[1:]:
-        try:
-            sample, sequence = line.split(None, 1)
-        except ValueError as exc:
-            raise PhylipError(f"Malformed sequence line in {path!r}: {line!r}") from exc
-
-        bases = list(sequence.strip())
-        if expected_sites and len(bases) != expected_sites:
-            raise PhylipError(
-                f"Sequence length mismatch in {path}: got {len(bases)}, expected {expected_sites}"
-            )
-
-        sample_names.append(sample)
-        sequences.append(bases)
-
-    if expected_samples and len(sample_names) != expected_samples:
-        raise PhylipError(
-            f"Sample count mismatch in {path}: got {len(sample_names)}, expected {expected_samples}"
-        )
-
-    if not sequences:
-        raise PhylipError(f"No sequences found in {path}")
-
-    stacked = np.array(sequences, dtype="U1")
-    return Alignment(sequences=stacked, sample_names=sample_names)
+    return Alignment(sequences=sequences, sample_names=sample_names)
 
 
 def discover_inversion_files(base_dir: str) -> Dict[InversionKey, Dict[int, str]]:
@@ -316,31 +336,63 @@ def analyze_inversion_pair(key: InversionKey, files: Dict[int, str]) -> List[dic
             )
         )
 
-    combined_sequences = np.vstack([alignment_direct.sequences, alignment_inverted.sequences])
-    group_labels = np.array(
-        [DIRECT_GROUP] * alignment_direct.n_samples
-        + [INVERTED_GROUP] * alignment_inverted.n_samples
+    n_sites = alignment_direct.n_sites
+    n_direct = alignment_direct.n_samples
+    n_inverted = alignment_inverted.n_samples
+    n_total = n_direct + n_inverted
+
+    base_counts_direct = np.empty((len(BASE_CODES), n_sites), dtype=np.int32)
+    base_counts_inverted = np.empty_like(base_counts_direct)
+    for i, base_code in enumerate(BASE_CODES):
+        base_counts_direct[i] = (alignment_direct.sequences == base_code).sum(axis=0)
+        base_counts_inverted[i] = (alignment_inverted.sequences == base_code).sum(axis=0)
+
+    combined_counts = base_counts_direct + base_counts_inverted
+
+    informative_indices = np.array([i for i in range(len(BASE_CODES)) if i not in MISSING_BASE_INDICES])
+    informative_counts = combined_counts[informative_indices]
+
+    informative_totals = informative_counts.sum(axis=0)
+    if not np.any(informative_totals):
+        return []
+
+    major_rel_indices = np.argmax(informative_counts, axis=0)
+    major_base_indices = informative_indices[major_rel_indices]
+    sites = np.arange(n_sites)
+
+    major_counts_total = combined_counts[major_base_indices, sites]
+    major_counts_direct = base_counts_direct[major_base_indices, sites]
+    major_counts_inverted = base_counts_inverted[major_base_indices, sites]
+
+    # Skip monomorphic or wholly missing sites.
+    valid = (
+        informative_totals > 0
+        & (major_counts_total > 0)
+        & (major_counts_total < n_total)
     )
 
+    if not np.any(valid):
+        return []
+
+    sum_x = major_counts_total[valid].astype(np.float64)
+    sum_xg = major_counts_inverted[valid].astype(np.float64)
+
+    numerator = n_total * sum_xg - sum_x * n_inverted
+    denom_constant = float(n_direct * n_inverted)
+    denom = np.sqrt((n_total * sum_x - sum_x * sum_x) * denom_constant)
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        correlations = numerator / denom
+
+    freq_direct = major_counts_direct[valid] / n_direct
+    freq_inverted = major_counts_inverted[valid] / n_inverted
+
+    valid_sites = sites[valid]
     results: List[dict] = []
-    for site_index in range(combined_sequences.shape[1]):
-        column = combined_sequences[:, site_index]
-        try:
-            major_allele, _freqs = site_allele_frequencies(column)
-        except ValueError:
-            continue
 
-        encoded_major = (column == major_allele).astype(int)
-        if encoded_major.sum() == 0 or encoded_major.sum() == encoded_major.size:
-            # Monomorphic relative to the major allele; skip
+    for site_index, corr, f_dir, f_inv in zip(valid_sites, correlations, freq_direct, freq_inverted):
+        if np.isnan(corr):
             continue
-
-        correlation, _ = stats.pearsonr(group_labels, encoded_major)
-        if np.isnan(correlation):
-            continue
-
-        freq_direct = encoded_major[: alignment_direct.n_samples].mean()
-        freq_inverted = encoded_major[alignment_direct.n_samples :].mean()
 
         results.append(
             {
@@ -348,16 +400,16 @@ def analyze_inversion_pair(key: InversionKey, files: Dict[int, str]) -> List[dic
                 "chromosome": key.chrom,
                 "region_start": key.start,
                 "region_end": key.end,
-                "site_index": site_index,
-                "position": key.start + site_index,
-                "position_hg38": key.start + site_index,
+                "site_index": int(site_index),
+                "position": key.start + int(site_index),
+                "position_hg38": key.start + int(site_index),
                 "chromosome_hg38": key.chrom,
-                "direct_group_size": alignment_direct.n_samples,
-                "inverted_group_size": alignment_inverted.n_samples,
-                "allele_freq_direct": freq_direct,
-                "allele_freq_inverted": freq_inverted,
-                "allele_freq_difference": abs(freq_direct - freq_inverted),
-                "correlation": correlation,
+                "direct_group_size": n_direct,
+                "inverted_group_size": n_inverted,
+                "allele_freq_direct": float(f_dir),
+                "allele_freq_inverted": float(f_inv),
+                "allele_freq_difference": float(abs(f_dir - f_inv)),
+                "correlation": float(corr),
             }
         )
 
