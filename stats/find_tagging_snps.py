@@ -413,12 +413,28 @@ def analyze_inversion_pair(key: InversionKey, files: Dict[int, str]) -> List[dic
     freq_direct = major_counts_direct[valid] / valid_direct
     freq_inverted = major_counts_inverted[valid] / valid_inverted
 
+    allele_labels = ("A", "C", "G", "T")
+    allele_indices = np.arange(len(allele_labels))
+    per_allele_direct = base_counts_direct[allele_indices][:, valid] / valid_direct
+    per_allele_inverted = base_counts_inverted[allele_indices][:, valid] / valid_inverted
+
     valid_sites = sites[valid]
     results: List[dict] = []
 
-    for site_index, corr, f_dir, f_inv in zip(valid_sites, correlations, freq_direct, freq_inverted):
+    for pos, corr, f_dir, f_inv, idx in zip(
+        valid_sites,
+        correlations,
+        freq_direct,
+        freq_inverted,
+        range(per_allele_direct.shape[1]),
+    ):
         if np.isnan(corr):
             continue
+
+        allele_freqs_dir = {label: float(per_allele_direct[i, idx]) for i, label in enumerate(allele_labels)}
+        allele_freqs_inv = {
+            label: float(per_allele_inverted[i, idx]) for i, label in enumerate(allele_labels)
+        }
 
         results.append(
             {
@@ -426,9 +442,9 @@ def analyze_inversion_pair(key: InversionKey, files: Dict[int, str]) -> List[dic
                 "chromosome": key.chrom,
                 "region_start": key.start,
                 "region_end": key.end,
-                "site_index": int(site_index),
-                "position": key.start + int(site_index),
-                "position_hg38": key.start + int(site_index),
+                "site_index": int(pos),
+                "position": key.start + int(pos),
+                "position_hg38": key.start + int(pos),
                 "chromosome_hg38": key.chrom,
                 "direct_group_size": n_direct,
                 "inverted_group_size": n_inverted,
@@ -436,6 +452,21 @@ def analyze_inversion_pair(key: InversionKey, files: Dict[int, str]) -> List[dic
                 "allele_freq_inverted": float(f_inv),
                 "allele_freq_difference": float(abs(f_dir - f_inv)),
                 "correlation": float(corr),
+                "A_inv_freq_hg38": allele_freqs_inv.get("A"),
+                "C_inv_freq_hg38": allele_freqs_inv.get("C"),
+                "G_inv_freq_hg38": allele_freqs_inv.get("G"),
+                "A_dir_freq_hg38": allele_freqs_dir.get("A"),
+                "T_dir_freq_hg38": allele_freqs_dir.get("T"),
+                "C_dir_freq_hg38": allele_freqs_dir.get("C"),
+                "G_dir_freq_hg38": allele_freqs_dir.get("G"),
+                "A_inv_freq_hg19": allele_freqs_inv.get("A"),
+                "T_inv_freq_hg19": allele_freqs_inv.get("T"),
+                "C_inv_freq_hg19": allele_freqs_inv.get("C"),
+                "G_inv_freq_hg19": allele_freqs_inv.get("G"),
+                "A_dir_freq_hg19": allele_freqs_dir.get("A"),
+                "T_dir_freq_hg19": allele_freqs_dir.get("T"),
+                "C_dir_freq_hg19": allele_freqs_dir.get("C"),
+                "G_dir_freq_hg19": allele_freqs_dir.get("G"),
             }
         )
 
