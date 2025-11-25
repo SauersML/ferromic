@@ -28,7 +28,7 @@ jobs:
           echo "Found latest successful run with ID: $run_id"
 
           echo "Downloading phy_outputs artifact..."
-          gh run download "$run_id" -n run-vcf-phy-outputs -p ./phy_outputs
+          gh run download "$run_id" -n run-vcf-phy-outputs -D ./phy_outputs
 
           if [ ! -f ./phy_outputs/phy_outputs.zip ]; then
               echo "Artifact 'run-vcf-phy-outputs' not found or failed to download."
