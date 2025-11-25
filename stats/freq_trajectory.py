@@ -21,14 +21,14 @@ TRAJECTORY_1_URL = (
     "https://raw.githubusercontent.com/SauersML/ferromic/refs/heads/main/data/"
     "Trajectory-12_47296118_A_G.tsv"
 )
-TRAJECTORY_1_OUTPUT = Path("allele_frequency_trajectory_rs34666797.png")
+TRAJECTORY_1_OUTPUT = Path("data/allele_frequency_trajectory_rs34666797.pdf")
 TRAJECTORY_1_LABEL = 'Derived allele "G" frequency (rs34666797)'
 
 TRAJECTORY_2_URL = (
     "https://raw.githubusercontent.com/SauersML/ferromic/refs/heads/main/data/"
     "Trajectory-17_44073889_A_G.tsv"
 )
-TRAJECTORY_2_OUTPUT = Path("allele_frequency_trajectory_rs1052553.png")
+TRAJECTORY_2_OUTPUT = Path("data/allele_frequency_trajectory_rs1052553.pdf")
 TRAJECTORY_2_LABEL = 'Inverted allele "G" frequency (rs1052553)'
 
 # Column descriptions supplied by the AGES project. These comments double as
@@ -261,6 +261,7 @@ def plot_trajectory(
     ax.tick_params(axis="both", labelsize=18)
 
     fig.tight_layout()
+    output.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output, dpi=300)
     plt.close(fig)
 
