@@ -829,12 +829,24 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
             # Plot all swarm points - bigger and more transparent
             sizes = np.array([scale_size(n) for n in pairs_sorted])
 
-            ax.scatter(
-                i + x_positions,
-                y_adjusted,
-                s=sizes, alpha=0.5, color=face,
-                edgecolor="white", linewidths=0.4, zorder=2,
-            )
+            # Determine hatch pattern based on recurrence
+            is_recurrent = 'Recurrent' in cat
+            hatch_pattern = '//' if is_recurrent else '.'
+            hatch_color = OVERLAY_RECUR if is_recurrent else OVERLAY_SINGLE
+
+            # Draw each point as a Circle patch to support hatching
+            for x_pos, y_pos, size in zip(x_positions, y_adjusted, sizes):
+                # Convert scatter size (area in points^2) to radius in data coordinates
+                radius = np.sqrt(size / np.pi) / 72.0 * fig.dpi / ax.transData.get_matrix()[0, 0]
+                circle = mpatches.Circle(
+                    (i + x_pos, y_pos), radius,
+                    facecolor=face, edgecolor='white', linewidth=0.4,
+                    alpha=0.5, zorder=2,
+                    hatch=hatch_pattern,
+                )
+                # Set hatch color
+                circle.set_edgecolor('white')  # white outline
+                ax.add_patch(circle)
 
         # Draw median line
         if not np.isnan(median):
@@ -852,15 +864,16 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
     ax.tick_params(axis="both", labelsize=9)
 
     legend_entries = [
-        ("Single-event, direct",   COLOR_DIRECT),
-        ("Single-event, inverted", COLOR_INVERTED),
-        ("Recurrent, direct",      COLOR_DIRECT),
-        ("Recurrent, inverted",    COLOR_INVERTED),
+        ("Single-event, direct",   COLOR_DIRECT,   ".",  OVERLAY_SINGLE),
+        ("Single-event, inverted", COLOR_INVERTED, ".",  OVERLAY_SINGLE),
+        ("Recurrent, direct",      COLOR_DIRECT,   "//", OVERLAY_RECUR),
+        ("Recurrent, inverted",    COLOR_INVERTED, "//", OVERLAY_RECUR),
     ]
     patches = [
-        plt.scatter([], [], s=100, color=face, alpha=0.5,
-                   edgecolor="white", linewidths=0.4, marker='o')
-        for (_, face) in legend_entries
+        mpatches.Circle((0, 0), 0.5,
+                       facecolor=face, edgecolor='white', linewidth=0.4,
+                       alpha=0.5, hatch=hatch)
+        for (_, face, hatch, _) in legend_entries
     ]
     labels = [lbl for (lbl, *_rest) in legend_entries]
 
