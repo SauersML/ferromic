@@ -826,25 +826,30 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
                     y_adjusted[idx] = y_val
                     placed_points.append((0, y_val))
 
-            # Plot all swarm points - bigger and more transparent
+            # Plot all swarm points - base circles without hatching
             sizes = np.array([scale_size(n) for n in pairs_sorted])
 
-            # Determine hatch pattern based on recurrence (subtle patterns)
-            is_recurrent = 'Recurrent' in cat
-            hatch_pattern = '/' if is_recurrent else 'o'  # single slash or small circles (more subtle)
-            hatch_color = OVERLAY_RECUR if is_recurrent else OVERLAY_SINGLE
+            # First, draw base scatter points with original sizes
+            ax.scatter(
+                i + x_positions,
+                y_adjusted,
+                s=sizes, alpha=0.5, color=face,
+                edgecolor="white", linewidths=0.4, zorder=2,
+            )
 
-            # Draw each point as an Ellipse patch to support hatching with correct aspect ratio
+            # Then overlay transparent hatching as a separate layer
+            is_recurrent = 'Recurrent' in cat
+            hatch_pattern = '//' if is_recurrent else '.'  # dense patterns
+
+            # Draw transparent hatched overlay circles
             for x_pos, y_pos, size in zip(x_positions, y_adjusted, sizes):
-                # Convert scatter size (area in points^2) to radius in points
+                # Convert scatter size to radius in points (same calculation as scatter uses)
                 radius_pts = np.sqrt(size / np.pi)
 
-                # Convert points to data coordinates separately for x and y to maintain circular shape
-                # Get the data-to-display transform matrix
+                # Convert to data coordinates while maintaining circular shape
                 trans = ax.transData.transform
                 inv_trans = ax.transData.inverted().transform
 
-                # Calculate width and height in data coordinates to make a proper circle
                 center_display = trans(np.array([[i + x_pos, y_pos]]))[0]
                 right_display = center_display + np.array([radius_pts, 0])
                 top_display = center_display + np.array([0, radius_pts])
@@ -855,10 +860,11 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
                 width = 2 * abs(right_data[0] - (i + x_pos))
                 height = 2 * abs(top_data[1] - y_pos)
 
+                # Transparent overlay with hatching only (no fill)
                 ellipse = mpatches.Ellipse(
                     (i + x_pos, y_pos), width, height,
-                    facecolor=face, edgecolor='white', linewidth=0.4,
-                    alpha=0.5, zorder=2,
+                    facecolor='none', edgecolor='black', linewidth=0,
+                    alpha=0.3, zorder=2.5,
                     hatch=hatch_pattern,
                 )
                 ax.add_patch(ellipse)
@@ -879,10 +885,10 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
     ax.tick_params(axis="both", labelsize=9)
 
     legend_entries = [
-        ("Single-event, direct",   COLOR_DIRECT,   "o",  OVERLAY_SINGLE),
-        ("Single-event, inverted", COLOR_INVERTED, "o",  OVERLAY_SINGLE),
-        ("Recurrent, direct",      COLOR_DIRECT,   "/",  OVERLAY_RECUR),
-        ("Recurrent, inverted",    COLOR_INVERTED, "/",  OVERLAY_RECUR),
+        ("Single-event, direct",   COLOR_DIRECT,   ".",  OVERLAY_SINGLE),
+        ("Single-event, inverted", COLOR_INVERTED, ".",  OVERLAY_SINGLE),
+        ("Recurrent, direct",      COLOR_DIRECT,   "//", OVERLAY_RECUR),
+        ("Recurrent, inverted",    COLOR_INVERTED, "//", OVERLAY_RECUR),
     ]
     patches = [
         mpatches.Circle((0, 0), 0.5,
