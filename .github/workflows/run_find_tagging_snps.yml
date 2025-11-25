@@ -1,0 +1,55 @@
+name: Run Find Tagging SNPs
+
+on:
+  workflow_dispatch:
+
+jobs:
+  find-tagging-snps:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get latest successful manual run artifact
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          echo "Finding latest successful run of manual_run_vcf.yml..."
+
+          run_id=$(gh run list --workflow=manual_run_vcf.yml --status=success --json databaseId -q '.[0].databaseId')
+
+          if [[ -z "$run_id" ]]; then
+            echo "No successful manual_run_vcf.yml runs found."
+            exit 1
+          fi
+
+          echo "Found latest successful run with ID: $run_id"
+
+          echo "Downloading phy_outputs artifact..."
+          gh run download "$run_id" -n run-vcf-phy-outputs -p ./phy_outputs
+
+          if [ ! -f ./phy_outputs/phy_outputs.zip ]; then
+              echo "Artifact 'run-vcf-phy-outputs' not found or failed to download."
+              exit 1
+          fi
+
+      - name: Decompress artifacts
+        run: |
+          set -euo pipefail
+
+          echo "Unzipping phy_outputs.zip..."
+          unzip ./phy_outputs/phy_outputs.zip -d ./phy_files
+
+          echo "Decompression complete."
+
+      - name: Run find_tagging_snps.py
+        run: |
+          python3 stats/find_tagging_snps.py ./phy_files --output tagging_snps.tsv
+
+      - name: Upload tagging SNPs report
+        uses: actions/upload-artifact@v4
+        with:
+          name: tagging-snps-report
+          path: tagging_snps.tsv
