@@ -17,11 +17,19 @@ except ModuleNotFoundError as exc:  # pragma: no cover - import guard for runtim
         "matplotlib is required to plot trajectories. Install it with 'pip install matplotlib'."
     ) from exc
 
-TRAJECTORY_URL = (
+TRAJECTORY_1_URL = (
     "https://raw.githubusercontent.com/SauersML/ferromic/refs/heads/main/data/"
     "Trajectory-12_47296118_A_G.tsv"
 )
-OUTPUT_IMAGE = Path("allele_frequency_trajectory.png")
+TRAJECTORY_1_OUTPUT = Path("allele_frequency_trajectory_rs34666797.png")
+TRAJECTORY_1_LABEL = 'Derived allele "G" frequency (rs34666797)'
+
+TRAJECTORY_2_URL = (
+    "https://raw.githubusercontent.com/SauersML/ferromic/refs/heads/main/data/"
+    "Trajectory-17_44073889_A_G.tsv"
+)
+TRAJECTORY_2_OUTPUT = Path("allele_frequency_trajectory_rs1052553.png")
+TRAJECTORY_2_LABEL = 'Inverted allele "G" frequency (rs1052553)'
 
 # Column descriptions supplied by the AGES project. These comments double as
 # in-code documentation for anyone reusing the downloaded table.
@@ -60,7 +68,7 @@ OUTPUT_IMAGE = Path("allele_frequency_trajectory.png")
 #   fitted trajectory’s lower/upper interval).
 
 
-def download_trajectory(url: str = TRAJECTORY_URL) -> List[Dict[str, float]]:
+def download_trajectory(url: str) -> List[Dict[str, float]]:
     """Download the allele-frequency trajectory TSV file and parse it."""
 
     with urlopen(url) as response:
@@ -167,7 +175,7 @@ def _find_largest_window_change(
 
 
 def plot_trajectory(
-    columns: Dict[str, List[float]], output: Path
+    columns: Dict[str, List[float]], output: Path, ylabel: str
 ) -> Optional[Tuple[float, float, float]]:
     """Plot empirical and model allele-frequency trajectories with uncertainty."""
 
@@ -220,7 +228,7 @@ def plot_trajectory(
         return formatted
 
     ax.xaxis.set_major_formatter(FuncFormatter(_format_year))
-    ax.set_ylabel('Derived allele "G" frequency (rs34666797)', fontsize=20, fontweight='bold')
+    ax.set_ylabel(ylabel, fontsize=20, fontweight='bold')
 
     series_for_ylim = [
         columns["af_low"],
@@ -260,18 +268,35 @@ def plot_trajectory(
 
 
 def main() -> None:
-    rows = download_trajectory()
-    columns = rows_to_columns(rows)
-    highlight = plot_trajectory(columns, OUTPUT_IMAGE)
-    if highlight is not None:
-        start_year, end_year, change = highlight
+    # Process trajectory 1 (rs34666797)
+    print("Processing trajectory 1: rs34666797 (12:47296118)")
+    rows_1 = download_trajectory(TRAJECTORY_1_URL)
+    columns_1 = rows_to_columns(rows_1)
+    highlight_1 = plot_trajectory(columns_1, TRAJECTORY_1_OUTPUT, TRAJECTORY_1_LABEL)
+    if highlight_1 is not None:
+        start_year, end_year, change = highlight_1
         print(
-            "Largest 1,000-year change window: "
+            "  Largest 1,000-year change window: "
             f"start={start_year:g} BP ({start_year/1000:.3f} kya), "
             f"end={end_year:g} BP ({end_year/1000:.3f} kya), "
             f"|Δf|={change:.4f}"
         )
-    print(f"Saved allele frequency trajectory to {OUTPUT_IMAGE.resolve()}")
+    print(f"  Saved to {TRAJECTORY_1_OUTPUT.resolve()}")
+
+    # Process trajectory 2 (rs1052553)
+    print("\nProcessing trajectory 2: rs1052553 (17:44073889)")
+    rows_2 = download_trajectory(TRAJECTORY_2_URL)
+    columns_2 = rows_to_columns(rows_2)
+    highlight_2 = plot_trajectory(columns_2, TRAJECTORY_2_OUTPUT, TRAJECTORY_2_LABEL)
+    if highlight_2 is not None:
+        start_year, end_year, change = highlight_2
+        print(
+            "  Largest 1,000-year change window: "
+            f"start={start_year:g} BP ({start_year/1000:.3f} kya), "
+            f"end={end_year:g} BP ({end_year/1000:.3f} kya), "
+            f"|Δf|={change:.4f}"
+        )
+    print(f"  Saved to {TRAJECTORY_2_OUTPUT.resolve()}")
 
 
 if __name__ == "__main__":
