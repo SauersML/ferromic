@@ -826,15 +826,48 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
                     y_adjusted[idx] = y_val
                     placed_points.append((0, y_val))
 
-            # Plot all swarm points - bigger and more transparent
+            # Plot all swarm points - base circles without hatching
             sizes = np.array([scale_size(n) for n in pairs_sorted])
 
+            # First, draw base scatter points with original sizes
             ax.scatter(
                 i + x_positions,
                 y_adjusted,
                 s=sizes, alpha=0.5, color=face,
                 edgecolor="white", linewidths=0.4, zorder=2,
             )
+
+            # Then overlay transparent hatching as a separate layer
+            is_recurrent = 'Recurrent' in cat
+            hatch_pattern = '////' if is_recurrent else '....'  # fine-grained, dense patterns
+
+            # Draw transparent hatched overlay circles
+            for x_pos, y_pos, size in zip(x_positions, y_adjusted, sizes):
+                # Convert scatter size to radius in points (same calculation as scatter uses)
+                radius_pts = np.sqrt(size / np.pi)
+
+                # Convert to data coordinates while maintaining circular shape
+                trans = ax.transData.transform
+                inv_trans = ax.transData.inverted().transform
+
+                center_display = trans(np.array([[i + x_pos, y_pos]]))[0]
+                right_display = center_display + np.array([radius_pts, 0])
+                top_display = center_display + np.array([0, radius_pts])
+
+                right_data = inv_trans(np.array([right_display]))[0]
+                top_data = inv_trans(np.array([top_display]))[0]
+
+                width = 2 * abs(right_data[0] - (i + x_pos))
+                height = 2 * abs(top_data[1] - y_pos)
+
+                # Transparent overlay with hatching only (no fill)
+                ellipse = mpatches.Ellipse(
+                    (i + x_pos, y_pos), width, height,
+                    facecolor='none', edgecolor='#666666', linewidth=0,
+                    alpha=0.5, zorder=2.5,
+                    hatch=hatch_pattern,
+                )
+                ax.add_patch(ellipse)
 
         # Draw median line
         if not np.isnan(median):
@@ -852,18 +885,16 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
     ax.tick_params(axis="both", labelsize=9)
 
     legend_entries = [
-        ("Single-event, direct",   COLOR_DIRECT,   ".",  OVERLAY_SINGLE),
-        ("Single-event, inverted", COLOR_INVERTED, ".",  OVERLAY_SINGLE),
-        ("Recurrent, direct",      COLOR_DIRECT,   "//", OVERLAY_RECUR),
-        ("Recurrent, inverted",    COLOR_INVERTED, "//", OVERLAY_RECUR),
+        ("Single-event, direct",   COLOR_DIRECT,   "....",  OVERLAY_SINGLE),
+        ("Single-event, inverted", COLOR_INVERTED, "....",  OVERLAY_SINGLE),
+        ("Recurrent, direct",      COLOR_DIRECT,   "////", OVERLAY_RECUR),
+        ("Recurrent, inverted",    COLOR_INVERTED, "////", OVERLAY_RECUR),
     ]
     patches = [
-        mpatches.Rectangle(
-            (0, 0), 1, 1,
-            facecolor=face, edgecolor=edge, hatch=hatch,
-            linewidth=0.0, alpha=ALPHA_VIOLIN
-        )
-        for (_, face, hatch, edge) in legend_entries
+        mpatches.Circle((0, 0), 0.5,
+                       facecolor=face, edgecolor='#666666', linewidth=0,
+                       alpha=0.5, hatch=hatch)
+        for (_, face, hatch, _) in legend_entries
     ]
     labels = [lbl for (lbl, *_rest) in legend_entries]
 
@@ -902,12 +933,11 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
             handletextpad=0.8,
             borderpad=0.2,
             loc="lower left",
-            bbox_to_anchor=(0.02, -0.28),
+            bbox_to_anchor=(-0.18, -0.28),
             fontsize=8,
         )
         if size_leg and size_leg.get_title():
             size_leg.get_title().set_fontsize(8.5)
-        ax.add_artist(size_leg)
 
     # Re-attach the category legend after any additional legend calls
     ax.add_artist(leg)
