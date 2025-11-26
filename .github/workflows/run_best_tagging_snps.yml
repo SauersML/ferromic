@@ -1,0 +1,66 @@
+name: Run Best Tagging SNPs
+
+on:
+  workflow_dispatch:
+    inputs:
+      regions:
+        description: "Comma-separated regions (chrN:start-end)"
+        required: true
+        default: "chr12:12345-45678, chr2:1234-4456"
+
+jobs:
+  run-best-tags:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pandas
+
+      - name: Run best tagging SNP extraction in parallel
+        env:
+          REGIONS: ${{ github.event.inputs.regions }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          REGIONS_CLEAN=$(echo "$REGIONS" | tr ',' '\n' | sed 's/[[:space:]]//g' | sed '/^$/d')
+          if [ -z "$REGIONS_CLEAN" ]; then
+            echo "No regions provided" >&2
+            exit 1
+          fi
+
+          echo "Processing regions:" $REGIONS_CLEAN
+          echo "$REGIONS_CLEAN" | xargs -I{} -P "$(nproc)" python scripts/extract_best_tagging_snp.py --region {} --workdir outputs --repo "${GITHUB_REPOSITORY}"
+
+      - name: Summarize results
+        if: always()
+        run: |
+          SUMMARY="${GITHUB_STEP_SUMMARY:-}" || true
+          if [ -z "$SUMMARY" ]; then
+            echo "GITHUB_STEP_SUMMARY not set; skipping summary"
+            exit 0
+          fi
+
+          shopt -s nullglob
+          for file in outputs/*_best_tagging_snp.txt; do
+            echo "### $(basename "$file")" >> "$SUMMARY"
+            echo '```' >> "$SUMMARY"
+            cat "$file" >> "$SUMMARY"
+            echo '```' >> "$SUMMARY"
+            echo >> "$SUMMARY"
+          done
+
+      - name: Upload outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: best-tagging-snps
+          path: outputs
