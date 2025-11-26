@@ -80,9 +80,37 @@ def github_json(url: str) -> dict:
 def find_latest_artifact(repo: str, name: str, workflow_path: str | None = None) -> dict:
     """Return metadata for the newest non-expired artifact with the given name.
 
-    If ``workflow_path`` is provided, only artifacts created by that workflow file
-    (e.g., ``.github/workflows/run_find_tagging_snps.yml``) are considered.
+    If ``workflow_path`` is provided, the latest *successful* run of that workflow
+    is located first and its artifacts are inspected. This mirrors the pattern
+    used in other workflows (e.g., ``upload_latest_manual_run_artifacts.yml``)
+    and avoids relying on the global artifacts listing (which may omit
+    ``workflow_run`` metadata).
     """
+
+    if workflow_path:
+        runs_url = (
+            f"https://api.github.com/repos/{repo}/actions/workflows/"
+            f"{workflow_path}/runs?status=success&per_page=1"
+        )
+        runs = github_json(runs_url).get("workflow_runs", [])
+        if not runs:
+            raise ArtifactError(
+                f"No successful runs of workflow {workflow_path!r} found in {repo}"
+            )
+
+        run_id = runs[0].get("id")
+        artifacts_url = (
+            f"https://api.github.com/repos/{repo}/actions/runs/{run_id}/artifacts"
+            "?per_page=100"
+        )
+        artifacts = github_json(artifacts_url).get("artifacts", [])
+        for artifact in artifacts:
+            if artifact.get("name") == name and not artifact.get("expired"):
+                return artifact
+
+        raise ArtifactError(
+            f"No non-expired artifact named {name!r} found in last successful run {run_id}"
+        )
 
     page = 1
     latest: Optional[dict] = None
@@ -96,11 +124,6 @@ def find_latest_artifact(repo: str, name: str, workflow_path: str | None = None)
         for artifact in artifacts:
             if artifact.get("name") != name or artifact.get("expired"):
                 continue
-
-            if workflow_path:
-                run_meta = artifact.get("workflow_run") or {}
-                if run_meta.get("path") != workflow_path:
-                    continue
 
             if latest is None or artifact.get("created_at") > latest.get("created_at"):
                 latest = artifact
