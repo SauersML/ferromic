@@ -271,7 +271,10 @@ def ensure_selection_data() -> Path:
         return SELECTION_TSV_PATH
 
     print("Selection TSV missing; downloading via Dataverse metadata...")
-    meta = get_dataset_metadata()
+    try:
+        meta = get_dataset_metadata()
+    except Exception as exc:  # pragma: no cover - network failure surfaces as runtime error
+        raise RuntimeError("Unable to retrieve Dataverse metadata for selection data") from exc
 
     files = meta.get("latestVersion", {}).get("files", [])
     target = SELECTION_GZ_NAME
@@ -284,7 +287,10 @@ def ensure_selection_data() -> Path:
         checksum = df.get("checksum", {})
         expected = checksum.get("value") if checksum.get("type") == "MD5" else None
 
-        gz_path = download_file(file_id, name, expected)
+        try:
+            gz_path = download_file(file_id, name, expected)
+        except Exception as exc:  # pragma: no cover - network failure surfaces as runtime error
+            raise RuntimeError("Unable to download selection data") from exc
 
         out = unzip_file(gz_path)
         if out.name != SELECTION_TSV_NAME:
