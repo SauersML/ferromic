@@ -11,6 +11,14 @@ on:
         description: "Comma-separated regions (chrN:start-end)"
         required: true
         default: "chr12:12345-45678, chr2:1234-4456"
+  push:
+    paths:
+      - ".github/workflows/run_best_tagging_snps.yml"
+      - "scripts/extract_best_tagging_snp.py"
+  pull_request:
+    paths:
+      - ".github/workflows/run_best_tagging_snps.yml"
+      - "scripts/extract_best_tagging_snp.py"
 
 jobs:
   run-best-tags:
@@ -28,6 +36,23 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install pandas
+
+      - name: Download tagging SNPs artifact
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p outputs
+
+          echo "Locating latest successful run of run_find_tagging_snps.yml..."
+          RUN_ID=$(gh run list --workflow run_find_tagging_snps.yml --status success --limit 1 --json databaseId -q '.[0].databaseId')
+          if [ -z "$RUN_ID" ]; then
+            echo "Unable to find successful run for run_find_tagging_snps.yml" >&2
+            exit 1
+          fi
+
+          echo "Downloading tagging-snps-report artifact from run $RUN_ID"
+          gh run download "$RUN_ID" --name tagging-snps-report --dir outputs
 
       - name: Run best tagging SNP extraction in parallel
         env:
