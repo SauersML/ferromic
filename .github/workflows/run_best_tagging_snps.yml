@@ -9,8 +9,8 @@ on:
     inputs:
       regions:
         description: "Comma-separated regions (chrN:start-end)"
-        required: true
-        default: "chr12:12345-45678, chr2:1234-4456"
+        required: false
+        default: "chr17:45585159-46292045"
   push:
     paths:
       - ".github/workflows/run_best_tagging_snps.yml"
@@ -60,10 +60,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          REGIONS_CLEAN=$(echo "$REGIONS" | tr ',' '\n' | sed 's/[[:space:]]//g' | sed '/^$/d')
+          REGIONS_CLEAN=$(echo "${REGIONS:-}" | tr ',' '\n' | sed 's/[[:space:]]//g' | sed '/^$/d')
           if [ -z "$REGIONS_CLEAN" ]; then
-            echo "No regions provided" >&2
-            exit 1
+            REGIONS_CLEAN="chr17:45585159-46292045"
+            echo "No regions provided; defaulting to $REGIONS_CLEAN"
           fi
 
           echo "Processing regions:" $REGIONS_CLEAN
