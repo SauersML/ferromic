@@ -1,5 +1,9 @@
 name: Run Best Tagging SNPs
 
+permissions:
+  contents: read
+  actions: read
+
 on:
   workflow_dispatch:
     inputs:
