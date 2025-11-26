@@ -507,6 +507,52 @@ def _format_tagging_result(
     return lines
 
 
+def _best_allele(row: pd.Series, group: str) -> tuple[str, float | str]:
+    best_base = "NA"
+    best_freq: float | str = "NA"
+
+    for base in ["A", "C", "G", "T"]:
+        freq = row.get(f"{base}_{group}_freq", float("nan"))
+        if pd.isna(freq):
+            continue
+        if best_base == "NA" or float(freq) > float(best_freq):
+            best_base = base
+            best_freq = float(freq)
+
+    return best_base, best_freq
+
+
+def _format_segment_summary(
+    header: str,
+    result: TaggingSNPResult,
+    selection_row: Optional[pd.Series],
+    indent: str = "  ",
+) -> list[str]:
+    row = result.row
+    lines = [header]
+
+    lines.append(f"{indent}Correlation r: {result.correlation:+.6f}")
+
+    if selection_row is None:
+        lines.append(f"{indent}S: not found in selection statistics table")
+        lines.append(f"{indent}P_X: not found in selection statistics table")
+    else:
+        lines.append(f"{indent}S: {_format_float(selection_row.get('S'))}")
+        lines.append(f"{indent}P_X: {_format_float(selection_row.get('P_X'))}")
+
+    dir_allele, dir_freq = _best_allele(row, "dir")
+    inv_allele, inv_freq = _best_allele(row, "inv")
+
+    lines.append(
+        f"{indent}Best allele (direct group): {dir_allele} ({_format_float(dir_freq)})"
+    )
+    lines.append(
+        f"{indent}Best allele (inverted group): {inv_allele} ({_format_float(inv_freq)})"
+    )
+
+    return lines
+
+
 def render_output(
     region: str,
     top_results: list[TaggingSNPResult],
@@ -530,7 +576,9 @@ def render_output(
             lines.append(f"{segment_title}: no SNPs found in this segment")
             continue
         selection_row = find_selection_row(result, selection_df)
-        lines.extend(_format_tagging_result(segment_title, result, selection_row, indent="    "))
+        lines.extend(
+            _format_segment_summary(segment_title, result, selection_row, indent="    ")
+        )
 
     return "\n".join(lines)
 
