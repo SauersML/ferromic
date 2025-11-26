@@ -7,8 +7,11 @@ correlation (``|r|``). It also downloads the selection summary statistics from
 Dataverse (doi:10.7910/DVN/7RVV9N) and attempts to annotate the tagging SNP using
 GRCh37/hg19 coordinates.
 
-Outputs are written to ``outputs/<region>_best_tagging_snp.txt`` and also
-printed to stdout for GitHub Actions log visibility.
+The script now reports the top three tagging SNPs by absolute correlation
+(``|r|``) for the full inversion region, plus the best tagging SNP within each
+of ten equally sized subregions. Outputs are written to
+``outputs/<region>_best_tagging_snp.txt`` and also printed to stdout for GitHub
+Actions log visibility.
 """
 
 from __future__ import annotations
@@ -313,6 +316,8 @@ class TaggingSNPResult:
     chromosome_hg37: str
     position_hg37: int
     row: pd.Series
+    rank: Optional[int] = None
+    context: Optional[str] = None
 
     @property
     def abs_correlation(self) -> float:
@@ -325,10 +330,14 @@ def load_tagging_snps(tsv_path: Path) -> pd.DataFrame:
     return df
 
 
-def select_best_tag(region: str, df: pd.DataFrame) -> TaggingSNPResult:
-    chrom, start, end = parse_region(region)
-    target_chrom = chrom.lstrip("chr")
-    region_df = df[(df["chrom_norm"] == target_chrom) & (df["region_start"] == start) & (df["region_end"] == end)]
+def _prepare_region_df(region: str, df: pd.DataFrame) -> pd.DataFrame:
+    _chrom, start, end = parse_region(region)
+    target_chrom = _chrom.lstrip("chr")
+    region_df = df[
+        (df["chrom_norm"] == target_chrom)
+        & (df["region_start"] == start)
+        & (df["region_end"] == end)
+    ]
 
     if region_df.empty:
         raise ValueError(
@@ -336,18 +345,71 @@ def select_best_tag(region: str, df: pd.DataFrame) -> TaggingSNPResult:
             "Check that chromosome and coordinates match tagging_snps.tsv."
         )
 
-    region_df = region_df.assign(abs_corr=region_df["correlation"].abs())
-    best_idx = region_df["abs_corr"].idxmax()
-    best_row = region_df.loc[best_idx]
+    return region_df.assign(abs_corr=region_df["correlation"].abs())
 
-    return TaggingSNPResult(
-        region=region,
-        inversion_region=str(best_row["inversion_region"]),
-        correlation=float(best_row["correlation"]),
-        chromosome_hg37=str(best_row["chromosome_hg37"]),
-        position_hg37=int(best_row["position_hg37"]),
-        row=best_row,
-    )
+
+def select_top_tags(region: str, df: pd.DataFrame, *, top_n: int = 3) -> tuple[list[TaggingSNPResult], pd.DataFrame]:
+    region_df = _prepare_region_df(region, df)
+    sorted_df = region_df.sort_values("abs_corr", ascending=False)
+
+    results: list[TaggingSNPResult] = []
+    for rank, (_, row) in enumerate(sorted_df.head(top_n).iterrows(), start=1):
+        results.append(
+            TaggingSNPResult(
+                region=region,
+                inversion_region=str(row["inversion_region"]),
+                correlation=float(row["correlation"]),
+                chromosome_hg37=str(row["chromosome_hg37"]),
+                position_hg37=int(row["position_hg37"]),
+                row=row,
+                rank=rank,
+                context="Top overall",
+            )
+        )
+
+    return results, sorted_df
+
+
+def select_segment_bests(
+    region: str, region_df: pd.DataFrame, *, segments: int = 10
+) -> list[tuple[tuple[int, int], Optional[TaggingSNPResult]]]:
+    _chrom, start, end = parse_region(region)
+    if segments < 1:
+        raise ValueError("segments must be at least 1")
+
+    length = end - start + 1
+    base_size = length // segments
+    remainder = length % segments
+
+    results: list[tuple[tuple[int, int], Optional[TaggingSNPResult]]] = []
+    for idx in range(segments):
+        seg_start = start + idx * base_size + min(idx, remainder)
+        seg_len = base_size + (1 if idx < remainder else 0)
+        seg_end = seg_start + seg_len - 1
+
+        seg_df = region_df[(region_df["position"] >= seg_start) & (region_df["position"] <= seg_end)]
+        if seg_df.empty:
+            results.append(((seg_start, seg_end), None))
+            continue
+
+        best_idx = seg_df["abs_corr"].idxmax()
+        best_row = seg_df.loc[best_idx]
+        results.append(
+            (
+                (seg_start, seg_end),
+                TaggingSNPResult(
+                    region=region,
+                    inversion_region=str(best_row["inversion_region"]),
+                    correlation=float(best_row["correlation"]),
+                    chromosome_hg37=str(best_row["chromosome_hg37"]),
+                    position_hg37=int(best_row["position_hg37"]),
+                    row=best_row,
+                    context=f"Segment {idx + 1}",
+                ),
+            )
+        )
+
+    return results
 
 
 def load_selection_table() -> pd.DataFrame:
@@ -367,17 +429,56 @@ def find_selection_row(result: TaggingSNPResult, selection_df: pd.DataFrame) -> 
     return matches.iloc[0]
 
 
-def render_output(result: TaggingSNPResult, selection_row: Optional[pd.Series]) -> str:
-    lines = [
-        f"Region: {result.region}",
-        f"Inversion region label: {result.inversion_region}",
-        f"Best tagging SNP |r|: {result.abs_correlation:.4f} (correlation={result.correlation:+.4f})",
-        f"Tagging SNP position (hg37): chr{result.chromosome_hg37}:{result.position_hg37}",
-    ]
+def _format_float(val: float | int | str | None) -> str:
+    if pd.isna(val):
+        return "NA"
+    try:
+        return f"{float(val):.6f}"
+    except Exception:
+        return str(val)
+
+
+def _format_tagging_result(
+    header: str,
+    result: TaggingSNPResult,
+    selection_row: Optional[pd.Series],
+    indent: str = "  ",
+) -> list[str]:
+    row = result.row
+    inner = indent + "  "
+
+    lines = [header]
+    lines.append(f"{indent}Inversion region label: {result.inversion_region}")
+    lines.append(
+        f"{indent}Tagging SNP position (hg38): chr{row['chromosome']}:{int(row['position'])}"
+    )
+    lines.append(
+        f"{indent}Tagging SNP position (hg37): chr{result.chromosome_hg37}:{result.position_hg37}"
+    )
+    lines.append(f"{indent}Correlation r: {result.correlation:+.6f}")
+    lines.append(f"{indent}|r|: {result.abs_correlation:.6f}")
+    lines.append(f"{indent}Direct group size: {_format_float(row['direct_group_size'])}")
+    lines.append(f"{indent}Inverted group size: {_format_float(row['inverted_group_size'])}")
+    lines.append(f"{indent}Allele frequency (direct group): {_format_float(row['allele_freq_direct'])}")
+    lines.append(
+        f"{indent}Allele frequency (inverted group): {_format_float(row['allele_freq_inverted'])}"
+    )
+    lines.append(
+        f"{indent}Allele frequency difference: {_format_float(row['allele_freq_difference'])}"
+    )
+
+    dir_freqs = ", ".join(
+        f"{base}={_format_float(row[f'{base}_dir_freq'])}" for base in ["A", "C", "G", "T"]
+    )
+    inv_freqs = ", ".join(
+        f"{base}={_format_float(row[f'{base}_inv_freq'])}" for base in ["A", "C", "G", "T"]
+    )
+    lines.append(f"{indent}Allele frequencies by base (direct): {dir_freqs}")
+    lines.append(f"{indent}Allele frequencies by base (inverted): {inv_freqs}")
 
     if selection_row is None:
-        lines.append("Selection summary: not found in selection statistics table")
-        return "\n".join(lines)
+        lines.append(f"{indent}Selection summary: not found in selection statistics table")
+        return lines
 
     selection_columns = [
         "CHROM",
@@ -398,10 +499,38 @@ def render_output(result: TaggingSNPResult, selection_row: Optional[pd.Series]) 
         "FILTER",
     ]
 
-    lines.append("Selection summary (hg19/GRCh37):")
+    lines.append(f"{indent}Selection summary (hg19/GRCh37):")
     for col in selection_columns:
         val = selection_row.get(col, "")
-        lines.append(f"  {col}: {val}")
+        lines.append(f"{inner}{col}: {val}")
+
+    return lines
+
+
+def render_output(
+    region: str,
+    top_results: list[TaggingSNPResult],
+    segment_results: list[tuple[tuple[int, int], Optional[TaggingSNPResult]]],
+    selection_df: pd.DataFrame,
+) -> str:
+    lines: list[str] = [f"Region: {region}"]
+    if top_results:
+        lines.append(f"Inversion region label: {top_results[0].inversion_region}")
+
+    lines.append("Top tagging SNPs by |r| (overall inversion region):")
+    for result in top_results:
+        title = f"  #{result.rank} ({result.context})"
+        selection_row = find_selection_row(result, selection_df)
+        lines.extend(_format_tagging_result(title, result, selection_row, indent="    "))
+
+    lines.append("Best tagging SNP per decile (ten equally sized subregions):")
+    for seg_idx, ((seg_start, seg_end), result) in enumerate(segment_results, start=1):
+        segment_title = f"  Segment {seg_idx} ({seg_start}-{seg_end})"
+        if result is None:
+            lines.append(f"{segment_title}: no SNPs found in this segment")
+            continue
+        selection_row = find_selection_row(result, selection_df)
+        lines.extend(_format_tagging_result(segment_title, result, selection_row, indent="    "))
 
     return "\n".join(lines)
 
@@ -440,11 +569,11 @@ def main(argv: Iterable[str]) -> int:
         archive = download_artifact(artifact, workdir)
         tagging_tsv = extract_tagging_snps(archive, workdir)
     tag_df = load_tagging_snps(tagging_tsv)
-    result = select_best_tag(args.region, tag_df)
+    top_results, region_df = select_top_tags(args.region, tag_df, top_n=3)
+    segment_results = select_segment_bests(args.region, region_df, segments=10)
 
     selection_df = load_selection_table()
-    selection_row = find_selection_row(result, selection_df)
-    output_text = render_output(result, selection_row)
+    output_text = render_output(args.region, top_results, segment_results, selection_df)
 
     outfile = workdir / f"{sanitize_region(args.region)}_best_tagging_snp.txt"
     outfile.write_text(output_text)
