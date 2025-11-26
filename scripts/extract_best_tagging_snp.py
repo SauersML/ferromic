@@ -32,7 +32,7 @@ import pandas as pd
 
 # Constants for locating artifacts and selection statistics
 ARTIFACT_NAME = "tagging-snps-report"
-ARTIFACT_WORKFLOW_PATH = ".github/workflows/run_find_tagging_snps.yml"
+ARTIFACT_WORKFLOW_PATH = "run_find_tagging_snps.yml"
 DATAVERSE_DOI = "doi:10.7910/DVN/7RVV9N"
 DATAVERSE_BASE = "https://dataverse.harvard.edu"
 SELECTION_GZ_NAME = "Selection_Summary_Statistics_01OCT2025.tsv.gz"
@@ -88,9 +88,10 @@ def find_latest_artifact(repo: str, name: str, workflow_path: str | None = None)
     """
 
     if workflow_path:
+        workflow_id = Path(workflow_path).name
         runs_url = (
             f"https://api.github.com/repos/{repo}/actions/workflows/"
-            f"{workflow_path}/runs?status=success&per_page=1"
+            f"{workflow_id}/runs?status=success&per_page=1"
         )
         runs = github_json(runs_url).get("workflow_runs", [])
         if not runs:
