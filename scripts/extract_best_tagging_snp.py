@@ -199,7 +199,11 @@ def unzip_file(gz_path: Path) -> Path:
 
 def get_dataset_metadata() -> dict:
     url = f"{DATAVERSE_BASE}/api/datasets/:persistentId/?persistentId={DATAVERSE_DOI}"
-    req = urllib.request.Request(url, headers={"Accept": "application/json"})
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0",
+    }
+    req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req) as resp:
         data = json.load(resp)
     return data["data"]
@@ -261,17 +265,13 @@ def download_file(file_id: int, filename: str, expected_md5: str | None) -> Path
     return out_path
 
 
-def ensure_selection_data() -> Optional[Path]:
+def ensure_selection_data() -> Path:
     if SELECTION_TSV_PATH.exists():
         print(f"✓ Selection TSV present at {SELECTION_TSV_PATH}")
         return SELECTION_TSV_PATH
 
     print("Selection TSV missing; downloading via Dataverse metadata...")
-    try:
-        meta = get_dataset_metadata()
-    except Exception as exc:  # pragma: no cover - network failure fallback
-        print(f"⚠️  Unable to retrieve Dataverse metadata ({exc}); skipping selection annotation")
-        return None
+    meta = get_dataset_metadata()
 
     files = meta.get("latestVersion", {}).get("files", [])
     target = SELECTION_GZ_NAME
@@ -284,11 +284,7 @@ def ensure_selection_data() -> Optional[Path]:
         checksum = df.get("checksum", {})
         expected = checksum.get("value") if checksum.get("type") == "MD5" else None
 
-        try:
-            gz_path = download_file(file_id, name, expected)
-        except Exception as exc:  # pragma: no cover - network failure fallback
-            print(f"⚠️  Unable to download selection data ({exc}); skipping selection annotation")
-            return None
+        gz_path = download_file(file_id, name, expected)
 
         out = unzip_file(gz_path)
         if out.name != SELECTION_TSV_NAME:
@@ -296,8 +292,7 @@ def ensure_selection_data() -> Optional[Path]:
         print(f"✓ Selection TSV available at {SELECTION_TSV_PATH}")
         return SELECTION_TSV_PATH
 
-    print(f"⚠️  Selection file {target} not found in dataset metadata; skipping selection annotation")
-    return None
+    raise RuntimeError(f"Selection file {target} not found in dataset metadata")
 
 
 def sanitize_region(region: str) -> str:
@@ -351,8 +346,6 @@ def select_best_tag(region: str, df: pd.DataFrame) -> TaggingSNPResult:
 
 def load_selection_table() -> pd.DataFrame:
     path = ensure_selection_data()
-    if path is None:
-        return pd.DataFrame()
 
     df = pd.read_csv(path, sep="\t", comment="#")
     df["CHROM_norm"] = df["CHROM"].astype(str).str.removeprefix("chr")
@@ -360,9 +353,6 @@ def load_selection_table() -> pd.DataFrame:
 
 
 def find_selection_row(result: TaggingSNPResult, selection_df: pd.DataFrame) -> Optional[pd.Series]:
-    if selection_df.empty:
-        return None
-
     chrom = str(result.chromosome_hg37).lstrip("chr")
     pos = result.position_hg37
     matches = selection_df[(selection_df["CHROM_norm"] == chrom) & (selection_df["POS"] == pos)]
