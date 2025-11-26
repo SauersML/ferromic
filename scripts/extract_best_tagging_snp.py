@@ -416,9 +416,14 @@ def main(argv: Iterable[str]) -> int:
     workdir: Path = args.workdir
     workdir.mkdir(parents=True, exist_ok=True)
 
-    artifact = find_latest_artifact(args.repo, ARTIFACT_NAME, ARTIFACT_WORKFLOW_PATH)
-    archive = download_artifact(artifact, workdir)
-    tagging_tsv = extract_tagging_snps(archive, workdir)
+    predownloaded = workdir / "tagging_snps.tsv"
+    if predownloaded.exists():
+        print(f"✓ Found pre-downloaded tagging SNPs at {predownloaded}")
+        tagging_tsv = predownloaded
+    else:
+        artifact = find_latest_artifact(args.repo, ARTIFACT_NAME, ARTIFACT_WORKFLOW_PATH)
+        archive = download_artifact(artifact, workdir)
+        tagging_tsv = extract_tagging_snps(archive, workdir)
     tag_df = load_tagging_snps(tagging_tsv)
     result = select_best_tag(args.region, tag_df)
 
