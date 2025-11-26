@@ -199,7 +199,11 @@ def unzip_file(gz_path: Path) -> Path:
 
 def get_dataset_metadata() -> dict:
     url = f"{DATAVERSE_BASE}/api/datasets/:persistentId/?persistentId={DATAVERSE_DOI}"
-    req = urllib.request.Request(url, headers={"Accept": "application/json"})
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0",
+    }
+    req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req) as resp:
         data = json.load(resp)
     return data["data"]
@@ -267,9 +271,12 @@ def ensure_selection_data() -> Path:
         return SELECTION_TSV_PATH
 
     print("Selection TSV missing; downloading via Dataverse metadata...")
-    meta = get_dataset_metadata()
-    files = meta["latestVersion"]["files"]
+    try:
+        meta = get_dataset_metadata()
+    except Exception as exc:  # pragma: no cover - network failure surfaces as runtime error
+        raise RuntimeError("Unable to retrieve Dataverse metadata for selection data") from exc
 
+    files = meta.get("latestVersion", {}).get("files", [])
     target = SELECTION_GZ_NAME
     for fmeta in files:
         df = fmeta.get("dataFile", {})
@@ -280,7 +287,11 @@ def ensure_selection_data() -> Path:
         checksum = df.get("checksum", {})
         expected = checksum.get("value") if checksum.get("type") == "MD5" else None
 
-        gz_path = download_file(file_id, name, expected)
+        try:
+            gz_path = download_file(file_id, name, expected)
+        except Exception as exc:  # pragma: no cover - network failure surfaces as runtime error
+            raise RuntimeError("Unable to download selection data") from exc
+
         out = unzip_file(gz_path)
         if out.name != SELECTION_TSV_NAME:
             out.rename(SELECTION_TSV_PATH)
@@ -341,6 +352,7 @@ def select_best_tag(region: str, df: pd.DataFrame) -> TaggingSNPResult:
 
 def load_selection_table() -> pd.DataFrame:
     path = ensure_selection_data()
+
     df = pd.read_csv(path, sep="\t", comment="#")
     df["CHROM_norm"] = df["CHROM"].astype(str).str.removeprefix("chr")
     return df
@@ -416,9 +428,17 @@ def main(argv: Iterable[str]) -> int:
     workdir: Path = args.workdir
     workdir.mkdir(parents=True, exist_ok=True)
 
-    artifact = find_latest_artifact(args.repo, ARTIFACT_NAME, ARTIFACT_WORKFLOW_PATH)
-    archive = download_artifact(artifact, workdir)
-    tagging_tsv = extract_tagging_snps(archive, workdir)
+    predownloaded = next((path for path in [workdir / "tagging_snps.tsv", workdir / ARTIFACT_NAME / "tagging_snps.tsv"] if path.exists()), None)
+    if predownloaded is None:
+        predownloaded = next(workdir.glob("**/tagging_snps.tsv"), None)
+
+    if predownloaded is not None:
+        print(f"✓ Found pre-downloaded tagging SNPs at {predownloaded}")
+        tagging_tsv = predownloaded
+    else:
+        artifact = find_latest_artifact(args.repo, ARTIFACT_NAME, ARTIFACT_WORKFLOW_PATH)
+        archive = download_artifact(artifact, workdir)
+        tagging_tsv = extract_tagging_snps(archive, workdir)
     tag_df = load_tagging_snps(tagging_tsv)
     result = select_best_tag(args.region, tag_df)
 
