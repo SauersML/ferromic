@@ -416,8 +416,11 @@ def main(argv: Iterable[str]) -> int:
     workdir: Path = args.workdir
     workdir.mkdir(parents=True, exist_ok=True)
 
-    predownloaded = workdir / "tagging_snps.tsv"
-    if predownloaded.exists():
+    predownloaded = next((path for path in [workdir / "tagging_snps.tsv", workdir / ARTIFACT_NAME / "tagging_snps.tsv"] if path.exists()), None)
+    if predownloaded is None:
+        predownloaded = next(workdir.glob("**/tagging_snps.tsv"), None)
+
+    if predownloaded is not None:
         print(f"✓ Found pre-downloaded tagging SNPs at {predownloaded}")
         tagging_tsv = predownloaded
     else:
