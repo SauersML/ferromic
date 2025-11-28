@@ -59,6 +59,13 @@ class RegionRecord:
     best: Optional[TaggingSNPResult] = None
     p_x: Optional[float] = None
     s: Optional[float] = None
+    ref: Optional[str] = None
+    alt: Optional[str] = None
+    af: Optional[float] = None
+    ref_freq_dir: Optional[float] = None
+    ref_freq_inv: Optional[float] = None
+    alt_freq_dir: Optional[float] = None
+    alt_freq_inv: Optional[float] = None
     reasons: list[str] = field(default_factory=list)
 
 
@@ -72,86 +79,11 @@ def find_tagging_table() -> Path:
         "tagging_snps.tsv not found. Provide --tagging-snps or place the file in data/."
     )
 
-
-def bh_qvalues(pvals: pd.Series) -> pd.Series:
-    """Benjamini–Hochberg FDR correction on a Series of p-values."""
-    arr = pd.to_numeric(pvals, errors="coerce").to_numpy(dtype=float)
-    out = np.full_like(arr, np.nan, dtype=float)
-
-    valid_idx = np.where(~np.isnan(arr))[0]
-    if valid_idx.size == 0:
-        return pd.Series(out, index=pvals.index)
-
-    p_valid = arr[valid_idx]
-    order = np.argsort(p_valid)
-    ranks = np.arange(1, len(p_valid) + 1)
-    bh = p_valid[order] * len(p_valid) / ranks
-    bh = np.minimum.accumulate(bh[::-1])[::-1]
-    bh = np.minimum(bh, 1.0)
-
-    out_valid = np.empty_like(p_valid)
-    out_valid[order] = bh
-    out[valid_idx] = out_valid
-    return pd.Series(out, index=pvals.index)
-
-
-def iter_regions(inv_path: Path) -> list[tuple[str, float]]:
-    log(f"[regions] Loading inversion properties from {inv_path}")
-    df = pd.read_csv(inv_path, sep="\t")
-    log(f"[regions] Loaded {len(df)} rows total")
-    mask = df["0_single_1_recur_consensus"].isin([0, 1])
-    filtered = df[mask]
-    log(f"[regions] Filtered to {len(filtered)} rows with consensus in {{0,1}}")
-    regions: list[tuple[str, float]] = []
-    for _, row in filtered.iterrows():
-        chrom = str(row["Chromosome"])
-        start = int(row["Start"])
-        end = int(row["End"])
-        consensus = float(row["0_single_1_recur_consensus"])
-        regions.append((f"{chrom}:{start}-{end}", consensus))
-    return regions
-
-
-def compute_best_tags(tag_df: pd.DataFrame, regions: list[tuple[str, float]], workers: int) -> list[RegionRecord]:
-    records: list[RegionRecord] = []
-    
-    def _process(region_consensus: tuple[str, float]) -> RegionRecord:
-        region, consensus = region_consensus
-        # log(f"[process] Start {region}") # reduce verbosity
-        try:
-            top_results, _ = select_top_tags(region, tag_df, top_n=1)
-            if not top_results:
-                return RegionRecord(region=region, consensus=consensus, reasons=["No tagging SNPs found"])
-            best = top_results[0]
-            return RegionRecord(region=region, consensus=consensus, best=best)
-        except Exception as exc:
-            msg = str(exc)
-            if "cannot convert float NaN to integer" in msg:
-                msg = "Tagging SNP missing hg37 coordinates (NaN)"
-            elif "No tagging SNP rows found for region" in msg:
-                msg = "No tagging SNPs found in tagging file"
-            
-            log(f"[warn] Failed {region}: {msg}")
-            return RegionRecord(region=region, consensus=consensus, reasons=[msg])
-
-    log(f"[process] Using {workers} worker threads for top-tag selection")
-    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
-        future_map = {executor.submit(_process, rc): rc[0] for rc in regions}
-        for future in concurrent.futures.as_completed(future_map):
-            try:
-                records.append(future.result())
-            except Exception as exc:
-                # Should be caught inside _process, but just in case
-                reg_txt = future_map[future]
-                log(f"[error] Unexpected failure for {reg_txt}: {exc}")
-                
-    return records
-
-
 def load_selection_subset(keys_df: pd.DataFrame, selection_path: Path, *, chunksize: int = 500_000) -> pd.DataFrame:
     """Stream the selection file and keep only rows matching requested keys."""
+    cols = ["CHROM_norm", "POS", "P_X", "S", "REF", "ALT", "AF"]
     if keys_df.empty:
-        return pd.DataFrame(columns=["CHROM_norm", "POS", "P_X", "S"])
+        return pd.DataFrame(columns=cols)
 
     log(f"[selection] Streaming selection file {selection_path} in chunks of {chunksize}")
     matches: list[pd.DataFrame] = []
@@ -163,18 +95,13 @@ def load_selection_subset(keys_df: pd.DataFrame, selection_path: Path, *, chunks
             selection_path,
             sep="\t",
             comment="#",
-            usecols=["CHROM", "POS", "P_X", "S"],
+            usecols=["CHROM", "POS", "P_X", "S", "REF", "ALT", "AF"],
             chunksize=chunksize,
         )
     ):
         total_rows += len(chunk)
         chunk["CHROM_norm"] = chunk["CHROM"].astype(str).str.removeprefix("chr").str.removesuffix(".0")
         
-        # Diagnostic: Check types before merge
-        if idx == 0:
-            log(f"[debug] chunk dtypes:\n{chunk.dtypes}")
-            log(f"[debug] keys_df dtypes:\n{keys_df.dtypes}")
-
         merged = chunk.merge(
             keys_df,
             left_on=["CHROM_norm", "POS"],
@@ -183,14 +110,14 @@ def load_selection_subset(keys_df: pd.DataFrame, selection_path: Path, *, chunks
         )
         if not merged.empty:
             found += len(merged)
-            matches.append(merged[["CHROM_norm", "POS", "P_X", "S"]])
+            matches.append(merged[cols])
         if (idx + 1) % 5 == 0:
             log(f"[selection] Processed ~{total_rows:,} rows; found {found} matches so far")
 
     if matches:
         out = pd.concat(matches, ignore_index=True)
     else:
-        out = pd.DataFrame(columns=["CHROM_norm", "POS", "P_X", "S"])
+        out = pd.DataFrame(columns=cols)
 
     out = out.drop_duplicates(subset=["CHROM_norm", "POS"], keep="first")
     log(f"[selection] Finished streaming; matched {len(out)} rows for {len(keys_df)} requested positions")
@@ -198,6 +125,8 @@ def load_selection_subset(keys_df: pd.DataFrame, selection_path: Path, *, chunks
 
 
 def process_regions(inv_path: Path, tagging_path: Path, *, workers: Optional[int] = None) -> pd.DataFrame:
+    # ... (load tagging, iter_regions, compute_best_tags, filter records - mostly unchanged) ...
+    # (Just keeping the context, will implement the changes inside the function body)
     log("[load] Reading tagging SNP table")
     tag_df = load_tagging_snps(tagging_path)
     log(f"[load] Tagging SNPs loaded: {len(tag_df)} rows")
@@ -215,10 +144,8 @@ def process_regions(inv_path: Path, tagging_path: Path, *, workers: Optional[int
     # Annotate exclusion reasons
     for r in records:
         if r.best is None:
-            # Already has a reason (e.g. "No tagging data found")
             continue
         
-        # 1. Haplotype counts
         try:
             n_dir = float(r.best.row.get("direct_group_size", 0))
             n_inv = float(r.best.row.get("inverted_group_size", 0))
@@ -227,16 +154,14 @@ def process_regions(inv_path: Path, tagging_path: Path, *, workers: Optional[int
         except (ValueError, TypeError):
              r.reasons.append("Malformed group size data")
 
-        # 2. r^2
         r2 = r.best.abs_correlation ** 2
         if r2 < 0.5:
             r.reasons.append("Low r^2 (<0.5)")
         
-        # 3. hg37 coord
         if r.best.position_hg37 is None:
             r.reasons.append("No hg37 coordinate")
 
-    # Build lookup keys for selection stats (even for excluded ones, if they have coords)
+    # Build lookup keys
     key_rows = []
     for r in records:
         if r.best is None or r.best.position_hg37 is None:
@@ -251,37 +176,22 @@ def process_regions(inv_path: Path, tagging_path: Path, *, workers: Optional[int
     keys_df = pd.DataFrame(key_rows).drop_duplicates()
     log(f"[selection] Need selection stats for {len(keys_df)} unique hg37 positions")
 
-    # Ensure selection file exists, then stream only needed rows
     selection_path = ensure_selection_data()
-    
-    # --- DIAGNOSTICS ---
-    try:
-        size_mb = selection_path.stat().st_size / (1024 * 1024)
-        log(f"[debug] Selection file: {selection_path} ({size_mb:.2f} MB)")
-        with open(selection_path, "r") as f:
-            head = [next(f).strip() for _ in range(5)]
-        log(f"[debug] Selection file head: {head}")
-        log(f"[debug] Keys DF head:\n{keys_df[['chrom_norm', 'position_hg37']].head().to_string()}")
-    except Exception as e:
-        log(f"[debug] Diagnostic failed: {e}")
-    # -------------------
-
     subset = load_selection_subset(keys_df, selection_path)
+    
+    # Update lookup to include REF, ALT, AF
     lookup = {
-        (row["CHROM_norm"], int(row["POS"])): (row.get("P_X"), row.get("S"))
+        (row["CHROM_norm"], int(row["POS"])): (
+            row.get("P_X"), row.get("S"), row.get("REF"), row.get("ALT"), row.get("AF")
+        )
         for _, row in subset.iterrows()
     }
-    log(f"[debug] Lookup table size: {len(lookup)}")
-    if len(lookup) > 0:
-        log(f"[debug] Lookup sample keys: {list(lookup.keys())[:5]}")
 
     # Attach selection values
-    lookup_failures_logged = 0
     for r in records:
         if r.best is None or r.best.position_hg37 is None:
             continue
             
-        # Fix: Ensure key matches the normalized format used in keys_df (no .0 suffix)
         key = (
             str(r.best.chromosome_hg37).lstrip("chr").removesuffix(".0"),
             int(r.best.position_hg37),
@@ -289,51 +199,44 @@ def process_regions(inv_path: Path, tagging_path: Path, *, workers: Optional[int
         vals = lookup.get(key)
         
         if vals is None:
-            # Expanded diagnostics for missing keys
-            if lookup_failures_logged < 10:
-                log(f"[debug] Lookup failed for key: {key} types=({type(key[0])}, {type(key[1])})")
-                
-                # Check if chrom exists
-                chrom_exists = any(k[0] == key[0] for k in lookup)
-                if not chrom_exists:
-                    log(f"[debug]   -> Chromosome '{key[0]}' NOT found in lookup table keys.")
-                    sample_chroms = list(set(k[0] for k in lookup))[:10]
-                    log(f"[debug]   -> Sample lookup chromosomes: {sample_chroms}")
-                else:
-                    # Check if pos exists with different chrom
-                    candidates = [k for k in lookup if k[1] == key[1]]
-                    if candidates:
-                        log(f"[debug]   -> Position {key[1]} found with other chroms: {candidates}")
-                    else:
-                        log(f"[debug]   -> Position {key[1]} not found in lookup table at all.")
-                        # Check for nearby positions
-                        nearby = [k for k in lookup if k[0] == key[0] and abs(k[1] - key[1]) < 100]
-                        if nearby:
-                            log(f"[debug]   -> Found nearby positions on '{key[0]}': {nearby}")
-
-                lookup_failures_logged += 1
-                
             r.reasons.append(f"Selection stats missing for key {key}")
             continue
             
-        p_x_val, s_val = vals
+        p_x_val, s_val, ref_val, alt_val, af_val = vals
         try:
             r.p_x = float(p_x_val)
         except Exception:
-            pass # Remains None
+            pass
             
         try:
             r.s = float(s_val)
         except Exception:
-            pass # Remains None
+            pass
+
+        r.ref = str(ref_val) if pd.notna(ref_val) else None
+        r.alt = str(alt_val) if pd.notna(alt_val) else None
+        try:
+            r.af = float(af_val)
+        except Exception:
+            pass
             
         if r.p_x is None:
              r.reasons.append("Selection stats missing (P_X is NaN)")
 
+        # Map REF/ALT to group frequencies from Tagging SNP report (if single base)
+        if r.ref and r.alt and len(r.ref) == 1 and len(r.alt) == 1:
+            # Columns in tagging report are like 'A_dir_freq', 'C_inv_freq'
+            try:
+                r.ref_freq_dir = float(r.best.row.get(f"{r.ref}_dir_freq", np.nan))
+                r.ref_freq_inv = float(r.best.row.get(f"{r.ref}_inv_freq", np.nan))
+                r.alt_freq_dir = float(r.best.row.get(f"{r.alt}_dir_freq", np.nan))
+                r.alt_freq_inv = float(r.best.row.get(f"{r.alt}_inv_freq", np.nan))
+            except Exception:
+                pass # Leave as None/NaN if lookup fails or conversion fails
+
 
     order_map = {region: idx for idx, (region, _) in enumerate(regions)}
     
-    # Construct DataFrame
     data_list = []
     for r in records:
         row_dict = {
@@ -342,6 +245,13 @@ def process_regions(inv_path: Path, tagging_path: Path, *, workers: Optional[int
             "consensus": r.consensus,
             "p_x": r.p_x,
             "S": r.s,
+            "REF": r.ref,
+            "ALT": r.alt,
+            "AF": r.af,
+            "REF_freq_direct": r.ref_freq_dir,
+            "REF_freq_inverted": r.ref_freq_inv,
+            "ALT_freq_direct": r.alt_freq_dir,
+            "ALT_freq_inverted": r.alt_freq_inv,
             "exclusion_reasons": "; ".join(sorted(set(r.reasons))) if r.reasons else ""
         }
         if r.best:
@@ -353,7 +263,6 @@ def process_regions(inv_path: Path, tagging_path: Path, *, workers: Optional[int
                 "position_hg37": r.best.position_hg37,
             })
         else:
-            # Fill missing fields with None or NaN
             row_dict.update({
                 "inversion_region": None,
                 "correlation_r": None,
@@ -367,13 +276,10 @@ def process_regions(inv_path: Path, tagging_path: Path, *, workers: Optional[int
     df["order"] = df["region"].map(order_map)
     df = df.sort_values("order").drop(columns=["order"])
     
-    # Calculate Q-values ONLY for records with NO exclusion reasons
     pass_mask = df["exclusion_reasons"] == ""
     log(f"[fdr] Applying BH correction to {pass_mask.sum()} passing regions out of {len(df)}")
     
     df.loc[pass_mask, "q_value"] = bh_qvalues(df.loc[pass_mask, "p_x"])
-    # Ensure q_value is NaN where not passed (it should be by default if column init was NaN, but let's be safe)
-    # If column didn't exist, the assignment created it with NaNs elsewhere.
     
     return df
 
