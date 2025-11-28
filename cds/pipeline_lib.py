@@ -49,16 +49,18 @@ def _load_inversion_whitelist():
     Parses data/inv_properties.tsv to build the ALLOWED_REGIONS whitelist.
     Filters by '0_single_1_recur_consensus' column.
     """
-    whitelist = []
     # Manual overrides for significant regions identified in batch analysis
-    if WHITELIST:
-        whitelist.extend([
-            ("chr10", 79542901, 80217413),
-            ("chr12", 46896694, 46915975),
-            ("chr7", 54234014, 54308393),
-            ("chr8", 7301024, 12598379),
-        ])
+    manual_list = [
+        ("chr10", 79542901, 80217413),
+        ("chr12", 46896694, 46915975),
+        ("chr7", 54234014, 54308393),
+        ("chr8", 7301024, 12598379),
+    ]
 
+    if WHITELIST:
+        return manual_list
+
+    whitelist = []
     # Look for file in likely locations
     candidates = [
         "data/inv_properties.tsv",
