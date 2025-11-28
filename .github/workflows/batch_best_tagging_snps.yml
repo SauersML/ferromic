@@ -1,0 +1,98 @@
+name: Batch Best Tagging SNPs
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/batch_best_tagging_snps.yml'
+      - 'stats/batch_best_tagging_snps.py'
+      - 'scripts/extract_best_tagging_snp.py'
+
+jobs:
+  batch-tagging-snps:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy pandas scipy
+
+      - name: Check for inv_properties.tsv
+        run: |
+          if [[ ! -f "data/inv_properties.tsv" ]]; then
+            echo "::error::data/inv_properties.tsv not found in repository. This file is required."
+            exit 1
+          else
+            echo "Found data/inv_properties.tsv"
+          fi
+
+      - name: Download Tagging SNPs Data
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p data
+          
+          echo "Fetching latest tagging-snps-report..."
+          # Find latest successful run of run_find_tagging_snps.yml
+          RUN_ID=$(gh run list --workflow run_find_tagging_snps.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId')
+          
+          if [[ -n "$RUN_ID" ]]; then
+            echo "Downloading tagging-snps-report from run $RUN_ID to data/tagging-snps-report..."
+            gh run download "$RUN_ID" -n tagging-snps-report --dir data/tagging-snps-report
+            
+            # Verify download
+            if [[ -f "data/tagging-snps-report/tagging_snps.tsv" ]]; then
+                echo "✓ tagging_snps.tsv successfully downloaded."
+            else
+                echo "::warning::Artifact downloaded but tagging_snps.tsv not found in expected path data/tagging-snps-report/."
+                ls -R data/tagging-snps-report
+            fi
+          else
+            echo "::error::No successful run of run_find_tagging_snps.yml found. Cannot proceed."
+            exit 1
+          fi
+
+      - name: Run Batch Extraction
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # The script handles downloading selection statistics (SELECTION_Summary_Statistics_01OCT2025.tsv)
+          # if they are missing from data/selection_data/
+          python3 stats/batch_best_tagging_snps.py
+
+      - name: Print Results
+        run: |
+          if [[ -f "data/best_tagging_snps_qvalues.tsv" ]]; then
+            echo "----------------------------------------------------------------"
+            echo "Preview of data/best_tagging_snps_qvalues.tsv (first 20 lines):"
+            echo "----------------------------------------------------------------"
+            head -n 20 data/best_tagging_snps_qvalues.tsv
+            
+            echo ""
+            echo "----------------------------------------------------------------"
+            echo "Summary of Exclusion Reasons:"
+            echo "----------------------------------------------------------------"
+            # Print a summary of the 'exclusion_reasons' column
+            python3 -c "import pandas as pd; df = pd.read_csv('data/best_tagging_snps_qvalues.tsv', sep='\t'); print(df['exclusion_reasons'].value_counts(dropna=False))"
+          else
+            echo "::error::Output file data/best_tagging_snps_qvalues.tsv was not created."
+            exit 1
+          fi
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: best-tagging-snps-results
+          path: data/best_tagging_snps_qvalues.tsv
+          if-no-files-found: error
