@@ -162,7 +162,7 @@ def load_selection_subset(keys_df: pd.DataFrame, selection_path: Path, *, chunks
         )
     ):
         total_rows += len(chunk)
-        chunk["CHROM_norm"] = chunk["CHROM"].astype(str).str.removeprefix("chr")
+        chunk["CHROM_norm"] = chunk["CHROM"].astype(str).str.removeprefix("chr").str.removesuffix(".0")
         merged = chunk.merge(
             keys_df,
             left_on=["CHROM_norm", "POS"],
@@ -231,7 +231,7 @@ def process_regions(inv_path: Path, tagging_path: Path, *, workers: Optional[int
             continue
         key_rows.append(
             {
-                "chrom_norm": str(r.best.chromosome_hg37).lstrip("chr"),
+                "chrom_norm": str(r.best.chromosome_hg37).lstrip("chr").removesuffix(".0"),
                 "position_hg37": int(r.best.position_hg37),
             }
         )
