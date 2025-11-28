@@ -51,12 +51,13 @@ def _load_inversion_whitelist():
     """
     whitelist = []
     # Manual overrides for significant regions identified in batch analysis
-    whitelist.extend([
-        ("chr10", 79542901, 80217413),
-        ("chr12", 46896694, 46915975),
-        ("chr7", 54234014, 54308393),
-        ("chr8", 7301024, 12598379),
-    ])
+    if WHITELIST:
+        whitelist.extend([
+            ("chr10", 79542901, 80217413),
+            ("chr12", 46896694, 46915975),
+            ("chr7", 54234014, 54308393),
+            ("chr8", 7301024, 12598379),
+        ])
 
     # Look for file in likely locations
     candidates = [
@@ -147,6 +148,7 @@ ANNOTATED_FIGURE_DIR = "annotated_tree_figures"
 REGION_TREE_DIR = "region_trees"
 
 # --- Analysis Configuration ---
+WHITELIST = True
 CHECKPOINT_FILE = "paml_results.checkpoint.tsv"
 CHECKPOINT_EVERY = int(os.environ.get("CHECKPOINT_EVERY", "100"))
 KEEP_PAML_OUT = bool(int(os.environ.get("KEEP_PAML_OUT", "0")))
