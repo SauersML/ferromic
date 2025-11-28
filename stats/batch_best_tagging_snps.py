@@ -125,8 +125,11 @@ def compute_best_tags(tag_df: pd.DataFrame, regions: list[tuple[str, float]], wo
             best = top_results[0]
             return RegionRecord(region=region, consensus=consensus, best=best)
         except Exception as exc:
-            log(f"[warn] Failed {region}: {exc}")
-            return RegionRecord(region=region, consensus=consensus, reasons=[f"Error: {exc}"])
+            msg = str(exc)
+            if "cannot convert float NaN to integer" in msg:
+                msg = "Tagging SNP missing hg37 coordinates (NaN)"
+            log(f"[warn] Failed {region}: {msg}")
+            return RegionRecord(region=region, consensus=consensus, reasons=[f"Error: {msg}"])
 
     log(f"[process] Using {workers} worker threads for top-tag selection")
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
