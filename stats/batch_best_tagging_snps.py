@@ -163,6 +163,12 @@ def load_selection_subset(keys_df: pd.DataFrame, selection_path: Path, *, chunks
     ):
         total_rows += len(chunk)
         chunk["CHROM_norm"] = chunk["CHROM"].astype(str).str.removeprefix("chr").str.removesuffix(".0")
+        
+        # Diagnostic: Check types before merge
+        if idx == 0:
+            log(f"[debug] chunk dtypes:\n{chunk.dtypes}")
+            log(f"[debug] keys_df dtypes:\n{keys_df.dtypes}")
+
         merged = chunk.merge(
             keys_df,
             left_on=["CHROM_norm", "POS"],
@@ -279,13 +285,26 @@ def process_regions(inv_path: Path, tagging_path: Path, *, workers: Optional[int
         if vals is None:
             # Expanded diagnostics for missing keys
             if lookup_failures_logged < 10:
-                log(f"[debug] Lookup failed for key: {key}")
-                # Check if pos exists with different chrom
-                candidates = [k for k in lookup if k[1] == key[1]]
-                if candidates:
-                    log(f"[debug]   -> Position {key[1]} found with other chroms: {candidates}")
+                log(f"[debug] Lookup failed for key: {key} types=({type(key[0])}, {type(key[1])})")
+                
+                # Check if chrom exists
+                chrom_exists = any(k[0] == key[0] for k in lookup)
+                if not chrom_exists:
+                    log(f"[debug]   -> Chromosome '{key[0]}' NOT found in lookup table keys.")
+                    sample_chroms = list(set(k[0] for k in lookup))[:10]
+                    log(f"[debug]   -> Sample lookup chromosomes: {sample_chroms}")
                 else:
-                    log(f"[debug]   -> Position {key[1]} not found in lookup table at all.")
+                    # Check if pos exists with different chrom
+                    candidates = [k for k in lookup if k[1] == key[1]]
+                    if candidates:
+                        log(f"[debug]   -> Position {key[1]} found with other chroms: {candidates}")
+                    else:
+                        log(f"[debug]   -> Position {key[1]} not found in lookup table at all.")
+                        # Check for nearby positions
+                        nearby = [k for k in lookup if k[0] == key[0] and abs(k[1] - key[1]) < 100]
+                        if nearby:
+                            log(f"[debug]   -> Found nearby positions on '{key[0]}': {nearby}")
+
                 lookup_failures_logged += 1
                 
             r.reasons.append(f"Selection stats missing for key {key}")
