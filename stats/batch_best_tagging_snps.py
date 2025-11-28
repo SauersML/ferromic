@@ -124,9 +124,60 @@ def load_selection_subset(keys_df: pd.DataFrame, selection_path: Path, *, chunks
     return out
 
 
+def iter_regions(inv_path: Path) -> list[tuple[str, float]]:
+    log(f"[regions] Loading inversion properties from {inv_path}")
+    df = pd.read_csv(inv_path, sep="\t")
+    log(f"[regions] Loaded {len(df)} rows total")
+    mask = df["0_single_1_recur_consensus"].isin([0, 1])
+    filtered = df[mask]
+    log(f"[regions] Filtered to {len(filtered)} rows with consensus in {{0,1}}")
+    regions: list[tuple[str, float]] = []
+    for _, row in filtered.iterrows():
+        chrom = str(row["Chromosome"])
+        start = int(row["Start"])
+        end = int(row["End"])
+        consensus = float(row["0_single_1_recur_consensus"])
+        regions.append((f"{chrom}:{start}-{end}", consensus))
+    return regions
+
+
+def compute_best_tags(tag_df: pd.DataFrame, regions: list[tuple[str, float]], workers: int) -> list[RegionRecord]:
+    records: list[RegionRecord] = []
+    
+    def _process(region_consensus: tuple[str, float]) -> RegionRecord:
+        region, consensus = region_consensus
+        # log(f"[process] Start {region}") # reduce verbosity
+        try:
+            top_results, _ = select_top_tags(region, tag_df, top_n=1)
+            if not top_results:
+                return RegionRecord(region=region, consensus=consensus, reasons=["No tagging SNPs found"])
+            best = top_results[0]
+            return RegionRecord(region=region, consensus=consensus, best=best)
+        except Exception as exc:
+            msg = str(exc)
+            if "cannot convert float NaN to integer" in msg:
+                msg = "Tagging SNP missing hg37 coordinates (NaN)"
+            elif "No tagging SNP rows found for region" in msg:
+                msg = "No tagging SNPs found in tagging file"
+            
+            log(f"[warn] Failed {region}: {msg}")
+            return RegionRecord(region=region, consensus=consensus, reasons=[msg])
+
+    log(f"[process] Using {workers} worker threads for top-tag selection")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+        future_map = {executor.submit(_process, rc): rc[0] for rc in regions}
+        for future in concurrent.futures.as_completed(future_map):
+            try:
+                records.append(future.result())
+            except Exception as exc:
+                # Should be caught inside _process, but just in case
+                reg_txt = future_map[future]
+                log(f"[error] Unexpected failure for {reg_txt}: {exc}")
+                
+    return records
+
+
 def process_regions(inv_path: Path, tagging_path: Path, *, workers: Optional[int] = None) -> pd.DataFrame:
-    # ... (load tagging, iter_regions, compute_best_tags, filter records - mostly unchanged) ...
-    # (Just keeping the context, will implement the changes inside the function body)
     log("[load] Reading tagging SNP table")
     tag_df = load_tagging_snps(tagging_path)
     log(f"[load] Tagging SNPs loaded: {len(tag_df)} rows")
