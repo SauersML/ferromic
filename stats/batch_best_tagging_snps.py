@@ -241,6 +241,19 @@ def process_regions(inv_path: Path, tagging_path: Path, *, workers: Optional[int
 
     # Ensure selection file exists, then stream only needed rows
     selection_path = ensure_selection_data()
+    
+    # --- DIAGNOSTICS ---
+    try:
+        size_mb = selection_path.stat().st_size / (1024 * 1024)
+        log(f"[debug] Selection file: {selection_path} ({size_mb:.2f} MB)")
+        with open(selection_path, "r") as f:
+            head = [next(f).strip() for _ in range(5)]
+        log(f"[debug] Selection file head: {head}")
+        log(f"[debug] Keys DF head:\n{keys_df[['chrom_norm', 'position_hg37']].head().to_string()}")
+    except Exception as e:
+        log(f"[debug] Diagnostic failed: {e}")
+    # -------------------
+
     subset = load_selection_subset(keys_df, selection_path)
     lookup = {
         (row["CHROM_norm"], int(row["POS"])): (row.get("P_X"), row.get("S"))
