@@ -141,6 +141,23 @@ def iter_regions(inv_path: Path) -> list[tuple[str, float]]:
     return regions
 
 
+def iter_regions(inv_path: Path) -> list[tuple[str, float]]:
+    log(f"[regions] Loading inversion properties from {inv_path}")
+    df = pd.read_csv(inv_path, sep="\t")
+    log(f"[regions] Loaded {len(df)} rows total")
+    mask = df["0_single_1_recur_consensus"].isin([0, 1])
+    filtered = df[mask]
+    log(f"[regions] Filtered to {len(filtered)} rows with consensus in {{0,1}}")
+    regions: list[tuple[str, float]] = []
+    for _, row in filtered.iterrows():
+        chrom = str(row["Chromosome"])
+        start = int(row["Start"])
+        end = int(row["End"])
+        consensus = float(row["0_single_1_recur_consensus"])
+        regions.append((f"{chrom}:{start}-{end}", consensus))
+    return regions
+
+
 def compute_best_tags(tag_df: pd.DataFrame, regions: list[tuple[str, float]], workers: int) -> list[RegionRecord]:
     records: list[RegionRecord] = []
     
