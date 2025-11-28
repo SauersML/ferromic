@@ -79,6 +79,29 @@ def find_tagging_table() -> Path:
         "tagging_snps.tsv not found. Provide --tagging-snps or place the file in data/."
     )
 
+
+def bh_qvalues(pvals: pd.Series) -> pd.Series:
+    """Benjamini–Hochberg FDR correction on a Series of p-values."""
+    arr = pd.to_numeric(pvals, errors="coerce").to_numpy(dtype=float)
+    out = np.full_like(arr, np.nan, dtype=float)
+
+    valid_idx = np.where(~np.isnan(arr))[0]
+    if valid_idx.size == 0:
+        return pd.Series(out, index=pvals.index)
+
+    p_valid = arr[valid_idx]
+    order = np.argsort(p_valid)
+    ranks = np.arange(1, len(p_valid) + 1)
+    bh = p_valid[order] * len(p_valid) / ranks
+    bh = np.minimum.accumulate(bh[::-1])[::-1]
+    bh = np.minimum(bh, 1.0)
+
+    out_valid = np.empty_like(p_valid)
+    out_valid[order] = bh
+    out[valid_idx] = out_valid
+    return pd.Series(out, index=pvals.index)
+
+
 def load_selection_subset(keys_df: pd.DataFrame, selection_path: Path, *, chunksize: int = 500_000) -> pd.DataFrame:
     """Stream the selection file and keep only rows matching requested keys."""
     cols = ["CHROM_norm", "POS", "P_X", "S", "REF", "ALT", "AF"]
