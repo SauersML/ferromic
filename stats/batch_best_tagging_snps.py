@@ -259,20 +259,36 @@ def process_regions(inv_path: Path, tagging_path: Path, *, workers: Optional[int
         (row["CHROM_norm"], int(row["POS"])): (row.get("P_X"), row.get("S"))
         for _, row in subset.iterrows()
     }
+    log(f"[debug] Lookup table size: {len(lookup)}")
+    if len(lookup) > 0:
+        log(f"[debug] Lookup sample keys: {list(lookup.keys())[:5]}")
 
     # Attach selection values
+    lookup_failures_logged = 0
     for r in records:
         if r.best is None or r.best.position_hg37 is None:
             continue
             
+        # Fix: Ensure key matches the normalized format used in keys_df (no .0 suffix)
         key = (
-            str(r.best.chromosome_hg37).lstrip("chr"),
+            str(r.best.chromosome_hg37).lstrip("chr").removesuffix(".0"),
             int(r.best.position_hg37),
         )
         vals = lookup.get(key)
         
         if vals is None:
-            r.reasons.append("Selection stats missing")
+            # Expanded diagnostics for missing keys
+            if lookup_failures_logged < 10:
+                log(f"[debug] Lookup failed for key: {key}")
+                # Check if pos exists with different chrom
+                candidates = [k for k in lookup if k[1] == key[1]]
+                if candidates:
+                    log(f"[debug]   -> Position {key[1]} found with other chroms: {candidates}")
+                else:
+                    log(f"[debug]   -> Position {key[1]} not found in lookup table at all.")
+                lookup_failures_logged += 1
+                
+            r.reasons.append(f"Selection stats missing for key {key}")
             continue
             
         p_x_val, s_val = vals
