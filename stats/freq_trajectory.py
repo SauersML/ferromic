@@ -1,97 +1,137 @@
-"""Visualize the allele-frequency trajectory downloaded from the AGES dataset."""
+"""
+Generate a four-panel figure (A, B, C, D) showing the allele frequency 
+trajectories of the inverted haplotype for four selected inversion polymorphisms.
+"""
 
 from __future__ import annotations
 
 import csv
-import io
+import sys
 from bisect import bisect_left
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
-from urllib.request import urlopen
+from typing import Dict, Iterable, List, Optional, Tuple, Any
+from urllib.request import Request, urlopen
+from urllib.error import URLError, HTTPError
+import shutil
 
 try:
     import matplotlib.pyplot as plt
     from matplotlib.ticker import FuncFormatter
-except ModuleNotFoundError as exc:  # pragma: no cover - import guard for runtime usability
+    from matplotlib.axes import Axes
+    from matplotlib.lines import Line2D
+    from matplotlib.patches import Patch
+except ModuleNotFoundError as exc:
     raise SystemExit(
-        "matplotlib is required to plot trajectories. Install it with 'pip install matplotlib'."
+        "matplotlib is required. Install it with 'pip install matplotlib'."
     ) from exc
 
-TRAJECTORY_1_URL = (
-    "https://raw.githubusercontent.com/SauersML/ferromic/refs/heads/main/data/"
-    "Trajectory-12_47296118_A_G.tsv"
-)
-TRAJECTORY_1_OUTPUT = Path("data/allele_frequency_trajectory_rs34666797.pdf")
-TRAJECTORY_1_LABEL = 'Derived allele "G" frequency (rs34666797)'
 
-TRAJECTORY_2_URL = (
-    "https://raw.githubusercontent.com/SauersML/ferromic/refs/heads/main/data/"
-    "Trajectory-17_44073889_A_G.tsv"
-)
-TRAJECTORY_2_OUTPUT = Path("data/allele_frequency_trajectory_rs1052553.pdf")
-TRAJECTORY_2_LABEL = 'Inverted allele "G" frequency (rs1052553)'
+# -----------------------------------------------------------------------------
+# Configuration
+# -----------------------------------------------------------------------------
 
-# Column descriptions supplied by the AGES project. These comments double as
-# in-code documentation for anyone reusing the downloaded table.
-#
-# Time fields
-# * date_left / date_right — The bounds of the sliding time window (in years
-#   before present) used to compute that row’s estimates. Think “the bin starts
-#   here, ends there.”
-# * date_center — The midpoint of that window; this is the x-coordinate used to
-#   plot the point for that window.
-# * date_mean — The average sampling date (BP) of the individuals that actually
-#   contribute data inside that window; if the window spans a millennium but
-#   only mid-period samples exist, this will sit near those sample dates.
-# * date_normalized — The same time value mapped to the model’s internal scale
-#   (e.g., converted to generations and centered so “today” is 0). In the AGES
-#   GLMM, time enters on the logit scale of allele frequency with units tied to
-#   the generation interval (≈29 years/generation).
-#
-# Counts and raw frequencies (empirical within each window)
-# * num_allele — Haploid sample size in the window: the number of allele copies
-#   with calls (≈ 2 × number of diploid individuals contributing data there,
-#   after imputation/QC).
-# * num_alt_allele — Count of alternative-allele copies among those calls in the
-#   window.
-# * af — Empirical allele frequency for the window: num_alt_allele / num_allele.
-# * af_low / af_up — The uncertainty band for that empirical frequency in the
-#   window (a binomial-likelihood–based confidence/credible interval around af).
-#
-# Model-predicted trajectory (smoothed / structure-adjusted)
-# * pt — The model-predicted allele frequency at date_center (“pₜ”), after
-#   smoothing and correction for population structure; this is the trajectory
-#   the browser draws through the noisy points. It differs from af in that af is
-#   the raw window estimate, whereas pt is the fitted value from the trajectory
-#   model.
-# * pt_low / pt_up — The model’s uncertainty band for pt at that time (the
-#   fitted trajectory’s lower/upper interval).
+BASE_URL = "https://raw.githubusercontent.com/SauersML/ferromic/refs/heads/main/data"
+OUTPUT_FILE = Path("data/inversion_trajectories_combined.pdf")
+
+# Configuration for the four subplots
+SUBPLOTS_CONFIG = [
+    {
+        "panel_label": "A",
+        "title": "10q22.3 (chr10:79.5–80.2 Mb)",
+        "filename": "Trajectory-10_81319354_C_T.tsv",
+        "flip": False,
+    },
+    {
+        "panel_label": "B",
+        "title": "8p23.1 (chr8:7.3–12.6 Mb)",
+        "filename": "Trajectory-8_9261356_T_A.tsv",
+        "flip": True, 
+    },
+    {
+        "panel_label": "C",
+        "title": "12q13.11 (chr12:46.90–46.92 Mb)",
+        "filename": "Trajectory-12_47295449_A_G.tsv",
+        "flip": False,
+    },
+    {
+        "panel_label": "D",
+        "title": "7p11.2 (chr7:54.23–54.31 Mb)",
+        "filename": "Trajectory-7_54318757_A_G.tsv",
+        "flip": False,
+    },
+]
+
+# Style Constants
+COLOR_EMPIRICAL_LINE = "#045a8d"  # Dark Blue
+COLOR_EMPIRICAL_FILL = "#b3cde3"  # Light Blue
+COLOR_MODEL_LINE = "#238b45"      # Dark Green
+COLOR_MODEL_FILL = "#ccebc5"      # Light Green
+COLOR_HIGHLIGHT = "#fdd49e"       # Light Orange
+
+# Font Sizes (Calculated based on previous ~12pt base)
+FONT_AXIS_LABEL = 15     # +20%
+FONT_PANEL_LABEL = 32    # +50% (was ~20)
+FONT_TICKS = 18          # +80% (was ~10)
+FONT_TITLE = 16
+FONT_LEGEND = 12
 
 
-def download_trajectory(url: str) -> List[Dict[str, float]]:
-    """Download the allele-frequency trajectory TSV file and parse it."""
+# -----------------------------------------------------------------------------
+# Data I/O and Processing
+# -----------------------------------------------------------------------------
 
-    with urlopen(url) as response:
-        status = getattr(response, "status", 200)
-        if status != 200:
-            raise RuntimeError(f"Failed to download trajectory (status {status}).")
-        payload = response.read().decode("utf-8")
+def ensure_file_exists(filename: str) -> Path:
+    """Check if file exists in 'data/'; if not, download it."""
+    local_path = Path("data") / filename
+    local_path.parent.mkdir(parents=True, exist_ok=True)
 
-    reader = csv.DictReader(io.StringIO(payload), delimiter="\t")
-    rows: List[Dict[str, float]] = []
-    for row in reader:
-        parsed_row = {key: float(value) for key, value in row.items()}
-        rows.append(parsed_row)
+    if local_path.exists():
+        return local_path
+
+    url = f"{BASE_URL}/{filename}"
+    print(f"Downloading {filename}...")
+    
+    req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    try:
+        with urlopen(req) as response:
+            if response.status != 200:
+                raise HTTPError(url, response.status, "Bad Status", response.headers, None)
+            with local_path.open("wb") as out_file:
+                shutil.copyfileobj(response, out_file)
+    except (URLError, HTTPError) as e:
+        if local_path.exists():
+            local_path.unlink()
+        raise RuntimeError(f"Failed to download {url}: {e}")
+
+    return local_path
+
+
+def load_trajectory(filename: str) -> List[Dict[str, float]]:
+    """Load and parse the TSV file."""
+    path = ensure_file_exists(filename)
+    
+    with path.open("r", encoding="utf-8") as f:
+        reader = csv.DictReader(f, delimiter="\t")
+        rows: List[Dict[str, float]] = []
+        
+        for line_num, row in enumerate(reader, start=2):
+            try:
+                parsed_row = {
+                    k: float(v) if v not in ("", "NA", "nan") else float("nan") 
+                    for k, v in row.items()
+                }
+                rows.append(parsed_row)
+            except ValueError:
+                continue
 
     if not rows:
-        raise RuntimeError("Trajectory file is empty.")
+        raise RuntimeError(f"Trajectory file {filename} is empty or invalid.")
 
     return rows
 
 
 def rows_to_columns(rows: Iterable[Dict[str, float]]) -> Dict[str, List[float]]:
-    """Convert a row-oriented table into column-oriented lists for plotting."""
-
+    """Convert row-oriented dicts to column-oriented lists."""
     columns: Dict[str, List[float]] = {}
     for row in rows:
         for key, value in row.items():
@@ -100,70 +140,51 @@ def rows_to_columns(rows: Iterable[Dict[str, float]]) -> Dict[str, List[float]]:
 
 
 def invert_allele_frequencies(columns: Dict[str, List[float]]) -> Dict[str, List[float]]:
-    """Invert allele frequencies to show the complement allele (1 - frequency).
+    """Invert frequencies (p -> 1-p) and swap confidence intervals."""
+    inverted = {}
+    
+    if "date_center" in columns:
+        inverted["date_center"] = list(columns["date_center"])
 
-    This is used when the data shows the non-inverted allele but we want to plot
-    the inverted allele frequency. Note that confidence intervals are swapped:
-    the new lower bound is 1 - old upper bound, and vice versa.
-    """
-    inverted = columns.copy()
+    if "af" in columns:
+        inverted["af"] = [1.0 - x for x in columns["af"]]
+    if "af_low" in columns and "af_up" in columns:
+        inverted["af_low"] = [1.0 - x for x in columns["af_up"]]
+        inverted["af_up"] = [1.0 - x for x in columns["af_low"]]
 
-    # Invert empirical frequencies
-    if "af" in inverted:
-        inverted["af"] = [1.0 - x for x in inverted["af"]]
-    if "af_low" in inverted and "af_up" in inverted:
-        # Swap and invert the confidence bounds
-        old_low = inverted["af_low"]
-        old_up = inverted["af_up"]
-        inverted["af_low"] = [1.0 - x for x in old_up]
-        inverted["af_up"] = [1.0 - x for x in old_low]
-
-    # Invert model-predicted frequencies
-    if "pt" in inverted:
-        inverted["pt"] = [1.0 - x for x in inverted["pt"]]
-    if "pt_low" in inverted and "pt_up" in inverted:
-        # Swap and invert the confidence bounds
-        old_low = inverted["pt_low"]
-        old_up = inverted["pt_up"]
-        inverted["pt_low"] = [1.0 - x for x in old_up]
-        inverted["pt_up"] = [1.0 - x for x in old_low]
+    if "pt" in columns:
+        inverted["pt"] = [1.0 - x for x in columns["pt"]]
+    if "pt_low" in columns and "pt_up" in columns:
+        inverted["pt_low"] = [1.0 - x for x in columns["pt_up"]]
+        inverted["pt_up"] = [1.0 - x for x in columns["pt_low"]]
 
     return inverted
 
 
+# -----------------------------------------------------------------------------
+# Analysis Helpers
+# -----------------------------------------------------------------------------
+
 def _prepare_interpolator(
     dates: List[float], values: List[float]
 ) -> Tuple[List[float], List[float]]:
-    """Return the date/value series sorted for interpolation."""
-
     paired = sorted(zip(dates, values))
-    sorted_dates = [date for date, _ in paired]
-    sorted_values = [value for _, value in paired]
-    return sorted_dates, sorted_values
+    return [d for d, _ in paired], [v for _, v in paired]
 
 
 def _interpolate(date: float, dates: List[float], values: List[float]) -> float:
-    """Linearly interpolate the value at ``date`` within the sorted series."""
-
-    if date <= dates[0]:
-        return values[0]
-    if date >= dates[-1]:
-        return values[-1]
-
+    if date <= dates[0]: return values[0]
+    if date >= dates[-1]: return values[-1]
     idx = bisect_left(dates, date)
-    if dates[idx] == date:
-        return values[idx]
-
-    left_date = dates[idx - 1]
-    right_date = dates[idx]
-    left_value = values[idx - 1]
-    right_value = values[idx]
-
+    if dates[idx] == date: return values[idx]
+    
+    left_date, right_date = dates[idx - 1], dates[idx]
+    left_val, right_val = values[idx - 1], values[idx]
+    
     span = right_date - left_date
-    if span == 0:
-        return left_value
+    if span == 0: return left_val
     weight = (date - left_date) / span
-    return left_value + weight * (right_value - left_value)
+    return left_val + weight * (right_val - left_val)
 
 
 def _find_largest_window_change(
@@ -171,168 +192,181 @@ def _find_largest_window_change(
     values: List[float],
     window: float,
 ) -> Optional[Tuple[float, float, float]]:
-    """Return the start, end, and magnitude of the largest change in ``window`` years."""
-
-    if not dates:
-        return None
-
+    if not dates: return None
     sorted_dates, sorted_values = _prepare_interpolator(dates, values)
-    min_date = sorted_dates[0]
-    max_date = sorted_dates[-1]
-    if max_date - min_date < window:
-        return None
+    min_date, max_date = sorted_dates[0], sorted_dates[-1]
+    if max_date - min_date < window: return None
 
-    best_start = None
-    best_change = -1.0
-    best_end = None
-    
+    best_start, best_change, best_end = None, -1.0, None
     start = min_date
     while start <= max_date - window:
         end = start + window
-        start_val = _interpolate(start, sorted_dates, sorted_values)
-        end_val = _interpolate(end, sorted_dates, sorted_values)
-        change = abs(end_val - start_val)
-        
+        s_val = _interpolate(start, sorted_dates, sorted_values)
+        e_val = _interpolate(end, sorted_dates, sorted_values)
+        change = abs(e_val - s_val)
         if change > best_change:
-            best_change = change
-            best_start = start
-            best_end = end
-        
-        start += 1.0  # Check every year
-
-    if best_start is None or best_end is None:
-        return None
-
+            best_change, best_start, best_end = change, start, end
+        start += 10.0
+    
+    if best_start is None: return None
     return best_start, best_end, best_change
 
 
-def plot_trajectory(
-    columns: Dict[str, List[float]], output: Path, ylabel: str
-) -> Optional[Tuple[float, float, float]]:
-    """Plot empirical and model allele-frequency trajectories with uncertainty."""
+# -----------------------------------------------------------------------------
+# Plotting Logic
+# -----------------------------------------------------------------------------
 
+def plot_trajectory_on_axis(
+    ax: Axes, 
+    columns: Dict[str, List[float]], 
+    config: Dict[str, Any],
+    show_ylabel: bool,
+    show_xlabel: bool,
+    is_panel_a: bool
+) -> None:
     dates = columns["date_center"]
-
-    plt.style.use("seaborn-v0_8-whitegrid")
-    fig, ax = plt.subplots(figsize=(11, 6.5))
-
+    
+    # 1. Empirical Data
     ax.fill_between(
-        dates,
-        columns["af_low"],
-        columns["af_up"],
-        color="#b3cde3",
-        alpha=0.45,
-        label="",
+        dates, columns["af_low"], columns["af_up"],
+        color=COLOR_EMPIRICAL_FILL, alpha=0.45, edgecolor="none"
     )
     ax.plot(
-        dates,
-        columns["af"],
-        color="#045a8d",
-        linewidth=2.5,
-        label="Empirical allele frequency",
+        dates, columns["af"],
+        color=COLOR_EMPIRICAL_LINE, linewidth=1.5, alpha=0.8
     )
 
+    # 2. Model Data
     ax.fill_between(
-        dates,
-        columns["pt_low"],
-        columns["pt_up"],
-        color="#ccebc5",
-        alpha=0.45,
-        label="",
+        dates, columns["pt_low"], columns["pt_up"],
+        color=COLOR_MODEL_FILL, alpha=0.45, edgecolor="none"
     )
     ax.plot(
-        dates,
-        columns["pt"],
-        color="#238b45",
-        linewidth=2.5,
-        label="Model allele frequency",
+        dates, columns["pt"],
+        color=COLOR_MODEL_LINE, linewidth=2.5
     )
 
-    ax.set_xlabel("Years before present (window center)", fontsize=20, fontweight='bold')
+    # 3. Highlight
+    highlight = _find_largest_window_change(dates, columns["pt"], window=1000.0)
+    if highlight is not None:
+        s_yr, e_yr, _ = highlight
+        ax.axvspan(
+            min(s_yr, e_yr), max(s_yr, e_yr),
+            color=COLOR_HIGHLIGHT, alpha=0.4, edgecolor="none"
+        )
 
+    # 4. Panel Label (A, B, C, D)
+    ax.text(
+        -0.1, 1.1, config["panel_label"], 
+        transform=ax.transAxes, 
+        fontsize=FONT_PANEL_LABEL, 
+        fontweight='bold', 
+        va='bottom', ha='right'
+    )
+
+    # 5. Titles and Labels
+    ax.set_title(config["title"], fontsize=FONT_TITLE, fontweight="bold", loc='center')
+    
+    if show_xlabel:
+        ax.set_xlabel("Years before present (BP)", fontsize=FONT_AXIS_LABEL)
+    if show_ylabel:
+        ax.set_ylabel("Inversion-tagging allele frequency", fontsize=FONT_AXIS_LABEL)
+
+    # 6. Formatting X-Axis (Exactly 14000 to 0)
     def _format_year(value: float, _: float) -> str:
-        if abs(value) >= 100:
-            formatted = f"{value:,.0f}"
-        elif abs(value) >= 10:
-            formatted = f"{value:,.1f}".rstrip("0").rstrip(".")
-        else:
-            formatted = f"{value:,.2f}".rstrip("0").rstrip(".")
-        return formatted
+        if abs(value) >= 1000: return f"{value/1000:.0f}k"
+        return f"{value:,.0f}"
 
     ax.xaxis.set_major_formatter(FuncFormatter(_format_year))
-    ax.set_ylabel(ylabel, fontsize=20, fontweight='bold')
+    ax.set_xlim(14000, 0) # Force range, Left=14k, Right=0
 
-    series_for_ylim = [
-        columns["af_low"],
-        columns["af_up"],
-        columns["af"],
-        columns["pt_low"],
-        columns["pt_up"],
-        columns["pt"],
-    ]
-    all_values = [value for series in series_for_ylim for value in series]
-    ymin = min(all_values)
-    ymax = max(all_values)
-    padding = (ymax - ymin) * 0.05 if ymax > ymin else 0.05
-    ax.set_ylim(ymin - padding, ymax + padding)
-
-    highlight = _find_largest_window_change(dates, columns["af"], window=1_000.0)
-    if highlight is not None:
-        start_year, end_year, change = highlight
-        ax.axvspan(
-            min(start_year, end_year),
-            max(start_year, end_year),
-            color="#fdd49e",
-            alpha=0.35,
-            label="Largest 1,000-year change in allele frequency",
-        )
+    # 7. Dynamic Y-Scaling Per Subplot
+    # Gather all visible data points to determine bounds
+    all_vals = []
+    if "af" in columns: all_vals.extend(columns["af"])
+    if "pt" in columns: all_vals.extend(columns["pt"])
+    if "af_low" in columns: all_vals.extend(columns["af_low"])
+    if "af_up" in columns: all_vals.extend(columns["af_up"])
     
-    ax.invert_xaxis()
-    ax.legend(frameon=True, framealpha=0.9, edgecolor="none", fontsize=16)
-    ax.grid(True, linestyle="--", linewidth=0.6, alpha=0.35)
-    ax.tick_params(axis="both", labelsize=18)
+    if all_vals:
+        ymin, ymax = min(all_vals), max(all_vals)
+        yrange = ymax - ymin
+        # If range is effectively zero (flat line), give it some room
+        if yrange < 0.01: yrange = 0.1
+        
+        padding = yrange * 0.05
+        ax.set_ylim(max(0.0, ymin - padding), min(1.0, ymax + padding))
+    else:
+        ax.set_ylim(0, 1)
 
-    fig.tight_layout()
-    output.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output, dpi=300)
-    plt.close(fig)
+    # 8. Ticks and Grid
+    ax.tick_params(axis="both", labelsize=FONT_TICKS)
+    ax.grid(False) # No grid lines
 
-    return highlight
+    # 9. Legend (Only for Panel A)
+    if is_panel_a:
+        legend_elements = [
+            Line2D([0], [0], color=COLOR_EMPIRICAL_LINE, lw=2, label='Empirical frequency'),
+            Line2D([0], [0], color=COLOR_MODEL_LINE, lw=2, label='Model frequency'),
+            Patch(facecolor=COLOR_HIGHLIGHT, alpha=0.4, label='Max 1 kyr change'),
+        ]
+        ax.legend(
+            handles=legend_elements,
+            loc='upper right',
+            frameon=True,
+            fontsize=FONT_LEGEND,
+            framealpha=0.9
+        )
 
 
 def main() -> None:
-    # Process trajectory 1 (rs34666797)
-    print("Processing trajectory 1: rs34666797 (12:47296118)")
-    rows_1 = download_trajectory(TRAJECTORY_1_URL)
-    columns_1 = rows_to_columns(rows_1)
-    highlight_1 = plot_trajectory(columns_1, TRAJECTORY_1_OUTPUT, TRAJECTORY_1_LABEL)
-    if highlight_1 is not None:
-        start_year, end_year, change = highlight_1
-        print(
-            "  Largest 1,000-year change window: "
-            f"start={start_year:g} BP ({start_year/1000:.3f} kya), "
-            f"end={end_year:g} BP ({end_year/1000:.3f} kya), "
-            f"|Δf|={change:.4f}"
-        )
-    print(f"  Saved to {TRAJECTORY_1_OUTPUT.resolve()}")
+    print("Generating combined inversion trajectory plot...")
+    
+    plt.style.use("seaborn-v0_8-white") # Clean style, no grid default
+    
+    # Constrained layout helps with the large text sizes
+    fig, axes = plt.subplots(
+        nrows=2, ncols=2, 
+        figsize=(16, 12), 
+        constrained_layout=True
+    )
+    
+    axes_flat = axes.flatten()
 
-    # Process trajectory 2 (rs1052553)
-    # Note: The data tracks the non-inverted allele "A", but we plot inverted allele "G"
-    print("\nProcessing trajectory 2: rs1052553 (17:44073889)")
-    print("  (Data shows non-inverted 'A' frequency; plotting inverted 'G' as 1 - frequency)")
-    rows_2 = download_trajectory(TRAJECTORY_2_URL)
-    columns_2 = rows_to_columns(rows_2)
-    columns_2 = invert_allele_frequencies(columns_2)  # Invert to show inverted allele "G"
-    highlight_2 = plot_trajectory(columns_2, TRAJECTORY_2_OUTPUT, TRAJECTORY_2_LABEL)
-    if highlight_2 is not None:
-        start_year, end_year, change = highlight_2
-        print(
-            "  Largest 1,000-year change window: "
-            f"start={start_year:g} BP ({start_year/1000:.3f} kya), "
-            f"end={end_year:g} BP ({end_year/1000:.3f} kya), "
-            f"|Δf|={change:.4f}"
-        )
-    print(f"  Saved to {TRAJECTORY_2_OUTPUT.resolve()}")
+    for idx, config in enumerate(SUBPLOTS_CONFIG):
+        ax = axes_flat[idx]
+        filename = config["filename"]
+        
+        row, col = divmod(idx, 2)
+        show_ylabel = (col == 0)
+        show_xlabel = (row == 1)
+        is_panel_a = (idx == 0)
+        
+        print(f"Processing Panel {config['panel_label']}: {filename}")
+        
+        try:
+            rows = load_trajectory(filename)
+            columns = rows_to_columns(rows)
+            
+            if config["flip"]:
+                print("  -> Flipping allele frequencies")
+                columns = invert_allele_frequencies(columns)
+                
+            plot_trajectory_on_axis(
+                ax, columns, config, 
+                show_ylabel, show_xlabel, is_panel_a
+            )
+            
+        except Exception as e:
+            print(f"  [ERROR] {e}")
+            ax.text(0.5, 0.5, "Data Unavailable", ha='center', fontsize=20, color='red')
+            ax.set_title(config["title"], fontsize=FONT_TITLE)
+            ax.set_axis_off()
+
+    OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(OUTPUT_FILE, dpi=300)
+    print(f"\n✓ Saved 4-panel figure to {OUTPUT_FILE.resolve()}")
+    plt.close(fig)
 
 
 if __name__ == "__main__":
