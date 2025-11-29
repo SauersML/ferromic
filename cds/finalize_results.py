@@ -14,18 +14,13 @@ from datetime import datetime
 
 import numpy as np
 import pandas as pd
-
-# Ensure pipeline_lib is importable
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-try:
-    import pipeline_lib as lib
-except ImportError:
-    print("Error: Could not import pipeline_lib.", file=sys.stderr)
-    sys.exit(1)
+from scipy.stats import chi2
+from statsmodels.stats.multitest import fdrcorrection
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+FDR_ALPHA = 0.05
 
 ORDERED_COLUMNS = [
     'region', 'gene', 'status',
@@ -40,6 +35,33 @@ ORDERED_COLUMNS = [
     'taxa_used', 'reason'
 ]
 
+def compute_fdr(df):
+    """
+    Wrapper around statsmodels.stats.multitest.fdrcorrection.
+    Applies to 'bm_p_value' and 'cmc_p_value' columns if they exist and are successful.
+    Returns the modified DataFrame.
+    """
+    successful = df[df['status'] == 'success'].copy()
+    if successful.empty:
+        return df
+
+    # FDR for branch-model test
+    if 'bm_p_value' in successful.columns:
+        bm_pvals = successful['bm_p_value'].dropna()
+        if not bm_pvals.empty:
+            _, qvals = fdrcorrection(bm_pvals, alpha=FDR_ALPHA, method='indep')
+            df.loc[bm_pvals.index, 'bm_q_value'] = qvals
+            logging.info(f"Applied FDR correction to {len(bm_pvals)} branch-model tests.")
+
+    # FDR for clade-model test
+    if 'cmc_p_value' in successful.columns:
+        cmc_pvals = successful['cmc_p_value'].dropna()
+        if not cmc_pvals.empty:
+            _, qvals = fdrcorrection(cmc_pvals, alpha=FDR_ALPHA, method='indep')
+            df.loc[cmc_pvals.index, 'cmc_q_value'] = qvals
+            logging.info(f"Applied FDR correction to {len(cmc_pvals)} clade-model tests.")
+
+    return df
 
 def _default_record(region, gene, seed_columns):
     rec = {c: np.nan for c in ORDERED_COLUMNS + list(seed_columns)}
@@ -101,7 +123,7 @@ def _finalize_record(record):
             # Clip small negative noise to 0 for valid tests
             lrt = 2 * max(0.0, diff)
             record['cmc_lrt_stat'] = lrt
-            record['cmc_p_value'] = float(lib.chi2.sf(lrt, df=1))
+            record['cmc_p_value'] = float(chi2.sf(lrt, df=1))
 
     branch_ready = not pd.isna(record.get('bm_p_value')) or all(pd.isna(record.get(col)) for col in ['bm_p_value', 'bm_lrt_stat'])
 
@@ -208,7 +230,7 @@ def main():
         if col not in results_df.columns:
             results_df[col] = np.nan
 
-    results_df = lib.compute_fdr(results_df)
+    results_df = compute_fdr(results_df)
 
     remaining_cols = [c for c in results_df.columns if c not in ORDERED_COLUMNS]
 
@@ -240,7 +262,7 @@ def main():
     logging.info("Status counts: " + str(counts))
 
     sig = results_df[(results_df['status'] == 'success') &
-                     ((results_df['bm_q_value'] < lib.FDR_ALPHA) | (results_df['cmc_q_value'] < lib.FDR_ALPHA))]
+                     ((results_df['bm_q_value'] < FDR_ALPHA) | (results_df['cmc_q_value'] < FDR_ALPHA))]
     if not sig.empty:
         logging.info(f"Significant tests: {len(sig)}")
     else:
