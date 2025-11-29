@@ -1,5 +1,13 @@
 import os
 import sys
+
+# Set environment variables to limit thread usage and prevent OOM/segfaults in constrained environments
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
 import glob
 import logging
 from datetime import datetime
@@ -115,15 +123,25 @@ def _finalize_record(record):
 
 
 def main():
-    files = glob.glob("partial_results_*.tsv")
+    files = sorted(glob.glob("partial_results_*.tsv"))
     if not files:
         logging.warning("No partial_results_*.tsv files found. Nothing to aggregate.")
         return
 
     logging.info(f"Found {len(files)} partial result files. Aggregating...")
     dfs = []
-    for f in files:
+    for i, f in enumerate(files):
         try:
+            # Check for empty file
+            if os.stat(f).st_size == 0:
+                logging.warning(f"Skipping empty file: {f}")
+                continue
+
+            logging.info(f"Reading file {i+1}/{len(files)}: {f}")
+            # Flush handlers to ensure log is written before potential crash
+            for handler in logging.root.handlers:
+                handler.flush()
+
             df = pd.read_csv(f, sep='\t')
             dfs.append(df)
         except Exception as e:
@@ -132,6 +150,10 @@ def main():
     if not dfs:
         logging.error("No valid dataframes loaded.")
         sys.exit(1)
+
+    logging.info("Concatenating dataframes...")
+    for handler in logging.root.handlers:
+        handler.flush()
 
     raw = pd.concat(dfs, ignore_index=True)
     raw['paml_model'] = raw.get('paml_model', pd.Series(['both'] * len(raw))).fillna('both').str.lower()
