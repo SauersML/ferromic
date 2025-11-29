@@ -206,14 +206,32 @@ def _interpolate(
 
 def _find_largest_window_change(
     dates: List[float],
-    values: List[float],
+    pt: List[float],
+    pt_low: List[float],
+    pt_up: List[float],
     window: float,
-) -> Optional[Tuple[float, float, float]]:
-    """Find the time window with the largest absolute change in value."""
+) -> Optional[Tuple[float, float, float, float]]:
+    """Find the time window with the largest standardized (Z-score) change.
+
+    For each window, we compute Δ = p_end - p_start using the model trajectory (pt)
+    and approximate the standard deviation of Δ from the 95% credible intervals
+    at the endpoints, then maximize |Δ| / sd(Δ).
+    """
     if not dates:
         return None
 
-    sorted_dates, sorted_values = _prepare_interpolator(dates, values)
+    # Approximate per-timepoint SD from 95% intervals: width ≈ 3.92 * SD
+    sigmas = [
+        (up - low) / 3.92
+        for low, up in zip(pt_low, pt_up)
+    ]
+
+    # Sort by date, keeping pt and sigma aligned
+    triplets = sorted(zip(dates, pt, sigmas))
+    sorted_dates = [d for d, _, _ in triplets]
+    sorted_pt = [p for _, p, _ in triplets]
+    sorted_sigma = [s for _, _, s in triplets]
+
     min_date = sorted_dates[0]
     max_date = sorted_dates[-1]
 
@@ -222,27 +240,40 @@ def _find_largest_window_change(
 
     best_start: Optional[float] = None
     best_end: Optional[float] = None
-    best_change = -1.0
+    best_delta: float = 0.0
+    best_z: float = -1.0  # ensures any finite Z will beat this
 
     start = min_date
     while start <= max_date - window:
         end = start + window
-        start_value = _interpolate(start, sorted_dates, sorted_values)
-        end_value = _interpolate(end, sorted_dates, sorted_values)
-        change = abs(end_value - start_value)
 
-        if change > best_change:
-            best_change = change
+        # Interpolate pt and sigma at the window boundaries
+        p_start = _interpolate(start, sorted_dates, sorted_pt)
+        p_end = _interpolate(end, sorted_dates, sorted_pt)
+        delta = p_end - p_start
+
+        sigma_start = _interpolate(start, sorted_dates, sorted_sigma)
+        sigma_end = _interpolate(end, sorted_dates, sorted_sigma)
+        var_delta = sigma_start * sigma_start + sigma_end * sigma_end
+
+        if var_delta <= 0.0:
+            start += 10.0
+            continue
+
+        z = abs(delta) / (var_delta ** 0.5)
+
+        if z > best_z:
+            best_z = z
             best_start = start
             best_end = end
+            best_delta = delta
 
         start += 10.0
 
     if best_start is None or best_end is None:
         return None
 
-    return best_start, best_end, best_change
-
+    return best_start, best_end, best_delta, best_z
 
 # ---------------------------------------------------------------------------
 # Plotting
@@ -292,10 +323,16 @@ def plot_trajectory_on_axis(
         linewidth=2.5,
     )
 
-    # Highlight interval of maximum 1 kyr change in model trajectory
-    highlight = _find_largest_window_change(dates, columns["pt"], window=1000.0)
+    # Highlight interval of maximum 1 kyr standardized (Z-score) change
+    highlight = _find_largest_window_change(
+        dates,
+        columns["pt"],
+        columns["pt_low"],
+        columns["pt_up"],
+        window=1000.0,
+    )
     if highlight is not None:
-        start_year, end_year, _ = highlight
+        start_year, end_year, delta, z = highlight
         ax.axvspan(
             min(start_year, end_year),
             max(start_year, end_year),
@@ -303,6 +340,13 @@ def plot_trajectory_on_axis(
             alpha=0.4,
             edgecolor="none",
         )
+        # Print the window and effect for this panel
+        print(
+            f"Panel {config['panel_label']}: strongest 1 kyr change "
+            f"{start_year:.0f}–{end_year:.0f} BP "
+            f"(Δ={delta:+.3f}, Z={z:.2f})"
+        )
+
 
     # Panel label (A/B/C/D)
     ax.text(
@@ -381,7 +425,7 @@ def plot_trajectory_on_axis(
             Patch(
                 facecolor=COLOR_HIGHLIGHT,
                 alpha=0.4,
-                label="Max 1 kyr change",
+                label="1,000 year period of maximum standardized change",
             ),
         ]
         ax.legend(
