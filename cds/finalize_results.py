@@ -133,7 +133,8 @@ def main():
     for i, f in enumerate(files):
         try:
             # Check for empty file
-            if os.stat(f).st_size == 0:
+            st = os.stat(f)
+            if st.st_size == 0:
                 logging.warning(f"Skipping empty file: {f}")
                 continue
 
@@ -142,8 +143,23 @@ def main():
             for handler in logging.root.handlers:
                 handler.flush()
 
-            df = pd.read_csv(f, sep='\t')
+            # --- DEBUGGING / SANITY CHECK START ---
+            logging.debug(f"DEBUG: Processing file: {f}")
+            with open(f, 'rb') as bin_f:
+                 head = bin_f.read(2048) # Read up to 2KB
+                 if b'\x00' in head:
+                     logging.error(f"File {f} contains null bytes. Skipping as it is likely corrupt binary data.")
+                     continue
+
+                 logging.debug(f"DEBUG: First 100 bytes of {f}: {head[:100]}")
+
+            # --- DEBUGGING END ---
+
+            # Use engine='python' for robustness against malformed lines/segfaults
+            df = pd.read_csv(f, sep='\t', engine='python')
             dfs.append(df)
+            logging.debug(f"DEBUG: Successfully read dataframe from {f}")
+
         except Exception as e:
             logging.error(f"Failed to read {f}: {e}")
 
