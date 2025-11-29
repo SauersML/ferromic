@@ -65,7 +65,7 @@ FONT_AXIS_LABEL_X = 24
 FONT_AXIS_LABEL_Y = 24
 FONT_PANEL_LABEL = 32
 FONT_TICKS = 18
-FONT_TITLE = 16
+FONT_TITLE = 26
 FONT_LEGEND = 12
 
 
@@ -347,7 +347,7 @@ def plot_trajectory_on_axis(
         status = "95% non-overlapping CIs" if is_significant else "overlapping CIs"
         print(
             f"Panel {config['panel_label']}: strongest 1 kyr change "
-            f"{start_year:.0f}–{end_year:.0f} BP "
+            f"{start_year:.0f}–{end_year:.0f} years ago "
             f"(Δ={delta:+.3f}, {status})"
         )
 
@@ -371,7 +371,7 @@ def plot_trajectory_on_axis(
     )
 
     if show_xlabel:
-        ax.set_xlabel("Years before present (BP)", fontsize=FONT_AXIS_LABEL_X)
+        ax.set_xlabel("Years before present", fontsize=FONT_AXIS_LABEL_X)
     if show_ylabel:
         ax.set_ylabel(
             "Inversion-tagging allele frequency",
