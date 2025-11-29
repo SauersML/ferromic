@@ -140,24 +140,48 @@ def main():
                 continue
 
             logging.info(f"Reading file {i+1}/{len(files)}: {f}")
-            # Flush handlers to ensure log is written before potential crash
-            for handler in logging.root.handlers:
-                handler.flush()
+            sys.stdout.flush()
+            sys.stderr.flush()
 
-            # Read file once and parse from string to avoid double-open segfault
+            logging.info(f"  Step 1: Opening file...")
+            sys.stdout.flush()
             with open(f, 'rb') as bin_f:
+                 logging.info(f"  Step 2: Reading header (2KB)...")
+                 sys.stdout.flush()
                  head = bin_f.read(2048)
+
+                 logging.info(f"  Step 3: Checking for null bytes...")
+                 sys.stdout.flush()
                  if b'\x00' in head:
                      logging.error(f"File {f} contains null bytes. Skipping.")
                      continue
 
-                 # Read full file content in same open operation
+                 logging.info(f"  Step 4: Seeking to start...")
+                 sys.stdout.flush()
                  bin_f.seek(0)
-                 content = bin_f.read().decode('utf-8')
 
-            # Parse from string (avoids pandas re-opening file)
-            df = pd.read_csv(io.StringIO(content), sep='\t', engine='python')
+                 logging.info(f"  Step 5: Reading full file...")
+                 sys.stdout.flush()
+                 content = bin_f.read()
+
+                 logging.info(f"  Step 6: Decoding UTF-8 ({len(content)} bytes)...")
+                 sys.stdout.flush()
+                 content = content.decode('utf-8')
+
+            logging.info(f"  Step 7: Creating StringIO...")
+            sys.stdout.flush()
+            string_io = io.StringIO(content)
+
+            logging.info(f"  Step 8: Parsing CSV with pandas...")
+            sys.stdout.flush()
+            df = pd.read_csv(string_io, sep='\t', engine='python')
+
+            logging.info(f"  Step 9: Appending to list (current list size: {len(dfs)})...")
+            sys.stdout.flush()
             dfs.append(df)
+
+            logging.info(f"  Step 10: Done! DataFrame shape: {df.shape}")
+            sys.stdout.flush()
 
         except Exception as e:
             logging.error(f"Failed to read {f}: {e}")
@@ -166,11 +190,19 @@ def main():
         logging.error("No valid dataframes loaded.")
         sys.exit(1)
 
-    logging.info("Concatenating dataframes...")
-    for handler in logging.root.handlers:
-        handler.flush()
+    logging.info(f"CONCAT: Starting concatenation of {len(dfs)} dataframes...")
+    sys.stdout.flush()
+    sys.stderr.flush()
 
+    logging.info(f"CONCAT: Total rows across all dfs: {sum(len(df) for df in dfs)}")
+    sys.stdout.flush()
+
+    logging.info(f"CONCAT: Calling pd.concat()...")
+    sys.stdout.flush()
     raw = pd.concat(dfs, ignore_index=True)
+
+    logging.info(f"CONCAT: Success! Result shape: {raw.shape}")
+    sys.stdout.flush()
     raw['paml_model'] = raw.get('paml_model', pd.Series(['both'] * len(raw))).fillna('both').str.lower()
     logging.info(f"Aggregated {len(raw)} total rows across models.")
 
