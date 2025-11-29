@@ -44,6 +44,8 @@ except Exception as exc:
 # 1. Constants & Configuration
 # ==============================================================================
 
+WHITELIST = True
+
 def _load_inversion_whitelist():
     """
     Parses data/inv_properties.tsv to build the ALLOWED_REGIONS whitelist.
@@ -150,7 +152,6 @@ ANNOTATED_FIGURE_DIR = "annotated_tree_figures"
 REGION_TREE_DIR = "region_trees"
 
 # --- Analysis Configuration ---
-WHITELIST = True
 CHECKPOINT_FILE = "paml_results.checkpoint.tsv"
 CHECKPOINT_EVERY = int(os.environ.get("CHECKPOINT_EVERY", "100"))
 KEEP_PAML_OUT = bool(int(os.environ.get("KEEP_PAML_OUT", "0")))
