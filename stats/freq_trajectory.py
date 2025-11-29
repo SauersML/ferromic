@@ -206,31 +206,32 @@ def _interpolate(
 
 def _find_largest_window_change(
     dates: List[float],
-    pt: List[float],
-    pt_low: List[float],
-    pt_up: List[float],
+    af: List[float],
+    af_low: List[float],
+    af_up: List[float],
     window: float,
-) -> Optional[Tuple[float, float, float, float]]:
-    """Find the time window with the largest standardized (Z-score) change.
+) -> Optional[Tuple[float, float, float, bool]]:
+    """Find the 1,000-year window with the largest credible empirical change.
 
-    For each window, we compute Δ = p_end - p_start using the model trajectory (pt)
-    and approximate the standard deviation of Δ from the 95% credible intervals
-    at the endpoints, then maximize |Δ| / sd(Δ).
+    For each window, we:
+      - interpolate the empirical allele frequency (af) at the start and end,
+      - interpolate the 95% CIs (af_low, af_up) at the start and end,
+      - check whether the two 95% intervals overlap,
+      - prioritize windows with non-overlapping intervals (“statistically
+        distinguishable”), and within that set choose the largest |Δ|.
+      - if no window has non-overlapping intervals, fall back to the window
+        with the largest |Δ| overall.
+    Returns (start_year, end_year, delta, is_significant).
     """
     if not dates:
         return None
 
-    # Approximate per-timepoint SD from 95% intervals: width ≈ 3.92 * SD
-    sigmas = [
-        (up - low) / 3.92
-        for low, up in zip(pt_low, pt_up)
-    ]
-
-    # Sort by date, keeping pt and sigma aligned
-    triplets = sorted(zip(dates, pt, sigmas))
-    sorted_dates = [d for d, _, _ in triplets]
-    sorted_pt = [p for _, p, _ in triplets]
-    sorted_sigma = [s for _, _, s in triplets]
+    # Sort dates and keep af/CI aligned
+    quad = sorted(zip(dates, af, af_low, af_up))
+    sorted_dates = [d for d, _, _, _ in quad]
+    sorted_af = [p for _, p, _, _ in quad]
+    sorted_low = [l for _, _, l, _ in quad]
+    sorted_up = [u for _, _, _, u in quad]
 
     min_date = sorted_dates[0]
     max_date = sorted_dates[-1]
@@ -241,39 +242,42 @@ def _find_largest_window_change(
     best_start: Optional[float] = None
     best_end: Optional[float] = None
     best_delta: float = 0.0
-    best_z: float = -1.0  # ensures any finite Z will beat this
+    best_abs_change: float = -1.0
+    best_significant: bool = False  # non-overlapping 95% CIs
 
     start = min_date
     while start <= max_date - window:
         end = start + window
 
-        # Interpolate pt and sigma at the window boundaries
-        p_start = _interpolate(start, sorted_dates, sorted_pt)
-        p_end = _interpolate(end, sorted_dates, sorted_pt)
-        delta = p_end - p_start
+        # Interpolate af and 95% CIs at the window boundaries
+        f_start = _interpolate(start, sorted_dates, sorted_af)
+        f_end = _interpolate(end, sorted_dates, sorted_af)
+        delta = f_end - f_start
+        abs_change = abs(delta)
 
-        sigma_start = _interpolate(start, sorted_dates, sorted_sigma)
-        sigma_end = _interpolate(end, sorted_dates, sorted_sigma)
-        var_delta = sigma_start * sigma_start + sigma_end * sigma_end
+        low_start = _interpolate(start, sorted_dates, sorted_low)
+        up_start = _interpolate(start, sorted_dates, sorted_up)
+        low_end = _interpolate(end, sorted_dates, sorted_low)
+        up_end = _interpolate(end, sorted_dates, sorted_up)
 
-        if var_delta <= 0.0:
-            start += 10.0
-            continue
+        # Non-overlapping 95% intervals => “statistically distinguishable”
+        intervals_disjoint = (up_start < low_end) or (up_end < low_start)
+        is_significant = bool(intervals_disjoint)
 
-        z = abs(delta) / (var_delta ** 0.5)
-
-        if z > best_z:
-            best_z = z
+        # Primary: significance; secondary: magnitude
+        if (is_significant, abs_change) > (best_significant, best_abs_change):
+            best_significant = is_significant
+            best_abs_change = abs_change
+            best_delta = delta
             best_start = start
             best_end = end
-            best_delta = delta
 
         start += 10.0
 
     if best_start is None or best_end is None:
         return None
 
-    return best_start, best_end, best_delta, best_z
+    return best_start, best_end, best_delta, best_significant
 
 # ---------------------------------------------------------------------------
 # Plotting
@@ -323,16 +327,16 @@ def plot_trajectory_on_axis(
         linewidth=2.5,
     )
 
-    # Highlight interval of maximum 1 kyr standardized (Z-score) change
+    # Highlight 1 kyr window with largest credible empirical change
     highlight = _find_largest_window_change(
         dates,
-        columns["pt"],
-        columns["pt_low"],
-        columns["pt_up"],
+        columns["af"],
+        columns["af_low"],
+        columns["af_up"],
         window=1000.0,
     )
     if highlight is not None:
-        start_year, end_year, delta, z = highlight
+        start_year, end_year, delta, is_significant = highlight
         ax.axvspan(
             min(start_year, end_year),
             max(start_year, end_year),
@@ -340,13 +344,12 @@ def plot_trajectory_on_axis(
             alpha=0.4,
             edgecolor="none",
         )
-        # Print the window and effect for this panel
+        status = "95% non-overlapping CIs" if is_significant else "overlapping CIs"
         print(
             f"Panel {config['panel_label']}: strongest 1 kyr change "
             f"{start_year:.0f}–{end_year:.0f} BP "
-            f"(Δ={delta:+.3f}, Z={z:.2f})"
+            f"(Δ={delta:+.3f}, {status})"
         )
-
 
     # Panel label (A/B/C/D)
     ax.text(
@@ -425,7 +428,7 @@ def plot_trajectory_on_axis(
             Patch(
                 facecolor=COLOR_HIGHLIGHT,
                 alpha=0.4,
-                label="1,000 year period of maximum standardized change",
+                label="1,000 year period of largest credible change",
             ),
         ]
         ax.legend(
