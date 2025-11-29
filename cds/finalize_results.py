@@ -1,5 +1,6 @@
 import os
 import sys
+import io
 
 # Set environment variables to limit thread usage and prevent OOM/segfaults in constrained environments
 os.environ["OMP_NUM_THREADS"] = "1"
@@ -143,22 +144,20 @@ def main():
             for handler in logging.root.handlers:
                 handler.flush()
 
-            # --- DEBUGGING / SANITY CHECK START ---
-            logging.debug(f"DEBUG: Processing file: {f}")
+            # Read file once and parse from string to avoid double-open segfault
             with open(f, 'rb') as bin_f:
-                 head = bin_f.read(2048) # Read up to 2KB
+                 head = bin_f.read(2048)
                  if b'\x00' in head:
-                     logging.error(f"File {f} contains null bytes. Skipping as it is likely corrupt binary data.")
+                     logging.error(f"File {f} contains null bytes. Skipping.")
                      continue
 
-                 logging.debug(f"DEBUG: First 100 bytes of {f}: {head[:100]}")
+                 # Read full file content in same open operation
+                 bin_f.seek(0)
+                 content = bin_f.read().decode('utf-8')
 
-            # --- DEBUGGING END ---
-
-            # Use engine='python' for robustness against malformed lines/segfaults
-            df = pd.read_csv(f, sep='\t', engine='python')
+            # Parse from string (avoids pandas re-opening file)
+            df = pd.read_csv(io.StringIO(content), sep='\t', engine='python')
             dfs.append(df)
-            logging.debug(f"DEBUG: Successfully read dataframe from {f}")
 
         except Exception as e:
             logging.error(f"Failed to read {f}: {e}")
