@@ -61,8 +61,8 @@ COLOR_MODEL_FILL = "#ccebc5"      # Light green
 COLOR_HIGHLIGHT = "#fdd49e"       # Light orange
 
 # Font sizes
-FONT_AXIS_LABEL_X = 15
-FONT_AXIS_LABEL_Y = int(FONT_AXIS_LABEL_X * 1.6)  # 60% larger y-axis label
+FONT_AXIS_LABEL_X = 24
+FONT_AXIS_LABEL_Y = 24
 FONT_PANEL_LABEL = 32
 FONT_TICKS = 18
 FONT_TITLE = 16
