@@ -491,6 +491,38 @@ SIMULATION_COLUMN_DEFS: Dict[str, str] = OrderedDict(
     ]
 )
 
+PAML_COLUMN_DEFS: Dict[str, str] = OrderedDict(
+    [
+        ("region", "The identifier of the genomic inversion region (e.g., chr17:42000-45000)."),
+        ("gene", "The gene symbol or identifier being analyzed."),
+        (
+            "status",
+            "The final result of the pipeline for this gene (success or partial_success rows are retained).",
+        ),
+        ("reason", "If status is not success, this explains why (e.g., Insufficient taxa)."),
+        ("cmc_p_value", "P-value for the Clade Model C test."),
+        ("cmc_q_value", "FDR adjusted q-value for the Clade Model C test."),
+        ("cmc_lrt_stat", "Likelihood ratio test statistic for the Clade Model C comparison."),
+        ("cmc_lnl_h1", "Log-likelihood of the alternative hypothesis (different ω for divergent sites)."),
+        ("cmc_lnl_h0", "Log-likelihood of the null hypothesis (shared ω for divergent sites)."),
+        ("cmc_p0", "Proportion of sites in site class 0 (strictly conserved)."),
+        ("cmc_p1", "Proportion of sites in site class 1 (neutral evolution)."),
+        ("cmc_p2", "Proportion of sites in site class 2 (divergent selection class of interest)."),
+        ("cmc_omega0", "dN/dS (ω) estimate for conserved site class 0."),
+        ("cmc_omega2_direct", "dN/dS (ω) estimate for divergent sites in the Direct clade."),
+        ("cmc_omega2_inverted", "dN/dS (ω) estimate for divergent sites in the Inverted clade."),
+        ("cmc_kappa", "Estimated transition/transversion ratio (κ)."),
+        (
+            "n_leaves_pruned",
+            "Number of sequences retained after intersecting the region tree and gene alignment.",
+        ),
+        (
+            "taxa_used",
+            "Semicolon-separated list of the exact samples included in the PAML analysis (reproducibility).",
+        ),
+    ]
+)
+
 GENE_RESULTS_SCRIPT = REPO_ROOT / "stats" / "per_gene_cds_differences_jackknife.py"
 GENE_RESULTS_TSV = DATA_DIR / "gene_inversion_direct_inverted.tsv"
 CDS_SUMMARY_TSV = DATA_DIR / "cds_identical_proportions.tsv"
@@ -505,6 +537,7 @@ IMPUTATION_RESULTS = DATA_DIR / "imputation_results.tsv"
 INV_PROPERTIES = DATA_DIR / "inv_properties.tsv"
 POPULATION_METRICS = DATA_DIR / "output.csv"
 BEST_TAGGING_RESULTS = DATA_DIR / BEST_TAGGING_FILENAME
+PAML_RESULTS = DATA_DIR / "GRAND_PAML_RESULTS.tsv"
 
 TABLE_S1 = DATA_DIR / "tables.xlsx - Table S1.tsv"
 TABLE_S2 = DATA_DIR / "tables.xlsx - Table S2.tsv"
@@ -945,6 +978,22 @@ def _load_imputation_results() -> pd.DataFrame:
     return _prune_columns(df, IMPUTATION_COLUMN_DEFS, "Imputation results")
 
 
+def _load_paml_results() -> pd.DataFrame:
+    df = _load_simple_tsv(PAML_RESULTS)
+    if "status" not in df.columns:
+        raise SupplementaryTablesError("PAML results file is missing the 'status' column.")
+
+    df = df[df["status"].isin(["success", "partial_success"])]
+    if "region" in df.columns:
+        df["region"] = df["region"].str.replace(
+            r"^([^_]+)_([^_]+)_([^_]+)$", r"\1:\2-\3", regex=True
+        )
+    df = _prune_columns(df, PAML_COLUMN_DEFS, "dN/dS (ω) results")
+    if {"region", "gene"}.issubset(df.columns):
+        df = df.sort_values(["region", "gene"], kind="mergesort")
+    return df.reset_index(drop=True)
+
+
 def _ensure_best_tagging_results() -> Path:
     if BEST_TAGGING_RESULTS.exists():
         return BEST_TAGGING_RESULTS
@@ -1046,10 +1095,10 @@ def build_workbook(output_path: Path) -> None:
             name="dN/dS (ω) results",
             description=(
                 "Results of the dN/dS (ω) analysis testing for genes with significantly different selective regimes between "
-                "direct and inverted orientations. (Placeholder: data will be added in a future release.)"
+                "direct and inverted orientations."
             ),
-            column_defs=OrderedDict(),
-            loader=lambda: pd.DataFrame(),
+            column_defs=PAML_COLUMN_DEFS,
+            loader=_load_paml_results,
         )
     )
 
