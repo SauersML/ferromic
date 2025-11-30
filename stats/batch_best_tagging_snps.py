@@ -318,12 +318,28 @@ def process_regions(inv_path: Path, tagging_path: Path, *, workers: Optional[int
         if r.ref and r.alt and len(r.ref) == 1 and len(r.alt) == 1:
             # Columns in tagging report are like 'A_dir_freq', 'C_inv_freq'
             try:
-                r.ref_freq_dir = float(r.best.row.get(f"{r.ref}_dir_freq", np.nan))
-                r.ref_freq_inv = float(r.best.row.get(f"{r.ref}_inv_freq", np.nan))
-                r.alt_freq_dir = float(r.best.row.get(f"{r.alt}_dir_freq", np.nan))
-                r.alt_freq_inv = float(r.best.row.get(f"{r.alt}_inv_freq", np.nan))
+                ref_dir_val = r.best.row.get(f"{r.ref}_dir_freq")
+                ref_inv_val = r.best.row.get(f"{r.ref}_inv_freq")
+                alt_dir_val = r.best.row.get(f"{r.alt}_dir_freq")
+                alt_inv_val = r.best.row.get(f"{r.alt}_inv_freq")
+
+                r.ref_freq_dir = float(ref_dir_val) if ref_dir_val is not None else None
+                r.ref_freq_inv = float(ref_inv_val) if ref_inv_val is not None else None
+                r.alt_freq_dir = float(alt_dir_val) if alt_dir_val is not None else None
+                r.alt_freq_inv = float(alt_inv_val) if alt_inv_val is not None else None
             except Exception:
                 pass # Leave as None/NaN if lookup fails or conversion fails
+
+            # Flag selection stats whose REF/ALT alleles are absent in samples
+            ref_parts = [v for v in (r.ref_freq_dir, r.ref_freq_inv) if v is not None]
+            alt_parts = [v for v in (r.alt_freq_dir, r.alt_freq_inv) if v is not None]
+
+            if ref_parts and alt_parts:
+                total_ref_abundance = sum(ref_parts)
+                total_alt_abundance = sum(alt_parts)
+
+                if total_ref_abundance < 0.001 and total_alt_abundance < 0.001:
+                    r.reasons.append("Allele mismatch: Selection REF/ALT absent in samples")
 
 
     order_map = {region: idx for idx, (region, _) in enumerate(regions)}
@@ -355,7 +371,7 @@ def process_regions(inv_path: Path, tagging_path: Path, *, workers: Optional[int
             })
         else:
             row_dict.update({
-                "inversion_region": None,
+                "inversion_region": r.region,
                 "correlation_r": None,
                 "abs_r": None,
                 "chromosome_hg37": None,
