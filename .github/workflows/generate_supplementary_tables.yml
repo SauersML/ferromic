@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   build:
@@ -28,6 +29,8 @@ jobs:
       - name: Generate supplementary tables workbook
         run: |
           python stats/generate_tables.py --output web/figures-site/public/downloads/supplementary_tables.xlsx
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload supplementary tables artifact
         uses: actions/upload-artifact@v4
