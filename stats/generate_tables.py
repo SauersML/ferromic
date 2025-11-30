@@ -560,12 +560,6 @@ def _download_github_artifact(
     token = next((os.environ.get(env) for env in GITHUB_TOKEN_ENVS if os.environ.get(env)), None)
     repo = os.environ.get(GITHUB_REPO_ENV) or DEFAULT_REPO_SLUG
 
-    if not token:
-        raise SupplementaryTablesError(
-            "GitHub token not provided. Set GITHUB_TOKEN (or GH_TOKEN) to enable artifact download "
-            f"for {artifact_name}."
-        )
-
     runs_url = f"https://api.github.com/repos/{repo}/actions/workflows/{workflow_file}/runs"
     runs_json = _github_json(
         runs_url,
@@ -585,8 +579,14 @@ def _download_github_artifact(
             f"Artifact '{artifact_name}' not found in workflow run {run_id} for {repo}."
         )
 
-    download_url = artifact.get("archive_download_url")
-    req = Request(download_url, headers=_github_headers(token))
+    if token:
+        download_url = artifact.get("archive_download_url")
+        req = Request(download_url, headers=_github_headers(token))
+    else:
+        # Public unauthenticated fallback via nightly.link
+        download_url = f"https://nightly.link/{repo}/actions/runs/{run_id}/{artifact_name}.zip"
+        req = Request(download_url)
+
     try:
         with urlopen(req) as response:
             archive_bytes = response.read()
