@@ -74,6 +74,11 @@ REMOTE_PATHS: Sequence[RemoteResource] = [
     "public_internet/group1_MAPT_ENSG00000186868.18_ENST00000262410.10_chr17_cds_start45962338_cds_end46024168_inv_start45585159_inv_end46292045.phy",
     # FRF data
     "data/per_inversion_frf_effects.tsv",
+    # Allele frequency trajectories
+    "data/Trajectory-10_81319354_C_T.tsv",
+    "data/Trajectory-8_9261356_T_A.tsv",
+    "data/Trajectory-12_47295449_A_G.tsv",
+    "data/Trajectory-7_54318757_A_G.tsv",
 ]
 
 
@@ -164,6 +169,19 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         outputs=(Path("special/spearman_decay_raincloud.pdf"),),
         dependencies=("data/spearman_decay_points.tsv",),
         note="Generates raincloud plot for Spearman decay correlations.",
+        group="Diversity",
+    ),
+    FigureTask(
+        name="Inversion allele frequency trajectories",
+        script=Path("stats/freq_trajectory.py"),
+        outputs=(Path("data/inversion_trajectories_combined.pdf"),),
+        dependencies=(
+            "data/Trajectory-10_81319354_C_T.tsv",
+            "data/Trajectory-8_9261356_T_A.tsv",
+            "data/Trajectory-12_47295449_A_G.tsv",
+            "data/Trajectory-7_54318757_A_G.tsv",
+        ),
+        note="Combines four inversion allele frequency trajectories into a single PDF panel.",
         group="Diversity",
     ),
     FigureTask(
