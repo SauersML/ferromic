@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2025-11-30T18:17:20.024785+00:00",
+  "generatedAt": "2025-11-30T18:41:15.039151+00:00",
   "groups": [
     {
       "title": "Top-level figures",
@@ -300,87 +300,15 @@
           "type": "pdf"
         },
         {
-          "name": "PGS_control_comparison.pdf",
-          "href": "figures/data/PGS_control_comparison.pdf",
-          "preview": "figures/data/PGS_control_comparison.pdf",
+          "name": "allele_frequency_trajectory_rs1052553.pdf",
+          "href": "figures/data/allele_frequency_trajectory_rs1052553.pdf",
+          "preview": "figures/data/allele_frequency_trajectory_rs1052553.pdf",
           "type": "pdf"
         },
         {
-          "name": "PGS_control_volcano.pdf",
-          "href": "figures/data/PGS_control_volcano.pdf",
-          "preview": "figures/data/PGS_control_volcano.pdf",
-          "type": "pdf"
-        },
-        {
-          "name": "chr17_inversion_tag_correlation.pdf",
-          "href": "figures/data/chr17_inversion_tag_correlation.pdf",
-          "preview": "figures/data/chr17_inversion_tag_correlation.pdf",
-          "type": "pdf"
-        },
-        {
-          "name": "chr17_inversion_tag_correlation_pvalue.pdf",
-          "href": "figures/data/chr17_inversion_tag_correlation_pvalue.pdf",
-          "preview": "figures/data/chr17_inversion_tag_correlation_pvalue.pdf",
-          "type": "pdf"
-        },
-        {
-          "name": "fst_vs_inversion_edge_bp_cap100kb_grouped_median.pdf",
-          "href": "figures/data/fst_vs_inversion_edge_bp_cap100kb_grouped_median.pdf",
-          "preview": "figures/data/fst_vs_inversion_edge_bp_cap100kb_grouped_median.pdf",
-          "type": "pdf"
-        },
-        {
-          "name": "fst_vs_inversion_edge_bp_cap100kb_grouped_pooled.pdf",
-          "href": "figures/data/fst_vs_inversion_edge_bp_cap100kb_grouped_pooled.pdf",
-          "preview": "figures/data/fst_vs_inversion_edge_bp_cap100kb_grouped_pooled.pdf",
-          "type": "pdf"
-        },
-        {
-          "name": "fst_vs_inversion_edge_bp_cap40kb_grouped_pooled.pdf",
-          "href": "figures/data/fst_vs_inversion_edge_bp_cap40kb_grouped_pooled.pdf",
-          "preview": "figures/data/fst_vs_inversion_edge_bp_cap40kb_grouped_pooled.pdf",
-          "type": "pdf"
-        },
-        {
-          "name": "fst_vs_inversion_edge_proportion_cap40kb_grouped_pooled.pdf",
-          "href": "figures/data/fst_vs_inversion_edge_proportion_cap40kb_grouped_pooled.pdf",
-          "preview": "figures/data/fst_vs_inversion_edge_proportion_cap40kb_grouped_pooled.pdf",
-          "type": "pdf"
-        },
-        {
-          "name": "phewas_chr10_79542901-80217413.pdf",
-          "href": "figures/data/phewas_chr10_79542901-80217413.pdf",
-          "preview": "figures/data/phewas_chr10_79542901-80217413.pdf",
-          "type": "pdf"
-        },
-        {
-          "name": "phewas_chr12_46896694-46915975.pdf",
-          "href": "figures/data/phewas_chr12_46896694-46915975.pdf",
-          "preview": "figures/data/phewas_chr12_46896694-46915975.pdf",
-          "type": "pdf"
-        },
-        {
-          "name": "phewas_chr17_45585159-46292045.pdf",
-          "href": "figures/data/phewas_chr17_45585159-46292045.pdf",
-          "preview": "figures/data/phewas_chr17_45585159-46292045.pdf",
-          "type": "pdf"
-        },
-        {
-          "name": "phewas_chr4_33098066-33104924.pdf",
-          "href": "figures/data/phewas_chr4_33098066-33104924.pdf",
-          "preview": "figures/data/phewas_chr4_33098066-33104924.pdf",
-          "type": "pdf"
-        },
-        {
-          "name": "phewas_chr6_141866310-141898728.pdf",
-          "href": "figures/data/phewas_chr6_141866310-141898728.pdf",
-          "preview": "figures/data/phewas_chr6_141866310-141898728.pdf",
-          "type": "pdf"
-        },
-        {
-          "name": "phewas_chr6_167209001-167357782.pdf",
-          "href": "figures/data/phewas_chr6_167209001-167357782.pdf",
-          "preview": "figures/data/phewas_chr6_167209001-167357782.pdf",
+          "name": "allele_frequency_trajectory_rs34666797.pdf",
+          "href": "figures/data/allele_frequency_trajectory_rs34666797.pdf",
+          "preview": "figures/data/allele_frequency_trajectory_rs34666797.pdf",
           "type": "pdf"
         }
       ]
@@ -602,42 +530,6 @@
       ]
     },
     {
-      "title": "final_plots/fst_analysis_results_exact_mf_quadrants/total_100kb",
-      "slug": "final-plots-fst-analysis-results-exact-mf-quadrants-total-100kb",
-      "items": [
-        {
-          "name": "fst_mf_quadrant_violins_total_100kb.pdf",
-          "href": "figures/final_plots/fst_analysis_results_exact_mf_quadrants/total_100kb/fst_mf_quadrant_violins_total_100kb.pdf",
-          "preview": "figures/final_plots/fst_analysis_results_exact_mf_quadrants/total_100kb/fst_mf_quadrant_violins_total_100kb.pdf",
-          "type": "pdf"
-        }
-      ]
-    },
-    {
-      "title": "final_plots/fst_analysis_results_exact_mf_quadrants/total_200kb",
-      "slug": "final-plots-fst-analysis-results-exact-mf-quadrants-total-200kb",
-      "items": [
-        {
-          "name": "fst_mf_quadrant_violins_total_200kb.pdf",
-          "href": "figures/final_plots/fst_analysis_results_exact_mf_quadrants/total_200kb/fst_mf_quadrant_violins_total_200kb.pdf",
-          "preview": "figures/final_plots/fst_analysis_results_exact_mf_quadrants/total_200kb/fst_mf_quadrant_violins_total_200kb.pdf",
-          "type": "pdf"
-        }
-      ]
-    },
-    {
-      "title": "final_plots/fst_analysis_results_exact_mf_quadrants/total_20kb",
-      "slug": "final-plots-fst-analysis-results-exact-mf-quadrants-total-20kb",
-      "items": [
-        {
-          "name": "fst_mf_quadrant_violins_total_20kb.pdf",
-          "href": "figures/final_plots/fst_analysis_results_exact_mf_quadrants/total_20kb/fst_mf_quadrant_violins_total_20kb.pdf",
-          "preview": "figures/final_plots/fst_analysis_results_exact_mf_quadrants/total_20kb/fst_mf_quadrant_violins_total_20kb.pdf",
-          "type": "pdf"
-        }
-      ]
-    },
-    {
       "title": "final_plots/fst_analysis_results_exact_mf_quadrants/total_40kb",
       "slug": "final-plots-fst-analysis-results-exact-mf-quadrants-total-40kb",
       "items": [
@@ -645,30 +537,6 @@
           "name": "fst_mf_quadrant_violins_total_40kb.pdf",
           "href": "figures/final_plots/fst_analysis_results_exact_mf_quadrants/total_40kb/fst_mf_quadrant_violins_total_40kb.pdf",
           "preview": "figures/final_plots/fst_analysis_results_exact_mf_quadrants/total_40kb/fst_mf_quadrant_violins_total_40kb.pdf",
-          "type": "pdf"
-        }
-      ]
-    },
-    {
-      "title": "final_plots/fst_analysis_results_exact_mf_quadrants/total_60kb",
-      "slug": "final-plots-fst-analysis-results-exact-mf-quadrants-total-60kb",
-      "items": [
-        {
-          "name": "fst_mf_quadrant_violins_total_60kb.pdf",
-          "href": "figures/final_plots/fst_analysis_results_exact_mf_quadrants/total_60kb/fst_mf_quadrant_violins_total_60kb.pdf",
-          "preview": "figures/final_plots/fst_analysis_results_exact_mf_quadrants/total_60kb/fst_mf_quadrant_violins_total_60kb.pdf",
-          "type": "pdf"
-        }
-      ]
-    },
-    {
-      "title": "final_plots/fst_analysis_results_exact_mf_quadrants/total_80kb",
-      "slug": "final-plots-fst-analysis-results-exact-mf-quadrants-total-80kb",
-      "items": [
-        {
-          "name": "fst_mf_quadrant_violins_total_80kb.pdf",
-          "href": "figures/final_plots/fst_analysis_results_exact_mf_quadrants/total_80kb/fst_mf_quadrant_violins_total_80kb.pdf",
-          "preview": "figures/final_plots/fst_analysis_results_exact_mf_quadrants/total_80kb/fst_mf_quadrant_violins_total_80kb.pdf",
           "type": "pdf"
         }
       ]
@@ -1664,78 +1532,6 @@
       ]
     },
     {
-      "title": "final_plots/pi_analysis_results_exact_mf_quadrants/total_100kb",
-      "slug": "final-plots-pi-analysis-results-exact-mf-quadrants-total-100kb",
-      "items": [
-        {
-          "name": "pi_mf_overall_violins_total_100kb.pdf",
-          "href": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_100kb/pi_mf_overall_violins_total_100kb.pdf",
-          "preview": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_100kb/pi_mf_overall_violins_total_100kb.pdf",
-          "type": "pdf"
-        },
-        {
-          "name": "pi_mf_quadrant_violins_total_100kb.pdf",
-          "href": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_100kb/pi_mf_quadrant_violins_total_100kb.pdf",
-          "preview": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_100kb/pi_mf_quadrant_violins_total_100kb.pdf",
-          "type": "pdf"
-        },
-        {
-          "name": "pi_mf_recurrence_violins_total_100kb.pdf",
-          "href": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_100kb/pi_mf_recurrence_violins_total_100kb.pdf",
-          "preview": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_100kb/pi_mf_recurrence_violins_total_100kb.pdf",
-          "type": "pdf"
-        }
-      ]
-    },
-    {
-      "title": "final_plots/pi_analysis_results_exact_mf_quadrants/total_200kb",
-      "slug": "final-plots-pi-analysis-results-exact-mf-quadrants-total-200kb",
-      "items": [
-        {
-          "name": "pi_mf_overall_violins_total_200kb.pdf",
-          "href": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_200kb/pi_mf_overall_violins_total_200kb.pdf",
-          "preview": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_200kb/pi_mf_overall_violins_total_200kb.pdf",
-          "type": "pdf"
-        },
-        {
-          "name": "pi_mf_quadrant_violins_total_200kb.pdf",
-          "href": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_200kb/pi_mf_quadrant_violins_total_200kb.pdf",
-          "preview": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_200kb/pi_mf_quadrant_violins_total_200kb.pdf",
-          "type": "pdf"
-        },
-        {
-          "name": "pi_mf_recurrence_violins_total_200kb.pdf",
-          "href": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_200kb/pi_mf_recurrence_violins_total_200kb.pdf",
-          "preview": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_200kb/pi_mf_recurrence_violins_total_200kb.pdf",
-          "type": "pdf"
-        }
-      ]
-    },
-    {
-      "title": "final_plots/pi_analysis_results_exact_mf_quadrants/total_20kb",
-      "slug": "final-plots-pi-analysis-results-exact-mf-quadrants-total-20kb",
-      "items": [
-        {
-          "name": "pi_mf_overall_violins_total_20kb.pdf",
-          "href": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_20kb/pi_mf_overall_violins_total_20kb.pdf",
-          "preview": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_20kb/pi_mf_overall_violins_total_20kb.pdf",
-          "type": "pdf"
-        },
-        {
-          "name": "pi_mf_quadrant_violins_total_20kb.pdf",
-          "href": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_20kb/pi_mf_quadrant_violins_total_20kb.pdf",
-          "preview": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_20kb/pi_mf_quadrant_violins_total_20kb.pdf",
-          "type": "pdf"
-        },
-        {
-          "name": "pi_mf_recurrence_violins_total_20kb.pdf",
-          "href": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_20kb/pi_mf_recurrence_violins_total_20kb.pdf",
-          "preview": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_20kb/pi_mf_recurrence_violins_total_20kb.pdf",
-          "type": "pdf"
-        }
-      ]
-    },
-    {
       "title": "final_plots/pi_analysis_results_exact_mf_quadrants/total_40kb",
       "slug": "final-plots-pi-analysis-results-exact-mf-quadrants-total-40kb",
       "items": [
@@ -1755,54 +1551,6 @@
           "name": "pi_mf_recurrence_violins_total_40kb.pdf",
           "href": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_40kb/pi_mf_recurrence_violins_total_40kb.pdf",
           "preview": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_40kb/pi_mf_recurrence_violins_total_40kb.pdf",
-          "type": "pdf"
-        }
-      ]
-    },
-    {
-      "title": "final_plots/pi_analysis_results_exact_mf_quadrants/total_60kb",
-      "slug": "final-plots-pi-analysis-results-exact-mf-quadrants-total-60kb",
-      "items": [
-        {
-          "name": "pi_mf_overall_violins_total_60kb.pdf",
-          "href": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_60kb/pi_mf_overall_violins_total_60kb.pdf",
-          "preview": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_60kb/pi_mf_overall_violins_total_60kb.pdf",
-          "type": "pdf"
-        },
-        {
-          "name": "pi_mf_quadrant_violins_total_60kb.pdf",
-          "href": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_60kb/pi_mf_quadrant_violins_total_60kb.pdf",
-          "preview": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_60kb/pi_mf_quadrant_violins_total_60kb.pdf",
-          "type": "pdf"
-        },
-        {
-          "name": "pi_mf_recurrence_violins_total_60kb.pdf",
-          "href": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_60kb/pi_mf_recurrence_violins_total_60kb.pdf",
-          "preview": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_60kb/pi_mf_recurrence_violins_total_60kb.pdf",
-          "type": "pdf"
-        }
-      ]
-    },
-    {
-      "title": "final_plots/pi_analysis_results_exact_mf_quadrants/total_80kb",
-      "slug": "final-plots-pi-analysis-results-exact-mf-quadrants-total-80kb",
-      "items": [
-        {
-          "name": "pi_mf_overall_violins_total_80kb.pdf",
-          "href": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_80kb/pi_mf_overall_violins_total_80kb.pdf",
-          "preview": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_80kb/pi_mf_overall_violins_total_80kb.pdf",
-          "type": "pdf"
-        },
-        {
-          "name": "pi_mf_quadrant_violins_total_80kb.pdf",
-          "href": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_80kb/pi_mf_quadrant_violins_total_80kb.pdf",
-          "preview": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_80kb/pi_mf_quadrant_violins_total_80kb.pdf",
-          "type": "pdf"
-        },
-        {
-          "name": "pi_mf_recurrence_violins_total_80kb.pdf",
-          "href": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_80kb/pi_mf_recurrence_violins_total_80kb.pdf",
-          "preview": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_80kb/pi_mf_recurrence_violins_total_80kb.pdf",
           "type": "pdf"
         }
       ]
@@ -1874,42 +1622,6 @@
       ]
     },
     {
-      "title": "fst_analysis_results_exact_mf_quadrants/total_100kb",
-      "slug": "fst-analysis-results-exact-mf-quadrants-total-100kb",
-      "items": [
-        {
-          "name": "fst_mf_quadrant_violins_total_100kb.pdf",
-          "href": "figures/fst_analysis_results_exact_mf_quadrants/total_100kb/fst_mf_quadrant_violins_total_100kb.pdf",
-          "preview": "figures/fst_analysis_results_exact_mf_quadrants/total_100kb/fst_mf_quadrant_violins_total_100kb.pdf",
-          "type": "pdf"
-        }
-      ]
-    },
-    {
-      "title": "fst_analysis_results_exact_mf_quadrants/total_200kb",
-      "slug": "fst-analysis-results-exact-mf-quadrants-total-200kb",
-      "items": [
-        {
-          "name": "fst_mf_quadrant_violins_total_200kb.pdf",
-          "href": "figures/fst_analysis_results_exact_mf_quadrants/total_200kb/fst_mf_quadrant_violins_total_200kb.pdf",
-          "preview": "figures/fst_analysis_results_exact_mf_quadrants/total_200kb/fst_mf_quadrant_violins_total_200kb.pdf",
-          "type": "pdf"
-        }
-      ]
-    },
-    {
-      "title": "fst_analysis_results_exact_mf_quadrants/total_20kb",
-      "slug": "fst-analysis-results-exact-mf-quadrants-total-20kb",
-      "items": [
-        {
-          "name": "fst_mf_quadrant_violins_total_20kb.pdf",
-          "href": "figures/fst_analysis_results_exact_mf_quadrants/total_20kb/fst_mf_quadrant_violins_total_20kb.pdf",
-          "preview": "figures/fst_analysis_results_exact_mf_quadrants/total_20kb/fst_mf_quadrant_violins_total_20kb.pdf",
-          "type": "pdf"
-        }
-      ]
-    },
-    {
       "title": "fst_analysis_results_exact_mf_quadrants/total_40kb",
       "slug": "fst-analysis-results-exact-mf-quadrants-total-40kb",
       "items": [
@@ -1917,30 +1629,6 @@
           "name": "fst_mf_quadrant_violins_total_40kb.pdf",
           "href": "figures/fst_analysis_results_exact_mf_quadrants/total_40kb/fst_mf_quadrant_violins_total_40kb.pdf",
           "preview": "figures/fst_analysis_results_exact_mf_quadrants/total_40kb/fst_mf_quadrant_violins_total_40kb.pdf",
-          "type": "pdf"
-        }
-      ]
-    },
-    {
-      "title": "fst_analysis_results_exact_mf_quadrants/total_60kb",
-      "slug": "fst-analysis-results-exact-mf-quadrants-total-60kb",
-      "items": [
-        {
-          "name": "fst_mf_quadrant_violins_total_60kb.pdf",
-          "href": "figures/fst_analysis_results_exact_mf_quadrants/total_60kb/fst_mf_quadrant_violins_total_60kb.pdf",
-          "preview": "figures/fst_analysis_results_exact_mf_quadrants/total_60kb/fst_mf_quadrant_violins_total_60kb.pdf",
-          "type": "pdf"
-        }
-      ]
-    },
-    {
-      "title": "fst_analysis_results_exact_mf_quadrants/total_80kb",
-      "slug": "fst-analysis-results-exact-mf-quadrants-total-80kb",
-      "items": [
-        {
-          "name": "fst_mf_quadrant_violins_total_80kb.pdf",
-          "href": "figures/fst_analysis_results_exact_mf_quadrants/total_80kb/fst_mf_quadrant_violins_total_80kb.pdf",
-          "preview": "figures/fst_analysis_results_exact_mf_quadrants/total_80kb/fst_mf_quadrant_violins_total_80kb.pdf",
           "type": "pdf"
         }
       ]
@@ -3260,78 +2948,6 @@
       ]
     },
     {
-      "title": "pi_analysis_results_exact_mf_quadrants/total_100kb",
-      "slug": "pi-analysis-results-exact-mf-quadrants-total-100kb",
-      "items": [
-        {
-          "name": "pi_mf_overall_violins_total_100kb.pdf",
-          "href": "figures/pi_analysis_results_exact_mf_quadrants/total_100kb/pi_mf_overall_violins_total_100kb.pdf",
-          "preview": "figures/pi_analysis_results_exact_mf_quadrants/total_100kb/pi_mf_overall_violins_total_100kb.pdf",
-          "type": "pdf"
-        },
-        {
-          "name": "pi_mf_quadrant_violins_total_100kb.pdf",
-          "href": "figures/pi_analysis_results_exact_mf_quadrants/total_100kb/pi_mf_quadrant_violins_total_100kb.pdf",
-          "preview": "figures/pi_analysis_results_exact_mf_quadrants/total_100kb/pi_mf_quadrant_violins_total_100kb.pdf",
-          "type": "pdf"
-        },
-        {
-          "name": "pi_mf_recurrence_violins_total_100kb.pdf",
-          "href": "figures/pi_analysis_results_exact_mf_quadrants/total_100kb/pi_mf_recurrence_violins_total_100kb.pdf",
-          "preview": "figures/pi_analysis_results_exact_mf_quadrants/total_100kb/pi_mf_recurrence_violins_total_100kb.pdf",
-          "type": "pdf"
-        }
-      ]
-    },
-    {
-      "title": "pi_analysis_results_exact_mf_quadrants/total_200kb",
-      "slug": "pi-analysis-results-exact-mf-quadrants-total-200kb",
-      "items": [
-        {
-          "name": "pi_mf_overall_violins_total_200kb.pdf",
-          "href": "figures/pi_analysis_results_exact_mf_quadrants/total_200kb/pi_mf_overall_violins_total_200kb.pdf",
-          "preview": "figures/pi_analysis_results_exact_mf_quadrants/total_200kb/pi_mf_overall_violins_total_200kb.pdf",
-          "type": "pdf"
-        },
-        {
-          "name": "pi_mf_quadrant_violins_total_200kb.pdf",
-          "href": "figures/pi_analysis_results_exact_mf_quadrants/total_200kb/pi_mf_quadrant_violins_total_200kb.pdf",
-          "preview": "figures/pi_analysis_results_exact_mf_quadrants/total_200kb/pi_mf_quadrant_violins_total_200kb.pdf",
-          "type": "pdf"
-        },
-        {
-          "name": "pi_mf_recurrence_violins_total_200kb.pdf",
-          "href": "figures/pi_analysis_results_exact_mf_quadrants/total_200kb/pi_mf_recurrence_violins_total_200kb.pdf",
-          "preview": "figures/pi_analysis_results_exact_mf_quadrants/total_200kb/pi_mf_recurrence_violins_total_200kb.pdf",
-          "type": "pdf"
-        }
-      ]
-    },
-    {
-      "title": "pi_analysis_results_exact_mf_quadrants/total_20kb",
-      "slug": "pi-analysis-results-exact-mf-quadrants-total-20kb",
-      "items": [
-        {
-          "name": "pi_mf_overall_violins_total_20kb.pdf",
-          "href": "figures/pi_analysis_results_exact_mf_quadrants/total_20kb/pi_mf_overall_violins_total_20kb.pdf",
-          "preview": "figures/pi_analysis_results_exact_mf_quadrants/total_20kb/pi_mf_overall_violins_total_20kb.pdf",
-          "type": "pdf"
-        },
-        {
-          "name": "pi_mf_quadrant_violins_total_20kb.pdf",
-          "href": "figures/pi_analysis_results_exact_mf_quadrants/total_20kb/pi_mf_quadrant_violins_total_20kb.pdf",
-          "preview": "figures/pi_analysis_results_exact_mf_quadrants/total_20kb/pi_mf_quadrant_violins_total_20kb.pdf",
-          "type": "pdf"
-        },
-        {
-          "name": "pi_mf_recurrence_violins_total_20kb.pdf",
-          "href": "figures/pi_analysis_results_exact_mf_quadrants/total_20kb/pi_mf_recurrence_violins_total_20kb.pdf",
-          "preview": "figures/pi_analysis_results_exact_mf_quadrants/total_20kb/pi_mf_recurrence_violins_total_20kb.pdf",
-          "type": "pdf"
-        }
-      ]
-    },
-    {
       "title": "pi_analysis_results_exact_mf_quadrants/total_40kb",
       "slug": "pi-analysis-results-exact-mf-quadrants-total-40kb",
       "items": [
@@ -3351,54 +2967,6 @@
           "name": "pi_mf_recurrence_violins_total_40kb.pdf",
           "href": "figures/pi_analysis_results_exact_mf_quadrants/total_40kb/pi_mf_recurrence_violins_total_40kb.pdf",
           "preview": "figures/pi_analysis_results_exact_mf_quadrants/total_40kb/pi_mf_recurrence_violins_total_40kb.pdf",
-          "type": "pdf"
-        }
-      ]
-    },
-    {
-      "title": "pi_analysis_results_exact_mf_quadrants/total_60kb",
-      "slug": "pi-analysis-results-exact-mf-quadrants-total-60kb",
-      "items": [
-        {
-          "name": "pi_mf_overall_violins_total_60kb.pdf",
-          "href": "figures/pi_analysis_results_exact_mf_quadrants/total_60kb/pi_mf_overall_violins_total_60kb.pdf",
-          "preview": "figures/pi_analysis_results_exact_mf_quadrants/total_60kb/pi_mf_overall_violins_total_60kb.pdf",
-          "type": "pdf"
-        },
-        {
-          "name": "pi_mf_quadrant_violins_total_60kb.pdf",
-          "href": "figures/pi_analysis_results_exact_mf_quadrants/total_60kb/pi_mf_quadrant_violins_total_60kb.pdf",
-          "preview": "figures/pi_analysis_results_exact_mf_quadrants/total_60kb/pi_mf_quadrant_violins_total_60kb.pdf",
-          "type": "pdf"
-        },
-        {
-          "name": "pi_mf_recurrence_violins_total_60kb.pdf",
-          "href": "figures/pi_analysis_results_exact_mf_quadrants/total_60kb/pi_mf_recurrence_violins_total_60kb.pdf",
-          "preview": "figures/pi_analysis_results_exact_mf_quadrants/total_60kb/pi_mf_recurrence_violins_total_60kb.pdf",
-          "type": "pdf"
-        }
-      ]
-    },
-    {
-      "title": "pi_analysis_results_exact_mf_quadrants/total_80kb",
-      "slug": "pi-analysis-results-exact-mf-quadrants-total-80kb",
-      "items": [
-        {
-          "name": "pi_mf_overall_violins_total_80kb.pdf",
-          "href": "figures/pi_analysis_results_exact_mf_quadrants/total_80kb/pi_mf_overall_violins_total_80kb.pdf",
-          "preview": "figures/pi_analysis_results_exact_mf_quadrants/total_80kb/pi_mf_overall_violins_total_80kb.pdf",
-          "type": "pdf"
-        },
-        {
-          "name": "pi_mf_quadrant_violins_total_80kb.pdf",
-          "href": "figures/pi_analysis_results_exact_mf_quadrants/total_80kb/pi_mf_quadrant_violins_total_80kb.pdf",
-          "preview": "figures/pi_analysis_results_exact_mf_quadrants/total_80kb/pi_mf_quadrant_violins_total_80kb.pdf",
-          "type": "pdf"
-        },
-        {
-          "name": "pi_mf_recurrence_violins_total_80kb.pdf",
-          "href": "figures/pi_analysis_results_exact_mf_quadrants/total_80kb/pi_mf_recurrence_violins_total_80kb.pdf",
-          "preview": "figures/pi_analysis_results_exact_mf_quadrants/total_80kb/pi_mf_recurrence_violins_total_80kb.pdf",
           "type": "pdf"
         }
       ]
