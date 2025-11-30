@@ -435,7 +435,7 @@ BEST_TAGGING_COLUMN_DEFS: Dict[str, str] = OrderedDict(
     [
         (
             "inversion_region",
-            "Inversion interval (GRCh37/hg19 coordinates) reported by the tagging SNP pipeline (chr:start-end).",
+            "Inversion interval (GRCh38/hg38 coordinates) reported by the tagging SNP pipeline (chr:start-end).",
         ),
         (
             "p_x",
@@ -444,7 +444,7 @@ BEST_TAGGING_COLUMN_DEFS: Dict[str, str] = OrderedDict(
         ("S", "Selection coefficient estimate from the selection summary statistics (hg19/GRCh37)."),
         ("REF", "Reference allele for the tagging SNP in the selection dataset."),
         ("ALT", "Alternate allele for the tagging SNP in the selection dataset."),
-        ("AF", "Reference allele frequency reported in the selection summary statistics."),
+        ("AF", "Alternate allele frequency reported in the selection summary statistics."),
         (
             "REF_freq_direct",
             "Frequency of the REF allele among direct (haplotype group 0) chromosomes in the tagging SNP analysis.",
