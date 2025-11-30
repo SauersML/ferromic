@@ -18,15 +18,21 @@ public directory so the web site can link to it directly.
 from __future__ import annotations
 
 import argparse
+import io
+import json
+import os
+import shutil
 import subprocess
 import sys
 import warnings
+import zipfile
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional
 from urllib.error import HTTPError, URLError
-from urllib.request import urlopen
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 import pandas as pd
 
@@ -36,6 +42,14 @@ NEXT_PUBLIC_DIR = REPO_ROOT / "web" / "figures-site" / "public"
 DEFAULT_OUTPUT = NEXT_PUBLIC_DIR / "downloads" / "supplementary_tables.xlsx"
 
 PUBLIC_BASE_URL = "https://sharedspace.s3.msi.umn.edu/public_internet/"
+
+GITHUB_TOKEN_ENVS = ("GITHUB_TOKEN", "GH_TOKEN")
+GITHUB_REPO_ENV = "GITHUB_REPOSITORY"
+DEFAULT_REPO_SLUG = "SauersML/ferromic"
+
+BEST_TAGGING_WORKFLOW = "batch_best_tagging_snps.yml"
+BEST_TAGGING_ARTIFACT = "best-tagging-snps-results"
+BEST_TAGGING_FILENAME = "best_tagging_snps_qvalues.tsv"
 
 INV_COLUMNS_KEEP: List[str] = [
     "Chromosome",
@@ -419,13 +433,51 @@ IMPUTATION_COLUMN_DEFS: Dict[str, str] = OrderedDict(
     ]
 )
 
-TRAJECTORY_COLUMN_DEFS: Dict[str, str] = OrderedDict(
+BEST_TAGGING_COLUMN_DEFS: Dict[str, str] = OrderedDict(
     [
-        ("date_center", "Estimated time point (Years Before Present)."),
-        ("af", "Allele frequency of the reference allele."),
-        ("af_low", "Lower bound of the allele frequency confidence interval."),
-        ("af_up", "Upper bound of the allele frequency confidence interval."),
-        ("selection_coefficient", "Estimated strength of selection acting on the locus."),
+        (
+            "inversion_region",
+            "Inversion interval (GRCh37/hg19 coordinates) reported by the tagging SNP pipeline (chr:start-end).",
+        ),
+        (
+            "p_x",
+            "P-value (P_X) from the ancient selection summary statistics corresponding to the tagging SNP (hg19/GRCh37).",
+        ),
+        ("S", "Selection coefficient estimate from the selection summary statistics (hg19/GRCh37)."),
+        ("REF", "Reference allele for the tagging SNP in the selection dataset."),
+        ("ALT", "Alternate allele for the tagging SNP in the selection dataset."),
+        ("AF", "Reference allele frequency reported in the selection summary statistics."),
+        (
+            "REF_freq_direct",
+            "Frequency of the REF allele among direct (haplotype group 0) chromosomes in the tagging SNP analysis.",
+        ),
+        (
+            "REF_freq_inverted",
+            "Frequency of the REF allele among inverted (haplotype group 1) chromosomes in the tagging SNP analysis.",
+        ),
+        (
+            "ALT_freq_direct",
+            "Frequency of the ALT allele among direct (haplotype group 0) chromosomes in the tagging SNP analysis.",
+        ),
+        (
+            "ALT_freq_inverted",
+            "Frequency of the ALT allele among inverted (haplotype group 1) chromosomes in the tagging SNP analysis.",
+        ),
+        (
+            "exclusion_reasons",
+            "Semicolon-delimited reasons why the tagging SNP did not pass quality filters (e.g., low r², low haplotype count, missing selection stats).",
+        ),
+        (
+            "correlation_r",
+            "Pearson correlation (r) between the tagging SNP allele and inversion orientation (direct vs. inverted haplotypes).",
+        ),
+        ("abs_r", "Absolute correlation |r| for the tagging SNP within the inversion region."),
+        ("chromosome_hg37", "Chromosome (GRCh37/hg19) of the tagging SNP."),
+        ("position_hg37", "1-based genomic position (GRCh37/hg19) of the tagging SNP."),
+        (
+            "q_value",
+            "Benjamini–Hochberg FDR q-value across inversions that passed tagging SNP quality filters (computed from P_X).",
+        ),
     ]
 )
 
@@ -454,7 +506,7 @@ CATEGORIES_RESULTS_CANDIDATES = (
 IMPUTATION_RESULTS = DATA_DIR / "imputation_results.tsv"
 INV_PROPERTIES = DATA_DIR / "inv_properties.tsv"
 POPULATION_METRICS = DATA_DIR / "output.csv"
-TRAJECTORY_DATA = DATA_DIR / "Trajectory-12_47296118_A_G.tsv"
+BEST_TAGGING_RESULTS = DATA_DIR / BEST_TAGGING_FILENAME
 
 TABLE_S1 = DATA_DIR / "tables.xlsx - Table S1.tsv"
 TABLE_S2 = DATA_DIR / "tables.xlsx - Table S2.tsv"
@@ -489,6 +541,95 @@ def _download_file(url: str, destination: Path) -> None:
         ) from exc
 
     destination.write_bytes(data)
+
+
+def _github_headers(token: Optional[str]) -> Dict[str, str]:
+    headers: Dict[str, str] = {
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
+def _github_json(url: str, token: Optional[str], params: Optional[Dict[str, str]] = None) -> dict:
+    if params:
+        url = f"{url}?{urlencode(params)}"
+
+    req = Request(url, headers=_github_headers(token))
+    try:
+        with urlopen(req) as response:
+            return json.load(response)
+    except HTTPError as exc:  # pragma: no cover - network failure edge case
+        raise SupplementaryTablesError(
+            f"GitHub API request failed for {url} (HTTP {exc.code})."
+        ) from exc
+    except URLError as exc:  # pragma: no cover - network failure edge case
+        raise SupplementaryTablesError(f"Unable to reach GitHub API at {url}: {exc.reason}.") from exc
+
+
+def _download_github_artifact(
+    *,
+    workflow_file: str,
+    artifact_name: str,
+    expected_member: str,
+    destination: Path,
+) -> Path:
+    token = next((os.environ.get(env) for env in GITHUB_TOKEN_ENVS if os.environ.get(env)), None)
+    repo = os.environ.get(GITHUB_REPO_ENV) or DEFAULT_REPO_SLUG
+
+    if not token:
+        raise SupplementaryTablesError(
+            "GitHub token not provided. Set GITHUB_TOKEN (or GH_TOKEN) to enable artifact download "
+            f"for {artifact_name}."
+        )
+
+    runs_url = f"https://api.github.com/repos/{repo}/actions/workflows/{workflow_file}/runs"
+    runs_json = _github_json(
+        runs_url,
+        token,
+        params={"status": "success", "per_page": 1, "exclude_pull_requests": "true"},
+    )
+    runs = runs_json.get("workflow_runs", [])
+    if not runs:
+        raise SupplementaryTablesError(f"No successful runs found for workflow {workflow_file} in {repo}.")
+
+    run_id = runs[0].get("id")
+    artifacts_url = f"https://api.github.com/repos/{repo}/actions/runs/{run_id}/artifacts"
+    artifacts = _github_json(artifacts_url, token, params={"per_page": 100}).get("artifacts", [])
+    artifact = next((a for a in artifacts if a.get("name") == artifact_name), None)
+    if artifact is None:
+        raise SupplementaryTablesError(
+            f"Artifact '{artifact_name}' not found in workflow run {run_id} for {repo}."
+        )
+
+    download_url = artifact.get("archive_download_url")
+    req = Request(download_url, headers=_github_headers(token))
+    try:
+        with urlopen(req) as response:
+            archive_bytes = response.read()
+    except HTTPError as exc:  # pragma: no cover - network failure edge case
+        raise SupplementaryTablesError(
+            f"Failed to download artifact {artifact_name} (HTTP {exc.code})."
+        ) from exc
+    except URLError as exc:  # pragma: no cover - network failure edge case
+        raise SupplementaryTablesError(
+            f"Unable to download artifact {artifact_name} from GitHub: {exc.reason}."
+        ) from exc
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(io.BytesIO(archive_bytes)) as zf:
+        member = next((name for name in zf.namelist() if name.endswith(expected_member)), None)
+        if member is None:
+            raise SupplementaryTablesError(
+                f"Expected file {expected_member} not found inside artifact {artifact_name}."
+            )
+
+        with zf.open(member) as src, destination.open("wb") as dst:
+            shutil.copyfileobj(src, dst)
+
+    return destination
 
 
 def _prune_columns(df: pd.DataFrame, column_defs: Dict[str, str], sheet_name: str) -> pd.DataFrame:
@@ -830,11 +971,23 @@ def _load_imputation_results() -> pd.DataFrame:
     return _prune_columns(df, IMPUTATION_COLUMN_DEFS, "Imputation results")
 
 
-def _load_trajectory_data() -> pd.DataFrame:
-    if not TRAJECTORY_DATA.exists():
-        raise SupplementaryTablesError(f"Trajectory data not found: {TRAJECTORY_DATA}")
-    df = pd.read_csv(TRAJECTORY_DATA, sep="\t", dtype=str, low_memory=False)
-    return _prune_columns(df, TRAJECTORY_COLUMN_DEFS, "AGES trajectory 12_47296118")
+def _ensure_best_tagging_results() -> Path:
+    if BEST_TAGGING_RESULTS.exists():
+        return BEST_TAGGING_RESULTS
+
+    print("Best tagging SNP results missing; attempting to download latest artifact ...")
+    return _download_github_artifact(
+        workflow_file=BEST_TAGGING_WORKFLOW,
+        artifact_name=BEST_TAGGING_ARTIFACT,
+        expected_member=BEST_TAGGING_FILENAME,
+        destination=BEST_TAGGING_RESULTS,
+    )
+
+
+def _load_best_tagging_snps() -> pd.DataFrame:
+    path = _ensure_best_tagging_results()
+    df = pd.read_csv(path, sep="\t", dtype=str, low_memory=False)
+    return _prune_columns(df, BEST_TAGGING_COLUMN_DEFS, "Best tagging SNPs")
 
 
 def _load_simulation_table(path: Path) -> pd.DataFrame:
@@ -966,14 +1119,15 @@ def build_workbook(output_path: Path) -> None:
 
     register(
         SheetInfo(
-            name="AGES trajectory 12_47296118",
+            name="Best tagging SNPs",
             description=(
-                "Allele frequency trajectory data for SNP 12_47296118_A_G (tagging the 12q13 inversion) derived from the "
-                "Ancient Genome Edge Selection (AGES) database. Represents frequency changes over the last ~14,000 years in "
-                "West Eurasia."
+                "Top tagging SNP for each inversion locus, extracted by ``batch_best_tagging_snps.py`` from the latest "
+                "``batch_best_tagging_snps.yml`` workflow run. Selection statistics (S and P_X) originate from the Ancient "
+                "Genome Edge Selection summary table, allele frequencies are stratified by direct vs. inverted haplotypes, and "
+                "q-values reflect Benjamini–Hochberg correction across inversions passing quality filters."
             ),
-            column_defs=TRAJECTORY_COLUMN_DEFS,
-            loader=_load_trajectory_data,
+            column_defs=BEST_TAGGING_COLUMN_DEFS,
+            loader=_load_best_tagging_snps,
         )
     )
 
