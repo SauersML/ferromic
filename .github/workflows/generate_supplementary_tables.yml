@@ -26,6 +26,42 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas xlsxwriter tqdm
 
+      - name: Download best tagging SNP results artifact
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p data
+
+          echo "Locating latest successful batch_best_tagging_snps.yml run ..."
+          RUN_ID=$(gh run list --workflow batch_best_tagging_snps.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId')
+
+          if [[ -z "$RUN_ID" ]]; then
+            echo "::error::No successful batch_best_tagging_snps.yml run found. Cannot download tagging SNPs artifact."
+            exit 1
+          fi
+
+          echo "Downloading best-tagging-snps-results artifact from run $RUN_ID ..."
+          gh run download "$RUN_ID" -n best-tagging-snps-results --dir data/best-tagging-snps-results
+
+          CANDIDATE=""
+          if [[ -f "data/best-tagging-snps-results/best_tagging_snps_qvalues.tsv" ]]; then
+            CANDIDATE="data/best-tagging-snps-results/best_tagging_snps_qvalues.tsv"
+          elif [[ -f "data/best-tagging-snps-results/data/best_tagging_snps_qvalues.tsv" ]]; then
+            CANDIDATE="data/best-tagging-snps-results/data/best_tagging_snps_qvalues.tsv"
+          fi
+
+          if [[ -n "$CANDIDATE" ]]; then
+            mv "$CANDIDATE" data/best_tagging_snps_qvalues.tsv
+            echo "✓ best_tagging_snps_qvalues.tsv downloaded to data/."
+          else
+            echo "::error::Artifact downloaded but best_tagging_snps_qvalues.tsv was not found in expected locations."
+            find data/best-tagging-snps-results -maxdepth 3 -type f -print
+            exit 1
+          fi
+
       - name: Generate supplementary tables workbook
         run: |
           python stats/generate_tables.py --output web/figures-site/public/downloads/supplementary_tables.xlsx
