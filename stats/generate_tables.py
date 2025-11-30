@@ -41,8 +41,6 @@ DATA_DIR = REPO_ROOT / "data"
 NEXT_PUBLIC_DIR = REPO_ROOT / "web" / "figures-site" / "public"
 DEFAULT_OUTPUT = NEXT_PUBLIC_DIR / "downloads" / "supplementary_tables.xlsx"
 
-PUBLIC_BASE_URL = "https://sharedspace.s3.msi.umn.edu/public_internet/"
-
 GITHUB_TOKEN_ENVS = ("GITHUB_TOKEN", "GH_TOKEN")
 GITHUB_REPO_ENV = "GITHUB_REPOSITORY"
 DEFAULT_REPO_SLUG = "SauersML/ferromic"
@@ -526,23 +524,6 @@ class SupplementaryTablesError(RuntimeError):
     """Raised for unrecoverable supplementary table failures."""
 
 
-def _download_file(url: str, destination: Path) -> None:
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        with urlopen(url) as response:  # noqa: S310 (trusted host maintained by project)
-            data = response.read()
-    except HTTPError as exc:  # pragma: no cover - network failure edge case
-        raise SupplementaryTablesError(
-            f"Unable to download required resource from {url} (HTTP {exc.code})."
-        ) from exc
-    except URLError as exc:  # pragma: no cover - network failure edge case
-        raise SupplementaryTablesError(
-            f"Unable to reach {url}: {exc.reason}."
-        ) from exc
-
-    destination.write_bytes(data)
-
-
 def _github_headers(token: Optional[str]) -> Dict[str, str]:
     headers: Dict[str, str] = {
         "Accept": "application/vnd.github+json",
@@ -736,13 +717,14 @@ def ensure_cds_summary() -> Path:
             raise SupplementaryTablesError("cds_differences.py timed out after 1 hour")
         except Exception as e:
             print(f"Failed to run cds_differences.py: {e}", file=sys.stderr)
-            print("Falling back to downloading pre-computed results...")
-    
-    # Fallback: download pre-computed results
-    url = PUBLIC_BASE_URL + CDS_SUMMARY_TSV.name
-    print(f"Downloading CDS summary table from {url} ...")
-    _download_file(url, CDS_SUMMARY_TSV)
-    return CDS_SUMMARY_TSV
+            raise SupplementaryTablesError(
+                "cds_identical_proportions.tsv is missing and could not be generated from local inputs."
+            )
+
+    raise SupplementaryTablesError(
+        "cds_identical_proportions.tsv is missing. Please add it to the data directory or provide the required inputs "
+        "to generate it locally."
+    )
 
 
 def ensure_gene_results() -> Path:
@@ -789,13 +771,14 @@ def ensure_gene_results() -> Path:
             raise SupplementaryTablesError("per_gene_cds_differences_jackknife.py timed out after 1 hour")
         except Exception as e:
             print(f"Failed to run per_gene_cds_differences_jackknife.py: {e}", file=sys.stderr)
-            print("Falling back to downloading pre-computed results...")
-    
-    # Fallback: download pre-computed results
-    url = PUBLIC_BASE_URL + GENE_RESULTS_TSV.name
-    print(f"Downloading gene-level CDS results from {url} ...")
-    _download_file(url, GENE_RESULTS_TSV)
-    return GENE_RESULTS_TSV
+            raise SupplementaryTablesError(
+                "gene_inversion_direct_inverted.tsv is missing and could not be generated from local inputs."
+            )
+
+    raise SupplementaryTablesError(
+        "gene_inversion_direct_inverted.tsv is missing. Please add it to the data directory or provide the required "
+        "inputs to generate it locally."
+    )
 
 
 def _load_inversion_catalog() -> pd.DataFrame:
@@ -940,17 +923,8 @@ def _load_phewas_tagging() -> pd.DataFrame:
         df = _load_simple_tsv(PHEWAS_TAGGING_RESULTS)
         return _clean_phewas_df(df, "17q21 tagging PheWAS", TAG_PHEWAS_COLUMN_DEFS)
 
-    url = PUBLIC_BASE_URL + PHEWAS_TAGGING_RESULTS.name
-    print(f"Attempting to download PheWAS tagging results from {url} ...")
-    try:
-        _download_file(url, PHEWAS_TAGGING_RESULTS)
-    except SupplementaryTablesError as exc:
-        raise SupplementaryTablesError(
-            "PheWAS tagging results were not found locally and could not be downloaded."
-        ) from exc
-
-    return _clean_phewas_df(
-        _load_simple_tsv(PHEWAS_TAGGING_RESULTS), "17q21 tagging PheWAS", TAG_PHEWAS_COLUMN_DEFS
+    raise SupplementaryTablesError(
+        "PheWAS tagging results were not found in the data directory. Please add all_pop_phewas_tag.tsv."
     )
 
 
