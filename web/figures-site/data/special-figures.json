@@ -44,6 +44,11 @@
           "title": "Mean π by Category: Flanks vs. Middle",
           "filename": "pi_analysis_results_exact_mf_quadrants/total_40kb/pi_mf_recurrence_violins_total_40kb.pdf",
           "description": "Four-panel flank versus middle comparison stratified by recurrence status and orientation."
+        },
+        {
+          "title": "Inversion Allele Frequency Trajectories",
+          "filename": "data/inversion_trajectories_combined.pdf",
+          "description": "Four-panel allele frequency trajectories combining empirical points and selection-model fits across representative inversions."
         }
       ]
     },
