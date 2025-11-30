@@ -19,6 +19,9 @@ import hashlib
 import random
 import shlex
 
+import faulthandler
+faulthandler.enable(all_threads=True)
+
 import numpy as np
 from scipy.stats import chi2
 from statsmodels.stats.multitest import fdrcorrection
@@ -43,6 +46,19 @@ except Exception as exc:
 # ==============================================================================
 # 1. Constants & Configuration
 # ==============================================================================
+
+def log_runtime_environment(prefix=""):
+    label = f"{prefix} " if prefix else ""
+    logging.info(
+        "%sEnvironment: python=%s; numpy=%s; pandas=%s; scipy=%s; statsmodels=%s; platform=%s",
+        label,
+        sys.version.split()[0],
+        getattr(__import__("numpy"), "__version__", "unknown"),
+        getattr(__import__("pandas"), "__version__", "unknown"),
+        getattr(__import__("scipy"), "__version__", "unknown"),
+        getattr(__import__("statsmodels"), "__version__", "unknown"),
+        sys.platform,
+    )
 
 WHITELIST = True
 
@@ -1779,3 +1795,102 @@ def analyze_single_gene(gene_info, region_tree_path, region_label, paml_bin, cac
     finally:
         if temp_dir:
             logging.info(f"[{gene_name}|{region_label}] PAML run directory available at: {temp_dir}")
+
+def safe_read_tsv_via_subprocess(path, log_prefix=""):
+    """
+    Read a TSV using pandas in a separate Python process, with noisy diagnostics.
+    If the child segfaults or otherwise dies, this process stays alive and logs code/stdout/stderr.
+    """
+    import tempfile as _tempfile
+    import pickle as _pickle
+
+    tmp = _tempfile.NamedTemporaryFile(suffix=".pkl", delete=False)
+    tmp_path = tmp.name
+    tmp.close()
+
+    # Child script: heavy diagnostics, then read_csv, then pickle DF
+    script = r"""
+import os, sys, pickle, platform, textwrap
+import faulthandler
+faulthandler.enable(all_threads=True)
+
+import numpy as np
+import pandas as pd
+
+path, out_path = sys.argv[1], sys.argv[2]
+
+print(f"[child] python={sys.version.split()[0]} "
+      f"platform={sys.platform} "
+      f"numpy={np.__version__} "
+      f"pandas={pd.__version__}")
+print(f"[child] reading file: {path}")
+sys.stdout.flush()
+
+try:
+    st = os.stat(path)
+    size = st.st_size
+    with open(path, "rb") as f:
+        raw_head = f.read(2048)
+    print(f"[child] size_bytes={size}")
+    print(f"[child] head_bytes={raw_head[:200]!r}")
+    try:
+        header_line = raw_head.splitlines()[0].decode("utf-8", "replace")
+    except Exception as e:
+        header_line = f"<decode error: {e!r}>"
+    print(f"[child] header_line={header_line!r}")
+    sys.stdout.flush()
+except Exception as e:
+    print(f"[child] pre-read diagnostics failed: {e!r}", file=sys.stderr)
+    sys.exit(2)
+
+try:
+    print("[child] calling pandas.read_csv(..., sep='\\t', engine='python')", flush=True)
+    df = pd.read_csv(path, sep="\t", engine="python")
+    print(f"[child] parsed shape={df.shape}", flush=True)
+    # dtypes can be large; but still extremely useful
+    print(f"[child] dtypes={df.dtypes.to_dict()}", flush=True)
+    with open(out_path, "wb") as f:
+        pickle.dump(df, f, protocol=4)
+    sys.exit(0)
+except Exception as e:
+    import traceback
+    print(f"[child] pandas.read_csv raised: {e!r}", file=sys.stderr)
+    traceback.print_exc(file=sys.stderr)
+    if os.path.exists(out_path):
+        os.remove(out_path)
+    sys.exit(1)
+"""
+
+    cmd = [sys.executable, "-c", script, path, tmp_path]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+
+    # Always dump child's logs
+    if proc.stdout:
+        logging.info("%schild_stdout:\n%s", log_prefix, proc.stdout.rstrip("\n"))
+    if proc.stderr:
+        logging.error("%schild_stderr:\n%s", log_prefix, proc.stderr.rstrip("\n"))
+
+    if proc.returncode != 0:
+        logging.error(
+            "%sChild TSV reader failed for %s (exit_code=%s)",
+            log_prefix,
+            path,
+            proc.returncode,
+        )
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+        return None
+
+    # Successful: unpickle the DataFrame
+    try:
+        with open(tmp_path, "rb") as f:
+            df = _pickle.load(f)
+    finally:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+
+    return df
