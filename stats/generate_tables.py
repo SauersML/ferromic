@@ -492,8 +492,8 @@ SIMULATION_COLUMN_DEFS: Dict[str, str] = OrderedDict(
 )
 
 GENE_RESULTS_SCRIPT = REPO_ROOT / "stats" / "per_gene_cds_differences_jackknife.py"
-GENE_RESULTS_TSV = REPO_ROOT / "gene_inversion_direct_inverted.tsv"
-CDS_SUMMARY_TSV = REPO_ROOT / "cds_identical_proportions.tsv"
+GENE_RESULTS_TSV = DATA_DIR / "gene_inversion_direct_inverted.tsv"
+CDS_SUMMARY_TSV = DATA_DIR / "cds_identical_proportions.tsv"
 
 PHEWAS_RESULTS = DATA_DIR / "phewas_results.tsv"
 PHEWAS_TAGGING_RESULTS = DATA_DIR / "all_pop_phewas_tag.tsv"
