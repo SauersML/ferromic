@@ -1,6 +1,8 @@
 import os
 import sys
 import io
+import tracemalloc
+import time
 
 # Set environment variables to limit thread usage and prevent OOM/segfaults in constrained environments
 os.environ["OMP_NUM_THREADS"] = "1"
@@ -124,12 +126,19 @@ def _finalize_record(record):
 
 
 def main():
+    # Start memory tracking
+    tracemalloc.start()
+    start_time = time.time()
+
     files = sorted(glob.glob("partial_results_*.tsv"))
     if not files:
         logging.warning("No partial_results_*.tsv files found. Nothing to aggregate.")
         return
 
     logging.info(f"Found {len(files)} partial result files. Aggregating...")
+    logging.info(f"Initial memory: {tracemalloc.get_traced_memory()[0] / 1024 / 1024:.2f} MB")
+    sys.stdout.flush()
+
     dfs = []
     for i, f in enumerate(files):
         try:
@@ -139,25 +148,61 @@ def main():
                 logging.warning(f"Skipping empty file: {f}")
                 continue
 
-            logging.info(f"Reading file {i+1}/{len(files)}: {f}")
-            # Flush handlers to ensure log is written before potential crash
-            for handler in logging.root.handlers:
-                handler.flush()
+            file_start = time.time()
+            current_mem, peak_mem = tracemalloc.get_traced_memory()
 
-            # Read file once and parse from string to avoid double-open segfault
+            logging.info(f"\n{'='*80}")
+            logging.info(f"FILE {i+1}/{len(files)}: {os.path.basename(f)}")
+            logging.info(f"  File size: {st.st_size:,} bytes ({st.st_size/1024:.1f} KB)")
+            logging.info(f"  Current memory: {current_mem/1024/1024:.1f} MB (peak: {peak_mem/1024/1024:.1f} MB)")
+            logging.info(f"  DataFrames in list: {len(dfs)}")
+            sys.stdout.flush()
+
+            # Read file
+            t0 = time.time()
             with open(f, 'rb') as bin_f:
                  head = bin_f.read(2048)
                  if b'\x00' in head:
-                     logging.error(f"File {f} contains null bytes. Skipping.")
+                     logging.error(f"  ✗ SKIP: Contains null bytes")
+                     sys.stdout.flush()
                      continue
 
-                 # Read full file content in same open operation
                  bin_f.seek(0)
-                 content = bin_f.read().decode('utf-8')
+                 content = bin_f.read()
+                 logging.info(f"  ✓ Read file in {time.time()-t0:.3f}s")
+                 sys.stdout.flush()
 
-            # Parse from string (avoids pandas re-opening file)
-            df = pd.read_csv(io.StringIO(content), sep='\t', engine='python')
+                 t0 = time.time()
+                 content = content.decode('utf-8')
+                 logging.info(f"  ✓ Decoded UTF-8 in {time.time()-t0:.3f}s ({len(content):,} chars)")
+                 sys.stdout.flush()
+
+            # Parse CSV
+            t0 = time.time()
+            string_io = io.StringIO(content)
+            logging.info(f"  → Parsing CSV with pandas (engine=python)...")
+            sys.stdout.flush()
+
+            df = pd.read_csv(string_io, sep='\t', engine='python')
+            parse_time = time.time() - t0
+
+            # Get DataFrame info
+            mem_usage = df.memory_usage(deep=True).sum()
+            logging.info(f"  ✓ Parsed in {parse_time:.3f}s")
+            logging.info(f"    Shape: {df.shape} (rows × cols)")
+            logging.info(f"    Memory: {mem_usage/1024:.1f} KB")
+            logging.info(f"    Dtypes: {dict(df.dtypes.value_counts())}")
+            sys.stdout.flush()
+
+            # Append to list
+            t0 = time.time()
             dfs.append(df)
+            logging.info(f"  ✓ Appended in {time.time()-t0:.3f}s (list now has {len(dfs)} DataFrames)")
+
+            current_mem, peak_mem = tracemalloc.get_traced_memory()
+            logging.info(f"  Memory after: {current_mem/1024/1024:.1f} MB (peak: {peak_mem/1024/1024:.1f} MB)")
+            logging.info(f"  Total time for file: {time.time()-file_start:.3f}s")
+            sys.stdout.flush()
 
         except Exception as e:
             logging.error(f"Failed to read {f}: {e}")
@@ -166,11 +211,36 @@ def main():
         logging.error("No valid dataframes loaded.")
         sys.exit(1)
 
-    logging.info("Concatenating dataframes...")
-    for handler in logging.root.handlers:
-        handler.flush()
+    logging.info(f"\n{'='*80}")
+    logging.info(f"CONCATENATION PHASE")
+    logging.info(f"{'='*80}")
+    current_mem, peak_mem = tracemalloc.get_traced_memory()
+    logging.info(f"DataFrames to concat: {len(dfs)}")
+    logging.info(f"Total rows: {sum(len(df) for df in dfs)}")
+    logging.info(f"Total columns: {sum(len(df.columns) for df in dfs)}")
+    logging.info(f"Memory before concat: {current_mem/1024/1024:.1f} MB (peak: {peak_mem/1024/1024:.1f} MB)")
+
+    # Calculate expected memory
+    total_mem = sum(df.memory_usage(deep=True).sum() for df in dfs)
+    logging.info(f"Total DataFrame memory: {total_mem/1024/1024:.1f} MB")
+    sys.stdout.flush()
+
+    logging.info(f"\n→ Calling pd.concat()...")
+    sys.stdout.flush()
+    t0 = time.time()
 
     raw = pd.concat(dfs, ignore_index=True)
+
+    concat_time = time.time() - t0
+    current_mem, peak_mem = tracemalloc.get_traced_memory()
+    result_mem = raw.memory_usage(deep=True).sum()
+
+    logging.info(f"✓ Concatenation successful!")
+    logging.info(f"  Time: {concat_time:.3f}s")
+    logging.info(f"  Result shape: {raw.shape}")
+    logging.info(f"  Result memory: {result_mem/1024/1024:.1f} MB")
+    logging.info(f"  Peak memory: {peak_mem/1024/1024:.1f} MB")
+    sys.stdout.flush()
     raw['paml_model'] = raw.get('paml_model', pd.Series(['both'] * len(raw))).fillna('both').str.lower()
     logging.info(f"Aggregated {len(raw)} total rows across models.")
 
