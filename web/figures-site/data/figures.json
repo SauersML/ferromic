@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2025-11-30T22:20:05.745250+00:00",
+  "generatedAt": "2025-11-30T22:30:19.927902+00:00",
   "groups": [
     {
       "title": "Top-level figures",
@@ -310,6 +310,12 @@
           "href": "figures/data/allele_frequency_trajectory_rs34666797.pdf",
           "preview": "figures/data/allele_frequency_trajectory_rs34666797.pdf",
           "type": "pdf"
+        },
+        {
+          "name": "inversion_trajectories_combined.pdf",
+          "href": "figures/data/inversion_trajectories_combined.pdf",
+          "preview": "figures/data/inversion_trajectories_combined.pdf",
+          "type": "pdf"
         }
       ]
     },
@@ -502,6 +508,18 @@
           "href": "figures/final_plots/variance_wc_vs_dxy_hudson_log_scale_colored.png",
           "preview": "figures/final_plots/variance_wc_vs_dxy_hudson_log_scale_colored.png",
           "type": "image"
+        }
+      ]
+    },
+    {
+      "title": "final_plots/data",
+      "slug": "final-plots-data",
+      "items": [
+        {
+          "name": "inversion_trajectories_combined.pdf",
+          "href": "figures/final_plots/data/inversion_trajectories_combined.pdf",
+          "preview": "figures/final_plots/data/inversion_trajectories_combined.pdf",
+          "type": "pdf"
         }
       ]
     },
