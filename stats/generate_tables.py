@@ -1093,11 +1093,11 @@ def build_workbook(output_path: Path) -> None:
 
     register(
         SheetInfo(
-            name="Best tagging SNPs",
+            name="Ancient DNA best tagging SNPs",
             description=(
-                "Top tagging SNP for each inversion locus, extracted by ``batch_best_tagging_snps.py`` from the latest "
-                "``batch_best_tagging_snps.yml`` workflow run. Selection statistics (S and P_X) originate from the Ancient "
-                "Genome Edge Selection summary table, allele frequencies are stratified by direct vs. inverted haplotypes, and "
+                "Top tagging SNP for each inversion locus, derived from the latest ancient DNA selection analysis of "
+                "West Eurasian genomes in the AGES database. Selection statistics (S and P_X) originate from that "
+                "ancient DNA summary table, allele frequencies are stratified by direct vs. inverted haplotypes, and "
                 "q-values reflect Benjamini–Hochberg correction across inversions passing quality filters."
             ),
             column_defs=BEST_TAGGING_COLUMN_DEFS,
