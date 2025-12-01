@@ -1055,8 +1055,25 @@ def _load_paml_results() -> pd.DataFrame:
             return 1
         return 0
 
-    def _choose_winner_run(row: pd.Series) -> int:
-        """Choose the winning run index based on status priority."""
+   def _choose_winner_run(row: pd.Series) -> int:
+        """Choose the winning run index based on the winner seed suffix."""
+        # Prioritize the run that actually generated the winning model parameters.
+        # This fixes issues where 'status' is success for both runs, but one run
+        # failed to produce metadata (taxa_used) or had convergence warnings hidden
+        # in the reason field.
+        h1_seed = str(row.get("h1_winner_seed", ""))
+        if h1_seed.endswith("run_2"):
+            return 2
+        if h1_seed.endswith("run_1"):
+            return 1
+
+        h0_seed = str(row.get("h0_winner_seed", ""))
+        if h0_seed.endswith("run_2"):
+            return 2
+        if h0_seed.endswith("run_1"):
+            return 1
+
+        # Fallback to status priority if seed information is missing
         status_run_1 = row.get("status_run_1")
         status_run_2 = row.get("status_run_2")
         priority_run_1 = _status_priority(status_run_1)
