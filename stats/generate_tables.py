@@ -1013,10 +1013,98 @@ def _load_best_tagging_snps() -> pd.DataFrame:
     return _prune_columns(df, BEST_TAGGING_COLUMN_DEFS, "Best tagging SNPs")
 
 
+def _load_paml_results() -> pd.DataFrame:
+    """Load and harmonize PAML output for the dN/dS summary table, using winner-level summaries."""
+    df = _load_simple_tsv(PAML_RESULTS)
+
+    rename_map: Dict[str, str] = {}
+
+    if "overall_p_value" in df.columns and "cmc_p_value" not in df.columns:
+        rename_map["overall_p_value"] = "cmc_p_value"
+    if "overall_q_value" in df.columns and "cmc_q_value" not in df.columns:
+        rename_map["overall_q_value"] = "cmc_q_value"
+    if "overall_lrt_stat" in df.columns and "cmc_lrt_stat" not in df.columns:
+        rename_map["overall_lrt_stat"] = "cmc_lrt_stat"
+    if "overall_h1_lnl" in df.columns and "cmc_lnl_h1" not in df.columns:
+        rename_map["overall_h1_lnl"] = "cmc_lnl_h1"
+    if "overall_h0_lnl" in df.columns and "cmc_lnl_h0" not in df.columns:
+        rename_map["overall_h0_lnl"] = "cmc_lnl_h0"
+
+    if "winner_p0" in df.columns and "cmc_p0" not in df.columns:
+        rename_map["winner_p0"] = "cmc_p0"
+    if "winner_p1" in df.columns and "cmc_p1" not in df.columns:
+        rename_map["winner_p1"] = "cmc_p1"
+    if "winner_p2" in df.columns and "cmc_p2" not in df.columns:
+        rename_map["winner_p2"] = "cmc_p2"
+    if "winner_omega0" in df.columns and "cmc_omega0" not in df.columns:
+        rename_map["winner_omega0"] = "cmc_omega0"
+    if "winner_omega2_direct" in df.columns and "cmc_omega2_direct" not in df.columns:
+        rename_map["winner_omega2_direct"] = "cmc_omega2_direct"
+    if "winner_omega2_inverted" in df.columns and "cmc_omega2_inverted" not in df.columns:
+        rename_map["winner_omega2_inverted"] = "cmc_omega2_inverted"
+    if "winner_kappa" in df.columns and "cmc_kappa" not in df.columns:
+        rename_map["winner_kappa"] = "cmc_kappa"
+
+    if rename_map:
+        df = df.rename(columns=rename_map)
+
+    def _status_priority(value: Optional[str]) -> int:
+        """Map textual run status to a numeric priority used to select the winning run."""
+        if value == "success":
+            return 2
+        if value == "partial_success":
+            return 1
+        return 0
+
+    def _choose_winner_run(row: pd.Series) -> int:
+        """Choose the winning run index based on status priority."""
+        status_run_1 = row.get("status_run_1")
+        status_run_2 = row.get("status_run_2")
+        priority_run_1 = _status_priority(status_run_1)
+        priority_run_2 = _status_priority(status_run_2)
+        if priority_run_2 > priority_run_1:
+            return 2
+        return 1
+
+    if "status" not in df.columns and "status_run_1" in df.columns and "status_run_2" in df.columns:
+        winner_run = df.apply(_choose_winner_run, axis=1)
+
+        df["status"] = df["status_run_1"]
+        df.loc[winner_run == 2, "status"] = df.loc[winner_run == 2, "status_run_2"]
+
+        if "reason_run_1" in df.columns and "reason_run_2" in df.columns:
+            df["reason"] = df["reason_run_1"]
+            df.loc[winner_run == 2, "reason"] = df.loc[winner_run == 2, "reason_run_2"]
+
+        if "n_leaves_pruned_run_1" in df.columns and "n_leaves_pruned_run_2" in df.columns:
+            df["n_leaves_pruned"] = df["n_leaves_pruned_run_1"]
+            df.loc[winner_run == 2, "n_leaves_pruned"] = df.loc[winner_run == 2, "n_leaves_pruned_run_2"]
+
+        if "taxa_used_run_1" in df.columns and "taxa_used_run_2" in df.columns:
+            df["taxa_used"] = df["taxa_used_run_1"]
+            df.loc[winner_run == 2, "taxa_used"] = df.loc[winner_run == 2, "taxa_used_run_2"]
+
+    if "status" not in df.columns:
+        raise SupplementaryTablesError("PAML results file is missing status information required for the summary table.")
+
+    df = df[df["status"].isin(["success", "partial_success"])]
+
+    if "region" in df.columns:
+        df["region"] = df["region"].str.replace(
+            r"^([^_]+)_([^_]+)_([^_]+)$",
+            r"\1:\2-\3",
+            regex=True,
+        )
+
+    df = _prune_columns(df, PAML_COLUMN_DEFS, "dN/dS (ω) results")
+    if {"region", "gene"}.issubset(df.columns):
+        df = df.sort_values(["region", "gene"], kind="mergesort")
+    return df.reset_index(drop=True)
+
+
 def _load_simulation_table(path: Path) -> pd.DataFrame:
     df = _load_simple_tsv(path)
     return _prune_columns(df, SIMULATION_COLUMN_DEFS, path.name)
-
 
 def build_workbook(output_path: Path) -> None:
     sheet_infos: List[SheetInfo] = []
