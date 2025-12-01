@@ -1071,10 +1071,6 @@ def _load_paml_results() -> pd.DataFrame:
         df["status"] = df["status_run_1"]
         df.loc[winner_run == 2, "status"] = df.loc[winner_run == 2, "status_run_2"]
 
-        if "reason_run_1" in df.columns and "reason_run_2" in df.columns:
-            df["reason"] = df["reason_run_1"]
-            df.loc[winner_run == 2, "reason"] = df.loc[winner_run == 2, "reason_run_2"]
-
         if "n_leaves_pruned_run_1" in df.columns and "n_leaves_pruned_run_2" in df.columns:
             df["n_leaves_pruned"] = df["n_leaves_pruned_run_1"]
             df.loc[winner_run == 2, "n_leaves_pruned"] = df.loc[winner_run == 2, "n_leaves_pruned_run_2"]
