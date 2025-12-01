@@ -499,7 +499,6 @@ PAML_COLUMN_DEFS: Dict[str, str] = OrderedDict(
             "status",
             "The final result of the pipeline for this gene (success or partial_success rows are retained).",
         ),
-        ("reason", "If status is not success, this explains why (e.g., Insufficient taxa)."),
         ("cmc_p_value", "P-value for the Clade Model C test."),
         ("cmc_q_value", "FDR adjusted q-value for the Clade Model C test."),
         ("cmc_lrt_stat", "Likelihood ratio test statistic for the Clade Model C comparison."),
