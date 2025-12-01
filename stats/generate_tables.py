@@ -441,7 +441,7 @@ BEST_TAGGING_COLUMN_DEFS: Dict[str, str] = OrderedDict(
             "p_x",
             "P-value (P_X) from the ancient selection summary statistics corresponding to the tagging SNP (hg19/GRCh37).",
         ),
-        ("S", "Selection coefficient estimate from the selection summary statistics (hg19/GRCh37)."),
+        ("s", "Selection coefficient estimate from the selection summary statistics (hg19/GRCh37)."),
         ("REF", "Reference allele for the tagging SNP in the selection dataset."),
         ("ALT", "Alternate allele for the tagging SNP in the selection dataset."),
         ("AF", "Alternate allele frequency reported in the selection summary statistics."),
@@ -1009,8 +1009,10 @@ def _ensure_best_tagging_results() -> Path:
 def _load_best_tagging_snps() -> pd.DataFrame:
     path = _ensure_best_tagging_results()
     df = pd.read_csv(path, sep="\t", dtype=str, low_memory=False)
+    # Rename uppercase 'S' to lowercase 's' to match the column definition schema
+    if "S" in df.columns and "s" not in df.columns:
+        df = df.rename(columns={"S": "s"})
     return _prune_columns(df, BEST_TAGGING_COLUMN_DEFS, "Best tagging SNPs")
-
 
 def _load_paml_results() -> pd.DataFrame:
     """Load and harmonize PAML output for the dN/dS summary table, using winner-level summaries."""
