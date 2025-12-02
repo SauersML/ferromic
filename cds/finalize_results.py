@@ -52,7 +52,7 @@ def _default_record(region, gene, seed_columns):
     rec.update({
         'region': region,
         'gene': gene,
-        'status': 'paml_optim_fail',
+        'status': 'PAML optimization failed',
         'reason': '',
         'models_present': set(),
         'reasons': [],
@@ -120,33 +120,33 @@ def _finalize_record(record):
         record['reasons'].append('Upstream runtime error observed')
 
     if not h0_present and not h1_present:
-        status_tag = 'no_model_likelihoods'
+        status_tag = 'Missing clade model likelihoods for H0 and H1'
         record['reasons'].append('Missing clade model likelihoods for H0 and H1')
     elif h0_present and not h1_present:
-        status_tag = 'incomplete_missing_h1'
+        status_tag = 'H1 clade likelihood missing'
         record['reasons'].append('Missing H1 clade likelihood')
     elif h1_present and not h0_present:
-        status_tag = 'incomplete_missing_h0'
+        status_tag = 'H0 clade likelihood missing'
         record['reasons'].append('Missing H0 clade likelihood')
     else:
         diff = record['cmc_lnl_h1'] - record['cmc_lnl_h0']
         if diff >= -1e-6:
-            status_tag = 'complete_h1_ge_h0'
+            status_tag = 'Complete data with H1 at least as good as H0'
         else:
-            status_tag = 'complete_h1_worse_than_h0'
+            status_tag = 'Complete data but H1 worse than H0'
 
     status_tags = []
     if runtime_statuses:
-        status_tags.append('runtime_error')
+        status_tags.append('Runtime error observed in upstream run')
 
     status_tags.append(status_tag)
 
     if not branch_data_present:
-        status_tags.append('branch_model_absent')
+        status_tags.append('Branch model results missing')
     elif pd.isna(record.get('bm_p_value')) and pd.isna(record.get('bm_lrt_stat')):
-        status_tags.append('branch_statistics_missing')
+        status_tags.append('Branch statistics missing')
 
-    record['status'] = ';'.join(status_tags)
+    record['status'] = '; '.join(status_tags)
 
     if record['reasons']:
         record['reason'] = ' | '.join(sorted(set(filter(None, record['reasons']))))

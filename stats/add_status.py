@@ -26,27 +26,27 @@ def compute_status_series(df: pd.DataFrame, epsilon: float = STATUS_EPSILON) -> 
         diff = row.get('overall_h1_lnl', np.nan) - row.get('overall_h0_lnl', np.nan)
 
         if _runtime_issue_present(row, status_run_cols):
-            tags.append('runtime_error_in_runs')
+            tags.append('Runtime error observed in at least one run')
 
         if not h0_present and not h1_present:
-            tags.append('no_model_likelihoods')
+            tags.append('Missing H0 and H1 likelihoods')
         elif h0_present and not h1_present:
-            tags.append('incomplete_missing_h1')
+            tags.append('H1 likelihood missing')
         elif h1_present and not h0_present:
-            tags.append('incomplete_missing_h0')
+            tags.append('H0 likelihood missing')
         else:
             if diff >= -epsilon:
-                tags.append('complete_h1_ge_h0')
+                tags.append('Complete data with H1 at least as good as H0')
             else:
-                tags.append('complete_h1_worse_than_h0')
+                tags.append('Complete data but H1 worse than H0')
 
         if pd.isna(row.get('overall_p_value')):
             if h0_present and h1_present and diff < -epsilon:
-                tags.append('p_value_not_computed_h1_below_h0')
+                tags.append('P-value not computed because H1 is below H0')
             elif not (h0_present and h1_present):
-                tags.append('p_value_not_computed_incomplete_models')
+                tags.append('P-value not computed because model results are incomplete')
 
-        return ';'.join(tags) if tags else 'status_unavailable'
+        return '; '.join(tags) if tags else 'Status unavailable'
 
     return df.apply(build_status, axis=1)
 
