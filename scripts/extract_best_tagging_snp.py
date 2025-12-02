@@ -308,6 +308,26 @@ def sanitize_region(region: str) -> str:
     return region.replace(":", "_").replace("-", "_").replace("/", "_")
 
 
+def _normalize_chromosome(value: str | int | float) -> str:
+    """Return a chromosome label without trailing decimal artifacts."""
+
+    text = str(value)
+    prefix = "chr" if text.startswith("chr") else ""
+    core = text.removeprefix("chr")
+
+    try:
+        as_float = float(core)
+        if as_float.is_integer():
+            core = str(int(as_float))
+        else:
+            core = str(as_float)
+    except ValueError:
+        # Keep the original core (e.g., "X" or "Y") if it is non-numeric.
+        pass
+
+    return f"{prefix}{core}"
+
+
 @dataclass
 class TaggingSNPResult:
     region: str
@@ -361,9 +381,9 @@ def select_top_tags(region: str, df: pd.DataFrame, *, top_n: int = 3) -> tuple[l
                 region=region,
                 inversion_region=str(row["inversion_region"]),
                 correlation=float(row["correlation"]),
-                chromosome_hg37=str(row["chromosome_hg37"]),
+                chromosome_hg37=_normalize_chromosome(row["chromosome_hg37"]),
                 position_hg37=int(row["position_hg37"]),
-                chromosome_hg38=str(row["chromosome_hg38"]),
+                chromosome_hg38=_normalize_chromosome(row["chromosome_hg38"]),
                 position_hg38=int(row["position_hg38"]),
                 row=row,
                 rank=rank,
@@ -405,9 +425,9 @@ def select_segment_bests(
                     region=region,
                     inversion_region=str(best_row["inversion_region"]),
                     correlation=float(best_row["correlation"]),
-                    chromosome_hg37=str(best_row["chromosome_hg37"]),
+                    chromosome_hg37=_normalize_chromosome(best_row["chromosome_hg37"]),
                     position_hg37=int(best_row["position_hg37"]),
-                    chromosome_hg38=str(best_row["chromosome_hg38"]),
+                    chromosome_hg38=_normalize_chromosome(best_row["chromosome_hg38"]),
                     position_hg38=int(best_row["position_hg38"]),
                     row=best_row,
                     context=f"Segment {idx + 1}",
