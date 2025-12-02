@@ -1168,10 +1168,6 @@ def _load_paml_results() -> pd.DataFrame:
     if "status" not in df.columns:
         raise SupplementaryTablesError("PAML results file is missing status information required for the summary table.")
 
-    # Retain all usable runs (including those with runtime warnings) while
-    # excluding rows where neither hypothesis could be evaluated.
-    df = df[~df["status"].str.startswith("Excluded", na=False)]
-
     if "region" in df.columns:
         df["region"] = df["region"].str.replace(
             r"^([^_]+)_([^_]+)_([^_]+)$",
