@@ -1057,7 +1057,7 @@ def _load_paml_results() -> pd.DataFrame:
             return 1
         return 0
 
-   def _choose_winner_run(row: pd.Series) -> int:
+    def _choose_winner_run(row: pd.Series) -> int:
         """Choose the winning run index based on the winner seed suffix."""
         # Prioritize the run that actually generated the winning model parameters.
         # This fixes issues where 'status' is success for both runs, but one run
