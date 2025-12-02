@@ -55,7 +55,8 @@ def _default_record(region, gene, seed_columns):
         'status': 'paml_optim_fail',
         'reason': '',
         'models_present': set(),
-        'reasons': []
+        'reasons': [],
+        'source_statuses': set()
     })
     return rec
 
@@ -95,36 +96,63 @@ def _merge_seed_data(record, row, seed_columns):
 
 
 def _finalize_record(record):
+    h0_present = np.isfinite(record.get('cmc_lnl_h0', np.nan))
+    h1_present = np.isfinite(record.get('cmc_lnl_h1', np.nan))
+
     # Compute clade statistics when both lnL values are present
-    if np.isfinite(record.get('cmc_lnl_h0', np.nan)) and np.isfinite(record.get('cmc_lnl_h1', np.nan)):
+    if h0_present and h1_present:
         diff = record['cmc_lnl_h1'] - record['cmc_lnl_h0']
-        # If H1 is significantly worse than H0, it is an optimization failure, not a valid test.
+        record['cmc_lrt_stat'] = 2 * diff
+
         if diff < -1e-6:
-            record['cmc_lrt_stat'] = np.nan
+            # Preserve the statistic but do not produce a p-value
             record['cmc_p_value'] = np.nan
             record['reasons'].append(f"Optimization failure: H1 < H0 (diff={diff:.4g})")
         else:
-            # Clip small negative noise to 0 for valid tests
-            lrt = 2 * max(0.0, diff)
-            record['cmc_lrt_stat'] = lrt
-            record['cmc_p_value'] = float(lib.chi2.sf(lrt, df=1))
+            lrt_for_p = max(record['cmc_lrt_stat'], 0.0)
+            record['cmc_p_value'] = float(lib.chi2.sf(lrt_for_p, df=1))
 
-    branch_ready = not pd.isna(record.get('bm_p_value')) or all(pd.isna(record.get(col)) for col in ['bm_p_value', 'bm_lrt_stat'])
+    branch_data_present = not pd.isna(record.get('bm_p_value')) or not all(pd.isna(record.get(col)) for col in ['bm_p_value', 'bm_lrt_stat'])
 
-    clade_ready = np.isfinite(record.get('cmc_lnl_h0', np.nan)) or np.isfinite(record.get('cmc_lnl_h1', np.nan))
-    clade_complete = np.isfinite(record.get('cmc_lnl_h0', np.nan)) and np.isfinite(record.get('cmc_lnl_h1', np.nan)) and not pd.isna(record.get('cmc_p_value'))
+    runtime_statuses = {s for s in record.get('source_statuses', set()) if str(s).startswith('runtime')}
 
-    if clade_complete and branch_ready:
-        record['status'] = 'success'
-    elif branch_ready or clade_ready:
-        record['status'] = 'partial_success'
+    if runtime_statuses:
+        record['reasons'].append('Upstream runtime error observed')
+
+    if not h0_present and not h1_present:
+        status_tag = 'no_model_likelihoods'
+        record['reasons'].append('Missing clade model likelihoods for H0 and H1')
+    elif h0_present and not h1_present:
+        status_tag = 'incomplete_missing_h1'
+        record['reasons'].append('Missing H1 clade likelihood')
+    elif h1_present and not h0_present:
+        status_tag = 'incomplete_missing_h0'
+        record['reasons'].append('Missing H0 clade likelihood')
     else:
-        record['status'] = 'paml_optim_fail'
+        diff = record['cmc_lnl_h1'] - record['cmc_lnl_h0']
+        if diff >= -1e-6:
+            status_tag = 'complete_h1_ge_h0'
+        else:
+            status_tag = 'complete_h1_worse_than_h0'
+
+    status_tags = []
+    if runtime_statuses:
+        status_tags.append('runtime_error')
+
+    status_tags.append(status_tag)
+
+    if not branch_data_present:
+        status_tags.append('branch_model_absent')
+    elif pd.isna(record.get('bm_p_value')) and pd.isna(record.get('bm_lrt_stat')):
+        status_tags.append('branch_statistics_missing')
+
+    record['status'] = ';'.join(status_tags)
 
     if record['reasons']:
         record['reason'] = ' | '.join(sorted(set(filter(None, record['reasons']))))
     record.pop('reasons', None)
     record.pop('models_present', None)
+    record.pop('source_statuses', None)
     return record
 
 
@@ -221,6 +249,9 @@ def main():
         model = row.get('paml_model', 'both')
         rec = combined.setdefault(key, _default_record(region, gene, seed_columns))
         rec['models_present'].add(model)
+
+        if 'status' in row and not pd.isna(row.get('status')):
+            rec['source_statuses'].add(str(row.get('status')))
 
         if str(row.get('status')).startswith('runtime') or str(row.get('status')).startswith('paml_optim'):
             if row.get('reason'):
