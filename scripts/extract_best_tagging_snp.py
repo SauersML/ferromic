@@ -315,6 +315,8 @@ class TaggingSNPResult:
     correlation: float
     chromosome_hg37: str
     position_hg37: int
+    chromosome_hg38: str
+    position_hg38: int
     row: pd.Series
     rank: Optional[int] = None
     context: Optional[str] = None
@@ -361,6 +363,8 @@ def select_top_tags(region: str, df: pd.DataFrame, *, top_n: int = 3) -> tuple[l
                 correlation=float(row["correlation"]),
                 chromosome_hg37=str(row["chromosome_hg37"]),
                 position_hg37=int(row["position_hg37"]),
+                chromosome_hg38=str(row["chromosome_hg38"]),
+                position_hg38=int(row["position_hg38"]),
                 row=row,
                 rank=rank,
                 context="Top overall",
@@ -403,6 +407,8 @@ def select_segment_bests(
                     correlation=float(best_row["correlation"]),
                     chromosome_hg37=str(best_row["chromosome_hg37"]),
                     position_hg37=int(best_row["position_hg37"]),
+                    chromosome_hg38=str(best_row["chromosome_hg38"]),
+                    position_hg38=int(best_row["position_hg38"]),
                     row=best_row,
                     context=f"Segment {idx + 1}",
                 ),
