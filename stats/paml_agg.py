@@ -7,6 +7,8 @@ import numpy as np
 from scipy.stats import chi2
 from statsmodels.stats.multitest import fdrcorrection
 
+from stats.add_status import STATUS_EPSILON, add_status_column
+
 # ==============================================================================
 # CONFIGURATION
 # ==============================================================================
@@ -190,25 +192,21 @@ def main():
     
     # Calculate differences to check for optimization consistency
     diffs = df['overall_h1_lnl'] - df['overall_h0_lnl']
-    
+
     # Identify optimization failures: H1 significantly less than H0 (e.g. < -1e-6)
     # We treat these as invalid tests (NaN p-value), not valid null results.
-    epsilon = 1e-6
+    epsilon = STATUS_EPSILON
     optim_fail_mask = diffs < -epsilon
 
     # Calculate LRT statistic
     lrt_stats = 2 * diffs
-    # Mask failures as NaN
-    lrt_stats[optim_fail_mask] = np.nan
-    # Clip valid small negatives (noise) to 0
-    lrt_stats = lrt_stats.clip(lower=0)
-    
+
     df['overall_lrt_stat'] = lrt_stats
     
     # P-Value (Chi-squared, df=1)
     # Only where LRT is valid (not NaN)
-    mask_valid = df['overall_lrt_stat'].notna()
-    df.loc[mask_valid, 'overall_p_value'] = chi2.sf(df.loc[mask_valid, 'overall_lrt_stat'], df=1)
+    mask_valid = (~optim_fail_mask) & df['overall_lrt_stat'].notna()
+    df.loc[mask_valid, 'overall_p_value'] = chi2.sf(df.loc[mask_valid, 'overall_lrt_stat'].clip(lower=0), df=1)
     
     # Q-Value (Benjamini-Hochberg FDR 0.05)
     df['overall_q_value'] = np.nan
@@ -224,12 +222,15 @@ def main():
     else:
         print("No valid P-values found; skipping FDR.")
 
-    # 6. Final Cleanup and Save
+    # 6. Status summarization
+    df = add_status_column(df, epsilon=epsilon)
+
+    # 7. Final Cleanup and Save
     # Reset index to make region/gene normal columns
     df.reset_index(inplace=True)
-    
+
     # Define output order
-    meta_cols = ['region', 'gene']
+    meta_cols = ['region', 'gene', 'status']
     stats_cols = [
         'overall_p_value', 'overall_q_value', 'overall_lrt_stat',
         'overall_h1_lnl', 'overall_h0_lnl',
