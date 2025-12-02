@@ -23,7 +23,6 @@ env/
 *.png
 *.pdf
 .DS_Store
-data/best_tagging_snps_qvalues.tsv
 web/figures-site/public/downloads/supplementary_tables.xlsx
 
 # Node/Next.js artifacts
