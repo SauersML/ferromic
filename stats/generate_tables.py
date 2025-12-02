@@ -132,7 +132,7 @@ GENE_CONSERVATION_COLUMN_DEFS: Dict[str, str] = OrderedDict(
         ),
         ("SE(Δ)", "Standard error of the difference (Δ), calculated via leave-one-haplotype-out jackknife."),
         ("p-value", "Nominal p-value testing the null hypothesis that conservation is equal between orientations."),
-        ("q-value", "Benjamini-Hochberg false discovery rate (FDR) adjusted p-value."),
+        ("BH p-value", "Benjamini-Hochberg adjusted p-value controlling the false discovery rate (FDR)."),
     ]
 )
 
@@ -144,8 +144,8 @@ PHEWAS_COLUMN_DEFS: Dict[str, str] = OrderedDict(
         ),
         ("Inversion", "The unique identifier of the chromosomal inversion locus being tested."),
         (
-            "Q_GLOBAL",
-            "The Global Benjamini-Hochberg False Discovery Rate (FDR) q-value, corrected across all phenotypes and all inversions tested in the study.",
+            "BH_P_GLOBAL",
+            "Benjamini-Hochberg adjusted p-value (global FDR) corrected across all phenotypes and inversions tested in the study.",
         ),
         (
             "N_Controls",
@@ -351,7 +351,7 @@ def _phewas_desc(column: str, fallback: str) -> str:
 TAG_PHEWAS_COLUMN_DEFS: Dict[str, str] = OrderedDict(
     [
         ("Phenotype", _phewas_desc("Phenotype", "Phenotype identifier.")),
-        ("Q_GLOBAL", _phewas_desc("Q_GLOBAL", "Global FDR q-value.")),
+        ("BH_P_GLOBAL", _phewas_desc("BH_P_GLOBAL", "Global Benjamini-Hochberg adjusted p-value.")),
         ("P_Value_unadjusted", "Nominal p-value for the association using the tagging SNP model."),
         ("N_Total", _phewas_desc("N_Total", "Total participants analyzed.")),
         ("N_Cases", _phewas_desc("N_Cases", "Number of cases.")),
@@ -409,8 +409,8 @@ CATEGORY_COLUMN_DEFS: Dict[str, str] = OrderedDict(
         ("GBJ_Draws", "Number of Monte Carlo draws used to approximate the GBJ p-value."),
         ("Phenotypes", "List or count of phenotypes in the category considered for GBJ."),
         ("Phenotypes_GLS", "List or count of phenotypes in the category considered for GLS."),
-        ("Q_GBJ", "FDR q-value for the GBJ test."),
-        ("Q_GLS", "FDR q-value for the GLS test."),
+        ("BH_P_GBJ", "Benjamini-Hochberg adjusted p-value for the GBJ test."),
+        ("BH_P_GLS", "Benjamini-Hochberg adjusted p-value for the GLS test."),
     ]
 )
 
@@ -470,11 +470,11 @@ BEST_TAGGING_COLUMN_DEFS: Dict[str, str] = OrderedDict(
             "Pearson correlation (r) between the tagging SNP allele and inversion orientation (direct vs. inverted haplotypes).",
         ),
         ("abs_r", "Absolute correlation |r| for the tagging SNP within the inversion region."),
-        ("hg37", "Tagging SNP coordinate on GRCh37/hg19 in chr:pos format (e.g., chr1:10583)."),
-        ("hg38", "Tagging SNP coordinate on GRCh38/hg38 in chr:pos format (e.g., chr1:10583)."),
+        ("hg37_coordinate", "Tagging SNP coordinate on GRCh37/hg19 in chr:pos format (e.g., chr1:10583)."),
+        ("hg38_coordinate", "Tagging SNP coordinate on GRCh38/hg38 in chr:pos format (e.g., chr1:10583)."),
         (
-            "q_value",
-            "Benjamini–Hochberg FDR q-value across inversions that passed tagging SNP quality filters (computed from P_X).",
+            "bh_p_value",
+            "Benjamini–Hochberg adjusted p-value across inversions that passed tagging SNP quality filters (computed from P_X).",
         ),
     ]
 )
@@ -500,7 +500,7 @@ PAML_COLUMN_DEFS: Dict[str, str] = OrderedDict(
             "The final result of the pipeline for this gene (success or partial_success rows are retained).",
         ),
         ("cmc_p_value", "P-value for the Clade Model C test."),
-        ("cmc_q_value", "FDR adjusted q-value for the Clade Model C test."),
+        ("cmc_bh_p_value", "Benjamini-Hochberg adjusted p-value for the Clade Model C test."),
         ("cmc_lrt_stat", "Likelihood ratio test statistic for the Clade Model C comparison."),
         ("cmc_lnl_h1", "Log-likelihood of the alternative hypothesis (different ω for divergent sites)."),
         ("cmc_lnl_h0", "Log-likelihood of the null hypothesis (shared ω for divergent sites)."),
@@ -686,6 +686,38 @@ def _format_chr_pos_from_text(value: str | float | int | None) -> str | pd._libs
 
     chrom, pos = text.split(":", 1)
     return _format_chr_pos(chrom, pos)
+
+
+def _coalesce_coordinate(
+    df: pd.DataFrame,
+    *,
+    existing_col: str,
+    chrom_col: str,
+    pos_col: str,
+) -> pd.Series:
+    """Return a chr:pos coordinate preferring the explicit column when present.
+
+    The best-tagging SNP artefact may already include a fully formatted coordinate
+    column (e.g., ``hg38``). If that column is missing or empty, fall back to
+    formatting chromosome/position pairs or a single ``chr:pos`` text column.
+    """
+
+    result = pd.Series(pd.NA, index=df.index)
+
+    if existing_col in df.columns:
+        result = result.combine_first(df[existing_col])
+
+    if {chrom_col, pos_col}.issubset(df.columns):
+        formatted = pd.Series(
+            [_format_chr_pos(chrom, pos) for chrom, pos in zip(df[chrom_col], df[pos_col])],
+            index=df.index,
+        )
+        result = result.combine_first(formatted)
+    elif pos_col in df.columns:
+        formatted = df[pos_col].apply(_format_chr_pos_from_text)
+        result = result.combine_first(formatted)
+
+    return result
 
 
 def _prepare_merge_columns(df: pd.DataFrame, chrom_col: str, start_col: str, end_col: str) -> pd.DataFrame:
@@ -891,12 +923,12 @@ def _load_gene_conservation() -> pd.DataFrame:
         "delta": "Δ (inverted − direct)",
         "se_delta": "SE(Δ)",
         "p_value": "p-value",
-        "q_value": "q-value",
+        "q_value": "BH p-value",
     }
 
     df = df.rename(columns=rename_map)
     df = _prune_columns(df, GENE_CONSERVATION_COLUMN_DEFS, "CDS conservation genes")
-    df = df.sort_values("q-value", kind="mergesort").reset_index(drop=True)
+    df = df.sort_values("BH p-value", kind="mergesort").reset_index(drop=True)
     return df
 
 
@@ -939,6 +971,9 @@ def _clean_phewas_df(
     if "P_Value_unadjusted" not in df.columns and "P_Value" in df.columns:
         df = df.rename(columns={"P_Value": "P_Value_unadjusted"})
 
+    if "Q_GLOBAL" in df.columns and "BH_P_GLOBAL" not in df.columns:
+        df = df.rename(columns={"Q_GLOBAL": "BH_P_GLOBAL"})
+
     if "P_Source" in df.columns and "P_Source_x" not in df.columns:
         df = df.rename(columns={"P_Source": "P_Source_x"})
 
@@ -971,7 +1006,8 @@ def _load_categories() -> pd.DataFrame:
                 "T_GLS": "GLS test statistic",
                 "K_GLS": "Phenotypes included in GLS",
                 "P_GLS": "P_GLS",
-                "Q_GLS": "Q_GLS",
+                "Q_GLS": "BH_P_GLS",
+                "Q_GBJ": "BH_P_GBJ",
             }
             df = df.rename(columns=rename_map)
 
@@ -1042,20 +1078,22 @@ def _load_best_tagging_snps() -> pd.DataFrame:
     if "S" in df.columns and "s" not in df.columns:
         df = df.rename(columns={"S": "s"})
 
-    df = df.copy()
-    df["hg37"] = pd.NA
-    if {"chromosome_hg37", "position_hg37"}.issubset(df.columns):
-        df["hg37"] = [
-            _format_chr_pos(chrom, pos) for chrom, pos in zip(df["chromosome_hg37"], df["position_hg37"])
-        ]
+    if "q_value" in df.columns and "bh_p_value" not in df.columns:
+        df = df.rename(columns={"q_value": "bh_p_value"})
 
-    df["hg38"] = pd.NA
-    if {"chromosome_hg38", "position_hg38"}.issubset(df.columns):
-        df["hg38"] = [
-            _format_chr_pos(chrom, pos) for chrom, pos in zip(df["chromosome_hg38"], df["position_hg38"])
-        ]
-    elif "position_hg38" in df.columns:
-        df["hg38"] = df["position_hg38"].apply(_format_chr_pos_from_text)
+    df = df.copy()
+    df["hg37_coordinate"] = _coalesce_coordinate(
+        df,
+        existing_col="hg37",
+        chrom_col="chromosome_hg37",
+        pos_col="position_hg37",
+    )
+    df["hg38_coordinate"] = _coalesce_coordinate(
+        df,
+        existing_col="hg38",
+        chrom_col="chromosome_hg38",
+        pos_col="position_hg38",
+    )
     return _prune_columns(df, BEST_TAGGING_COLUMN_DEFS, "Best tagging SNPs")
 
 def _load_paml_results() -> pd.DataFrame:
@@ -1066,8 +1104,10 @@ def _load_paml_results() -> pd.DataFrame:
 
     if "overall_p_value" in df.columns and "cmc_p_value" not in df.columns:
         rename_map["overall_p_value"] = "cmc_p_value"
-    if "overall_q_value" in df.columns and "cmc_q_value" not in df.columns:
-        rename_map["overall_q_value"] = "cmc_q_value"
+    if "cmc_q_value" in df.columns and "cmc_bh_p_value" not in df.columns:
+        rename_map["cmc_q_value"] = "cmc_bh_p_value"
+    if "overall_q_value" in df.columns and "cmc_bh_p_value" not in df.columns:
+        rename_map["overall_q_value"] = "cmc_bh_p_value"
     if "overall_lrt_stat" in df.columns and "cmc_lrt_stat" not in df.columns:
         rename_map["overall_lrt_stat"] = "cmc_lrt_stat"
     if "overall_h1_lnl" in df.columns and "cmc_lnl_h1" not in df.columns:
@@ -1314,7 +1354,7 @@ def build_workbook(output_path: Path) -> None:
                 "Top tagging SNP for each inversion locus, derived from the latest ancient DNA selection analysis of "
                 "West Eurasian genomes in the AGES database. Selection statistics (S and P_X) originate from that "
                 "ancient DNA summary table, allele frequencies are stratified by direct vs. inverted haplotypes, and "
-                "q-values reflect Benjamini–Hochberg correction across inversions passing quality filters."
+                "BH-adjusted p-values reflect Benjamini–Hochberg correction across inversions passing quality filters."
             ),
             column_defs=BEST_TAGGING_COLUMN_DEFS,
             loader=_load_best_tagging_snps,
