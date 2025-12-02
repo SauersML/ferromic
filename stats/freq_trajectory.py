@@ -14,6 +14,11 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 import matplotlib.pyplot as plt
+
+plt.rcParams.update({
+    "pdf.fonttype": 42,
+    "ps.fonttype": 42,
+})
 from matplotlib.axes import Axes
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
@@ -24,7 +29,8 @@ from matplotlib.ticker import FuncFormatter
 # ---------------------------------------------------------------------------
 
 BASE_URL = "https://raw.githubusercontent.com/SauersML/ferromic/refs/heads/main/data"
-OUTPUT_FILE = Path("data/inversion_trajectories_combined.pdf")
+OUTPUT_FILE_PDF = Path("data/inversion_trajectories_combined.pdf")
+OUTPUT_FILE_PNG = OUTPUT_FILE_PDF.with_suffix(".png")
 
 SUBPLOTS_CONFIG = [
     {
@@ -501,9 +507,11 @@ def main() -> None:
             ax.set_title(subplot_config["title"], fontsize=FONT_TITLE)
             ax.set_axis_off()
 
-    OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(OUTPUT_FILE, dpi=300)
-    print(f"Saved 4-panel figure to {OUTPUT_FILE.resolve()}")
+    OUTPUT_FILE_PDF.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(OUTPUT_FILE_PDF, dpi=300)
+    fig.savefig(OUTPUT_FILE_PNG, dpi=300)
+    print(f"Saved 4-panel figure to {OUTPUT_FILE_PDF.resolve()}")
+    print(f"Saved 4-panel figure to {OUTPUT_FILE_PNG.resolve()}")
     plt.close(fig)
 
 

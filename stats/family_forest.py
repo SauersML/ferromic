@@ -5,6 +5,11 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+plt.rcParams.update({
+    "pdf.fonttype": 42,
+    "ps.fonttype": 42,
+})
+
 from forest import (
     plot_forest,
     compute_padded_or_range,
