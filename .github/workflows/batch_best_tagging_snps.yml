@@ -9,6 +9,9 @@ on:
       - 'stats/batch_best_tagging_snps.py'
       - 'scripts/extract_best_tagging_snp.py'
 
+permissions:
+  contents: write
+
 jobs:
   batch-tagging-snps:
     runs-on: ubuntu-latest
@@ -96,3 +99,50 @@ jobs:
           name: best-tagging-snps-results
           path: data/best_tagging_snps_qvalues.tsv
           if-no-files-found: error
+
+  sync-results:
+    needs: batch-tagging-snps
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.WRITE_TOKEN }}
+
+      - name: Download workflow artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: best-tagging-snps-results
+          path: artifacts
+
+      - name: Sync TSV into data directory
+        run: |
+          set -euo pipefail
+          mkdir -p data
+
+          src="artifacts/best_tagging_snps_qvalues.tsv"
+          dest="data/best_tagging_snps_qvalues.tsv"
+
+          if [[ ! -f "$src" ]]; then
+            echo "::error::Artifact file $src not found."
+            exit 1
+          fi
+
+          mv "$src" "$dest"
+          echo "Updated $dest"
+
+      - name: Commit and push updated TSV
+        env:
+          GH_TOKEN: ${{ secrets.WRITE_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/best_tagging_snps_qvalues.tsv
+          if git diff --staged --quiet; then
+            echo "No data changes to commit"
+            exit 0
+          fi
+          git commit -m "Update best tagging SNPs results"
+          git pull --rebase origin main
+          git push https://${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git HEAD:main
