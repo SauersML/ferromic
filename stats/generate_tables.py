@@ -470,8 +470,8 @@ BEST_TAGGING_COLUMN_DEFS: Dict[str, str] = OrderedDict(
             "Pearson correlation (r) between the tagging SNP allele and inversion orientation (direct vs. inverted haplotypes).",
         ),
         ("abs_r", "Absolute correlation |r| for the tagging SNP within the inversion region."),
-        ("chromosome_hg37", "Chromosome (GRCh37/hg19) of the tagging SNP."),
-        ("position_hg37", "1-based genomic position (GRCh37/hg19) of the tagging SNP."),
+        ("hg37", "Tagging SNP coordinate on GRCh37/hg19 in chr:pos format (e.g., chr1:10583)."),
+        ("hg38", "Tagging SNP coordinate on GRCh38/hg38 in chr:pos format (e.g., chr1:10583)."),
         (
             "q_value",
             "Benjamini–Hochberg FDR q-value across inversions that passed tagging SNP quality filters (computed from P_X).",
@@ -657,6 +657,35 @@ def _prune_columns(df: pd.DataFrame, column_defs: Dict[str, str], sheet_name: st
         )
 
     return df.loc[:, available_cols].copy()
+
+
+def _format_chr_pos(chrom: str | float | int | None, pos: str | float | int | None) -> str | pd._libs.missing.NAType:
+    if chrom is None or pos is None:
+        return pd.NA
+
+    chrom_text = str(chrom).removeprefix("chr").removesuffix(".0")
+    try:
+        chrom_text = str(int(float(chrom_text)))
+    except (ValueError, TypeError):
+        chrom_text = chrom_text
+
+    pos_val = pd.to_numeric(pos, errors="coerce")
+    if pd.isna(pos_val):
+        return pd.NA
+
+    return f"chr{chrom_text}:{int(pos_val)}"
+
+
+def _format_chr_pos_from_text(value: str | float | int | None) -> str | pd._libs.missing.NAType:
+    if value is None or pd.isna(value):
+        return pd.NA
+
+    text = str(value)
+    if ":" not in text:
+        return pd.NA
+
+    chrom, pos = text.split(":", 1)
+    return _format_chr_pos(chrom, pos)
 
 
 def _prepare_merge_columns(df: pd.DataFrame, chrom_col: str, start_col: str, end_col: str) -> pd.DataFrame:
@@ -1012,6 +1041,21 @@ def _load_best_tagging_snps() -> pd.DataFrame:
     # Rename uppercase 'S' to lowercase 's' to match the column definition schema
     if "S" in df.columns and "s" not in df.columns:
         df = df.rename(columns={"S": "s"})
+
+    df = df.copy()
+    df["hg37"] = pd.NA
+    if {"chromosome_hg37", "position_hg37"}.issubset(df.columns):
+        df["hg37"] = [
+            _format_chr_pos(chrom, pos) for chrom, pos in zip(df["chromosome_hg37"], df["position_hg37"])
+        ]
+
+    df["hg38"] = pd.NA
+    if {"chromosome_hg38", "position_hg38"}.issubset(df.columns):
+        df["hg38"] = [
+            _format_chr_pos(chrom, pos) for chrom, pos in zip(df["chromosome_hg38"], df["position_hg38"])
+        ]
+    elif "position_hg38" in df.columns:
+        df["hg38"] = df["position_hg38"].apply(_format_chr_pos_from_text)
     return _prune_columns(df, BEST_TAGGING_COLUMN_DEFS, "Best tagging SNPs")
 
 def _load_paml_results() -> pd.DataFrame:

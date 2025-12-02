@@ -52,6 +52,26 @@ def log(message: str) -> None:
     print(message, flush=True)
 
 
+def format_chr_pos(chrom: str | float | int | None, pos: str | float | int | None) -> str | None:
+    """Return a ``chr:pos`` string when both components are present."""
+
+    if chrom is None or pos is None:
+        return None
+
+    chrom_text = str(chrom).removeprefix("chr").removesuffix(".0")
+    try:
+        chrom_text = str(int(float(chrom_text)))
+    except (ValueError, TypeError):
+        chrom_text = chrom_text
+
+    try:
+        pos_int = int(float(pos))
+    except (ValueError, TypeError):
+        return None
+
+    return f"chr{chrom_text}:{pos_int}"
+
+
 @dataclass
 class RegionRecord:
     region: str
@@ -366,15 +386,21 @@ def process_regions(inv_path: Path, tagging_path: Path, *, workers: Optional[int
                 "inversion_region": r.best.inversion_region,
                 "correlation_r": r.best.correlation,
                 "abs_r": r.best.abs_correlation,
-                "position_hg37": f"{r.best.chromosome_hg37}:{r.best.position_hg37}",
-                "position_hg38": f"{r.best.chromosome_hg38}:{r.best.position_hg38}",
+                "chromosome_hg37": r.best.chromosome_hg37,
+                "position_hg37": int(r.best.position_hg37) if r.best.position_hg37 is not None else None,
+                "hg37": format_chr_pos(r.best.chromosome_hg37, r.best.position_hg37),
+                "hg38": format_chr_pos(r.best.chromosome_hg38, r.best.position_hg38),
+                "position_hg38": int(r.best.position_hg38),
             })
         else:
             row_dict.update({
                 "inversion_region": r.region,
                 "correlation_r": None,
                 "abs_r": None,
+                "chromosome_hg37": None,
                 "position_hg37": None,
+                "hg37": None,
+                "hg38": None,
                 "position_hg38": None,
             })
         data_list.append(row_dict)
