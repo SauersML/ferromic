@@ -190,7 +190,7 @@ def main():
     
     # Calculate differences to check for optimization consistency
     diffs = df['overall_h1_lnl'] - df['overall_h0_lnl']
-    
+
     # Identify optimization failures: H1 significantly less than H0 (e.g. < -1e-6)
     # We treat these as invalid tests (NaN p-value), not valid null results.
     epsilon = 1e-6
@@ -198,17 +198,13 @@ def main():
 
     # Calculate LRT statistic
     lrt_stats = 2 * diffs
-    # Mask failures as NaN
-    lrt_stats[optim_fail_mask] = np.nan
-    # Clip valid small negatives (noise) to 0
-    lrt_stats = lrt_stats.clip(lower=0)
-    
+
     df['overall_lrt_stat'] = lrt_stats
     
     # P-Value (Chi-squared, df=1)
     # Only where LRT is valid (not NaN)
-    mask_valid = df['overall_lrt_stat'].notna()
-    df.loc[mask_valid, 'overall_p_value'] = chi2.sf(df.loc[mask_valid, 'overall_lrt_stat'], df=1)
+    mask_valid = (~optim_fail_mask) & df['overall_lrt_stat'].notna()
+    df.loc[mask_valid, 'overall_p_value'] = chi2.sf(df.loc[mask_valid, 'overall_lrt_stat'].clip(lower=0), df=1)
     
     # Q-Value (Benjamini-Hochberg FDR 0.05)
     df['overall_q_value'] = np.nan
@@ -224,12 +220,50 @@ def main():
     else:
         print("No valid P-values found; skipping FDR.")
 
-    # 6. Final Cleanup and Save
+    # 6. Status summarization
+    status_run_cols = [c for c in df.columns if re.match(r'^status_run_\d+$', c)]
+
+    def has_runtime_issue(row):
+        return any(str(row[c]).startswith('runtime') for c in status_run_cols if c in row and pd.notna(row[c]))
+
+    def build_status(row):
+        tags = []
+
+        h0_present = np.isfinite(row.get('overall_h0_lnl', np.nan))
+        h1_present = np.isfinite(row.get('overall_h1_lnl', np.nan))
+        diff = row.get('overall_h1_lnl', np.nan) - row.get('overall_h0_lnl', np.nan)
+
+        if has_runtime_issue(row):
+            tags.append('runtime_error_in_runs')
+
+        if not h0_present and not h1_present:
+            tags.append('no_model_likelihoods')
+        elif h0_present and not h1_present:
+            tags.append('incomplete_missing_h1')
+        elif h1_present and not h0_present:
+            tags.append('incomplete_missing_h0')
+        else:
+            if diff >= -epsilon:
+                tags.append('complete_h1_ge_h0')
+            else:
+                tags.append('complete_h1_worse_than_h0')
+
+        if pd.isna(row.get('overall_p_value')):
+            if h0_present and h1_present and diff < -epsilon:
+                tags.append('p_value_not_computed_h1_below_h0')
+            elif not (h0_present and h1_present):
+                tags.append('p_value_not_computed_incomplete_models')
+
+        return ';'.join(tags) if tags else 'status_unavailable'
+
+    df['status'] = df.apply(build_status, axis=1)
+
+    # 7. Final Cleanup and Save
     # Reset index to make region/gene normal columns
     df.reset_index(inplace=True)
-    
+
     # Define output order
-    meta_cols = ['region', 'gene']
+    meta_cols = ['region', 'gene', 'status']
     stats_cols = [
         'overall_p_value', 'overall_q_value', 'overall_lrt_stat',
         'overall_h1_lnl', 'overall_h0_lnl',
