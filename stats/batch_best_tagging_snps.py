@@ -366,7 +366,8 @@ def process_regions(inv_path: Path, tagging_path: Path, *, workers: Optional[int
                 "inversion_region": r.best.inversion_region,
                 "correlation_r": r.best.correlation,
                 "abs_r": r.best.abs_correlation,
-                "position_hg37": f"{r.best.chromosome_hg37}:{r.best.position_hg37}",
+                "chromosome_hg37": r.best.chromosome_hg37,
+                "position_hg37": int(r.best.position_hg37) if r.best.position_hg37 is not None else None,
                 "position_hg38": f"{r.best.chromosome_hg38}:{r.best.position_hg38}",
             })
         else:
@@ -374,6 +375,7 @@ def process_regions(inv_path: Path, tagging_path: Path, *, workers: Optional[int
                 "inversion_region": r.region,
                 "correlation_r": None,
                 "abs_r": None,
+                "chromosome_hg37": None,
                 "position_hg37": None,
                 "position_hg38": None,
             })
