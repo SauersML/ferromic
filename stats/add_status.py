@@ -40,12 +40,6 @@ def compute_status_series(df: pd.DataFrame, epsilon: float = STATUS_EPSILON) -> 
             else:
                 tags.append('Complete data but H1 worse than H0')
 
-        if pd.isna(row.get('overall_p_value')):
-            if h0_present and h1_present and diff < -epsilon:
-                tags.append('P-value not computed because H1 is below H0')
-            elif not (h0_present and h1_present):
-                tags.append('P-value not computed because model results are incomplete')
-
         return '; '.join(tags) if tags else 'Status unavailable'
 
     return df.apply(build_status, axis=1)
