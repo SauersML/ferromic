@@ -7,7 +7,7 @@ import numpy as np
 from scipy.stats import chi2
 from statsmodels.stats.multitest import fdrcorrection
 
-from stats.grand_status import STATUS_EPSILON, add_status_column
+from stats.add_status import STATUS_EPSILON, add_status_column
 
 # ==============================================================================
 # CONFIGURATION
