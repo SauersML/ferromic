@@ -4,6 +4,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+
+plt.rcParams.update({
+    "pdf.fonttype": 42,
+    "ps.fonttype": 42,
+})
 import numpy as np
 import pandas as pd
 import seaborn as sns
