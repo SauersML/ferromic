@@ -7,6 +7,8 @@ import numpy as np
 from scipy.stats import chi2
 from statsmodels.stats.multitest import fdrcorrection
 
+from stats.grand_status import STATUS_EPSILON, add_status_column
+
 # ==============================================================================
 # CONFIGURATION
 # ==============================================================================
@@ -193,7 +195,7 @@ def main():
 
     # Identify optimization failures: H1 significantly less than H0 (e.g. < -1e-6)
     # We treat these as invalid tests (NaN p-value), not valid null results.
-    epsilon = 1e-6
+    epsilon = STATUS_EPSILON
     optim_fail_mask = diffs < -epsilon
 
     # Calculate LRT statistic
@@ -221,42 +223,7 @@ def main():
         print("No valid P-values found; skipping FDR.")
 
     # 6. Status summarization
-    status_run_cols = [c for c in df.columns if re.match(r'^status_run_\d+$', c)]
-
-    def has_runtime_issue(row):
-        return any(str(row[c]).startswith('runtime') for c in status_run_cols if c in row and pd.notna(row[c]))
-
-    def build_status(row):
-        tags = []
-
-        h0_present = np.isfinite(row.get('overall_h0_lnl', np.nan))
-        h1_present = np.isfinite(row.get('overall_h1_lnl', np.nan))
-        diff = row.get('overall_h1_lnl', np.nan) - row.get('overall_h0_lnl', np.nan)
-
-        if has_runtime_issue(row):
-            tags.append('runtime_error_in_runs')
-
-        if not h0_present and not h1_present:
-            tags.append('no_model_likelihoods')
-        elif h0_present and not h1_present:
-            tags.append('incomplete_missing_h1')
-        elif h1_present and not h0_present:
-            tags.append('incomplete_missing_h0')
-        else:
-            if diff >= -epsilon:
-                tags.append('complete_h1_ge_h0')
-            else:
-                tags.append('complete_h1_worse_than_h0')
-
-        if pd.isna(row.get('overall_p_value')):
-            if h0_present and h1_present and diff < -epsilon:
-                tags.append('p_value_not_computed_h1_below_h0')
-            elif not (h0_present and h1_present):
-                tags.append('p_value_not_computed_incomplete_models')
-
-        return ';'.join(tags) if tags else 'status_unavailable'
-
-    df['status'] = df.apply(build_status, axis=1)
+    df = add_status_column(df, epsilon=epsilon)
 
     # 7. Final Cleanup and Save
     # Reset index to make region/gene normal columns
