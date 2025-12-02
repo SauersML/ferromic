@@ -572,16 +572,16 @@ class MultiTenantGovernor(ResourceGovernor):
 
 # --- Configuration ---
 TARGET_INVERSIONS = {
-    'chr10-79542902-INV-674513', 
-    'chr12-46897663-INV-16289', 
-    'chr17-45585160-INV-706887', 
-    'chr21-13992018-INV-65632', 
-    'chr4-33098029-INV-7075', 
-    'chr6-141867315-INV-29159', 
-    'chr6-167181003-INV-209976', 
-    'chr6-76111919-INV-44661', 
-    'chr7-57835189-INV-284465',
-    'chr17-45974480-INV-29218'
+    'chr7-73113990-INV-1685041',
+    'chr16-15028481-INV-133352',
+    'chr10-79542902-INV-674513',
+    'chr16-28471894-INV-165758',
+    'chr7-65219158-INV-312667',
+    'chr17-45585160-INV-706887',
+    'chr15-30618104-INV-1535102',
+    'chr8-7301025-INV-5297356',
+    'chr12-46897663-INV-16289',
+    'chr7-54220528-INV-101153'
 }
 
 # chr17-45974480-INV-29218 is arbitrary number for tagging SNP 17q21
