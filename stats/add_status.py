@@ -29,16 +29,16 @@ def compute_status_series(df: pd.DataFrame, epsilon: float = STATUS_EPSILON) -> 
             tags.append('Runtime error observed in at least one run')
 
         if not h0_present and not h1_present:
-            tags.append('Missing H0 and H1 likelihoods')
+            tags.append('Excluded (or unable to calculate)')
         elif h0_present and not h1_present:
-            tags.append('H1 likelihood missing')
+            tags.append('H1 likelihood absent')
         elif h1_present and not h0_present:
-            tags.append('H0 likelihood missing')
+            tags.append('H0 likelihood absent')
         else:
             if diff >= -epsilon:
-                tags.append('Complete data with H1 at least as good as H0')
+                tags.append('Usable: complete data')
             else:
-                tags.append('Complete data but H1 worse than H0')
+                tags.append('Complete data but H1 substantially worse than H0')
 
         return '; '.join(tags) if tags else 'Status unavailable'
 
