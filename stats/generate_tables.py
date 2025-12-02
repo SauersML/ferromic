@@ -1128,24 +1128,49 @@ def _load_paml_results() -> pd.DataFrame:
             return 2
         return 1
 
-    if "status" not in df.columns and "status_run_1" in df.columns and "status_run_2" in df.columns:
+    winner_run: Optional[pd.Series] = None
+
+    if "status_run_1" in df.columns and "status_run_2" in df.columns:
         winner_run = df.apply(_choose_winner_run, axis=1)
 
-        df["status"] = df["status_run_1"]
-        df.loc[winner_run == 2, "status"] = df.loc[winner_run == 2, "status_run_2"]
+        if "status" not in df.columns:
+            df["status"] = df["status_run_1"]
+            df.loc[winner_run == 2, "status"] = df.loc[winner_run == 2, "status_run_2"]
 
-        if "n_leaves_pruned_run_1" in df.columns and "n_leaves_pruned_run_2" in df.columns:
-            df["n_leaves_pruned"] = df["n_leaves_pruned_run_1"]
-            df.loc[winner_run == 2, "n_leaves_pruned"] = df.loc[winner_run == 2, "n_leaves_pruned_run_2"]
+    if winner_run is None and {
+        "n_leaves_pruned_run_1",
+        "n_leaves_pruned_run_2",
+        "taxa_used_run_1",
+        "taxa_used_run_2",
+    }.issubset(df.columns):
+        # Compute the winning run even if status is already present so we can
+        # propagate metadata columns consistently.
+        winner_run = df.apply(_choose_winner_run, axis=1)
 
-        if "taxa_used_run_1" in df.columns and "taxa_used_run_2" in df.columns:
-            df["taxa_used"] = df["taxa_used_run_1"]
-            df.loc[winner_run == 2, "taxa_used"] = df.loc[winner_run == 2, "taxa_used_run_2"]
+    if (
+        winner_run is not None
+        and "n_leaves_pruned" not in df.columns
+        and "n_leaves_pruned_run_1" in df.columns
+        and "n_leaves_pruned_run_2" in df.columns
+    ):
+        df["n_leaves_pruned"] = df["n_leaves_pruned_run_1"]
+        df.loc[winner_run == 2, "n_leaves_pruned"] = df.loc[winner_run == 2, "n_leaves_pruned_run_2"]
+
+    if (
+        winner_run is not None
+        and "taxa_used" not in df.columns
+        and "taxa_used_run_1" in df.columns
+        and "taxa_used_run_2" in df.columns
+    ):
+        df["taxa_used"] = df["taxa_used_run_1"]
+        df.loc[winner_run == 2, "taxa_used"] = df.loc[winner_run == 2, "taxa_used_run_2"]
 
     if "status" not in df.columns:
         raise SupplementaryTablesError("PAML results file is missing status information required for the summary table.")
 
-    df = df[df["status"].isin(["success", "partial_success"])]
+    # Retain all usable runs (including those with runtime warnings) while
+    # excluding rows where neither hypothesis could be evaluated.
+    df = df[~df["status"].str.startswith("Excluded", na=False)]
 
     if "region" in df.columns:
         df["region"] = df["region"].str.replace(
