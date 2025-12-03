@@ -11,6 +11,7 @@ import math
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
+from scipy import linalg as sp_linalg
 from scipy import stats as sp_stats
 from scipy.special import expit
 from scipy.optimize import brentq
@@ -1783,20 +1784,83 @@ def _drop_zero_variance(X: pd.DataFrame, keep_cols=('const',), always_keep=(), e
     return X.loc[:, cols]
 
 
-def _drop_rank_deficient(X: pd.DataFrame, keep_cols=('const',), always_keep=(), rtol=1e-2):
-    """
-    Detects rank deficiency but NEVER drops covariates.
-    
-    Returns the original DataFrame unchanged. If rank deficiency is detected,
-    downstream fitting will fail appropriately rather than silently dropping covariates.
-    
-    This function is kept for API compatibility but no longer modifies the design matrix.
+def _drop_rank_deficient(
+    X: pd.DataFrame, keep_cols=("const",), always_keep=(), rtol=1e-2
+):
+    """Drop linearly dependent columns using prioritized QR checks.
+
+    Columns listed in ``keep_cols`` and ``always_keep`` are evaluated first so
+    they are retained whenever they add independent information. Lower-priority
+    columns are dropped when they do not increase the rank of the design matrix.
+
+    Parameters
+    ----------
+    X : pd.DataFrame
+        Design matrix to evaluate.
+    keep_cols : tuple or list, default ("const",)
+        Columns that should be considered first when building the independent
+        basis (for example, the intercept).
+    always_keep : tuple or list, default ()
+        Additional high-priority columns (for example, the target variable).
+    rtol : float, default 1e-2
+        Relative tolerance used to decide when a column materially increases the
+        rank. Higher values drop near-dependent columns more aggressively.
+
+    Returns
+    -------
+    (pd.DataFrame, list[str])
+        Tuple of the pruned design matrix and the list of columns that were
+        removed due to rank deficiency.
     """
     if X.shape[1] == 0:
-        return X
-    
-    # Return the original DataFrame unchanged - NEVER drop covariates
-    return X
+        return X, []
+
+    # Establish priority order: keep_cols, always_keep, then everything else in
+    # their existing order.
+    priority = []
+    seen = set()
+    for name in list(keep_cols) + list(always_keep):
+        if name in X.columns and name not in seen:
+            priority.append(name)
+            seen.add(name)
+    for name in X.columns:
+        if name not in seen:
+            priority.append(name)
+            seen.add(name)
+
+    X_ordered = X.loc[:, priority]
+    X_arr = np.asarray(X_ordered, dtype=np.float64)
+
+    # Use pivoted QR to obtain a stable rank estimate and tolerance threshold.
+    try:
+        R, _ = sp_linalg.qr(X_arr, mode="r", pivoting=True)
+    except Exception:
+        # If QR fails for any reason, return the original matrix to avoid
+        # blocking the pipeline; downstream steps will handle the failure.
+        return X, []
+
+    diag = np.abs(np.diag(R))
+    if diag.size == 0:
+        return X, []
+    tol = diag.max() * float(rtol)
+
+    kept_cols = []
+    kept_mat = np.empty((X_arr.shape[0], 0), dtype=np.float64)
+    for idx, name in enumerate(priority):
+        col = X_arr[:, [idx]]
+        if kept_mat.shape[1] == 0:
+            residual_norm = float(sp_linalg.norm(col, ord=2))
+        else:
+            coeffs, _, _, _ = sp_linalg.lstsq(kept_mat, col)
+            residual = col - kept_mat @ coeffs
+            residual_norm = float(sp_linalg.norm(residual, ord=2))
+
+        if residual_norm > tol:
+            kept_cols.append(name)
+            kept_mat = np.hstack([kept_mat, col]) if kept_mat.size else col
+
+    dropped = [name for name in X.columns if name not in kept_cols]
+    return X.loc[:, kept_cols], dropped
 
 
 def _fit_diagnostics(X, y, params):
@@ -3193,7 +3257,13 @@ def _lrt_overall_worker_impl(task):
 
         # Prune the full model first to resolve rank deficiency.
         X_full_zv = _drop_zero_variance(X_full_df, keep_cols=('const',), always_keep=(target,))
-        X_full_zv = _drop_rank_deficient(X_full_zv, keep_cols=('const',), always_keep=(target,))
+        X_full_zv, dropped_rank_cols = _drop_rank_deficient(
+            X_full_zv, keep_cols=("const",), always_keep=(target,)
+        )
+
+        if dropped_rank_cols:
+            drop_note = f"dropped_rank_def={','.join(dropped_rank_cols)}"
+            note = f"{note};{drop_note}" if note else drop_note
 
         target_ix = X_full_zv.columns.get_loc(target) if target in X_full_zv.columns else None
 
@@ -4036,7 +4106,12 @@ def _bootstrap_overall_worker_impl(task):
 
         X_full_df = Xb
         X_full_zv = _drop_zero_variance(X_full_df, keep_cols=('const',), always_keep=(target,))
-        X_full_zv = _drop_rank_deficient(X_full_zv, keep_cols=('const',), always_keep=(target,))
+        X_full_zv, dropped_rank_cols = _drop_rank_deficient(
+            X_full_zv, keep_cols=("const",), always_keep=(target,)
+        )
+        if dropped_rank_cols:
+            drop_note = f"dropped_rank_def={','.join(dropped_rank_cols)}"
+            note = f"{note};{drop_note}" if note else drop_note
         if target not in X_full_zv.columns:
             io.atomic_write_json(result_path, {"Phenotype": s_name, "Reason": "target_dropped_in_pruning"})
             return
@@ -4502,7 +4577,12 @@ def _lrt_followup_worker_impl(task):
         print(f"[Stage2] Building models...", flush=True)
         print(f"[Stage2]   Full model: {len(X_full_df.columns)} covariates (before pruning)", flush=True)
         X_full_zv = _drop_zero_variance(X_full_df, keep_cols=('const',), always_keep=[target] + interaction_cols)
-        X_full_zv = _drop_rank_deficient(X_full_zv, keep_cols=('const',), always_keep=[target] + interaction_cols)
+        X_full_zv, dropped_rank_cols = _drop_rank_deficient(
+            X_full_zv, keep_cols=("const",), always_keep=[target] + interaction_cols
+        )
+        if dropped_rank_cols:
+            drop_note = f"dropped_rank_def={','.join(dropped_rank_cols)}"
+            note = f"{note};{drop_note}" if note else drop_note
         print(f"[Stage2]   Full model: {len(X_full_zv.columns)} covariates (after pruning)", flush=True)
 
         # Construct the reduced model by dropping interaction terms from the pruned full model.
@@ -4816,7 +4896,13 @@ def _lrt_followup_worker_impl(task):
                 continue
 
             X_anc_zv = _drop_zero_variance(X_anc, keep_cols=("const",), always_keep=(target,))
-            X_anc_zv = _drop_rank_deficient(X_anc_zv, keep_cols=("const",), always_keep=(target,))
+            X_anc_zv, dropped_rank_cols = _drop_rank_deficient(
+                X_anc_zv, keep_cols=("const",), always_keep=(target,)
+            )
+
+            if dropped_rank_cols:
+                drop_note = f"dropped_rank_def={','.join(dropped_rank_cols)}"
+                note = f"{note};{drop_note}" if note else drop_note
 
             if target not in X_anc_zv.columns:
                 out[f"{anc_upper}_REASON"] = "target_pruned"
