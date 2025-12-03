@@ -50,10 +50,10 @@ ALLOWED_CI_METHODS = {
     "wald_mle",
 }
 
-MLE_SE_MAX_ALL = 15.0
-MLE_SE_MAX_TARGET = 5.0
-MLE_MAX_ABS_XB = 15.0
-MLE_FRAC_P_EXTREME = 0.02
+MLE_SE_MAX_ALL = 100.0 # It looks at the Standard Error for every variable in the model. Looks for confidence interval massive across any covar
+MLE_SE_MAX_TARGET = 3.0 # Standard Error for the Inversion/SNP of interest
+MLE_MAX_ABS_XB = 25.0
+MLE_FRAC_P_EXTREME = 0.05
 EPV_MIN_FOR_MLE = 10.0
 TARGET_VAR_MIN_FOR_MLE = 1e-8
 PROFILE_MAX_ABS_BETA = 40.0
