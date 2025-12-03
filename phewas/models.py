@@ -3504,6 +3504,7 @@ def _lrt_overall_worker_impl(task):
             (not np.isfinite(p_value))
             and target_ix is not None
             and target in X_full_zv.columns
+            and red_is_mle
         ):
             x_target_vec = X_full_zv.iloc[:, int(target_ix)].to_numpy(dtype=np.float64, copy=False)
             p_sc, _ = _score_test_from_reduced(
