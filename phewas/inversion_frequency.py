@@ -65,13 +65,6 @@ def load_all_inversion_dosages(dosages_file: str) -> pd.DataFrame:
 
 
 def _available_inversions(dosages: pd.DataFrame, *, include_all: bool) -> list[str]:
-    if include_all:
-        return list(dosages.columns)
-
-    target_set = set(run.TARGET_INVERSIONS)
-    available = [col for col in dosages.columns if col in target_set]
-    if available:
-        return available
     return list(dosages.columns)
 
 
@@ -110,6 +103,9 @@ def summarize_population_frequencies(
 
     records: list[dict[str, object]] = []
     for inversion in inversion_cols:
+        overall_std = float(merged[inversion].std(ddof=1)) if len(merged[inversion].dropna()) > 1 else 0.0
+        if not np.isfinite(overall_std):
+            overall_std = 0.0
         for population in populations:
             if population == "ALL":
                 subset = merged[inversion]
@@ -125,6 +121,7 @@ def summarize_population_frequencies(
                     "Allele_Freq": af,
                     "CI95_Lower": lower,
                     "CI95_Upper": upper,
+                    "Dosage_STD_All": overall_std,
                 }
             )
 
