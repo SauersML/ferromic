@@ -75,16 +75,19 @@ def _compute_frequency_stats(series: pd.Series) -> tuple[float, float, float, in
         return float("nan"), float("nan"), float("nan"), 0
 
     mean_dosage = float(clean.mean())
-    std_dosage = float(clean.std(ddof=1)) if n > 1 else 0.0
+    std_dosage = float(clean.std(ddof=1)) if n > 1 else float("nan")
     if not np.isfinite(std_dosage):
-        std_dosage = 0.0
+        std_dosage = float("nan")
 
-    se_dosage = std_dosage / math.sqrt(n) if n > 0 else float("nan")
+    se_dosage = std_dosage / math.sqrt(n) if n > 1 else float("nan")
     af = mean_dosage / 2.0
-    margin = CI_Z * (se_dosage / 2.0)
-
-    lower = _clamp(af - margin)
-    upper = _clamp(af + margin)
+    if np.isfinite(se_dosage):
+        margin = CI_Z * (se_dosage / 2.0)
+        lower = _clamp(af - margin)
+        upper = _clamp(af + margin)
+    else:
+        lower = float("nan")
+        upper = float("nan")
     return af, lower, upper, n
 
 
@@ -103,9 +106,9 @@ def summarize_population_frequencies(
 
     records: list[dict[str, object]] = []
     for inversion in inversion_cols:
-        overall_std = float(merged[inversion].std(ddof=1)) if len(merged[inversion].dropna()) > 1 else 0.0
+        overall_std = float(merged[inversion].std(ddof=1)) if len(merged[inversion].dropna()) > 1 else float("nan")
         if not np.isfinite(overall_std):
-            overall_std = 0.0
+            overall_std = float("nan")
         for population in populations:
             if population == "ALL":
                 subset = merged[inversion]
