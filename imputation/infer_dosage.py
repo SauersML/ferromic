@@ -1,18 +1,18 @@
 import os
 import sys
 import time
-import gc
-import math
 import shutil
+import glob
+import gc
 import multiprocessing as mp
-from typing import List, Tuple, Optional, Dict
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
+from typing import List, Set, Dict
 
 import joblib
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
-from urllib.parse import urlparse
-from urllib.request import Request, urlopen
 
 # --- CONFIGURATION ---
 MODEL_DIR = "impute"
@@ -23,497 +23,307 @@ MODEL_MANIFEST_URL = os.getenv(
 GENOTYPE_DIR = "genotype_matrices"
 PLINK_PREFIX = "subset"
 OUTPUT_FILE = "imputed_inversion_dosages.tsv"
+TEMP_RESULT_DIR = "temp_dosages" 
 MISSING_VALUE_CODE = -127
+BATCH_SIZE = 10000       # Process 10k samples at a time to keep RAM flat
+MEAN_SUBSET_SIZE = 50000 # Use 50k samples to estimate column means (extremely fast)
 
-# Conservative overhead per parallel worker in bytes to account for model objects,
-# Python process overhead, and temporary arrays created by scikit-learn.
-PER_WORKER_OVERHEAD_BYTES = 512 * 1024 * 1024
-
-# Safety factor to ensure parallelization happens only when memory is comfortably sufficient.
-MEMORY_SAFETY_FACTOR = 2.0
-
-# Only models in this set will be processed. All others will be skipped.
+# The specific inversions we want
 TARGET_INVERSIONS = {
-    "chr3-195680867-INV-272256",
-    "chr3-195749464-INV-230745",
-    "chr6-76111919-INV-44661",
-    "chr12-46897663-INV-16289",
-    "chr6-141867315-INV-29159",
-    "chr3-131969892-INV-7927",
-    "chr6-167181003-INV-209976",
-    "chr11-71571191-INV-6980",
-    "chr9-102565835-INV-4446",
-    "chr4-33098029-INV-7075",
-    "chr7-57835189-INV-284465",
-    "chr10-46135869-INV-77646",
-    "chr11-24263185-INV-392",
-    "chr13-79822252-INV-17591",
-    "chr1-60775308-INV-5023",
-    "chr6-130527042-INV-4267",
-    "chr13-48199211-INV-7451",
-    "chr21-13992018-INV-65632",
-    "chr8-7301025-INV-5297356",
-    "chr9-30951702-INV-5595",
-    "chr17-45585160-INV-706887",
-    "chr12-131333944-INV-289865",
-    "chr7-70955928-INV-18020",
-    "chr16-28471894-INV-165758",
-    "chr7-65219158-INV-312667",
-    "chr10-79542902-INV-674513",
-    "chr1-13084312-INV-62181",
-    "chr10-37102555-INV-11157",
-    "chr4-40233409-INV-2010",
-    "chr2-138246733-INV-5010",
+    "chr3-195680867-INV-272256", "chr3-195749464-INV-230745", "chr6-76111919-INV-44661",
+    "chr12-46897663-INV-16289", "chr6-141867315-INV-29159", "chr3-131969892-INV-7927",
+    "chr6-167181003-INV-209976", "chr11-71571191-INV-6980", "chr9-102565835-INV-4446",
+    "chr4-33098029-INV-7075", "chr7-57835189-INV-284465", "chr10-46135869-INV-77646",
+    "chr11-24263185-INV-392", "chr13-79822252-INV-17591", "chr1-60775308-INV-5023",
+    "chr6-130527042-INV-4267", "chr13-48199211-INV-7451", "chr21-13992018-INV-65632",
+    "chr8-7301025-INV-5297356", "chr9-30951702-INV-5595", "chr17-45585160-INV-706887",
+    "chr12-131333944-INV-289865", "chr7-70955928-INV-18020", "chr16-28471894-INV-165758",
+    "chr7-65219158-INV-312667", "chr10-79542902-INV-674513", "chr1-13084312-INV-62181",
+    "chr10-37102555-INV-11157", "chr4-40233409-INV-2010", "chr2-138246733-INV-5010",
 }
 
-
-def _read_mem_available_bytes() -> Optional[int]:
-    """
-    Returns available system memory in bytes using /proc/meminfo when present.
-    Falls back to psutil if available. Returns None if neither method is available.
-    """
-    try:
-        with open("/proc/meminfo", "r") as f:
-            for line in f:
-                if line.startswith("MemAvailable:"):
-                    parts = line.split()
-                    # Value is in kB.
-                    return int(parts[1]) * 1024
-    except Exception:
-        pass
-    try:
-        import psutil  # type: ignore
-        return int(psutil.virtual_memory().available)
-    except Exception:
-        return None
-
-
-def _atomic_to_csv(df: pd.DataFrame, path: str) -> None:
-    """
-    Writes a DataFrame to `path` atomically by writing to a temporary file, fsyncing,
-    and replacing the target path.
-    """
-    temp_path = f"{path}.tmp"
-    with open(temp_path, "w", newline="") as f:
-        df.to_csv(f, sep="\t", float_format="%.4f")
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(temp_path, path)
-
-
-def _robust_read_results(path: str, sample_ids: List[str]) -> pd.DataFrame:
-    """
-    Reads the output TSV robustly, tolerating truncated lines and ensuring correct index ordering and dtype.
-    """
-    if not os.path.exists(path):
-        df = pd.DataFrame(index=sample_ids)
-        df.index.name = "SampleID"
-        _atomic_to_csv(df, path)
-        return df
-
-    try:
-        df = pd.read_csv(
-            path,
-            sep="\t",
-            index_col="SampleID",
-            dtype={"SampleID": str},
-            engine="python",
-            on_bad_lines="skip",
-        )
-    except Exception:
-        df = pd.DataFrame(index=sample_ids)
-        df.index.name = "SampleID"
-        _atomic_to_csv(df, path)
-        return df
-
-    # Ensure index alignment and order
-    df = df.reindex(sample_ids)
-    df.index.name = "SampleID"
-    return df
-
-
-def _ensure_output_initialized(path: str, sample_ids: List[str]) -> pd.DataFrame:
-    """
-    Ensures the output file exists, has the correct index, and returns the DataFrame view.
-    """
-    df = _robust_read_results(path, sample_ids)
-    expected_index = pd.Index(sample_ids, name="SampleID")
-    if len(df.index) != len(expected_index) or not df.index.equals(expected_index):
-        df = pd.DataFrame(index=sample_ids)
-        df.index.name = "SampleID"
-        _atomic_to_csv(df, path)
-    return df
-
-
-def _estimate_job_memory_bytes(matrix_path: str) -> Optional[int]:
-    """
-    Estimates memory in bytes required by a single worker for a given genotype matrix.
-    The major cost is the float32 imputed copy of the memmapped matrix.
-    Returns None if the matrix cannot be inspected.
-    """
-    try:
-        x = np.load(matrix_path, mmap_mode="r")
-        n_samples, n_snps = x.shape
-        # Float32 copy for imputation.
-        imputed_bytes = int(n_samples) * int(n_snps) * 4
-        # Add conservative overhead.
-        return imputed_bytes + PER_WORKER_OVERHEAD_BYTES
-    except Exception:
-        return None
-
-
-def _decide_num_workers(pending_models: List[str]) -> int:
-    """
-    Decides how many workers to use based on empirical available memory and the
-    maximum per-job memory footprint across the pending models.
-    """
-    if not pending_models:
-        return 0
-
-    avail = _read_mem_available_bytes()
-    if avail is None:
-        # Without a reliable memory reading, disable parallelization.
-        return 1
-
-    max_job_bytes = 0
-    for m in pending_models:
-        matrix_path = os.path.join(GENOTYPE_DIR, f"{m}.genotypes.npy")
-        est = _estimate_job_memory_bytes(matrix_path)
-        if est is None:
-            # If any matrix cannot be inspected, be conservative and go sequential.
-            return 1
-        max_job_bytes = max(max_job_bytes, est)
-
-    if max_job_bytes <= 0:
-        return 1
-
-    safe_avail = int(avail / MEMORY_SAFETY_FACTOR)
-    if safe_avail < max_job_bytes:
-        return 1
-
-    max_concurrency_by_mem = max(1, safe_avail // max_job_bytes)
-    max_concurrency_by_cpu = max(1, os.cpu_count() or 1)
-    return int(max(1, min(max_concurrency_by_mem, max_concurrency_by_cpu)))
-
+# --- UTILITIES ---
 
 def _download_url_to_path(url: str, dest_path: str) -> None:
-    """Download ``url`` atomically to ``dest_path``."""
     os.makedirs(os.path.dirname(dest_path), exist_ok=True)
     tmp_path = f"{dest_path}.tmp"
     req = Request(url, headers={"User-Agent": "ferromic-infer/1.0"})
     with urlopen(req, timeout=300) as resp, open(tmp_path, "wb") as f:
         shutil.copyfileobj(resp, f)
-        f.flush()
-        os.fsync(f.fileno())
     os.replace(tmp_path, dest_path)
 
-
 def _load_model_manifest(url: str) -> Dict[str, str]:
-    """Return mapping of model name -> .model.joblib URL from a manifest."""
     try:
         req = Request(url, headers={"User-Agent": "ferromic-infer/1.0"})
         with urlopen(req, timeout=120) as resp:
             text = resp.read().decode("utf-8", errors="replace")
     except Exception as exc:
-        print(f"[FATAL] Unable to fetch model manifest from '{url}': {exc}")
+        print(f"[FATAL] Unable to fetch model manifest: {exc}")
         sys.exit(1)
-
-    mapping: Dict[str, str] = {}
+    mapping = {}
     for line in text.splitlines():
         s = line.strip()
-        if not s or s.startswith("#") or not s.endswith(".model.joblib"):
-            continue
-        base = os.path.basename(urlparse(s).path)
-        if not base.endswith(".model.joblib"):
-            continue
-        model_name = base[:-13]
-        mapping[model_name] = s
+        if s and s.endswith(".model.joblib"):
+            model_name = os.path.basename(urlparse(s).path)[:-13]
+            mapping[model_name] = s
     return mapping
 
-
 def _ensure_models_available(models: List[str]) -> None:
-    """Ensure that every model in ``models`` has a local .model.joblib file."""
     missing = [m for m in models if not os.path.exists(os.path.join(MODEL_DIR, f"{m}.model.joblib"))]
-    if not missing:
-        return
+    if missing:
+        print(f"Downloading {len(missing)} missing models...")
+        manifest = _load_model_manifest(MODEL_MANIFEST_URL)
+        for model_name in missing:
+            url = manifest.get(model_name)
+            if url:
+                _download_url_to_path(url, os.path.join(MODEL_DIR, f"{model_name}.model.joblib"))
 
-    print(f"Need to download {len(missing)} model(s). Fetching manifest...")
-    manifest = _load_model_manifest(MODEL_MANIFEST_URL)
+# --- VALIDATION LOGIC ---
 
-    for model_name in missing:
-        url = manifest.get(model_name)
-        if not url:
-            print(
-                f"[FATAL] Model '{model_name}' not found in manifest '{MODEL_MANIFEST_URL}'."
-            )
-            sys.exit(1)
-
-        dest = os.path.join(MODEL_DIR, f"{model_name}.model.joblib")
-        print(f"  - Downloading {model_name} from {url} ...")
-        try:
-            _download_url_to_path(url, dest)
-        except Exception as exc:
-            print(f"[FATAL] Failed to download model '{model_name}': {exc}")
-            sys.exit(1)
-
-
-def _impute_and_predict(model_name: str, expected_sample_count: int) -> Dict[str, object]:
+def verify_existing_output(output_path: str, expected_samples: int) -> Set[str]:
     """
-    Worker function. Loads the model and genotype matrix, imputes missing values with column means,
-    and runs prediction. Returns a dictionary with keys:
-      - "model_name": str
-      - "dosages": np.ndarray (float32) on success
-      - "error": str on failure
-      - "skipped": bool when skipped due to validation
-      - "n_samples": int
-      - "n_snps": int
-      - "missing_count": int
+    Reads the output file in chunks.
+    Returns a set of 'Complete' models (valid row count, zero NaNs).
     """
-    result: Dict[str, object] = {
-        "model_name": model_name,
-        "skipped": False,
-        "error": "",
-        "dosages": None,
-        "n_samples": 0,
-        "n_snps": 0,
-        "missing_count": 0,
-    }
+    if not os.path.exists(output_path):
+        return set()
 
-    model_path = os.path.join(MODEL_DIR, f"{model_name}.model.joblib")
-    matrix_path = os.path.join(GENOTYPE_DIR, f"{model_name}.genotypes.npy")
-
-    predicted_dosages: Optional[np.ndarray] = None
-
+    print("--- Verifying existing output file integrity... ---")
+    valid_models = set()
     try:
-        model = joblib.load(model_path)
-        X_inference = np.load(matrix_path, mmap_mode="r")
-        n_samples, n_snps = X_inference.shape
-        result["n_samples"] = int(n_samples)
-        result["n_snps"] = int(n_snps)
+        # Read header only
+        header = pd.read_csv(output_path, sep="\t", index_col=0, nrows=0)
+        potential_models = [c for c in header.columns if c in TARGET_INVERSIONS]
+        
+        if not potential_models:
+            return set()
 
-        if n_samples != expected_sample_count:
-            result["skipped"] = True
-            result["error"] = f"Sample count mismatch. Expected {expected_sample_count}, found {n_samples}."
-            return result
-
-        if X_inference.size == 0:
-            result["skipped"] = True
-            result["error"] = "Empty genotype matrix."
-            return result
-
-        missing_count = int(np.sum(X_inference == MISSING_VALUE_CODE))
-        result["missing_count"] = missing_count
-
-        # Imputation with column means on a float32 copy.
-        X_imputed = X_inference.astype(np.float32, copy=True)
-        for j in range(n_snps):
-            column_data = X_imputed[:, j]
-            valid_mask = column_data != MISSING_VALUE_CODE
-            if np.any(valid_mask):
-                col_mean = float(np.mean(column_data[valid_mask]))
+        # Initialize trackers
+        nan_counts = {m: 0 for m in potential_models}
+        row_count = 0
+        
+        # Read in chunks to save RAM
+        chunk_iter = pd.read_csv(output_path, sep="\t", index_col=0, usecols=["SampleID"] + potential_models, chunksize=50000)
+        
+        for chunk in chunk_iter:
+            row_count += len(chunk)
+            # Count NaNs per column in this chunk
+            chunk_nans = chunk.isna().sum()
+            for m in potential_models:
+                nan_counts[m] += chunk_nans[m]
+        
+        # Final Check
+        for m in potential_models:
+            if row_count == expected_samples and nan_counts[m] == 0:
+                valid_models.add(m)
             else:
-                col_mean = 1.0
-            column_data[~valid_mask] = col_mean
-
-        predicted_dosages = model.predict(X_imputed)
-        # Normalize dtype to float32 to reduce memory in parent process.
-        if isinstance(predicted_dosages, np.ndarray) and predicted_dosages.dtype != np.float32:
-            predicted_dosages = predicted_dosages.astype(np.float32, copy=False)
-
-        result["dosages"] = predicted_dosages
-
-    except FileNotFoundError as e:
-        result["error"] = f"File not found: {e}"
+                print(f"  [WARN] Model {m} is incomplete (Rows: {row_count}/{expected_samples}, NaNs: {nan_counts[m]}). Will re-run.")
+                
     except Exception as e:
-        result["error"] = f"Unexpected error: {e}"
-    finally:
+        print(f"  [WARN] Error reading output file ({e}). Assuming all need re-running.")
+        return set()
+
+    return valid_models
+
+# --- INFERENCE WORKER LOGIC ---
+
+def _calculate_column_means_fast(matrix_mmap, n_snps, n_samples):
+    """
+    Calculates column means using a random subset. 
+    Processing 400k rows takes forever. 50k rows is statistically sufficient and fast.
+    """
+    if n_samples > MEAN_SUBSET_SIZE:
+        idx = np.random.choice(n_samples, MEAN_SUBSET_SIZE, replace=False)
+        idx.sort()
+        subset = matrix_mmap[idx, :]
+    else:
+        subset = matrix_mmap
+
+    # Convert subset to float32 for mean calc
+    subset_float = subset.astype(np.float32)
+    subset_float[subset == MISSING_VALUE_CODE] = np.nan
+    
+    with np.errstate(all='ignore'):
+        col_means = np.nanmean(subset_float, axis=0)
+    
+    # Fill any columns that were ALL missing with 0.0
+    col_means[np.isnan(col_means)] = 0.0
+    return col_means
+
+def _process_model_batched(args):
+    """
+    Worker function. Loads model, loads matrix via mmap, processes in batches.
+    Saves result to temp file. Returns metadata.
+    """
+    model_name, expected_count = args
+    out_file = os.path.join(TEMP_RESULT_DIR, f"{model_name}.npy")
+    
+    # If temp file exists and is correct size, skip (resume logic)
+    if os.path.exists(out_file):
         try:
-            del predicted_dosages
-        except Exception:
-            pass
-        try:
-            del X_inference  # type: ignore[name-defined]
-        except Exception:
-            pass
-        try:
-            del X_imputed  # type: ignore[name-defined]
-        except Exception:
-            pass
-        try:
-            del model  # type: ignore[name-defined]
-        except Exception:
-            pass
+            prev = np.load(out_file)
+            if len(prev) == expected_count:
+                return {"model": model_name, "status": "skipped_temp_exists"}
+        except:
+            pass # corrupted, re-run
+
+    res = {"model": model_name, "status": "ok", "error": None}
+    
+    try:
+        # Load Model
+        model_path = os.path.join(MODEL_DIR, f"{model_name}.model.joblib")
+        clf = joblib.load(model_path)
+        
+        # Load Matrix (MMAP - Zero RAM)
+        matrix_path = os.path.join(GENOTYPE_DIR, f"{model_name}.genotypes.npy")
+        X_mmap = np.load(matrix_path, mmap_mode="r")
+        n_samples, n_snps = X_mmap.shape
+        
+        if n_samples != expected_count:
+            return {"model": model_name, "status": "error", "error": f"Sample mismatch: {n_samples} vs {expected_count}"}
+
+        # 1. Fast Mean Calculation
+        means = _calculate_column_means_fast(X_mmap, n_snps, n_samples)
+        
+        # 2. Batched Inference
+        batch_predictions = []
+        
+        for i in range(0, n_samples, BATCH_SIZE):
+            end = min(i + BATCH_SIZE, n_samples)
+            
+            # Load small chunk into RAM
+            X_batch = X_mmap[i:end].astype(np.float32, copy=True)
+            
+            # Impute (Vectorized on the batch)
+            missing_mask = (X_mmap[i:end] == MISSING_VALUE_CODE)
+            if np.any(missing_mask):
+                # Advanced indexing to fill
+                rows, cols = np.where(missing_mask)
+                X_batch[rows, cols] = means[cols]
+            
+            # Predict
+            preds = clf.predict(X_batch)
+            batch_predictions.append(preds.astype(np.float32))
+            
+            # Free RAM
+            del X_batch, missing_mask, preds
+        
+        # Concatenate and Save
+        full_result = np.concatenate(batch_predictions)
+        np.save(out_file, full_result)
+        
+        del clf, X_mmap, full_result
         gc.collect()
+        
+    except Exception as e:
+        res["status"] = "error"
+        res["error"] = str(e)
+        
+    return res
 
-    return result
+# --- MAIN ORCHESTRATOR ---
 
+def main():
+    print("--- Starting Robust, Low-Memory Imputation Pipeline ---")
+    
+    # 1. Setup Dirs
+    os.makedirs(TEMP_RESULT_DIR, exist_ok=True)
+    os.makedirs(MODEL_DIR, exist_ok=True)
 
-def _impute_and_predict_from_tuple(args: Tuple[str, int]) -> Dict[str, object]:
-    """Helper to unpack tuple arguments when using Pool.imap_unordered."""
-    model_name, expected_sample_count = args
-    return _impute_and_predict(model_name, expected_sample_count)
-
-
-def main() -> None:
-    """
-    Launches the imputation pipeline with robust, restartable, and crash-safe behavior.
-    Parallelization is enabled only after confirming that available memory comfortably supports it.
-    Writes to the output file are atomic and performed from the main process only.
-    """
-    print("--- Starting Memory-Efficient Imputation Inference Pipeline ---")
-    start_time = time.time()
-
-    # --- 1. Pre-flight Checks ---
-    if not os.path.isdir(MODEL_DIR):
-        print(f"Model directory '{MODEL_DIR}' not found. Creating it.")
-        os.makedirs(MODEL_DIR, exist_ok=True)
-    if not os.path.isdir(GENOTYPE_DIR):
-        print(f"[FATAL] Genotype matrix directory not found: '{GENOTYPE_DIR}'")
-        sys.exit(1)
-
+    # 2. Load Sample List
     fam_path = f"{PLINK_PREFIX}.fam"
     if not os.path.exists(fam_path):
-        print(f"[FATAL] PLINK .fam file not found: '{fam_path}'. Cannot get sample IDs.")
-        sys.exit(1)
+        sys.exit(f"FATAL: {fam_path} not found.")
+    fam = pd.read_csv(fam_path, sep=r"\s+", header=None, usecols=[1], dtype=str)
+    sample_ids = fam[1].tolist()
+    n_samples = len(sample_ids)
+    print(f"Target Sample Count: {n_samples}")
 
-    # --- 2. Load Sample IDs ---
-    print(f"Loading sample IDs from {fam_path}...")
-    try:
-        fam_df = pd.read_csv(fam_path, sep=r"\s+", header=None, usecols=[1], dtype=str)
-        sample_ids: List[str] = fam_df[1].tolist()
-        print(f"Successfully loaded {len(sample_ids)} sample IDs.")
-    except Exception as e:
-        print(f"[FATAL] Could not read sample IDs from .fam file. Error: {e}")
-        sys.exit(1)
+    # 3. Check existing Output File
+    valid_done_models = verify_existing_output(OUTPUT_FILE, n_samples)
+    print(f"Found {len(valid_done_models)} valid models in existing output.")
 
-    # --- 3. Identify and Filter Models to Process ---
-    try:
-        all_available_models = sorted(
-            [
-                f.replace(".genotypes.npy", "")
-                for f in os.listdir(GENOTYPE_DIR)
-                if f.endswith(".genotypes.npy")
-            ]
-        )
-    except FileNotFoundError:
-        all_available_models = []
+    # 4. Determine Work List
+    avail_files = [f for f in os.listdir(GENOTYPE_DIR) if f.endswith(".genotypes.npy")]
+    avail_models = set(f.replace(".genotypes.npy", "") for f in avail_files)
+    
+    # We want: Targets that exist as genotype files AND are not already valid in output
+    todo_models = [m for m in TARGET_INVERSIONS if m in avail_models and m not in valid_done_models]
+    
+    print(f"Total Targets: {len(TARGET_INVERSIONS)}")
+    print(f"Available Genotypes: {len(avail_models)}")
+    print(f"Models Remaining to Compute: {len(todo_models)}")
 
-    if not all_available_models:
-        print("[FATAL] No '.genotypes.npy' files found in the genotype directory. Nothing to process.")
-        sys.exit(1)
-
-    print(f"Found {len(all_available_models)} total staged genotype matrices.")
-    models_to_process = [m for m in all_available_models if m in TARGET_INVERSIONS]
-
-    if not models_to_process:
-        print("[FATAL] None of the available models are in the target list. Nothing to process.")
-        sys.exit(1)
-
-    print(f"After filtering, {len(models_to_process)} models will be processed.")
-
-    # Ensure required models are present locally (download if needed).
-    _ensure_models_available(models_to_process)
-
-    # --- 4. Initialize or recover output file, and determine already completed models ---
-    print(f"Initializing output file: {OUTPUT_FILE}")
-    current_results = _ensure_output_initialized(OUTPUT_FILE, sample_ids)
-
-    completed_models = [c for c in current_results.columns if c in TARGET_INVERSIONS]
-    if completed_models:
-        before = len(models_to_process)
-        models_to_process = [m for m in models_to_process if m not in completed_models]
-        print(f"Resuming; {len(completed_models)} models already in output. {before - len(models_to_process)} will be skipped.")
-    print(f"{len(models_to_process)} models remain to process.")
-
-    if not models_to_process:
-        end_time = time.time()
-        print("\n--- Pipeline Complete ---")
-        print(f"Total time: {end_time - start_time:.2f} seconds.")
-        print(f"Final output file is ready at '{os.path.abspath(OUTPUT_FILE)}'")
+    if not todo_models:
+        print("All models are complete and valid. Nothing to do.")
         return
 
-    # --- 5. Decide parallelization based on empirical memory availability ---
-    num_workers = _decide_num_workers(models_to_process)
-    if num_workers <= 1:
-        print("Parallelization disabled due to memory constraints or insufficient information. Running sequentially.")
+    # 5. Ensure Model Files exist
+    _ensure_models_available(todo_models)
+
+    # 6. Run Inference (Multiprocessed)
+    # Using 4 workers is usually safe with batching. If 4 crashes, lower to 2.
+    n_workers = min(4, os.cpu_count())
+    print(f"Running inference with {n_workers} workers (Batch size: {BATCH_SIZE})...")
+    
+    pool_args = [(m, n_samples) for m in todo_models]
+    
+    # We track which models successfully created a temp file
+    successful_temp_models = []
+
+    with mp.Pool(n_workers) as pool:
+        for res in tqdm(pool.imap_unordered(_process_model_batched, pool_args), total=len(todo_models)):
+            if res["status"] == "error":
+                print(f"\n[ERROR] Model {res['model']} failed: {res['error']}")
+            else:
+                successful_temp_models.append(res["model"])
+
+    # 7. Merge Phase (Stitching)
+    print("--- Stitching results ---")
+    
+    # Load base dataframe (or create new)
+    if os.path.exists(OUTPUT_FILE) and len(valid_done_models) > 0:
+        print("Loading existing base file...")
+        # Only read index and valid columns to keep it clean
+        df = pd.read_csv(OUTPUT_FILE, sep="\t", index_col="SampleID", usecols=["SampleID"] + list(valid_done_models))
+        # Enforce correct index order
+        df = df.reindex(sample_ids)
     else:
-        print(f"Parallelization enabled with {num_workers} workers based on available memory.")
+        print("Creating new dataframe...")
+        df = pd.DataFrame(index=sample_ids)
+        df.index.name = "SampleID"
 
-    # --- 6. Execute imputation + prediction ---
-    # Results are written by the main process only, atomically, after each model finishes,
-    # enabling safe restarts. When parallel, worker processes only compute and return dosages.
-    pending = models_to_process
-
-    if num_workers <= 1:
-        iterator = tqdm(pending, desc="Predicting Inversions", unit="model")
-        for model_name in iterator:
-            print(f"\n--- Processing: {model_name} ---")
-            res = _impute_and_predict(model_name, expected_sample_count=len(sample_ids))
-
-            if res.get("skipped", False):
-                print(f"  - Skipped: {res.get('error')}")
+    # Add new columns from temp files
+    newly_added_count = 0
+    for m in successful_temp_models:
+        npy_path = os.path.join(TEMP_RESULT_DIR, f"{m}.npy")
+        if not os.path.exists(npy_path):
+            continue
+            
+        try:
+            data = np.load(npy_path)
+            if len(data) != n_samples:
+                print(f"Skipping merge for {m}: length mismatch")
                 continue
-            if res.get("error"):
-                print(f"  - [ERROR] {res.get('error')}")
-                continue
+                
+            df[m] = data
+            newly_added_count += 1
+        except Exception as e:
+            print(f"Error merging {m}: {e}")
 
-            dosages = res["dosages"]
-            if not isinstance(dosages, np.ndarray):
-                print("  - [ERROR] Invalid dosages returned.")
-                continue
-
-            # Robust read to tolerate any prior partial write.
-            current_results = _robust_read_results(OUTPUT_FILE, sample_ids)
-
-            if model_name in current_results.columns:
-                print("  - Column already present; skipping write.")
-                continue
-
-            current_results[model_name] = pd.Series(dosages, index=sample_ids, dtype=np.float32)
-            _atomic_to_csv(current_results, OUTPUT_FILE)
-            print(f"  - Appended results for {model_name}.")
-            gc.collect()
+    # 8. Atomic Write
+    if newly_added_count > 0:
+        print(f"Writing final file with {len(df.columns)} models...")
+        tmp_name = OUTPUT_FILE + ".tmp"
+        df.to_csv(tmp_name, sep="\t", float_format="%.4f")
+        os.replace(tmp_name, OUTPUT_FILE)
+        
+        # Cleanup
+        print("Cleaning up temp files...")
+        shutil.rmtree(TEMP_RESULT_DIR)
+        print("Done.")
     else:
-        # Stream results as they complete to keep memory bounded and ensure frequent durable progress.
-        with mp.Pool(processes=num_workers) as pool:
-            for res in tqdm(pool.imap_unordered(
-                func=_impute_and_predict_from_tuple,
-                iterable=[(m, len(sample_ids)) for m in pending],
-            ), total=len(pending), desc="Predicting Inversions", unit="model"):
-
-                model_name = res.get("model_name", "")
-                if not model_name:
-                    print("  - [ERROR] Missing model name in result.")
-                    continue
-
-                print(f"\n--- Processing: {model_name} ---")
-                if res.get("skipped", False):
-                    print(f"  - Skipped: {res.get('error')}")
-                    continue
-                if res.get("error"):
-                    print(f"  - [ERROR] {res.get('error')}")
-                    continue
-
-                dosages = res["dosages"]
-                if not isinstance(dosages, np.ndarray):
-                    print("  - [ERROR] Invalid dosages returned.")
-                    continue
-
-                current_results = _robust_read_results(OUTPUT_FILE, sample_ids)
-                if model_name in current_results.columns:
-                    print("  - Column already present; skipping write.")
-                    continue
-
-                current_results[model_name] = pd.Series(dosages, index=sample_ids, dtype=np.float32)
-                _atomic_to_csv(current_results, OUTPUT_FILE)
-                print(f"  - Appended results for {model_name}.")
-                gc.collect()
-
-    end_time = time.time()
-    print("\n--- Pipeline Complete ---")
-    print(f"Total time: {end_time - start_time:.2f} seconds.")
-    print(f"Final output file is ready at '{os.path.abspath(OUTPUT_FILE)}'")
-
+        print("No new data to merge.")
 
 if __name__ == "__main__":
     main()
