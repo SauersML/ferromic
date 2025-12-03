@@ -19,7 +19,7 @@ curl -s https://raw.githubusercontent.com/sauersml/ferromic/main/imputation/snv_
 2. **Prepare PLINK-derived inputs for inference:**
 
 ```
-curl -s https://raw.githubusercontent.com/sauersml/ferromic/main/imputation/prepare_data_for_infer.py | python3
+pip install bed_reader && curl -s https://raw.githubusercontent.com/sauersml/ferromic/main/imputation/prepare_data_for_infer.py | python3
 ```
 
 4. **Fetch the PLS regression helper used by the inference script:**
