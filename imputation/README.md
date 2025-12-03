@@ -11,18 +11,25 @@ The goal of this pipeline is to impute the genotype dosage (0, 1, or 2 copies) o
 Use the following sequence to download the required variant lists, prepare inputs, and infer dosages from trained models. These commands can be executed in a clean working directory.
 
 1. **Download the variant list from All of Us:**
+   
 ```
 curl -s https://raw.githubusercontent.com/sauersml/ferromic/main/imputation/snv_list_acaf_download.py | python3
 ```
+
 2. **Prepare PLINK-derived inputs for inference:**
+
 ```
 curl -s https://raw.githubusercontent.com/sauersml/ferromic/main/imputation/prepare_data_for_infer.py | python3
 ```
+
 4. **Fetch the PLS regression helper used by the inference script:**
+
 ```
 curl -O https://raw.githubusercontent.com/SauersML/ferromic/refs/heads/main/imputation/pls_patch.py
 ```
+
 4. **Run dosage inference with the trained models:**
+
 ```
 curl -s https://raw.githubusercontent.com/sauersml/ferromic/main/imputation/infer_dosage.py | python3
 ```
