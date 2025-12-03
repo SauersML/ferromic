@@ -11,9 +11,9 @@ The goal of this pipeline is to impute the genotype dosage (0, 1, or 2 copies) o
 Use the following sequence to download the required variant lists, prepare inputs, and infer dosages from trained models. These commands can be executed in a clean working directory.
 
 1. **Download the variant list from All of Us:**
-   ```bash
+```
 curl -s https://raw.githubusercontent.com/sauersml/ferromic/main/imputation/snv_list_acaf_download.py | python3
-   ```
+```
 2. **Prepare PLINK-derived inputs for inference:**
    ```bash
 curl -s https://raw.githubusercontent.com/sauersml/ferromic/main/imputation/prepare_data_for_infer.py | python3
