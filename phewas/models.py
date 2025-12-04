@@ -1831,9 +1831,17 @@ def _drop_rank_deficient(
     X_ordered = X.loc[:, priority]
     X_arr = np.asarray(X_ordered, dtype=np.float64)
 
-    # Use pivoted QR to obtain a stable rank estimate and tolerance threshold.
+    # Scale columns to unit norm before QR so the tolerance is based on linear
+    # independence rather than raw magnitude (which can vary wildly across
+    # covariates like an intercept vs. age-squared).
+    col_norms = sp_linalg.norm(X_arr, axis=0, ord=2)
+    safe_norms = np.where(col_norms == 0.0, 1.0, col_norms)
+    X_scaled = X_arr / safe_norms
+
+    # Use pivoted QR to obtain a stable rank estimate and tolerance threshold on
+    # the scaled design.
     try:
-        R, _ = sp_linalg.qr(X_arr, mode="r", pivoting=True)
+        R, _ = sp_linalg.qr(X_scaled, mode="r", pivoting=True)
     except Exception:
         # If QR fails for any reason, return the original matrix to avoid
         # blocking the pipeline; downstream steps will handle the failure.
@@ -1845,9 +1853,9 @@ def _drop_rank_deficient(
     tol = diag.max() * float(rtol)
 
     kept_cols = []
-    kept_mat = np.empty((X_arr.shape[0], 0), dtype=np.float64)
+    kept_mat = np.empty((X_scaled.shape[0], 0), dtype=np.float64)
     for idx, name in enumerate(priority):
-        col = X_arr[:, [idx]]
+        col = X_scaled[:, [idx]]
         if kept_mat.shape[1] == 0:
             residual_norm = float(sp_linalg.norm(col, ord=2))
         else:
