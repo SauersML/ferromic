@@ -559,7 +559,8 @@ class MultiTenantGovernor(ResourceGovernor):
         budget_avail = pipes.BUDGET.remaining_gb()
         effective_avail = min(latest_avail, budget_avail)
         active = self.total_active_footprint()
-        mem_ok = (effective_avail - predicted_gb) >= self.mem_guard_gb
+        guard = self.mem_guard_gb if active > 0 else 0.0
+        mem_ok = (effective_avail - predicted_gb) >= guard
         if active == 0 and mem_ok:
             return True
         if not mem_ok:
