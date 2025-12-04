@@ -673,8 +673,14 @@ if __name__ == '__main__':
         logging.warning("No valid inversions to process. Exiting."); sys.exit(0)
 
     total_cores = cpu_count()
-    N_INNER_JOBS = 1
-    N_OUTER_JOBS = max(1, total_cores)
+    num_inversions = len(all_jobs)
+
+    if num_inversions < total_cores:
+        N_OUTER_JOBS = max(1, num_inversions)
+        N_INNER_JOBS = max(1, total_cores // N_OUTER_JOBS)
+    else:
+        N_OUTER_JOBS = max(1, total_cores)
+        N_INNER_JOBS = 1
 
     logging.info(f"Loaded {len(all_jobs)} inversions to process or verify.")
     logging.info(f"Using {N_OUTER_JOBS} parallel 'outer' jobs, each with up to {N_INNER_JOBS} 'inner' cores for model training.")
