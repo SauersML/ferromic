@@ -173,19 +173,24 @@ def _process_model_batched(args):
         # Load Model
         model_path = os.path.join(MODEL_DIR, f"{model_name}.model.joblib")
         clf = joblib.load(model_path)
+        pls_model = clf.named_steps.get("pls") if hasattr(clf, "named_steps") else clf
+        model_means = getattr(pls_model, "_x_mean", None)
+        if model_means is None:
+            return {"model": model_name, "status": "error", "error": "Model missing training mean (_x_mean)."}
+        model_means = np.asarray(model_means, dtype=np.float32)
         
         # Load Matrix (MMAP - Zero RAM)
         matrix_path = os.path.join(GENOTYPE_DIR, f"{model_name}.genotypes.npy")
         X_mmap = np.load(matrix_path, mmap_mode="r")
         n_samples, n_snps = X_mmap.shape
+
+        if model_means.shape[0] != n_snps:
+            return {"model": model_name, "status": "error", "error": f"Model mean length {model_means.shape[0]} != genotype columns {n_snps}"}
         
         if n_samples != expected_count:
             return {"model": model_name, "status": "error", "error": f"Sample mismatch: {n_samples} vs {expected_count}"}
 
-        # 1. Fast Mean Calculation
-        means = _calculate_column_means_fast(X_mmap, n_snps, n_samples)
-        
-        # 2. Batched Inference
+        # 1. Batched Inference using training-set means for imputation
         batch_predictions = []
         
         for i in range(0, n_samples, BATCH_SIZE):
@@ -195,11 +200,11 @@ def _process_model_batched(args):
             X_batch = X_mmap[i:end].astype(np.float32, copy=True)
             
             # Impute (Vectorized on the batch)
-            missing_mask = (X_mmap[i:end] == MISSING_VALUE_CODE)
+            missing_mask = (X_batch == MISSING_VALUE_CODE)
             if np.any(missing_mask):
                 # Advanced indexing to fill
                 rows, cols = np.where(missing_mask)
-                X_batch[rows, cols] = means[cols]
+                X_batch[rows, cols] = model_means[cols]
             
             # Predict
             preds = clf.predict(X_batch)
