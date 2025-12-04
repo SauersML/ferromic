@@ -1127,12 +1127,17 @@ def _pipeline_once():
                         lock_dir=LOCK_DIR,
                     )
                 except io.LowVarianceInversionError as exc:
-                    std_repr = "nan" if not np.isfinite(exc.std) else f"{exc.std:.4f}"
-                    print(
-                        f"{log_prefix} [WARN] Skipping inversion due to low variance "
-                        f"(std={std_repr}, threshold={exc.threshold}).",
-                        flush=True,
-                    )
+                    if np.isfinite(exc.std):
+                        print(
+                            f"{log_prefix} [WARN] Skipping inversion: LOW VARIANCE "
+                            f"(std={exc.std:.4f}).",
+                            flush=True,
+                        )
+                    else:
+                        print(
+                            f"{log_prefix} [WARN] Skipping inversion: NO DATA / ALL NAN.",
+                            flush=True,
+                        )
                     with skipped_low_variance_lock:
                         skipped_low_variance_inversions.add(target_inversion)
                     return
@@ -1633,12 +1638,17 @@ def _pipeline_once():
                     )
                 except io.LowVarianceInversionError as exc:
                     inv_safe_name = models.safe_basename(target_inversion)
-                    std_repr = "nan" if not np.isfinite(exc.std) else f"{exc.std:.4f}"
-                    print(
-                        f"[INV {inv_safe_name}] Skipping follow-up due to low variance "
-                        f"(std={std_repr}, threshold={exc.threshold}).",
-                        flush=True,
-                    )
+                    if np.isfinite(exc.std):
+                        print(
+                            f"[INV {inv_safe_name}] Skipping follow-up: LOW VARIANCE "
+                            f"(std={exc.std:.4f}).",
+                            flush=True,
+                        )
+                    else:
+                        print(
+                            f"[INV {inv_safe_name}] Skipping follow-up: NO DATA / ALL NAN.",
+                            flush=True,
+                        )
                     with skipped_low_variance_lock:
                         skipped_low_variance_inversions.add(target_inversion)
                     continue
