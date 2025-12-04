@@ -412,9 +412,16 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int, output_
                 p=sample_weights / np.sum(sample_weights)
             )
             X_train_resampled = X_train[resampled_indices]; y_train_resampled = y_train[resampled_indices]
+            resampled_groups = resampled_indices
             train_min_class_count = min(Counter(y_train_resampled).values())
             if train_min_class_count < 2:
                 logging.info(f"[{inversion_id}] EVAL fold {fold_idx}/{n_outer_splits}: skipped (post-resample class <2).")
+                continue
+
+            unique_group_count = len(np.unique(resampled_groups))
+            n_inner_splits = min(3, train_min_class_count, unique_group_count)
+            if n_inner_splits < 2:
+                logging.info(f"[{inversion_id}] EVAL fold {fold_idx}/{n_outer_splits}: skipped (insufficient unique groups for CV).")
                 continue
 
             # Tune PLS components safely
@@ -425,7 +432,7 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int, output_
                 continue
 
             pipeline = Pipeline([('pls', PLSRegression())])
-            inner_cv = StratifiedKFold(n_splits=min(3, train_min_class_count), shuffle=True, random_state=123)
+            inner_cv = StratifiedGroupKFold(n_splits=n_inner_splits, shuffle=True, random_state=123)
             grid_search = GridSearchCV(
                 estimator=pipeline,
                 param_grid={'pls__n_components': range(1, effective_max_components + 1)},
@@ -434,7 +441,7 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int, output_
             )
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", "y residual is constant", UserWarning)
-                grid_search.fit(X_train_resampled, y_train_resampled)
+                grid_search.fit(X_train_resampled, y_train_resampled, groups=resampled_groups)
 
             dummy_model_fold = DummyRegressor(strategy='mean').fit(X_train, y_train)
             y_pred_pls_fold = grid_search.best_estimator_.predict(X_test).flatten()
@@ -501,6 +508,7 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int, output_
             p=final_sample_weights / np.sum(final_sample_weights)
         )
         X_final_train, y_final_train = X_final_train_full[final_resampled_indices], y_final_train_full[final_resampled_indices]
+        final_groups = final_resampled_indices
 
         final_min_class_count = min(Counter(y_final_train).values())
         if final_min_class_count < 2:
@@ -515,7 +523,14 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int, output_
             logging.error(f"[{inversion_id}] FAILED: {reason}")
             return {'status': 'FAILED', 'id': inversion_id, 'reason': reason}
 
-        final_cv = StratifiedKFold(n_splits=min(3, final_min_class_count), shuffle=True, random_state=42)
+        unique_final_groups = len(np.unique(final_groups))
+        final_splits = min(3, final_min_class_count, unique_final_groups)
+        if final_splits < 2:
+            reason = "Final balanced training set lacks enough unique groups for CV."
+            logging.error(f"[{inversion_id}] FAILED: {reason}")
+            return {'status': 'FAILED', 'id': inversion_id, 'reason': reason}
+
+        final_cv = StratifiedGroupKFold(n_splits=final_splits, shuffle=True, random_state=42)
         final_pipeline = Pipeline([('pls', PLSRegression())])
         final_grid_search = GridSearchCV(
             estimator=final_pipeline,
@@ -525,7 +540,7 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int, output_
         )
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", "y residual is constant", UserWarning)
-            final_grid_search.fit(X_final_train, y_final_train)
+            final_grid_search.fit(X_final_train, y_final_train, groups=final_groups)
 
         os.makedirs(output_dir, exist_ok=True)
         model_filename = os.path.join(output_dir, f"{inversion_id}.model.joblib")
@@ -639,6 +654,12 @@ if __name__ == '__main__':
     allowed_snps = load_and_normalize_snp_list(snp_whitelist_file)
 
     config_df = pd.read_csv(ground_truth_file, sep='\t', on_bad_lines='warn', dtype={'seqnames': str})
+    # Remove children from known parent–child trios to avoid relatedness leakage
+    child_ids_to_drop = ["HG00514", "HG00733", "NA19240"]
+    dropped_children = [c for c in child_ids_to_drop if c in config_df.columns]
+    config_df = config_df.drop(columns=child_ids_to_drop, errors='ignore')
+    if dropped_children:
+        logging.info(f"Dropped related child samples from config: {', '.join(dropped_children)}")
     config_df = config_df[(config_df['verdict'] == 'pass') & (~config_df['seqnames'].isin(['chrY', 'chrM']))].copy()
     all_jobs = config_df.to_dict('records')
     if not all_jobs:
