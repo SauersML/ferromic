@@ -631,6 +631,43 @@ if _pheno_filter_env is not None:
     PHENOTYPE_FILTER = _pheno_filter_env.strip() or None
 
 
+def _apply_pipeline_config(pipeline_config: Optional[dict[str, object]] = None) -> None:
+    """Synchronize module globals and environment variables with the pipeline config."""
+
+    global CLI_MIN_CASES_CONTROLS_OVERRIDE, MIN_CASES_FILTER, MIN_CONTROLS_FILTER
+    global POPULATION_FILTER, PHENOTYPE_FILTER
+
+    config = pipeline_config or {}
+
+    min_override = config.get("min_cases_controls")
+    if min_override is not None:
+        CLI_MIN_CASES_CONTROLS_OVERRIDE = int(min_override)
+        MIN_CASES_FILTER = int(min_override)
+        MIN_CONTROLS_FILTER = int(min_override)
+    else:
+        CLI_MIN_CASES_CONTROLS_OVERRIDE = None
+        MIN_CASES_FILTER = DEFAULT_MIN_CASES_FILTER
+        MIN_CONTROLS_FILTER = DEFAULT_MIN_CONTROLS_FILTER
+
+    pheno.MIN_CASES_FILTER = MIN_CASES_FILTER
+    pheno.MIN_CONTROLS_FILTER = MIN_CONTROLS_FILTER
+
+    population_label = config.get("population_filter", POPULATION_FILTER)
+    normalized_population = str(population_label).strip() or "all"
+    POPULATION_FILTER = normalized_population
+    if normalized_population == "all":
+        os.environ.pop("FERROMIC_POPULATION_FILTER", None)
+    else:
+        os.environ["FERROMIC_POPULATION_FILTER"] = normalized_population
+
+    phenotype_filter = config.get("phenotype_filter")
+    PHENOTYPE_FILTER = (str(phenotype_filter).strip() or None) if phenotype_filter is not None else None
+    if PHENOTYPE_FILTER is None:
+        os.environ.pop("FERROMIC_PHENOTYPE_FILTER", None)
+    else:
+        os.environ["FERROMIC_PHENOTYPE_FILTER"] = PHENOTYPE_FILTER
+
+
 def _normalize_population_label(label: Optional[str]) -> str:
     """Return a canonical, lower-case population label suitable for comparisons."""
     if label is None:
@@ -796,10 +833,12 @@ def _prefilter_thresholds() -> Tuple[int, int]:
     return _effective_case_control_thresholds()
 
 
-def _pipeline_once():
+def _pipeline_once(pipeline_config: Optional[dict[str, object]] = None):
     """
     Entry point for the PheWAS pipeline. Uses module-level configuration directly.
     """
+    _apply_pipeline_config(pipeline_config)
+
     script_start_time = time.time()
 
     # Keep the phenotype module thresholds in sync with any overrides applied here.
@@ -1804,7 +1843,7 @@ def _pipeline_once():
         print("=" * 70)
 
 
-def supervisor_main(max_restarts=100, backoff_sec=10):
+def supervisor_main(max_restarts=100, backoff_sec=10, *, pipeline_config=None):
     import multiprocessing as mp, time, signal, os
 
     ctx = mp.get_context("spawn")
@@ -1830,7 +1869,11 @@ def supervisor_main(max_restarts=100, backoff_sec=10):
 
     restarts = 0
     while not should_stop["flag"] and restarts <= max_restarts:
-        p = ctx.Process(target=_pipeline_once, name="ferromic-pipeline")
+        p = ctx.Process(
+            target=_pipeline_once,
+            name="ferromic-pipeline",
+            args=(pipeline_config,),
+        )
         current_child["proc"] = p
         p.start()
         while p.is_alive():
@@ -1863,14 +1906,15 @@ def main(argv: Sequence[str] | None = None) -> None:
     if argv is None:
         argv = []
 
+    pipeline_config = None
     if argv:
         # Import locally to avoid circular imports at module load time.
         from . import cli as _cli
 
         args = _cli.parse_args(argv)
-        _cli.apply_cli_configuration(args)
+        pipeline_config = _cli.apply_cli_configuration(args)
 
-    supervisor_main()
+    supervisor_main(pipeline_config=pipeline_config)
 
 
 if __name__ == "__main__":

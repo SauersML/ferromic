@@ -255,7 +255,14 @@ def test_pipeline_final_results_lambda_is_reasonable(inversion_mode):
                 patch("phewas.pheno._prequeue_should_run", _force_queue)
             )
             stack.enter_context(patch("phewas.pipes.POOL_PROCS_PER_INV", 1))
-            stack.enter_context(patch("phewas.run.supervisor_main", lambda: run._pipeline_once()))
+            stack.enter_context(
+                patch(
+                    "phewas.run.supervisor_main",
+                    lambda *_, **kwargs: run._pipeline_once(
+                        kwargs.get("pipeline_config")
+                    ),
+                )
+            )
 
             from phewas import cli
 
