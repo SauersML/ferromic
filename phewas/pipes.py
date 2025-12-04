@@ -32,28 +32,68 @@ def _log_worker_exception(stage: str, exc: BaseException) -> None:
 
 
 def cgroup_available_gb():
-    """Return remaining memory permitted by the active cgroup, if known."""
-    try:
-        max_v2 = "/sys/fs/cgroup/memory.max"
-        cur_v2 = "/sys/fs/cgroup/memory.current"
-        if os.path.exists(max_v2) and os.path.exists(cur_v2):
-            with open(max_v2, "r") as fh:
-                raw = fh.read().strip()
-            if raw != "max":
-                limit = int(raw)
-                with open(cur_v2, "r") as fh:
-                    usage = int(fh.read().strip())
-                return max(0.0, (limit - usage) / (1024**3))
+    """Return remaining memory permitted by the active cgroup, if known.
 
-        max_v1 = "/sys/fs/cgroup/memory/memory.limit_in_bytes"
-        cur_v1 = "/sys/fs/cgroup/memory/memory.usage_in_bytes"
-        if os.path.exists(max_v1) and os.path.exists(cur_v1):
-            with open(max_v1, "r") as fh:
-                limit = int(fh.read().strip())
-            if limit < (1 << 60):  # guard "unlimited" sentinel
-                with open(cur_v1, "r") as fh:
-                    usage = int(fh.read().strip())
-                return max(0.0, (limit - usage) / (1024**3))
+    Cgroup usage counters include the page cache, which is typically reclaimable.
+    Deducting that cache from the limit can significantly under-report available
+    memory in data-heavy workloads (for example, after reading large input
+    files).  To avoid artificially stalling the governor, estimate the
+    reclaimable cache from ``memory.stat`` and subtract it from the usage before
+    computing the available bytes.
+    """
+
+    def _read_int(path: str) -> int:
+        with open(path, "r") as fh:
+            return int(fh.read().strip())
+
+    def _reclaimable_bytes(stat_path: str, keys: tuple[str, ...]) -> int:
+        try:
+            with open(stat_path, "r") as fh:
+                for line in fh:
+                    parts = line.split()
+                    if len(parts) != 2:
+                        continue
+                    key, value = parts
+                    if key in keys:
+                        try:
+                            return int(value)
+                        except ValueError:
+                            return 0
+        except Exception:
+            pass
+        return 0
+
+    def _available(limit_path: str, usage_path: str, stat_path: str, stat_keys: tuple[str, ...]):
+        if not os.path.exists(limit_path) or not os.path.exists(usage_path):
+            return None
+
+        limit_raw = _read_int(limit_path)
+        if limit_raw <= 0 or limit_raw >= (1 << 60):
+            return None
+
+        usage_raw = _read_int(usage_path)
+        reclaimable = _reclaimable_bytes(stat_path, stat_keys)
+        adjusted_usage = max(0, usage_raw - reclaimable)
+        return max(0.0, (limit_raw - adjusted_usage) / (1024**3))
+
+    try:
+        avail_v2 = _available(
+            "/sys/fs/cgroup/memory.max",
+            "/sys/fs/cgroup/memory.current",
+            "/sys/fs/cgroup/memory.stat",
+            ("inactive_file", "file"),
+        )
+        if avail_v2 is not None:
+            return avail_v2
+
+        avail_v1 = _available(
+            "/sys/fs/cgroup/memory/memory.limit_in_bytes",
+            "/sys/fs/cgroup/memory/memory.usage_in_bytes",
+            "/sys/fs/cgroup/memory/memory.stat",
+            ("total_inactive_file", "total_cache"),
+        )
+        if avail_v1 is not None:
+            return avail_v1
     except Exception:
         pass
     return None
