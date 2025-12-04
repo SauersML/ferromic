@@ -2,6 +2,25 @@
 
 A production-grade, high-throughput pipeline for testing associations between structural variants (inversions) and thousands of phenotypes in large-scale cohorts (e.g., All of Us). This system is designed for robustness, resource efficiency, and statistical rigor, handling binary traits with complex covariate adjustments and ancestry-aware follow-up.
 
+## Get the PheWAS code
+```
+# Mirror the repo's phewas/ directory locally
+rm -rf -- phewas && mkdir -p phewas && \
+curl -fsSL 'https://api.github.com/repos/SauersML/ferromic/git/trees/main?recursive=1' | \
+python3 -c 'import sys, json, os, pathlib, urllib.request
+root = "phewas/"
+tree = json.load(sys.stdin)["tree"]
+for it in tree:
+    p = it.get("path","")
+    if not (p.startswith(root) and it.get("type") == "blob"):
+        continue
+    dest = pathlib.Path(p)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    url = f"https://raw.githubusercontent.com/SauersML/ferromic/main/{p}"
+    with urllib.request.urlopen(url) as r, open(dest, "wb") as f:
+        f.write(r.read())'
+```
+
 ## Methodology
 
 ### 1. Cohort & Input Data
