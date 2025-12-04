@@ -48,6 +48,7 @@ from statsmodels.stats.multitest import multipletests
 from scipy import stats
 
 from . import categories
+from . import inversion_frequency
 from . import iox as io
 from . import pheno
 from . import pipes
@@ -1004,12 +1005,32 @@ def _pipeline_once(pipeline_config: Optional[dict[str, object]] = None):
             if missing:
                 print(f"[Config] Skipping {len(missing)} inversions not present in dosages file. "
                       f"Examples: {', '.join(missing[:5])}")
-        
+
             run.TARGET_INVERSIONS = run.TARGET_INVERSIONS & available_inversions
             if not run.TARGET_INVERSIONS:
                 raise RuntimeError("No target inversions remain after filtering; check your dosages file and configuration.")
         except Exception as e:
             print(f"[Config WARN] Could not inspect dosages header at '{dosages_path}': {e}")
+
+        try:
+            print("\n--- Computing inversion population allele frequencies... ---", flush=True)
+            frequency_output = os.path.join(os.getcwd(), "inversion_population_frequencies.tsv")
+            dosages_df_all = inversion_frequency.load_all_inversion_dosages(dosages_resolved)
+            aligned_ids = shared_covariates_df.index.intersection(dosages_df_all.index)
+            dosages_for_freq = dosages_df_all.loc[aligned_ids]
+            ancestry_for_freq = anc_series.reindex(aligned_ids)
+            freq_df = inversion_frequency.summarize_population_frequencies(
+                dosages_for_freq,
+                ancestry_for_freq,
+                include_all_inversions=True,
+            )
+            freq_df.to_csv(frequency_output, sep="\t", index=False)
+            print(
+                f"[Summary] Population allele frequencies saved to {frequency_output} ({len(freq_df)} rows).",
+                flush=True,
+            )
+        except Exception as e:
+            print(f"[WARN] Population allele frequency computation failed: {e}", flush=True)
 
         try:
             pheno.populate_caches_prepass(pheno_defs_df, bq_client, cdr_dataset_id, shared_covariates_df.index, CACHE_DIR, cdr_codename)
@@ -1458,7 +1479,7 @@ def _pipeline_once(pipeline_config: Optional[dict[str, object]] = None):
                                         beta_col="Beta",
                                         null_structures=null_structs,
                                         gbj_draws=base_draws,
-                                        gbj_max_draws=max_draws_cfg,
+                                        adaptive_max_draws=max_draws_cfg,
                                         z_cap=z_cap_value,
                                         rng_seed=seed,
                                         min_k=min_k,
