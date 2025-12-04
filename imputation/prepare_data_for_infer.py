@@ -195,23 +195,22 @@ def load_models_and_build_router_from_manifest(manifest_url: str,
                 chosen.append((None, False))
                 continue
 
-            a1_matches = [v for v in cand_idxs if a1[v] == eff]
-            a2_matches = [v for v in cand_idxs if a2[v] == eff]
+            matches: List[Tuple[int, bool]] = []
+            for v in cand_idxs:
+                if a1[v] == eff:
+                    matches.append((v, False))
+                if a2[v] == eff:
+                    matches.append((v, True))
 
-            if a1_matches:
-                v_idx = a1_matches[0]
-                if len(a1_matches) > 1:
-                    print(f"[WARN ambiguous] {name}: multiple A1 matches for '{id_str}'='{eff}', picked index {v_idx}")
-                chosen.append((v_idx, False))
-            elif a2_matches:
-                v_idx = a2_matches[0]
-                if len(a2_matches) > 1:
-                    print(f"[WARN ambiguous] {name}: multiple A2 matches for '{id_str}'='{eff}', picked index {v_idx}")
-                chosen.append((v_idx, True))
-            else:
-                chosen.append((None, False))
+            if len(matches) == 1:
+                chosen.append(matches[0])
+            elif len(matches) == 0:
                 v0 = cand_idxs[0]
-                print(f"[WARN] {name}: effect '{eff}' not in {{A1='{a1[v0]}', A2='{a2[v0]}'}} at '{id_str}'")
+                print(f"[WARN] {name}: effect '{eff}' not in {{A1='{a1[v0]}', A2='{a2[v0]}'}} at '{id_str}', dropping variant")
+                chosen.append((None, False))
+            else:
+                print(f"[WARN ambiguous] {name}: {len(matches)} matches for effect '{eff}' at '{id_str}', dropping variant")
+                chosen.append((None, False))
 
         models.append(ModelSpec(name=name, ncols=ncols, col_ids=col_ids, col_effects=col_eff))
         selected_per_model.append(chosen)
