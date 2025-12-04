@@ -98,6 +98,7 @@ def preserve_run_globals():
     snapshot = {k: getattr(run, k) for k in keys if hasattr(run, k)}
     env_keys = [
         "FERROMIC_POPULATION_FILTER",
+        "FERROMIC_PHENOTYPE_FILTER",
     ]
     env_snapshot = {k: os.environ.get(k) for k in env_keys}
     try:
@@ -480,13 +481,16 @@ def test_cli_min_cases_controls_updates_thresholds():
         run.CLI_MIN_CASES_CONTROLS_OVERRIDE = None
         run.POPULATION_FILTER = "eur"
         args = argparse.Namespace(min_cases_controls=30, pop_label=None)
-        cli.apply_cli_configuration(args)
+        config = cli.apply_cli_configuration(args)
         assert run.MIN_CASES_FILTER == 30
         assert run.MIN_CONTROLS_FILTER == 30
         assert run.CLI_MIN_CASES_CONTROLS_OVERRIDE == 30
         assert run.POPULATION_FILTER == "all"
         assert "FERROMIC_CLI_MIN_CASES_CONTROLS_OVERRIDE" not in os.environ
         assert "FERROMIC_POPULATION_FILTER" not in os.environ
+        assert config["min_cases_controls"] == 30
+        assert config["population_filter"] == "all"
+        assert config["phenotype_filter"] is None
 
 
 def test_cli_pop_label_sets_population_filter():
@@ -495,13 +499,15 @@ def test_cli_pop_label_sets_population_filter():
         run.MIN_CASES_FILTER = 15
         run.MIN_CONTROLS_FILTER = 25
         args = argparse.Namespace(min_cases_controls=None, pop_label="  EUR  ")
-        cli.apply_cli_configuration(args)
+        config = cli.apply_cli_configuration(args)
         assert run.CLI_MIN_CASES_CONTROLS_OVERRIDE is None
         assert run.MIN_CASES_FILTER == run.DEFAULT_MIN_CASES_FILTER
         assert run.MIN_CONTROLS_FILTER == run.DEFAULT_MIN_CONTROLS_FILTER
         assert run.POPULATION_FILTER == "EUR"
         assert "FERROMIC_CLI_MIN_CASES_CONTROLS_OVERRIDE" not in os.environ
         assert os.environ["FERROMIC_POPULATION_FILTER"] == "EUR"
+        assert config["population_filter"] == "EUR"
+        assert config["min_cases_controls"] is None
 
 
 def test_run_main_applies_cli_overrides():
@@ -514,7 +520,36 @@ def test_run_main_applies_cli_overrides():
 
         assert run.POPULATION_FILTER == "eur"
         assert os.environ["FERROMIC_POPULATION_FILTER"] == "eur"
-        mock_supervisor.assert_called_once_with()
+        mock_supervisor.assert_called_once_with(pipeline_config={
+            "min_cases_controls": None,
+            "population_filter": "eur",
+            "phenotype_filter": None,
+        })
+
+
+def test_pipeline_config_applied_in_child_process():
+    with preserve_run_globals():
+        run.MIN_CASES_FILTER = 500
+        run.MIN_CONTROLS_FILTER = 500
+        run.CLI_MIN_CASES_CONTROLS_OVERRIDE = None
+        os.environ.pop("FERROMIC_POPULATION_FILTER", None)
+        os.environ.pop("FERROMIC_PHENOTYPE_FILTER", None)
+
+        run._apply_pipeline_config(
+            {
+                "min_cases_controls": 123,
+                "population_filter": "test-pop",
+                "phenotype_filter": "disease-1",
+            }
+        )
+
+        assert run.CLI_MIN_CASES_CONTROLS_OVERRIDE == 123
+        assert run.MIN_CASES_FILTER == 123
+        assert run.MIN_CONTROLS_FILTER == 123
+        assert run.POPULATION_FILTER == "test-pop"
+        assert run.PHENOTYPE_FILTER == "disease-1"
+        assert os.environ["FERROMIC_POPULATION_FILTER"] == "test-pop"
+        assert os.environ["FERROMIC_PHENOTYPE_FILTER"] == "disease-1"
 
 
 def test_cli_population_filter_matches_followup_effects():
@@ -571,7 +606,14 @@ def test_cli_population_filter_matches_followup_effects():
             stack.enter_context(patch("phewas.run.io.load_ancestry_labels", _load_anc_stub))
             stack.enter_context(patch("phewas.run.io.load_demographics_with_stable_age", _load_demo_stub))
             stack.enter_context(patch("phewas.pheno.populate_caches_prepass", lambda *_, **__: None))
-            stack.enter_context(patch("phewas.run.supervisor_main", lambda: run._pipeline_once()))
+            stack.enter_context(
+                patch(
+                    "phewas.run.supervisor_main",
+                    lambda *_, **kwargs: run._pipeline_once(
+                        kwargs.get("pipeline_config")
+                    ),
+                )
+            )
 
             cli.main(["--pop-label", "eur"])
 
@@ -671,7 +713,14 @@ def test_cli_pheno_filter_limits_stage1_worklist():
 
             stack.enter_context(patch("phewas.pheno._prequeue_should_run", _always_run))
             stack.enter_context(patch("phewas.testing.run_overall", fake_run_overall))
-            stack.enter_context(patch("phewas.run.supervisor_main", lambda: run._pipeline_once()))
+            stack.enter_context(
+                patch(
+                    "phewas.run.supervisor_main",
+                    lambda *_, **kwargs: run._pipeline_once(
+                        kwargs.get("pipeline_config")
+                    ),
+                )
+            )
 
             cli.main(["--pheno", target_pheno])
 
@@ -782,7 +831,10 @@ def test_cli_pheno_filter_uses_isolated_cache_tags():
             patch("phewas.pheno.deduplicate_phenotypes", lambda *_, **__: None),
             patch("phewas.pheno._prequeue_should_run", _always_run),
             patch("phewas.testing.run_overall", stage1_stub),
-            patch("phewas.run.supervisor_main", lambda: run._pipeline_once()),
+            patch(
+                "phewas.run.supervisor_main",
+                lambda *_, **kwargs: run._pipeline_once(kwargs.get("pipeline_config")),
+            ),
             patch("phewas.pipes.run_lrt_followup", lambda *_, **__: None),
         ]
 
