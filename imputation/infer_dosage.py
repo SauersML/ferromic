@@ -190,7 +190,10 @@ def _process_model_batched(args):
         if n_samples != expected_count:
             return {"model": model_name, "status": "error", "error": f"Sample mismatch: {n_samples} vs {expected_count}"}
 
-        # 1. Batched Inference using training-set means for imputation
+        # Calculate inference-set means for imputation
+        imputation_means = _calculate_column_means_fast(X_mmap, n_snps, n_samples).astype(np.float32, copy=False)
+
+        # 1. Batched Inference using inference-set means for imputation
         batch_predictions = []
         
         for i in range(0, n_samples, BATCH_SIZE):
@@ -204,7 +207,7 @@ def _process_model_batched(args):
             if np.any(missing_mask):
                 # Advanced indexing to fill
                 rows, cols = np.where(missing_mask)
-                X_batch[rows, cols] = model_means[cols]
+                X_batch[rows, cols] = imputation_means[cols]
             
             # Predict
             preds = clf.predict(X_batch)
