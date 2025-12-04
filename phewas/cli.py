@@ -54,9 +54,18 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return build_parser().parse_args(argv)
 
 
-def apply_cli_configuration(args: argparse.Namespace) -> None:
+def apply_cli_configuration(args: argparse.Namespace) -> dict[str, object]:
+    """Apply CLI arguments to runtime globals and return a pipeline config."""
+
+    pipeline_config: dict[str, object] = {
+        "min_cases_controls": None,
+        "population_filter": "all",
+        "phenotype_filter": None,
+    }
+
     if getattr(args, "min_cases_controls", None) is not None:
         threshold = int(args.min_cases_controls)
+        pipeline_config["min_cases_controls"] = threshold
         run.CLI_MIN_CASES_CONTROLS_OVERRIDE = threshold
         run.MIN_CASES_FILTER = threshold
         run.MIN_CONTROLS_FILTER = threshold
@@ -69,6 +78,7 @@ def apply_cli_configuration(args: argparse.Namespace) -> None:
     if raw_label is not None:
         label = raw_label.strip()
         normalized = label or "all"
+        pipeline_config["population_filter"] = normalized
         run.POPULATION_FILTER = normalized
         os.environ["FERROMIC_POPULATION_FILTER"] = normalized
     else:
@@ -77,17 +87,20 @@ def apply_cli_configuration(args: argparse.Namespace) -> None:
 
     pheno_name = getattr(args, "pheno", None)
     if pheno_name is not None:
+        pipeline_config["phenotype_filter"] = pheno_name.strip()
         run.PHENOTYPE_FILTER = pheno_name.strip()
         os.environ["FERROMIC_PHENOTYPE_FILTER"] = run.PHENOTYPE_FILTER
     else:
         run.PHENOTYPE_FILTER = None
         os.environ.pop("FERROMIC_PHENOTYPE_FILTER", None)
 
+    return pipeline_config
+
 
 def main(argv: Sequence[str] | None = None) -> None:
     args = parse_args(argv)
-    apply_cli_configuration(args)
-    run.supervisor_main()
+    pipeline_config = apply_cli_configuration(args)
+    run.supervisor_main(pipeline_config=pipeline_config)
 
 
 if __name__ == "__main__":  # pragma: no cover - CLI execution
