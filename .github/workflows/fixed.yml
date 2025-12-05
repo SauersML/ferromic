@@ -22,8 +22,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # fixed.py requires numpy and tqdm. 
-          # It does NOT use pandas (uses built-in csv module).
+          # fixed.py requires numpy and tqdm.
           pip install numpy tqdm
 
       - name: Download Sequence Data (Artifacts)
@@ -55,12 +54,11 @@ jobs:
           # Clean up zip
           rm -rf temp_downloads
 
-      - name: Stage Data for Script
+      - name: Stage and Clean Data
         run: |
           set -euo pipefail
           
           # 1. Ensure inv_properties.tsv is in the Current Working Directory (CWD)
-          # fixed.py looks for "inv_properties.tsv" in "."
           if [[ -f "data/inv_properties.tsv" ]]; then
             cp data/inv_properties.tsv .
             echo "Copied inv_properties.tsv to root."
@@ -70,8 +68,7 @@ jobs:
           fi
           
           # 2. Decompress PHYLIP files
-          # fixed.py uses open(), not gzip.open(), so we must unzip .phy.gz files
-          # The previous step unzipped files to CWD. Check for .gz and decompress.
+          # fixed.py uses open(), not gzip.open()
           count_gz=$(find . -maxdepth 1 -name "*.phy.gz" | wc -l)
           if [[ "$count_gz" -gt 0 ]]; then
             echo "Decompressing $count_gz .phy.gz files..."
@@ -80,7 +77,21 @@ jobs:
             echo "No .phy.gz files found (files might already be uncompressed)."
           fi
           
-          # 3. Verify presence of required files
+          # 3. MANUALLY RESOLVE CONFLICTS
+          # The script fixed.py asserts only 1 alignment per gene/inversion.
+          # We delete the specific files identified as duplicates/deprecated.
+          
+          echo "Resolving PINX1 conflict..."
+          # Keep: ENSG00000258724 / ENST00000554914
+          # Delete: ENSG00000254093 / ENST00000314787
+          find . -name "*PINX1*ENSG00000254093*" -print -delete
+          
+          echo "Resolving ARHGAP11B conflict..."
+          # Keep: ENSG00000285077 / ENST00000697964 (Canonical)
+          # Delete: ENSG00000284906 / ENST00000685924 (Duplicate clone)
+          find . -name "*ENSG00000284906*" -print -delete
+          
+          # 4. Verify presence of required files
           count_phy=$(find . -maxdepth 1 -name "*.phy" | wc -l)
           echo "Staging complete. Found $count_phy .phy files in root."
 
