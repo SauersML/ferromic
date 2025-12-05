@@ -184,29 +184,6 @@ def verify_existing_output(output_path: str, expected_samples: int) -> Set[str]:
 
 # --- INFERENCE WORKER LOGIC ---
 
-def _calculate_column_means_fast(matrix_mmap, n_snps, n_samples):
-    """
-    Calculates column means using a random subset. 
-    Processing 400k rows takes forever. 50k rows is statistically sufficient and fast.
-    """
-    if n_samples > MEAN_SUBSET_SIZE:
-        idx = np.random.choice(n_samples, MEAN_SUBSET_SIZE, replace=False)
-        idx.sort()
-        subset = matrix_mmap[idx, :]
-    else:
-        subset = matrix_mmap
-
-    # Convert subset to float32 for mean calc
-    subset_float = subset.astype(np.float32)
-    subset_float[subset == MISSING_VALUE_CODE] = np.nan
-    
-    with np.errstate(all='ignore'):
-        col_means = np.nanmean(subset_float, axis=0)
-    
-    # Fill any columns that were ALL missing with 0.0
-    col_means[np.isnan(col_means)] = 0.0
-    return col_means
-
 def _process_model_batched(args):
     """
     Worker function. Loads model, loads matrix via mmap, processes in batches.
@@ -247,10 +224,7 @@ def _process_model_batched(args):
         if n_samples != expected_count:
             return {"model": model_name, "status": "error", "error": f"Sample mismatch: {n_samples} vs {expected_count}"}
 
-        # Calculate inference-set means for imputation
-        imputation_means = _calculate_column_means_fast(X_mmap, n_snps, n_samples).astype(np.float32, copy=False)
-
-        # 1. Batched Inference using inference-set means for imputation
+        # 1. Batched Inference using training means for imputation
         batch_predictions = []
         
         for i in range(0, n_samples, BATCH_SIZE):
@@ -264,7 +238,7 @@ def _process_model_batched(args):
             if np.any(missing_mask):
                 # Advanced indexing to fill
                 rows, cols = np.where(missing_mask)
-                X_batch[rows, cols] = imputation_means[cols]
+                X_batch[rows, cols] = model_means[cols]
             
             # Predict
             preds = clf.predict(X_batch)
