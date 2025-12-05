@@ -57,14 +57,15 @@ def parse_cds_filename(fn: str) -> Optional[Dict[str, str]]:
 class PhylipParseError(Exception):
     pass
 
-# Handles non-standard single-line form: "<name_ends_with _L/_R><sequence>"
-NONSTD_LINE_RE = re.compile(r'^(?P<name>.*?_[LR])(?P<seq>[ACGTRYKMSWBDHVN\-\.\?]+)$', re.IGNORECASE)
+# Handles non-standard single-line form. 
+# Updated to use greedy matching for the name to handle names with internal underscores correctly.
+NONSTD_LINE_RE = re.compile(r'^(?P<name>.+_[LR])\s*(?P<seq>[ACGTRYKMSWBDHVN\-\.\?]+)$', re.IGNORECASE)
 
 
 def read_nonstandard_phylip(path: str, n: int, m: int) -> List[Tuple[str,str]]:
     out: List[Tuple[str,str]] = []
-    # Regex captures name up to the first _L or _R, skipping optional whitespace, capturing the rest as seq
-    pattern = re.compile(r"^(?P<name>.*?_[LR])\s*(?P<seq>.*)$")
+    # Regex captures name up to the LAST _L or _R (greedy match), skipping optional whitespace, capturing the rest as seq
+    pattern = re.compile(r"^(?P<name>.+_[LR])\s*(?P<seq>.*)$")
     
     with open(path, "r") as fh:
         lines = [ln.rstrip("\r\n") for ln in fh]
@@ -89,15 +90,15 @@ def read_nonstandard_phylip(path: str, n: int, m: int) -> List[Tuple[str,str]]:
         seq = "".join(match.group("seq").split()).upper()
         
         if len(seq) != m:
-            raise PhylipParseError(f"Sequence length mismatch: expected {m}, got {len(seq)} for {name}")
+            raise PhylipParseError(f"Sequence length mismatch for '{name}': expected {m}, got {len(seq)}")
         out.append((name, seq))
     if len(out) != n:
         raise PhylipParseError(f"Expected {n} sequences; got {len(out)}")
     return out
 
 def read_standard_phylip(path: str, n: int, m: int) -> List[Tuple[str,str]]:
-    # Regex captures name up to the first _L or _R, skipping optional whitespace, capturing the rest as seq
-    pattern = re.compile(r"^(?P<name>.*?_[LR])\s*(?P<seq>.*)$")
+    # Regex captures name up to the LAST _L or _R (greedy match), skipping optional whitespace, capturing the rest as seq
+    pattern = re.compile(r"^(?P<name>.+_[LR])\s*(?P<seq>.*)$")
 
     with open(path, "r") as fh:
         lines = [ln.rstrip("\r\n") for ln in fh]
