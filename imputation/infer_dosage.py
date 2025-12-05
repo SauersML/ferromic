@@ -149,7 +149,8 @@ def verify_existing_output(output_path: str, expected_samples: int) -> Set[str]:
     try:
         # Read header only
         header = pd.read_csv(output_path, sep="\t", index_col=0, nrows=0)
-        potential_models = [c for c in header.columns if c in TARGET_INVERSIONS]
+        # Deduplicate in case the header unexpectedly contains duplicate model columns
+        potential_models = list(dict.fromkeys(c for c in header.columns if c in TARGET_INVERSIONS))
         
         if not potential_models:
             return set()
