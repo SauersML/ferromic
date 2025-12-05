@@ -28,6 +28,11 @@ from sklearn.dummy import DummyRegressor
 from sklearn.utils.class_weight import compute_sample_weight
 from scipy.stats import wilcoxon, pearsonr
 import traceback
+import requests
+
+url = "https://raw.githubusercontent.com/SauersML/ferromic/refs/heads/main/data/passed_snvs.txt"
+with open("passed_snvs.txt", "wb") as f:
+    f.write(requests.get(url).content)
 
 # TARGET="$HOME/.pytargets/sklearn171" && python3 -m pip install --upgrade --no-cache-dir --ignore-installed   --target "$TARGET" "scikit-learn>=1.6,<2" && PYTHONPATH="$TARGET:$PYTHONPATH" python3 -c 'import sklearn,sys; print(sklearn.__version__, "->", sklearn.__file__)' && PYTHONPATH="$TARGET:$PYTHONPATH" python3 /home/hsiehph/sauer354/di/ferromic/linked.py
 
