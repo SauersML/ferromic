@@ -426,7 +426,7 @@ IMPUTATION_COLUMN_DEFS: Dict[str, str] = OrderedDict(
         ("p_fdr_bh", "FDR adjusted p-value."),
         (
             "Use",
-            "Boolean flag indicating if the inversion met the quality threshold (r² > 0.3 and q < 0.05) for inclusion in the PheWAS.",
+            "Boolean flag indicating if the inversion met the quality threshold (r² > 0.5 and q < 0.05) for inclusion in the PheWAS.",
         ),
     ]
 )
