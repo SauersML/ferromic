@@ -248,6 +248,9 @@ def load_models_and_build_router_from_manifest(manifest_url: str,
                 if lst:
                     cand_idxs.extend(lst)
 
+            # Deduplicate to avoid redundant matches across aliases (e.g., "1" vs "chr1")
+            cand_idxs = sorted(set(cand_idxs))
+
             if not cand_idxs:
                 chosen.append((None, False))
                 continue
