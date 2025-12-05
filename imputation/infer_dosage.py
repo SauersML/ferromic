@@ -52,6 +52,52 @@ TARGET_INVERSIONS = {
 
 # --- UTILITIES ---
 
+def verify_existing_output(output_path: str, expected_samples: int) -> Set[str]:
+    """
+    Reads the output file in chunks.
+    Returns a set of 'Complete' models (valid row count, zero NaNs).
+    """
+    if not os.path.exists(output_path):
+        return set()
+
+    print("--- Verifying existing output file integrity... ---")
+    valid_models = set()
+    try:
+        # Read header only
+        header = pd.read_csv(output_path, sep="\t", index_col=0, nrows=0)
+        # Deduplicate in case the header unexpectedly contains duplicate model columns
+        potential_models = list(dict.fromkeys(c for c in header.columns if c in TARGET_INVERSIONS))
+        
+        if not potential_models:
+            return set()
+
+        # Initialize trackers
+        nan_counts = {m: 0 for m in potential_models}
+        row_count = 0
+        
+        # Read in chunks to save RAM
+        chunk_iter = pd.read_csv(output_path, sep="\t", index_col=0, usecols=["SampleID"] + potential_models, chunksize=50000)
+        
+        for chunk in chunk_iter:
+            row_count += len(chunk)
+            # Count NaNs per column in this chunk
+            chunk_nans = chunk.isna().sum()
+            for m in potential_models:
+                nan_counts[m] += chunk_nans[m]
+        
+        # Final Check
+        for m in potential_models:
+            if row_count == expected_samples and nan_counts[m] == 0:
+                valid_models.add(m)
+            else:
+                print(f"  [WARN] Model {m} is incomplete (Rows: {row_count}/{expected_samples}, NaNs: {nan_counts[m]}). Will re-run.")
+                
+    except Exception as e:
+        print(f"  [WARN] Error reading output file ({e}). Assuming all need re-running.")
+        return set()
+
+    return valid_models
+
 def _download_url_to_path(url: str, dest_path: str) -> None:
     os.makedirs(os.path.dirname(dest_path), exist_ok=True)
     tmp_path = f"{dest_path}.tmp"
