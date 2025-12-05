@@ -60,8 +60,12 @@ class PhylipParseError(Exception):
 # Handles non-standard single-line form: "<name_ends_with _L/_R><sequence>"
 NONSTD_LINE_RE = re.compile(r'^(?P<name>.*?_[LR])(?P<seq>[ACGTRYKMSWBDHVN\-\.\?]+)$', re.IGNORECASE)
 
+
 def read_nonstandard_phylip(path: str, n: int, m: int) -> List[Tuple[str,str]]:
     out: List[Tuple[str,str]] = []
+    # Regex captures name up to the first _L or _R, skipping optional whitespace, capturing the rest as seq
+    pattern = re.compile(r"^(?P<name>.*?_[LR])\s*(?P<seq>.*)$")
+    
     with open(path, "r") as fh:
         lines = [ln.rstrip("\r\n") for ln in fh]
     idx = 0
@@ -75,11 +79,15 @@ def read_nonstandard_phylip(path: str, n: int, m: int) -> List[Tuple[str,str]]:
         idx += 1
         if line == "":
             continue
-        mobj = NONSTD_LINE_RE.match(line)
-        if not mobj:
+        
+        match = pattern.match(line)
+        if not match:
             raise PhylipParseError(f"Non-standard PHYLIP: bad sequence line: '{line[:60]}...'")
-        name = mobj.group("name")
-        seq = mobj.group("seq").upper()
+            
+        name = match.group("name")
+        # Remove whitespace from sequence part
+        seq = "".join(match.group("seq").split()).upper()
+        
         if len(seq) != m:
             raise PhylipParseError(f"Sequence length mismatch: expected {m}, got {len(seq)} for {name}")
         out.append((name, seq))
@@ -88,6 +96,9 @@ def read_nonstandard_phylip(path: str, n: int, m: int) -> List[Tuple[str,str]]:
     return out
 
 def read_standard_phylip(path: str, n: int, m: int) -> List[Tuple[str,str]]:
+    # Regex captures name up to the first _L or _R, skipping optional whitespace, capturing the rest as seq
+    pattern = re.compile(r"^(?P<name>.*?_[LR])\s*(?P<seq>.*)$")
+
     with open(path, "r") as fh:
         lines = [ln.rstrip("\r\n") for ln in fh]
     idx = 0
@@ -104,16 +115,22 @@ def read_standard_phylip(path: str, n: int, m: int) -> List[Tuple[str,str]]:
             idx += 1
         if idx >= len(lines):
             raise PhylipParseError(f"Truncated first block at sequence {i+1}/{n}")
-        line = lines[idx]
+        line = lines[idx].strip()
         idx += 1
-        if len(line) < 10:
-            raise PhylipParseError("Standard PHYLIP requires >=10 chars for name field")
-        name = line[:10].strip()
-        seq_chunk = "".join(line[10:].split()).upper()
+        
+        match = pattern.match(line)
+        if not match:
+             raise PhylipParseError(f"Standard PHYLIP: line does not match _L/_R name pattern: '{line[:60]}...'")
+
+        name = match.group("name")
+        # Remove whitespace from sequence part
+        seq_chunk = "".join(match.group("seq").split()).upper()
+        
         if name == "":
             raise PhylipParseError("Empty name in standard PHYLIP")
         names.append(name)
         seqs[i] += seq_chunk
+        
     # Subsequent blocks
     while any(len(s) < m for s in seqs):
         while idx < len(lines) and lines[idx].strip() == "":
@@ -131,6 +148,7 @@ def read_standard_phylip(path: str, n: int, m: int) -> List[Tuple[str,str]]:
         if len(seqs[i]) != m:
             raise PhylipParseError(f"Length mismatch for '{names[i]}': expected {m}, got {len(seqs[i])}")
     return list(zip(names, seqs))
+
 
 def read_phylip_sequences_strict(path: str) -> List[Tuple[str,str]]:
     if not os.path.exists(path):
