@@ -1,5 +1,6 @@
 import os
 import json
+import glob
 from collections import defaultdict, namedtuple
 from typing import Dict, List, Tuple, Optional, Iterable
 
@@ -25,10 +26,18 @@ OUTPUT_DIR   = os.getenv("OUTPUT_DIR", "genotype_matrices")
 BLOCK_SNPS   = int(os.getenv("BLOCK_SNPS", "4096"))   # SNP columns to read per block
 NUM_THREADS  = os.getenv("NUM_THREADS", "auto")      # "auto" or integer string
 
-# Remote manifest of models/SNPs JSON
+_DEFAULT_MODEL_SOURCE = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "data", "models")
+)
+MODEL_SOURCE_DIR = os.getenv(
+    "MODEL_SOURCE_DIR",
+    _DEFAULT_MODEL_SOURCE if os.path.isdir(_DEFAULT_MODEL_SOURCE) else "",
+)
+
+# Remote manifest of models/SNPs JSON (GitHub public repo by default)
 MANIFEST_URL = os.getenv(
     "MANIFEST_URL",
-    "https://sharedspace.s3.msi.umn.edu/public_internet/final_imputation_models.manifest.txt",
+    "https://api.github.com/repos/SauersML/ferromic/contents/data/models",
 )
 # ------------------------------------------------------------
 
@@ -108,21 +117,67 @@ def load_bed_meta(prefix: str):
 
     return bed, n_samples, n_snps, chrom, pos, a1, a2, id_to_idxs
 
-def _list_snps_json_urls_from_manifest(manifest_url: str) -> List[str]:
-    """Fetch manifest and return all .snps.json URLs, sorted by basename for stable order."""
-    r = requests.get(manifest_url, timeout=60)
-    text = r.text
-    urls = []
+def _list_snps_json_sources(manifest_url: str, source_dir: str) -> List[str]:
+    """Return filesystem paths or URLs to all available .snps.json files."""
+
+    if source_dir and os.path.isdir(source_dir):
+        local_files = sorted(
+            os.path.abspath(p) for p in glob.glob(os.path.join(source_dir, "*.snps.json"))
+        )
+        if local_files:
+            print(f"Found {len(local_files)} local SNP specs in {source_dir}.")
+            return local_files
+
+    if not manifest_url:
+        return []
+
+    try:
+        resp = requests.get(manifest_url, timeout=60)
+        resp.raise_for_status()
+    except Exception as exc:
+        raise RuntimeError(f"Unable to fetch manifest from {manifest_url}: {exc}") from exc
+
+    sources: List[str] = []
+    text = resp.text
+    payload: Optional[List[Dict[str, str]]] = None
+    try:
+        payload = resp.json()
+    except ValueError:
+        payload = None
+
+    if isinstance(payload, list):
+        for entry in payload:
+            name = entry.get("name", "")
+            download_url = entry.get("download_url")
+            if name.endswith(".snps.json") and download_url:
+                sources.append(download_url)
+        if sources:
+            sources.sort(key=lambda u: os.path.basename(urlparse(u).path))
+            print(f"Found {len(sources)} GitHub SNP specs via API.")
+            return sources
+
     for line in text.splitlines():
         s = line.strip()
         if not s or s.startswith("#"):
             continue
         if s.endswith(".snps.json"):
-            urls.append(s)
-    # Stable order by basename
-    urls_sorted = sorted(urls, key=lambda u: os.path.basename(urlparse(u).path))
-    print(f"Found {len(urls_sorted)} model files in manifest.")
-    return urls_sorted
+            sources.append(s)
+
+    sources.sort(key=lambda u: os.path.basename(urlparse(u).path))
+    print(f"Found {len(sources)} SNP specs via manifest text.")
+    return sources
+
+
+def _load_snps_json(source: str):
+    try:
+        if source.startswith("http://") or source.startswith("https://"):
+            resp = requests.get(source, timeout=120)
+            resp.raise_for_status()
+            return resp.json()
+        with open(source, "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except Exception as exc:
+        raise RuntimeError(f"cannot fetch/parse JSON from {source}: {exc}") from exc
 
 def load_models_and_build_router_from_manifest(manifest_url: str,
                                                id_to_idxs: Dict[str, List[int]],
@@ -135,7 +190,7 @@ def load_models_and_build_router_from_manifest(manifest_url: str,
       - skipped_models: count with fetch/schema/JSON problems
       - total_requested_cols: sum of cols across usable models
     """
-    urls = _list_snps_json_urls_from_manifest(manifest_url)
+    sources = _list_snps_json_sources(manifest_url, MODEL_SOURCE_DIR)
 
     models: List[ModelSpec] = []
     skipped = 0
@@ -144,15 +199,17 @@ def load_models_and_build_router_from_manifest(manifest_url: str,
     # Temporary per-model selected mapping: col_j -> (v_idx, flip) or (None, False) if missing
     selected_per_model: List[List[Tuple[Optional[int], bool]]] = []
 
-    for url in tqdm(urls, desc="Indexing models", unit="model", leave=False):
-        base = os.path.basename(urlparse(url).path)
+    for source in tqdm(sources, desc="Indexing models", unit="model", leave=False):
+        if source.startswith("http://") or source.startswith("https://"):
+            base = os.path.basename(urlparse(source).path)
+        else:
+            base = os.path.basename(source)
         if not base.endswith(".snps.json"):
             continue
         name = base[:-10]
 
         try:
-            resp = requests.get(url, timeout=120)
-            rows = resp.json()
+            rows = _load_snps_json(source)
             df = pd.DataFrame(rows)
         except Exception as e:
             print(f"[WARN] skip {name}: cannot fetch/parse JSON ({e})")
