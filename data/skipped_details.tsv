@@ -952,6 +952,7 @@ REGION	0	Single-event	1	Inverted	inversion_group1_5_start124425560_end124546657.
 REGION	0	Single-event	1	Inverted	inversion_group1_2_start87987171_end111255403.phy	N_LT_2	Fewer than 2 sequences
 REGION	0	Single-event	1	Inverted	inversion_group1_5_start177946129_end178003952.phy	N_LT_2	Fewer than 2 sequences
 REGION	0	Single-event	1	Inverted	inversion_group1_7_start33990735_end34010143.phy	N_LT_2	Fewer than 2 sequences
+REGION	0	Single-event	1	Inverted	inversion_group1_2_start87987171_end111255403.phy	N_LT_2	Fewer than 2 sequences
 REGION	0	Single-event	1	Inverted	inversion_group1_7_start57835188_end58119653.phy	N_LT_2	Fewer than 2 sequences
 REGION	0	Single-event	1	Inverted	inversion_group1_2_start87987171_end111255403.phy	N_LT_2	Fewer than 2 sequences
 REGION	0	Single-event	1	Inverted	inversion_group1_7_start97445822_end97459601.phy	N_LT_2	Fewer than 2 sequences
