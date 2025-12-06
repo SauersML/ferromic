@@ -11,7 +11,7 @@ DEFAULTS = {
     "SELECTION": "lrt_bh",
     "BOOTSTRAP_B": 1000, # not nearly enough for many tests... lrt_bh is better unless there is a ton of compute
     "BOOT_SEED_BASE": 2025,
-    "MAX_CONCURRENT_INVERSIONS_DEFAULT": 8,
+    "MAX_CONCURRENT_INVERSIONS_DEFAULT": 21,
     "MAX_CONCURRENT_INVERSIONS_BOOT": 8,
     "CAT_METHOD": "fast_phi",
     "CAT_GBJ_B": 5000,
