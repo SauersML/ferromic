@@ -15,7 +15,6 @@ import requests
 #chr12:46896694-46915975 chr12-46897663-INV-16289
 #chr7:54234014-54308393  chr7-54220528-INV-101153
 
-
 def download_tsv(url):
     response = requests.get(url)
     response.raise_for_status()
@@ -211,6 +210,70 @@ def main():
     print(f"Value 1: {pct_one:.2f}%")
     print(f"Value 0: {pct_zero:.2f}%")
     print(f"Other values: {pct_other:.2f}%")
+    print()
+
+    # New analysis: Imputation-based filtering
+    print("--- Downloading and processing imputation_results_merged.tsv ---")
+    imputation_url = "https://raw.githubusercontent.com/SauersML/ferromic/refs/heads/main/data/imputation_results_merged.tsv"
+    df_imputation = download_tsv(imputation_url)
+    
+    # Identify the ID column in imputation data
+    id_col_candidates = ["Inversion_ID", "OrigID", "inversion_id", "ID"]
+    imputation_id_col = None
+    for candidate in id_col_candidates:
+        if candidate in df_imputation.columns:
+            imputation_id_col = candidate
+            break
+    
+    if imputation_id_col is None:
+        print("ERROR: Could not find ID column in imputation_results_merged.tsv")
+        print(f"Available columns: {list(df_imputation.columns)}")
+        sys.exit(1)
+    
+    # Check for required columns
+    required_imputation_cols = ["unbiased_pearson_r2", "p_fdr_bh"]
+    for col in required_imputation_cols:
+        if col not in df_imputation.columns:
+            print(f"ERROR: Required column {col} not found in imputation_results_merged.tsv")
+            sys.exit(1)
+    
+    # Merge inv_properties with imputation results
+    merged_df = df_props.merge(df_imputation, left_on="OrigID", right_on=imputation_id_col, how="inner")
+    
+    # After merge, column names may have suffixes. Use the version from df_props (_x suffix)
+    consensus_col_merged = "0_single_1_recur_consensus_x" if "0_single_1_recur_consensus_x" in merged_df.columns else "0_single_1_recur_consensus"
+    
+    # Filter for List One criteria
+    list_one_df = merged_df[
+        (merged_df[consensus_col_merged].isin([0, 1])) &
+        (merged_df["unbiased_pearson_r2"] > 0.5) &
+        (merged_df["p_fdr_bh"] < 0.05)
+    ].copy()
+    
+    # Use OrigID from the merged dataframe (may have suffix)
+    origid_col = "OrigID_x" if "OrigID_x" in merged_df.columns else "OrigID"
+    list_one_ids = list_one_df[origid_col].tolist()
+    
+    print("--- LIST ONE: Imputation-filtered inversions ---")
+    print(f"Criteria: 0_single_1_recur_consensus in [0,1], unbiased_pearson_r2 > 0.5, p_fdr_bh < 0.05")
+    print(f"Total inversions meeting criteria: {len(list_one_ids)}")
+    print()
+    for inv_id in list_one_ids:
+        print(inv_id)
+    print()
+    
+    # Create List Two (intersection with final shortlist)
+    list_one_set = set(list_one_ids)
+    final_shortlist_set = set(final_inversion_ids)
+    list_two_ids = [inv_id for inv_id in list_one_ids if inv_id in final_shortlist_set]
+    
+    print("--- LIST TWO: Imputation-filtered inversions ALSO in final shortlist ---")
+    print(f"Criteria: Meet List One criteria AND q-value < 0.05 in CDS conservation OR SNP tagging")
+    print(f"Total inversions: {len(list_two_ids)}")
+    print()
+    for inv_id in list_two_ids:
+        print(inv_id)
+    print()
 
 
 if __name__ == "__main__":
