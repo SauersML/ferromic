@@ -297,7 +297,7 @@ class ProgressRegistry:
 PROGRESS = ProgressRegistry()
 
 _WORKER_GB_EST = 0.5
-POOL_PROCS_PER_INV = 21
+POOL_PROCS_PER_INV = 42
 
 try:
     import psutil
