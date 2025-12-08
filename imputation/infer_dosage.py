@@ -26,7 +26,8 @@ MODEL_SOURCE_DIR = os.getenv(
 
 # --- MODEL SOURCE CONFIGURATION ---
 # Set MODEL_SOURCE to "github" or "s3" to switch between remote sources
-MODEL_SOURCE = "s3"
+MODEL_SOURCE = "github"
+print(f"MODEL_SOURCE: {MODEL_SOURCE}")
 
 _MANIFEST_URLS = {
     "github": "https://api.github.com/repos/SauersML/ferromic/contents/data/models",
