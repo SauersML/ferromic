@@ -22,6 +22,7 @@ from . import logging_utils
 
 CTX = {}  # Worker context with constants from run.py
 allowed_fp_by_cat = {}
+worker_core_index_fp = None
 
 
 class CaseCacheReadError(RuntimeError):
@@ -67,13 +68,27 @@ def safe_basename(name: str) -> str:
     """Allow only [-._a-zA-Z0-9], map others to '_'."""
     return "".join(ch if ch.isalnum() or ch in "-._" else "_" for ch in str(name))
 
+def _canon_list(seq):
+    if seq is None:
+        return None
+    return sorted(list(seq))
+
+
+def _same_members_ignore_order(left, right):
+    if left is None or right is None:
+        return left is None and right is None
+    if len(left) != len(right):
+        return False
+    return sorted(left) == sorted(right)
+
+
 def _write_meta(meta_path, kind, s_name, category, target, core_cols, core_idx_fp, case_fp, extra=None):
     """Helper to write a standardized metadata JSON file."""
     base = {
         "kind": kind,
         "s_name": s_name,
         "category": category,
-        "model_columns": list(core_cols),
+        "model_columns": _canon_list(core_cols),
         "num_pcs": CTX["NUM_PCS"],
         "min_cases": CTX["MIN_CASES_FILTER"],
         "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
@@ -91,7 +106,7 @@ def _write_meta(meta_path, kind, s_name, category, target, core_cols, core_idx_f
     }
     data_keys = CTX.get("DATA_KEYS")
     if data_keys:
-        base["data_keys"] = data_keys
+        base["data_keys"] = _canon_list(data_keys)
     if extra:
         base.update(extra)
     io.atomic_write_json(meta_path, base)
@@ -2863,6 +2878,8 @@ def init_lrt_worker(base_shm_meta, core_cols, core_index, masks, anc_series, ctx
     allowed_mask_by_cat, CTX = masks, ctx
     worker_core_df_cols = pd.Index(core_cols)
     worker_core_df_index = pd.Index(core_index)
+    global worker_core_index_fp
+    worker_core_index_fp = _index_fingerprint(worker_core_df_index)
     worker_anc_series = anc_series.reindex(worker_core_df_index).str.lower()
 
     X_all, _BASE_SHM_HANDLE = io.attach_shared_ndarray(base_shm_meta)
@@ -2905,23 +2922,41 @@ def init_boot_worker(base_shm_meta, boot_shm_meta, core_cols, core_index, masks,
     B_boot = U_boot.shape[1]
     print(f"[Boot-Worker-{os.getpid()}] Attached U matrix shape={U_boot.shape}", flush=True)
 
-def _index_fingerprint(index):
-    """Fast, order-insensitive fingerprint of a person_id index using XOR hashing."""
-    h = 0
-    n = 0
-    for pid in map(str, index):
-        h ^= int(hashlib.sha256(pid.encode()).hexdigest()[:16], 16)
-        n += 1
-    return f"{h:016x}:{n}"
+def _index_fingerprint(index: pd.Index) -> str:
+    """Order-invariant fingerprint of an index.
+
+    The hash is computed on the sorted stringified identifiers so that pure row
+    re-orderings (including core index reorders) do not invalidate the cache,
+    while changes in membership or count still alter the fingerprint.
+    """
+    h = hashlib.blake2b(digest_size=16)
+    if len(index) == 0:
+        return f"{h.hexdigest()}:0"
+
+    ids = np.sort(index.astype(str, copy=False))
+    for pid in ids:
+        h.update(pid.encode("utf-8"))
+    return f"{h.hexdigest()}:{ids.size}"
 
 def _mask_fingerprint(mask: np.ndarray, index: pd.Index) -> str:
-    """Fast, order-insensitive fingerprint of a subset of an index using XOR hashing."""
-    h = 0
-    n = 0
-    for pid in map(str, index[mask]):
-        h ^= int(hashlib.sha256(pid.encode()).hexdigest()[:16], 16)
-        n += 1
-    return f"{h:016x}:{n}"
+    """Order-invariant fingerprint of a masked subset of an index."""
+    if mask.size != len(index):
+        raise ValueError("mask length must match index length for fingerprinting")
+
+    subset = index[mask]
+    h = hashlib.blake2b(digest_size=16)
+    if subset.empty:
+        return f"{h.hexdigest()}:0"
+
+    ids = np.sort(subset.astype(str, copy=False))
+    for pid in ids:
+        h.update(pid.encode("utf-8"))
+    return f"{h.hexdigest()}:{ids.size}"
+
+
+def _core_index_fp() -> str:
+    """Return the precomputed core index fingerprint (order-invariant)."""
+    return worker_core_index_fp if worker_core_index_fp is not None else _index_fingerprint(worker_core_df_index)
 
 
 
@@ -2940,7 +2975,7 @@ def _should_skip(meta_path, core_df_cols, core_index_fp, case_idx_fp, category, 
     if CTX.get("CACHE_VERSION_TAG") and meta.get("cache_version_tag") != CTX.get("CACHE_VERSION_TAG"):
         return False
     base_ok = (
-        meta.get("model_columns") == list(core_df_cols) and
+        _same_members_ignore_order(meta.get("model_columns"), core_df_cols) and
         meta.get("ridge_l2_base") == CTX["RIDGE_L2_BASE"] and
         meta.get("core_index_fp") == core_index_fp and
         meta.get("case_idx_fp") == case_idx_fp and
@@ -2950,7 +2985,7 @@ def _should_skip(meta_path, core_df_cols, core_index_fp, case_idx_fp, category, 
     if not base_ok:
         return False
     data_keys = CTX.get("DATA_KEYS")
-    if data_keys and meta.get("data_keys") != data_keys:
+    if data_keys and not _same_members_ignore_order(meta.get("data_keys"), data_keys):
         return False
     if used_index_fp is not None and meta.get("used_index_fp") != used_index_fp:
         return False
@@ -2977,7 +3012,7 @@ def _lrt_meta_should_skip(meta_path, core_df_cols, core_index_fp, case_idx_fp, c
     if CTX.get("CACHE_VERSION_TAG") and meta.get("cache_version_tag") != CTX.get("CACHE_VERSION_TAG"):
         return False
     base_ok = (
-        meta.get("model_columns") == list(core_df_cols) and
+        _same_members_ignore_order(meta.get("model_columns"), core_df_cols) and
         meta.get("ridge_l2_base") == CTX["RIDGE_L2_BASE"] and
         meta.get("core_index_fp") == core_index_fp and
         meta.get("case_idx_fp") == case_idx_fp and
@@ -2987,7 +3022,7 @@ def _lrt_meta_should_skip(meta_path, core_df_cols, core_index_fp, case_idx_fp, c
     if not base_ok:
         return False
     data_keys = CTX.get("DATA_KEYS")
-    if data_keys and meta.get("data_keys") != data_keys:
+    if data_keys and not _same_members_ignore_order(meta.get("data_keys"), data_keys):
         return False
     if used_index_fp is not None and meta.get("used_index_fp") != used_index_fp:
         return False
@@ -3093,7 +3128,7 @@ def _lrt_overall_worker_impl(task):
             allowed_mask_by_cat.get(cat, np.ones(N_core, dtype=bool)), worker_core_df_index
         )
 
-        core_fp = _index_fingerprint(worker_core_df_index)
+        core_fp = _core_index_fp()
 
         repair_meta = os.path.exists(result_path) and (not os.path.exists(meta_path)) and CTX.get("REPAIR_META_IF_MISSING", False)
 
@@ -3178,7 +3213,7 @@ def _lrt_overall_worker_impl(task):
             io.atomic_write_json(result_path, {"Phenotype": s_name, "P_LRT_Overall": np.nan, "LRT_Overall_Reason": skip, "N_Total_Used": n_total_used, "N_Cases_Used": n_cases_used, "N_Controls_Used": n_ctrls_used})
             meta_extra = dict(meta_extra_common)
             meta_extra["skip_reason"] = skip
-            _write_meta(meta_path, "lrt_overall", s_name, cat, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra=meta_extra)
+            _write_meta(meta_path, "lrt_overall", s_name, cat, target, worker_core_df_cols, core_fp, case_fp, extra=meta_extra)
 
             # Write the PheWAS-style result as a skip to mirror main pass outputs
             io.atomic_write_json(res_path, {
@@ -3206,7 +3241,7 @@ def _lrt_overall_worker_impl(task):
                 cat,
                 target,
                 worker_core_df_cols,
-                _index_fingerprint(worker_core_df_index),
+                core_fp,
                 case_fp,
                 extra=meta_extra_result,
             )
@@ -3227,7 +3262,7 @@ def _lrt_overall_worker_impl(task):
             })
             meta_extra = dict(meta_extra_common)
             meta_extra.update({"skip_reason": reason, "counts": det})
-            _write_meta(meta_path, "lrt_overall", s_name, cat, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra=meta_extra)
+            _write_meta(meta_path, "lrt_overall", s_name, cat, target, worker_core_df_cols, core_fp, case_fp, extra=meta_extra)
 
             # Emit a PheWAS-style skip result to keep downstream shape identical
             io.atomic_write_json(res_path, {
@@ -3256,7 +3291,7 @@ def _lrt_overall_worker_impl(task):
                 cat,
                 target,
                 worker_core_df_cols,
-                _index_fingerprint(worker_core_df_index),
+                core_fp,
                 case_fp,
                 extra=meta_extra_result,
             )
@@ -3313,7 +3348,7 @@ def _lrt_overall_worker_impl(task):
                 cat,
                 target,
                 worker_core_df_cols,
-                _index_fingerprint(worker_core_df_index),
+                core_fp,
                 case_fp,
                 extra=meta_extra,
             )
@@ -3331,7 +3366,7 @@ def _lrt_overall_worker_impl(task):
                 cat,
                 target,
                 worker_core_df_cols,
-                _index_fingerprint(worker_core_df_index),
+                core_fp,
                 case_fp,
                 extra=meta_extra_result,
             )
@@ -3915,7 +3950,7 @@ def _lrt_overall_worker_impl(task):
             cat,
             target,
             worker_core_df_cols,
-            _index_fingerprint(worker_core_df_index),
+            core_fp,
             case_fp,
             extra=meta_extra_result,
         )
@@ -3932,7 +3967,7 @@ def _lrt_overall_worker_impl(task):
             "prune_recipe_version": "zv+greedy-rank-v1",
         })
         _write_meta(meta_path, "lrt_overall", s_name, cat, target, worker_core_df_cols,
-                    _index_fingerprint(worker_core_df_index), case_fp,
+                    core_fp, case_fp,
                     extra=meta_extra)
     except Exception as e:
         io.atomic_write_json(result_path, {"Phenotype": s_name, "Skip_Reason": f"exception:{type(e).__name__}"})
@@ -3967,6 +4002,7 @@ def _bootstrap_overall_worker_impl(task):
     res_dir = CTX["RESULTS_CACHE_DIR"]
     os.makedirs(res_dir, exist_ok=True)
     res_path = os.path.join(res_dir, f"{s_name_safe}.json")
+    core_fp = _core_index_fp()
     try:
         pheno_path = os.path.join(CTX["CACHE_DIR"], f"pheno_{s_name}_{task['cdr_codename']}.parquet")
         if not os.path.exists(pheno_path):
@@ -4083,7 +4119,7 @@ def _bootstrap_overall_worker_impl(task):
             io.atomic_write_json(result_path, {"Phenotype": s_name, "Reason": skip, "N_Total_Used": n_total_used})
             meta_extra = dict(meta_extra_common)
             meta_extra["skip_reason"] = skip
-            _write_meta(meta_path, "boot_overall", s_name, cat, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra=meta_extra)
+            _write_meta(meta_path, "boot_overall", s_name, cat, target, worker_core_df_cols, core_fp, case_fp, extra=meta_extra)
             io.atomic_write_json(res_path, {
                 "Phenotype": s_name,
                 "N_Total": n_total_pre,
@@ -4101,7 +4137,7 @@ def _bootstrap_overall_worker_impl(task):
             io.atomic_write_json(result_path, {"Phenotype": s_name, "Reason": reason, "N_Total_Used": det['N'], "N_Cases_Used": det['N_cases'], "N_Controls_Used": det['N_ctrls']})
             meta_extra = dict(meta_extra_common)
             meta_extra.update({"counts": det, "skip_reason": reason})
-            _write_meta(meta_path, "boot_overall", s_name, cat, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra=meta_extra)
+            _write_meta(meta_path, "boot_overall", s_name, cat, target, worker_core_df_cols, core_fp, case_fp, extra=meta_extra)
             io.atomic_write_json(res_path, {
                 "Phenotype": s_name,
                 "N_Total": n_total_pre,
@@ -4267,7 +4303,7 @@ def _bootstrap_overall_worker_impl(task):
         if p_reason:
             result_payload["Reason"] = p_reason
         io.atomic_write_json(result_path, result_payload)
-        _write_meta(meta_path, "boot_overall", s_name, cat, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra=dict(meta_extra_common))
+        _write_meta(meta_path, "boot_overall", s_name, cat, target, worker_core_df_cols, core_fp, case_fp, extra=dict(meta_extra_common))
 
         const_ix_full = X_full_zv.columns.get_loc('const') if 'const' in X_full_zv.columns else None
         target_ix_full = X_full_zv.columns.get_loc(target) if target in X_full_zv.columns else None
@@ -4448,7 +4484,7 @@ def _lrt_followup_worker_impl(task):
             allowed_mask_by_cat.get(category, np.ones(N_core, dtype=bool)), worker_core_df_index
         )
 
-        core_fp = _index_fingerprint(worker_core_df_index)
+        core_fp = _core_index_fp()
 
         repair_meta = os.path.exists(result_path) and (not os.path.exists(meta_path)) and CTX.get("REPAIR_META_IF_MISSING", False)
 
@@ -4541,7 +4577,7 @@ def _lrt_followup_worker_impl(task):
             out['LRT_Reason'] = skip; io.atomic_write_json(result_path, out)
             meta_extra = dict(meta_extra_common)
             meta_extra["skip_reason"] = skip
-            _write_meta(meta_path, "lrt_followup", s_name, category, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra=meta_extra)
+            _write_meta(meta_path, "lrt_followup", s_name, category, target, worker_core_df_cols, core_fp, case_fp, extra=meta_extra)
             return
 
         levels = pd.Index(anc_vec.dropna().unique(), dtype=str).tolist()
@@ -4564,7 +4600,7 @@ def _lrt_followup_worker_impl(task):
             out['LRT_Reason'] = "only_one_ancestry_level"; io.atomic_write_json(result_path, out)
             meta_extra = dict(meta_extra_common)
             meta_extra["skip_reason"] = "only_one_ancestry_level"
-            _write_meta(meta_path, "lrt_followup", s_name, category, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra=meta_extra)
+            _write_meta(meta_path, "lrt_followup", s_name, category, target, worker_core_df_cols, core_fp, case_fp, extra=meta_extra)
             return
 
         if 'eur' in levels:
@@ -5351,7 +5387,7 @@ def _lrt_followup_worker_impl(task):
             print(f"[Stage2]     {anc_upper}: OR={or_str}, P={p_str}, CI95={ci_str_display}, method={p_source or 'none'}", flush=True)
 
         io.atomic_write_json(result_path, out)
-        _write_meta(meta_path, "lrt_followup", s_name, category, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra=dict(meta_extra_common))
+        _write_meta(meta_path, "lrt_followup", s_name, category, target, worker_core_df_cols, core_fp, case_fp, extra=dict(meta_extra_common))
         
         print(f"\n[Stage2] COMPLETE: {s_name_safe}", flush=True)
         p_display = f"{out['P_LRT_AncestryxDosage']:.4e}" if out['P_Stage2_Valid'] else 'NaN'
