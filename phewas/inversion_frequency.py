@@ -68,11 +68,11 @@ def _available_inversions(dosages: pd.DataFrame, *, include_all: bool) -> list[s
     return list(dosages.columns)
 
 
-def _compute_frequency_stats(series: pd.Series) -> tuple[float, float, float, int]:
+def _compute_frequency_stats(series: pd.Series) -> tuple[float, float, float, float, int]:
     clean = series.dropna()
     n = len(clean)
     if n == 0:
-        return float("nan"), float("nan"), float("nan"), 0
+        return float("nan"), float("nan"), float("nan"), float("nan"), 0
 
     mean_dosage = float(clean.mean())
     std_dosage = float(clean.std(ddof=1)) if n > 1 else float("nan")
@@ -88,7 +88,7 @@ def _compute_frequency_stats(series: pd.Series) -> tuple[float, float, float, in
     else:
         lower = float("nan")
         upper = float("nan")
-    return af, lower, upper, n
+    return mean_dosage, af, lower, upper, n
 
 
 def summarize_population_frequencies(
@@ -115,12 +115,13 @@ def summarize_population_frequencies(
             else:
                 subset = merged.loc[merged["Population"] == population, inversion]
 
-            af, lower, upper, n = _compute_frequency_stats(subset)
+            mean_dosage, af, lower, upper, n = _compute_frequency_stats(subset)
             records.append(
                 {
                     "Inversion": inversion,
                     "Population": population,
                     "N": n,
+                    "Mean_Dosage": mean_dosage,
                     "Allele_Freq": af,
                     "CI95_Lower": lower,
                     "CI95_Upper": upper,
