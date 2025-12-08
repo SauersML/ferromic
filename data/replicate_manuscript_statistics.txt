@@ -281,55 +281,30 @@ Imputation performance summary:
 
 PHEWAS SCALE
 PheWAS scale summary:
-  Unique phenotypes tested: 1089.
+  Unique phenotypes tested: 1090.
   Case counts span 1002 to 137692; controls span 182133–368254.
-  Phenotype coverage per inversion (top 5): chr10-79542902-INV-674513: 1089, chr12-46897663-INV-16289: 1089, chr17-45585160-INV-706887: 1089, chr4-33098029-INV-7075: 1089, chr6-141867315-INV-29159: 1089; ...
-  Inversions with ≥1 BH-significant phenotype: 4 of 6.
+  Phenotype coverage per inversion (top 5): chr10-79542902-INV-674513: 1090, chr12-46897663-INV-16289: 1090, chr17-45585160-INV-706887: 1090, chr4-33098029-INV-7075: 1090, chr6-141867315-INV-29159: 1090; ...
 
 KEY ASSOCIATIONS
 Selected inversion–phenotype associations (logistic regression with LRT p-values):
   Available source tables: all_pop_phewas_tag.tsv, phewas_results.tsv.
-  [MAIN IMPUTED] chr10-79542902-INV-674513 vs Positive DNA test for high-risk HPV types: OR = 1.241 (95% CI 1.114–1.382), BH-adjusted p ≈ 0.032 (raw p = 1.144e-04).
-    Interaction (Ancestry × Dosage): p = 0.074.
-  [MAIN IMPUTED] chr6-141867315-INV-29159 vs Laryngitis and tracheitis: OR = 0.572 (95% CI 0.491–0.751), BH-adjusted p ≈ 0.041 (raw p = 2.193e-04).
-    Interaction (Ancestry × Dosage): p = 5.670e-05.
-    [AFR] p = 7.340e-05, OR = 0.518 (95% CI 0.451–0.689).
-  [MAIN IMPUTED] chr12-46897663-INV-16289 vs Conjunctivitis: OR = 1.147 (95% CI 1.091–1.205), BH-adjusted p ≈ 1.970e-04 (raw p = 9.630e-08).
-    Interaction (Ancestry × Dosage): p = 0.813.
-  [MAIN IMPUTED] chr12-46897663-INV-16289 vs Acne: OR = 1.158 (95% CI 1.090–1.231), BH-adjusted p ≈ 2.225e-03 (raw p = 2.900e-06).
-    Interaction (Ancestry × Dosage): p = 0.840.
-  [MAIN IMPUTED] chr12-46897663-INV-16289 vs Epidermal thickening: OR = 1.111 (95% CI 1.060–1.128), BH-adjusted p ≈ 0.029 (raw p = 9.110e-05).
-    Interaction (Ancestry × Dosage): p = 0.800.
-  [MAIN IMPUTED] chr12-46897663-INV-16289 vs Inflammation of the eye: OR = 1.118 (95% CI 1.070–1.169), BH-adjusted p ≈ 8.678e-04 (raw p = 7.070e-07).
-    Interaction (Ancestry × Dosage): p = 0.778.
-  [MAIN IMPUTED] chr12-46897663-INV-16289 vs Migraine: OR = 1.086 (95% CI 1.044–1.103), BH-adjusted p ≈ 0.040 (raw p = 1.717e-04).
-    Interaction (Ancestry × Dosage): p = 0.020.
-  [MAIN IMPUTED] chr12-46897663-INV-16289 vs Disorder of nervous system: OR = 1.168 (95% CI 1.095–1.184), BH-adjusted p ≈ 0.018 (raw p = 5.090e-05).
-    Interaction (Ancestry × Dosage): p = 0.690.
-  [MAIN IMPUTED] chr17-45585160-INV-706887 vs Morbid obesity (Main Imputed): OR = 1.078 (95% CI 1.043–1.113), BH-adjusted p ≈ 4.138e-03 (raw p = 7.490e-06).
-    Interaction (Ancestry × Dosage): p = 2.748e-03.
-    [EUR] p = 5.607e-04, OR = 1.069 (95% CI 1.032–1.080).
-    [AFR] p = 4.138e-04, OR = 1.228 (95% CI 1.097–1.352).
-  [MAIN IMPUTED] chr17-45585160-INV-706887 vs Breast lump or abnormal exam (Main Imputed): OR = 0.929 (95% CI 0.928–0.951), BH-adjusted p ≈ 2.703e-03 (raw p = 4.400e-06).
-    Interaction (Ancestry × Dosage): p = 0.025.
-    [EUR] p = 1.140e-05, OR = 0.924 (95% CI 0.923–0.949).
-  [MAIN IMPUTED] chr17-45585160-INV-706887 vs Abnormal mammogram (Main Imputed): OR = 0.906 (95% CI 0.897–0.940), BH-adjusted p ≈ 7.722e-03 (raw p = 1.640e-05).
-    Interaction (Ancestry × Dosage): p = 0.023.
-    [EUR] p = 5.790e-06, OR = 0.890 (95% CI 0.887–0.924).
-  [MAIN IMPUTED] chr17-45585160-INV-706887 vs Mild cognitive impairment (Main Imputed): OR = 0.856 (95% CI 0.824–0.922), BH-adjusted p ≈ 0.040 (raw p = 1.707e-04).
-    Interaction (Ancestry × Dosage): p = 0.013.
-    [EUR] p = 4.998e-04, OR = 0.854 (95% CI 0.786–0.925).
-    [AMR] p = 0.012, OR = 0.736 (95% CI 0.564–0.944).
-  [MAIN IMPUTED] chr17-45585160-INV-706887 vs Abnormal Papanicolaou smear: OR = 0.898 (95% CI 0.879–0.943), BH-adjusted p ≈ 0.032 (raw p = 1.094e-04).
-    Interaction (Ancestry × Dosage): p = 0.174.
-  [MAIN IMPUTED] chr17-45585160-INV-706887 vs Melanocytic nevi: OR = 0.898 (95% CI 0.870–0.928), BH-adjusted p ≈ 3.480e-07 (raw p = 5.670e-11).
-    Interaction (Ancestry × Dosage): p = 5.670e-05.
-  [MAIN IMPUTED] chr17-45585160-INV-706887 vs Benign neoplasm of the skin: OR = 0.919 (95% CI 0.895–0.944), BH-adjusted p ≈ 2.970e-06 (raw p = 9.680e-10).
-    Interaction (Ancestry × Dosage): p = 0.010.
-  [MAIN IMPUTED] chr17-45585160-INV-706887 vs Diastolic Heart Failure: OR = 1.116 (95% CI 1.061–1.128), BH-adjusted p ≈ 0.040 (raw p = 1.778e-04).
-    Interaction (Ancestry × Dosage): p = 0.414.
-  [MAIN IMPUTED] chr17-45585160-INV-706887 vs Breast Cancer (Malignant neoplasm): OR = 0.901 (95% CI 0.880–0.949), BH-adjusted p ≈ 0.046 (raw p = 2.989e-04).
-    Interaction (Ancestry × Dosage): p = 0.127.
+  [MAIN IMPUTED] chr10-79542902-INV-674513 vs Positive DNA test for high-risk HPV types: OR = 1.240 (95% CI 1.113–1.382), BH-adjusted p ≈ 1.187e-04 (raw p = 1.187e-04).
+  [MAIN IMPUTED] chr6-141867315-INV-29159 vs Laryngitis and tracheitis: OR = 0.572 (95% CI 0.491–0.752), BH-adjusted p ≈ 2.236e-04 (raw p = 2.236e-04).
+  [MAIN IMPUTED] chr12-46897663-INV-16289 vs Conjunctivitis: OR = 1.147 (95% CI 1.091–1.205), BH-adjusted p ≈ 9.670e-08 (raw p = 9.670e-08).
+  [MAIN IMPUTED] chr12-46897663-INV-16289 vs Acne: OR = 1.158 (95% CI 1.090–1.231), BH-adjusted p ≈ 2.900e-06 (raw p = 2.900e-06).
+  [MAIN IMPUTED] chr12-46897663-INV-16289 vs Epidermal thickening: OR = 1.111 (95% CI 1.060–1.128), BH-adjusted p ≈ 9.120e-05 (raw p = 9.120e-05).
+  [MAIN IMPUTED] chr12-46897663-INV-16289 vs Inflammation of the eye: OR = 1.118 (95% CI 1.070–1.169), BH-adjusted p ≈ 7.120e-07 (raw p = 7.120e-07).
+  [MAIN IMPUTED] chr12-46897663-INV-16289 vs Migraine: OR = 1.086 (95% CI 1.044–1.103), BH-adjusted p ≈ 1.725e-04 (raw p = 1.725e-04).
+  [MAIN IMPUTED] chr12-46897663-INV-16289 vs Disorder of nervous system: OR = 1.168 (95% CI 1.095–1.184), BH-adjusted p ≈ 5.100e-05 (raw p = 5.100e-05).
+  [MAIN IMPUTED] chr17-45585160-INV-706887 vs Morbid obesity (Main Imputed): OR = 1.078 (95% CI 1.043–1.113), BH-adjusted p ≈ 6.770e-06 (raw p = 6.770e-06).
+  [MAIN IMPUTED] chr17-45585160-INV-706887 vs Breast lump or abnormal exam (Main Imputed): OR = 0.930 (95% CI 0.929–0.951), BH-adjusted p ≈ 4.460e-06 (raw p = 4.460e-06).
+  [MAIN IMPUTED] chr17-45585160-INV-706887 vs Abnormal mammogram (Main Imputed): OR = 0.906 (95% CI 0.898–0.940), BH-adjusted p ≈ 1.600e-05 (raw p = 1.600e-05).
+  [MAIN IMPUTED] chr17-45585160-INV-706887 vs Mild cognitive impairment (Main Imputed): OR = 0.857 (95% CI 0.826–0.922), BH-adjusted p ≈ 1.706e-04 (raw p = 1.706e-04).
+  [MAIN IMPUTED] chr17-45585160-INV-706887 vs Abnormal Papanicolaou smear: OR = 0.898 (95% CI 0.881–0.943), BH-adjusted p ≈ 1.120e-04 (raw p = 1.120e-04).
+  [MAIN IMPUTED] chr17-45585160-INV-706887 vs Melanocytic nevi: OR = 0.898 (95% CI 0.870–0.928), BH-adjusted p ≈ 5.400e-11 (raw p = 5.400e-11).
+  [MAIN IMPUTED] chr17-45585160-INV-706887 vs Benign neoplasm of the skin: OR = 0.919 (95% CI 0.895–0.945), BH-adjusted p ≈ 9.460e-10 (raw p = 9.460e-10).
+  [MAIN IMPUTED] chr17-45585160-INV-706887 vs Diastolic Heart Failure: OR = 1.116 (95% CI 1.061–1.127), BH-adjusted p ≈ 1.736e-04 (raw p = 1.736e-04).
+  [MAIN IMPUTED] chr17-45585160-INV-706887 vs Breast Cancer (Malignant neoplasm): OR = 0.901 (95% CI 0.881–0.949), BH-adjusted p ≈ 2.942e-04 (raw p = 2.942e-04).
   [TAG SNP] chr17-45974480-INV-29218 vs Morbid obesity (Tag SNP): OR = 1.054 (95% CI 1.031–1.078), BH-adjusted p ≈ 8.151e-04 (raw p = 3.650e-06).
   [TAG SNP] chr17-45974480-INV-29218 vs Breast lump or abnormal exam (Tag SNP): OR = 0.956 (95% CI 0.936–0.977), BH-adjusted p ≈ 6.375e-03 (raw p = 4.280e-05).
   [TAG SNP] chr17-45974480-INV-29218 vs Abnormal mammogram (Tag SNP): OR = 0.939 (95% CI 0.910–0.969), BH-adjusted p ≈ 7.326e-03 (raw p = 6.870e-05).
