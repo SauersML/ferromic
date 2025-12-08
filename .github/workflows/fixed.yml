@@ -5,7 +5,7 @@ on:
 
 permissions:
   actions: read
-  contents: read
+  contents: write
 
 jobs:
   analyze-fixed-differences:
@@ -13,6 +13,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.WRITE_TOKEN }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -100,11 +102,40 @@ jobs:
           # The script expects inputs in CWD and writes outputs to CWD
           python stats/fixed.py
 
+      - name: Move outputs into data directory
+        run: |
+          set -euo pipefail
+
+          mkdir -p data
+          mv -f gene_inversion_fixed_differences.tsv data/gene_inversion_fixed_differences.tsv
+          mv -f fixed_diff_summary.tsv data/fixed_diff_summary.tsv
+
+          ls -l data/gene_inversion_fixed_differences.tsv data/fixed_diff_summary.tsv
+
+      - name: Commit and push fixed differences outputs
+        env:
+          PUSH_TOKEN: ${{ secrets.WRITE_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add data/gene_inversion_fixed_differences.tsv data/fixed_diff_summary.tsv
+
+          if git diff --staged --quiet; then
+            echo "No fixed differences outputs to commit"
+          else
+            git commit -m "Add fixed differences outputs"
+            git pull https://${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git main --rebase --autostash --strategy=recursive -X ours
+            git push https://${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git HEAD:main
+          fi
+
       - name: Upload Results
         uses: actions/upload-artifact@v4
         with:
           name: fixed-differences-report
           path: |
-            gene_inversion_fixed_differences.tsv
-            fixed_diff_summary.tsv
+            data/gene_inversion_fixed_differences.tsv
+            data/fixed_diff_summary.tsv
           if-no-files-found: warn
