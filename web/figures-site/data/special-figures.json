@@ -21,6 +21,11 @@
           "description": "Raincloud distribution of Spearman correlations for FST decay near breakpoints, split by single-event versus recurrent inversions with significance highlighted."
         },
         {
+          "title": "Population Dosage by Ancestry",
+          "filename": "special/pop_dosage_plot.pdf",
+          "description": "Mean inversion dosage with 95% confidence intervals across ancestry groups for each inversion."
+        },
+        {
           "title": "Mean π Overall Violins (40 kb)",
           "filename": "pi_analysis_results_exact_mf_quadrants/total_40kb/pi_mf_overall_violins_total_40kb.pdf",
           "description": "Overall violin-and-line comparison of mean nucleotide diversity across inversion categories using 40 kb windows."
