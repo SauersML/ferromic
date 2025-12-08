@@ -1594,6 +1594,12 @@
           "href": "figures/final_plots/special/spearman_decay_raincloud.pdf",
           "preview": "figures/final_plots/special/spearman_decay_raincloud.pdf",
           "type": "pdf"
+        },
+        {
+          "name": "pop_dosage_plot.pdf",
+          "href": "figures/final_plots/special/pop_dosage_plot.pdf",
+          "preview": "figures/final_plots/special/pop_dosage_plot.pdf",
+          "type": "pdf"
         }
       ]
     },
@@ -3009,6 +3015,12 @@
           "name": "spearman_decay_raincloud.pdf",
           "href": "figures/special/spearman_decay_raincloud.pdf",
           "preview": "figures/special/spearman_decay_raincloud.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "pop_dosage_plot.pdf",
+          "href": "figures/special/pop_dosage_plot.pdf",
+          "preview": "figures/special/pop_dosage_plot.pdf",
           "type": "pdf"
         },
         {

@@ -172,6 +172,14 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         group="Diversity",
     ),
     FigureTask(
+        name="Population dosage plot",
+        script=Path("stats/pop_dosage_plot.py"),
+        outputs=(Path("special/pop_dosage_plot.pdf"),),
+        dependencies=(),
+        note="Downloads the inversion population dosage summary table from GitHub if needed.",
+        group="Diversity",
+    ),
+    FigureTask(
         name="Inversion allele frequency trajectories",
         script=Path("stats/freq_trajectory.py"),
         outputs=(Path("data/inversion_trajectories_combined.pdf"),),
