@@ -452,7 +452,8 @@ def _ok_mle_fit(fit, X, y, target_ix=None,
     if n_nonfinite_bse > 0:
         fail_reason = "bse_not_finite"
         fail_details["n_nonfinite_bse"] = n_nonfinite_bse
-        fail_details["bse_max"] = float(np.nanmax(bse))
+        finite_bse = bse[np.isfinite(bse)]
+        fail_details["bse_max"] = float(np.max(finite_bse)) if finite_bse.size else float("nan")
         print(f"[OK-MLE-FIT] ok=False FAIL_REASON={fail_reason} n_nonfinite_bse={n_nonfinite_bse}", flush=True)
         return False, fail_reason, fail_details
 
