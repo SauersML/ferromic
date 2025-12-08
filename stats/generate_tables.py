@@ -1229,11 +1229,24 @@ def build_workbook(output_path: Path) -> None:
     sheet_infos: List[SheetInfo] = []
     sheet_frames: List[pd.DataFrame] = []
 
+    def _finalize_frame_for_output(df: pd.DataFrame) -> pd.DataFrame:
+        """Return a copy of ``df`` with missing values filled for display.
+
+        Supplementary tables should not contain empty cells when the source
+        data are missing. Replacing blank entries with the string ``"NA"``
+        makes the absence of a value explicit in the exported workbook.
+        """
+
+        finalized = df.copy()
+        finalized.replace(to_replace=r"^\s*$", value=pd.NA, regex=True, inplace=True)
+        finalized.fillna("NA", inplace=True)
+        return finalized
+
     def register(sheet: SheetInfo) -> None:
         sheet_infos.append(sheet)
         print(f"Preparing sheet: {sheet.name}")
         df = sheet.loader()
-        sheet_frames.append(df)
+        sheet_frames.append(_finalize_frame_for_output(df))
 
     register(
         SheetInfo(
