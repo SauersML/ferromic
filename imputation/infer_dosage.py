@@ -23,10 +23,25 @@ MODEL_SOURCE_DIR = os.getenv(
     "MODEL_SOURCE_DIR",
     _DEFAULT_MODEL_SOURCE if os.path.isdir(_DEFAULT_MODEL_SOURCE) else "",
 )
-MODEL_MANIFEST_URL = os.getenv(
-    "MODEL_MANIFEST_URL",
-    "https://api.github.com/repos/SauersML/ferromic/contents/data/models",
-)
+
+# --- MODEL SOURCE CONFIGURATION ---
+# Set MODEL_SOURCE to "github" or "s3" to switch between remote sources
+MODEL_SOURCE = "s3"
+
+_MANIFEST_URLS = {
+    "github": "https://api.github.com/repos/SauersML/ferromic/contents/data/models",
+    "s3": "https://sharedspace.s3.msi.umn.edu/public_internet/final_imputation_models.manifest.txt",
+}
+
+if MODEL_SOURCE not in _MANIFEST_URLS:
+    print(f"[WARN] Invalid MODEL_SOURCE '{MODEL_SOURCE}'. Valid options: {list(_MANIFEST_URLS.keys())}")
+    print(f"[WARN] Defaulting to 's3'")
+    MODEL_SOURCE = "s3"
+
+MODEL_MANIFEST_URL = os.getenv("MODEL_MANIFEST_URL", _MANIFEST_URLS[MODEL_SOURCE])
+
+print(f"[CONFIG] Model source: {MODEL_SOURCE.upper()} → {MODEL_MANIFEST_URL}")
+
 ANCESTRY_URI = "gs://fc-aou-datasets-controlled/v8/wgs/short_read/snpindel/aux/ancestry/ancestry_preds.tsv"
 GENOTYPE_DIR = "genotype_matrices"
 PLINK_PREFIX = "subset"
