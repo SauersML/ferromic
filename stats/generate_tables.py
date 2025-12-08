@@ -119,6 +119,10 @@ GENE_CONSERVATION_COLUMN_DEFS: Dict[str, str] = OrderedDict(
             "Indicates which haplotype orientation (Inverted or Direct) has a higher proportion of identical CDS pairs based on the sign of Δ.",
         ),
         (
+            "Fixed CDS differences",
+            "Count of CDS sites where direct and inverted haplotype groups are each fixed to different alleles (strict fixed-difference criterion).",
+        ),
+        (
             "Direct identical pair proportion",
             "The fraction of pairwise comparisons among direct haplotypes that resulted in 100% identical amino acid sequences.",
         ),
@@ -525,6 +529,7 @@ PAML_COLUMN_DEFS: Dict[str, str] = OrderedDict(
 GENE_RESULTS_SCRIPT = REPO_ROOT / "stats" / "per_gene_cds_differences_jackknife.py"
 GENE_RESULTS_TSV = DATA_DIR / "gene_inversion_direct_inverted.tsv"
 CDS_SUMMARY_TSV = DATA_DIR / "cds_identical_proportions.tsv"
+FIXED_DIFF_SUMMARY_TSV = DATA_DIR / "fixed_diff_summary.tsv"
 
 PHEWAS_RESULTS = DATA_DIR / "phewas_results.tsv"
 PHEWAS_TAGGING_RESULTS = DATA_DIR / "all_pop_phewas_tag.tsv"
@@ -902,6 +907,43 @@ def _load_gene_conservation() -> pd.DataFrame:
     for col in numeric_cols:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
+    if not FIXED_DIFF_SUMMARY_TSV.exists():
+        raise SupplementaryTablesError(
+            f"Fixed differences summary TSV is missing: {FIXED_DIFF_SUMMARY_TSV}"
+        )
+
+    fixed_df = pd.read_csv(
+        FIXED_DIFF_SUMMARY_TSV, sep="\t", dtype=str, low_memory=False
+    )
+
+    key_cols = ["gene_name", "transcript_id", "inv_id"]
+    required_fixed_cols = key_cols + ["n_fixed_differences"]
+    missing_fixed_cols = [c for c in required_fixed_cols if c not in fixed_df.columns]
+    if missing_fixed_cols:
+        raise SupplementaryTablesError(
+            "Fixed differences summary TSV is missing required columns: "
+            + ", ".join(missing_fixed_cols)
+        )
+
+    duplicate_keys = fixed_df.duplicated(subset=key_cols, keep=False)
+    if duplicate_keys.any():
+        dup_rows = (
+            fixed_df.loc[duplicate_keys, key_cols]
+            .drop_duplicates()
+            .sort_values(key_cols, kind="mergesort")
+        )
+        raise SupplementaryTablesError(
+            "Fixed differences summary contains duplicate gene/transcript/inversion combinations:\n"
+            + dup_rows.to_csv(index=False)
+        )
+
+    fixed_df = fixed_df[required_fixed_cols].copy()
+    fixed_df["n_fixed_differences"] = pd.to_numeric(
+        fixed_df["n_fixed_differences"], errors="coerce"
+    ).astype("Int64")
+
+    df = df.merge(fixed_df, how="left", on=key_cols)
+
     def orientation(row: pd.Series) -> str:
         delta = row.get("delta")
         if pd.isna(delta):
@@ -924,6 +966,7 @@ def _load_gene_conservation() -> pd.DataFrame:
         "se_delta": "SE(Δ)",
         "p_value": "p-value",
         "q_value": "BH p-value",
+        "n_fixed_differences": "Fixed CDS differences",
     }
 
     df = df.rename(columns=rename_map)
