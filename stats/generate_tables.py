@@ -1435,17 +1435,21 @@ def build_workbook(output_path: Path) -> None:
         workbook = writer.book
         readme_ws = workbook.add_worksheet("Information")
 
-        header_fmt = workbook.add_format({"bold": True, "font_size": 14, "bottom": 1})
-        desc_fmt = workbook.add_format({"italic": True, "text_wrap": True})
-        col_name_fmt = workbook.add_format({"bold": True, "text_wrap": True, "bg_color": "#EEEEEE"})
-        col_def_fmt = workbook.add_format({"text_wrap": True})
+        def base_format(**kwargs: object):
+            return workbook.add_format({"bg_color": "#FFFFFF", **kwargs})
 
-        title_rich_fmt = workbook.add_format({"bold": True})
-        title_cell_fmt = workbook.add_format({"text_wrap": True, "valign": "top", "align": "left"})
-        table_header_fmt = workbook.add_format({"bold": True})
+        header_fmt = base_format(bold=True, font_size=14, bottom=1)
+        desc_fmt = base_format(italic=True, text_wrap=True)
+        col_name_fmt = base_format(bold=True, text_wrap=True, bg_color="#EEEEEE")
+        col_def_fmt = base_format(text_wrap=True)
 
-        readme_ws.set_column(0, 0, 32)
-        readme_ws.set_column(1, 1, 120)
+        title_rich_fmt = base_format(bold=True)
+        title_cell_fmt = base_format(text_wrap=True, valign="top", align="left")
+        table_header_fmt = base_format(bold=True)
+        default_cell_fmt = base_format()
+
+        readme_ws.set_column(0, 0, 32, default_cell_fmt)
+        readme_ws.set_column(1, 1, 120, default_cell_fmt)
 
         row = 0
         for i, sheet_info in enumerate(sheet_infos, start=1):
@@ -1472,6 +1476,7 @@ def build_workbook(output_path: Path) -> None:
 
             worksheet = writer.sheets[sheet_name]
             num_cols = max(len(df.columns), 1)
+            worksheet.set_column(0, num_cols - 1, None, default_cell_fmt)
 
             if num_cols > 1:
                 worksheet.merge_range(0, 0, 0, num_cols - 1, "", title_cell_fmt)
