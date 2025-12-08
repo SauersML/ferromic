@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2025-12-08T19:42:47.433884+00:00",
+  "generatedAt": "2025-12-08T19:52:14.498890+00:00",
   "groups": [
     {
       "title": "Top-level figures",
@@ -312,10 +312,22 @@
           "type": "pdf"
         },
         {
+          "name": "inversion_r2_sorted.pdf",
+          "href": "figures/data/inversion_r2_sorted.pdf",
+          "preview": "figures/data/inversion_r2_sorted.pdf",
+          "type": "pdf"
+        },
+        {
           "name": "inversion_trajectories_combined.pdf",
           "href": "figures/data/inversion_trajectories_combined.pdf",
           "preview": "figures/data/inversion_trajectories_combined.pdf",
           "type": "pdf"
+        },
+        {
+          "name": "inversion_trajectories_combined.png",
+          "href": "figures/data/inversion_trajectories_combined.png",
+          "preview": "figures/data/inversion_trajectories_combined.png",
+          "type": "image"
         }
       ]
     },
@@ -1589,6 +1601,12 @@
       "title": "final_plots/special",
       "slug": "final-plots-special",
       "items": [
+        {
+          "name": "pop_dosage_plot.pdf",
+          "href": "figures/final_plots/special/pop_dosage_plot.pdf",
+          "preview": "figures/final_plots/special/pop_dosage_plot.pdf",
+          "type": "pdf"
+        },
         {
           "name": "spearman_decay_raincloud.pdf",
           "href": "figures/final_plots/special/spearman_decay_raincloud.pdf",
@@ -3005,6 +3023,12 @@
       "title": "special",
       "slug": "special",
       "items": [
+        {
+          "name": "pop_dosage_plot.pdf",
+          "href": "figures/special/pop_dosage_plot.pdf",
+          "preview": "figures/special/pop_dosage_plot.pdf",
+          "type": "pdf"
+        },
         {
           "name": "spearman_decay_raincloud.pdf",
           "href": "figures/special/spearman_decay_raincloud.pdf",
