@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import math
 import os
+from pathlib import Path
 from typing import Iterable
 
 import matplotlib.pyplot as plt
@@ -26,6 +27,7 @@ plt.rcParams.update({
 CALLSET_PATH = "data/2AGRCh38_unifiedCallset - 2AGRCh38_unifiedCallset.tsv"
 INV_PROPERTIES_PATH = "data/inv_properties.tsv"
 AOU_FREQUENCIES_PATH = "data/inversion_population_frequencies.tsv"
+OUTPUT_BASE = Path("special/overall_AF_scatterplot")
 
 # Allowed diploid genotypes and the number of alternate alleles they carry
 ALLOWED_GENOTYPES = {
@@ -159,8 +161,11 @@ def plot_scatter(data: pd.DataFrame, filename: str) -> None:
     ax.set_ylabel("All of Us Cohort Imputed Allele Frequency", fontsize=16)
     ax.tick_params(labelsize=14)
 
+    output_base = Path(filename)
+    output_base.parent.mkdir(parents=True, exist_ok=True)
+
     for ext in ("png", "pdf"):
-        out_path = f"{filename}.{ext}"
+        out_path = output_base.with_suffix(f".{ext}")
         fig.savefig(out_path, bbox_inches="tight")
     plt.close(fig)
 
@@ -196,8 +201,11 @@ def plot_scatter_with_ci(data: pd.DataFrame, filename: str) -> None:
     ax.set_ylabel("All of Us Cohort Imputed Allele Frequency", fontsize=16)
     ax.tick_params(labelsize=14)
 
+    output_base = Path(filename)
+    output_base.parent.mkdir(parents=True, exist_ok=True)
+
     for ext in ("png", "pdf"):
-        out_path = f"{filename}.{ext}"
+        out_path = output_base.with_suffix(f".{ext}")
         fig.savefig(out_path, bbox_inches="tight")
     plt.close(fig)
 
@@ -220,8 +228,8 @@ def main() -> None:
     if merged.empty:
         raise ValueError("No overlapping inversions after filtering by consensus and availability.")
 
-    plot_scatter(merged, os.path.join("stats", "overall_AF_scatterplot"))
-    plot_scatter_with_ci(merged, os.path.join("stats", "overall_AF_scatterplot_with_ci"))
+    plot_scatter(merged, str(OUTPUT_BASE))
+    plot_scatter_with_ci(merged, str(OUTPUT_BASE.with_name(f"{OUTPUT_BASE.name}_with_ci")))
 
 
 if __name__ == "__main__":
