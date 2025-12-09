@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2025-12-09T06:16:11.744907+00:00",
+  "generatedAt": "2025-12-09T20:49:19.911434+00:00",
   "groups": [
     {
       "title": "Top-level figures",
@@ -1614,16 +1614,10 @@
       "slug": "final-plots-special",
       "items": [
         {
-          "name": "pop_allele_frequency_plot.pdf",
-          "href": "figures/final_plots/special/pop_allele_frequency_plot.pdf",
-          "preview": "figures/final_plots/special/pop_allele_frequency_plot.pdf",
+          "name": "pop_dosage_plot.pdf",
+          "href": "figures/final_plots/special/pop_dosage_plot.pdf",
+          "preview": "figures/final_plots/special/pop_dosage_plot.pdf",
           "type": "pdf"
-        },
-        {
-          "name": "pop_allele_frequency_plot.png",
-          "href": "figures/final_plots/special/pop_allele_frequency_plot.png",
-          "preview": "figures/final_plots/special/pop_allele_frequency_plot.png",
-          "type": "image"
         },
         {
           "name": "spearman_decay_raincloud.pdf",
@@ -3066,16 +3060,10 @@
       "slug": "special",
       "items": [
         {
-          "name": "pop_allele_frequency_plot.pdf",
-          "href": "figures/special/pop_allele_frequency_plot.pdf",
-          "preview": "figures/special/pop_allele_frequency_plot.pdf",
+          "name": "pop_dosage_plot.pdf",
+          "href": "figures/special/pop_dosage_plot.pdf",
+          "preview": "figures/special/pop_dosage_plot.pdf",
           "type": "pdf"
-        },
-        {
-          "name": "pop_allele_frequency_plot.png",
-          "href": "figures/special/pop_allele_frequency_plot.png",
-          "preview": "figures/special/pop_allele_frequency_plot.png",
-          "type": "image"
         },
         {
           "name": "spearman_decay_raincloud.pdf",
