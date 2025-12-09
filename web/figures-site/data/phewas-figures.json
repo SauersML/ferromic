@@ -18,5 +18,10 @@
     "title": "PheWAS Manhattan \u2014 chr6:141,866,310-141,898,728",
     "filename": "phewas_plots/phewas_chr6_141_866_310-141_898_728.pdf",
     "description": "Phenome-wide association plot for the 32 kbp inversion at chr6:141,866,310-141,898,728."
+  },
+  {
+    "title": "PheWAS Manhattan \u2014 chr8:7,301,024-12,598,379",
+    "filename": "phewas_plots/phewas_chr8_7_301_024-12_598_379.pdf",
+    "description": "Phenome-wide association plot for the 5297 kbp inversion at chr8:7,301,024-12,598,379."
   }
 ]
