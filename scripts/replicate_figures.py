@@ -193,6 +193,26 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         group="Diversity",
     ),
     FigureTask(
+        name="Overall allele frequency scatterplots",
+        script=Path("stats/overall_AF_scatterplot.py"),
+        outputs=(
+            Path("special/overall_AF_scatterplot.png"),
+            Path("special/overall_AF_scatterplot.pdf"),
+            Path("special/overall_AF_scatterplot_with_ci.png"),
+            Path("special/overall_AF_scatterplot_with_ci.pdf"),
+        ),
+        dependencies=(
+            "data/2AGRCh38_unifiedCallset - 2AGRCh38_unifiedCallset.tsv",
+            "data/inv_properties.tsv",
+            "data/inversion_population_frequencies.tsv",
+        ),
+        note=(
+            "Compares Porubsky et al. 2022 callset allele frequencies against All of Us"
+            " imputed frequencies with and without confidence intervals."
+        ),
+        group="Diversity",
+    ),
+    FigureTask(
         name="FRF Volcano Plot",
         script=Path("stats/frf_volcano.py"),
         outputs=(Path("frf/frf_volcano.pdf"),),
