@@ -145,10 +145,71 @@ jobs:
             echo "Using figures root: $FIGURES_ROOT"
           fi
 
+          REQUIRED_DIRS=$(python3 - <<'PY'
+import json
+from pathlib import Path
+
+required_dirs = set()
+for path in ["${APP_PATH}/data/special-figures.json", "${APP_PATH}/data/phewas-figures.json"]:
+    with open(path, "r", encoding="utf-8") as fh:
+        data = json.load(fh)
+
+    def record(filename: str) -> None:
+        if not filename:
+            return
+        parent = Path(filename).parent.as_posix()
+        if parent not in {"", "."}:
+            required_dirs.add(parent)
+
+    if isinstance(data, list):
+        for entry in data:
+            if isinstance(entry, dict):
+                record(entry.get("filename", ""))
+    elif isinstance(data, dict):
+        for group in data.get("groups", []):
+            for fig in group.get("figures", []):
+                if isinstance(fig, dict):
+                    record(fig.get("filename", ""))
+
+print("\n".join(sorted(required_dirs)))
+PY
+)
+
+          has_required_dirs() {
+            local root="$1"
+            while IFS= read -r dir; do
+              [ -z "$dir" ] && continue
+              if [ ! -d "$root/$dir" ]; then
+                return 1
+              fi
+            done <<< "$REQUIRED_DIRS"
+            return 0
+          }
+
+          if ! has_required_dirs "$FIGURES_ROOT"; then
+            echo "Figures root $FIGURES_ROOT is missing required figure directories; searching for an alternative root."
+            ALT_ROOT=$(find "$SEARCH_ROOT" -type d -name figures -print | while read -r candidate; do
+              if has_required_dirs "$candidate"; then
+                echo "$candidate"
+                break
+              fi
+            done)
+
+            if [ -n "$ALT_ROOT" ]; then
+              FIGURES_ROOT="$ALT_ROOT"
+              echo "Using figures root with required directories: $FIGURES_ROOT"
+            else
+              echo "No figures directory within the artifact contained the required subdirectories."
+              exit 1
+            fi
+          fi
+
           python3 scripts/prepare_figures_manifest.py \
             --figures-root "$FIGURES_ROOT" \
             --public-root "$FIGURES_DEST" \
-            --manifest-path "$MANIFEST_PATH"
+            --manifest-path "$MANIFEST_PATH" \
+            --required-figures-config "$APP_PATH/data/special-figures.json" \
+            --required-figures-config "$APP_PATH/data/phewas-figures.json"
 
           echo "restored=true" >> "$GITHUB_OUTPUT"
           echo "Manifest and figures restored from run-analysis artifacts."
