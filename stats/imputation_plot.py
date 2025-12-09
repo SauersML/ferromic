@@ -43,13 +43,28 @@ imp["id"] = imp["id"].astype(str).str.strip()
 inv["OrigID"] = inv["OrigID"].astype(str).str.strip()
 
 # Merge id ↔ OrigID
-merged = (
-    imp.merge(
-        inv[["OrigID", "Chromosome", "Start", "End", cons_col]],
-        left_on="id",
-        right_on="OrigID",
-        how="inner",
-    ).drop(columns=["OrigID"])
+# Merge, keeping suffixes so we can disambiguate any shared columns
+merged = imp.merge(
+    inv[["OrigID", "Chromosome", "Start", "End", cons_col]],
+    left_on="id",
+    right_on="OrigID",
+    how="inner",
+    suffixes=("_imp", "_inv"),
+)
+
+# Choose the inversion metadata columns from the inventory table
+chrom_col = "Chromosome_inv" if "Chromosome_inv" in merged.columns else "Chromosome"
+start_col = "Start_inv" if "Start_inv" in merged.columns else "Start"
+end_col = "End_inv" if "End_inv" in merged.columns else "End"
+cons_out = f"{cons_col}_inv" if f"{cons_col}_inv" in merged.columns else cons_col
+
+merged = merged[["id", "unbiased_pearson_r2", chrom_col, start_col, end_col, cons_out]].rename(
+    columns={
+        chrom_col: "Chromosome",
+        start_col: "Start",
+        end_col: "End",
+        cons_out: cons_col,
+    }
 )
 
 # Convert to numeric
