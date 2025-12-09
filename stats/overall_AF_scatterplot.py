@@ -171,15 +171,37 @@ def plot_scatter(data: pd.DataFrame, filename: str) -> None:
 
 
 def plot_scatter_with_ci(data: pd.DataFrame, filename: str) -> None:
+    # Ensure CI columns are ordered low→high so matplotlib receives non-negative
+    # error bar lengths even if the inputs were flipped. This mirrors the
+    # behaviour of `wilson_ci`, which always returns (lower, upper).
+    for low_col, high_col in (
+        ("callset_ci_low", "callset_ci_high"),
+        ("aou_ci_low", "aou_ci_high"),
+    ):
+        lows = data[[low_col, high_col]].min(axis=1)
+        highs = data[[low_col, high_col]].max(axis=1)
+        data[low_col] = lows
+        data[high_col] = highs
+
     fig, ax = plt.subplots(figsize=(6, 6))
-    xerr = np.vstack([
-        data["callset_af"] - data["callset_ci_low"],
-        data["callset_ci_high"] - data["callset_af"],
-    ])
-    yerr = np.vstack([
-        data["aou_af"] - data["aou_ci_low"],
-        data["aou_ci_high"] - data["aou_af"],
-    ])
+    xerr = np.maximum(
+        0,
+        np.vstack(
+            [
+                data["callset_af"] - data["callset_ci_low"],
+                data["callset_ci_high"] - data["callset_af"],
+            ]
+        ),
+    )
+    yerr = np.maximum(
+        0,
+        np.vstack(
+            [
+                data["aou_af"] - data["aou_ci_low"],
+                data["aou_ci_high"] - data["aou_af"],
+            ]
+        ),
+    )
 
     ax.errorbar(
         data["callset_af"],
