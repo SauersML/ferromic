@@ -89,15 +89,18 @@ def build_figure_index(figures: Iterable[Path], source_root: Path) -> dict[Path,
     return index
 
 
-def load_required_figures(config_paths: Iterable[Path]) -> set[Path]:
+def load_required_figures(config_paths: Iterable[Path]) -> tuple[set[Path], dict[Path, set[Path]]]:
     required: set[Path] = set()
 
-    def ensure_added(filename: str, source: Path) -> None:
+    def ensure_added(filename: str, source: Path, bucket: set[Path]) -> None:
         if not filename:
             return
-        required.add(Path(filename))
+        path = Path(filename)
+        required.add(path)
+        bucket.add(path)
 
     configs_loaded: dict[Path, int] = {}
+    per_config: dict[Path, set[Path]] = {}
 
     for config_path in config_paths:
         if not config_path.exists():
@@ -107,22 +110,24 @@ def load_required_figures(config_paths: Iterable[Path]) -> set[Path]:
             data = json.load(fh)
 
         previous_count = len(required)
+        added_paths: set[Path] = set()
 
         if isinstance(data, list):
             for entry in data:
                 if isinstance(entry, dict):
-                    ensure_added(entry.get("filename", ""), config_path)
+                    ensure_added(entry.get("filename", ""), config_path, added_paths)
         elif isinstance(data, dict):
             for group in data.get("groups", []):
                 for figure in group.get("figures", []):
                     if isinstance(figure, dict):
-                        ensure_added(figure.get("filename", ""), config_path)
+                        ensure_added(figure.get("filename", ""), config_path, added_paths)
         else:
             raise ValueError(
                 f"Unsupported required figures config format in {config_path}"
             )
 
         configs_loaded[config_path] = len(required) - previous_count
+        per_config[config_path] = added_paths
 
     for config_path, count in configs_loaded.items():
         if count == 0:
@@ -130,7 +135,7 @@ def load_required_figures(config_paths: Iterable[Path]) -> set[Path]:
                 f"Required figures config {config_path} did not list any figure filenames"
             )
 
-    return required
+    return required, per_config
 
 
 def copy_figures(figures: dict[Path, Path], destination_root: Path) -> dict[Path, list[Path]]:
@@ -190,7 +195,25 @@ def main() -> None:
     )
 
     if args.required_figures_config:
-        required_figures = load_required_figures(args.required_figures_config)
+        required_figures, _ = load_required_figures(args.required_figures_config)
+
+        required_dirs = {
+            path.parent
+            for path in required_figures
+            if path.parent.as_posix() not in {".", ""}
+        }
+        missing_required_dirs = sorted(
+            rel_dir.as_posix()
+            for rel_dir in required_dirs
+            if not (figures_root / rel_dir).exists()
+        )
+        if missing_required_dirs:
+            missing_dir_list = "\n".join(missing_required_dirs)
+            raise SystemExit(
+                "Required figure directories were missing under the figures root:\n"
+                f"{missing_dir_list}"
+            )
+
         missing = sorted(
             rel.as_posix() for rel in required_figures if rel not in figure_index
         )
