@@ -148,7 +148,9 @@ jobs:
           python3 scripts/prepare_figures_manifest.py \
             --figures-root "$FIGURES_ROOT" \
             --public-root "$FIGURES_DEST" \
-            --manifest-path "$MANIFEST_PATH"
+            --manifest-path "$MANIFEST_PATH" \
+            --required-figures-config "$APP_PATH/data/special-figures.json" \
+            --required-figures-config "$APP_PATH/data/phewas-figures.json"
 
           echo "restored=true" >> "$GITHUB_OUTPUT"
           echo "Manifest and figures restored from run-analysis artifacts."
