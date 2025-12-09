@@ -1070,10 +1070,10 @@ def _load_phewas_tagging() -> pd.DataFrame:
 
 def _load_imputation_results() -> pd.DataFrame:
     df = _load_simple_tsv(IMPUTATION_RESULTS)
-    # Rename columns to match definitions
+    # Rename columns to match definitions and retain the original inversion ID for merging
     df = df.rename(
         columns={
-            "id": "Inversion",
+            "id": "OrigID",
             "best_n_components": "n_components",
             "model_p_value": "p_value",
         }
@@ -1082,6 +1082,30 @@ def _load_imputation_results() -> pd.DataFrame:
     # Remove unnamed columns (Column 6 and Column 9)
     columns_to_drop = ["Column 6", "Column 9"]
     df = df.drop(columns=[col for col in columns_to_drop if col in df.columns])
+
+    inv_properties = _load_simple_tsv(INV_PROPERTIES)
+    required_cols = {"OrigID", "Chromosome", "Start", "End", "0_single_1_recur_consensus"}
+    missing_cols = required_cols - set(inv_properties.columns)
+    if missing_cols:
+        raise SupplementaryTablesError(
+            f"Missing required columns in inv_properties.tsv: {', '.join(sorted(missing_cols))}"
+        )
+
+    inv_properties = inv_properties[list(required_cols)].copy()
+    inv_properties["0_single_1_recur_consensus"] = inv_properties["0_single_1_recur_consensus"].str.strip()
+    inv_properties = inv_properties[inv_properties["0_single_1_recur_consensus"].isin(["0", "1"])]
+
+    inv_properties["Start"] = pd.to_numeric(inv_properties["Start"], errors="coerce")
+    inv_properties["End"] = pd.to_numeric(inv_properties["End"], errors="coerce")
+    inv_properties = inv_properties.dropna(subset=["Start", "End"])
+    inv_properties["Start"] = inv_properties["Start"].astype(int)
+    inv_properties["End"] = inv_properties["End"].astype(int)
+
+    inv_properties["Inversion"] = inv_properties.apply(
+        lambda row: f"{row['Chromosome']}:{row['Start']}-{row['End']}", axis=1
+    )
+
+    df = df.merge(inv_properties[["OrigID", "Inversion"]], on="OrigID", how="inner")
     return _prune_columns(df, IMPUTATION_COLUMN_DEFS, "Imputation results")
 
 
