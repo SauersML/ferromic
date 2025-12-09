@@ -146,34 +146,34 @@ jobs:
           fi
 
           REQUIRED_DIRS=$(python3 - <<'PY'
-import json
-from pathlib import Path
+            import json
+            from pathlib import Path
 
-required_dirs = set()
-for path in ["${APP_PATH}/data/special-figures.json", "${APP_PATH}/data/phewas-figures.json"]:
-    with open(path, "r", encoding="utf-8") as fh:
-        data = json.load(fh)
+            required_dirs = set()
+            for path in ["${APP_PATH}/data/special-figures.json", "${APP_PATH}/data/phewas-figures.json"]:
+                with open(path, "r", encoding="utf-8") as fh:
+                    data = json.load(fh)
 
-    def record(filename: str) -> None:
-        if not filename:
-            return
-        parent = Path(filename).parent.as_posix()
-        if parent not in {"", "."}:
-            required_dirs.add(parent)
+                def record(filename: str) -> None:
+                    if not filename:
+                        return
+                    parent = Path(filename).parent.as_posix()
+                    if parent not in {"", "."}:
+                        required_dirs.add(parent)
 
-    if isinstance(data, list):
-        for entry in data:
-            if isinstance(entry, dict):
-                record(entry.get("filename", ""))
-    elif isinstance(data, dict):
-        for group in data.get("groups", []):
-            for fig in group.get("figures", []):
-                if isinstance(fig, dict):
-                    record(fig.get("filename", ""))
+                if isinstance(data, list):
+                    for entry in data:
+                        if isinstance(entry, dict):
+                            record(entry.get("filename", ""))
+                elif isinstance(data, dict):
+                    for group in data.get("groups", []):
+                        for fig in group.get("figures", []):
+                            if isinstance(fig, dict):
+                                record(fig.get("filename", ""))
 
-print("\n".join(sorted(required_dirs)))
-PY
-)
+            print("\n".join(sorted(required_dirs)))
+          PY
+          )
 
           has_required_dirs() {
             local root="$1"
