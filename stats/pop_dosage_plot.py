@@ -111,7 +111,14 @@ def _prepare_dataframe() -> tuple[pd.DataFrame, np.ndarray, list[str]]:
         if col in df.columns:
             df = df[df[col].notna()]
 
-    inversions = np.sort(df["Inversion"].unique())
+    overall = df[df["Population_display"] == "Overall"].set_index("Inversion")
+    if overall.empty:
+        raise ValueError("Overall population (ALL) is required for inversion ordering")
+
+    inversions = (
+        overall.sort_values("AF_Median", ascending=False, na_position="last")
+        .index.to_numpy()
+    )
     pop_order = ["Overall", "AFR", "AMR", "EAS", "EUR", "MID", "SAS"]
     pop_order = [p for p in pop_order if p in df["Population_display"].unique()]
 
