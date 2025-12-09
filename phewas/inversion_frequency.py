@@ -91,6 +91,35 @@ def _compute_frequency_stats(series: pd.Series) -> tuple[float, float, float, fl
     return mean_dosage, af, lower, upper, n
 
 
+def _compute_box_plot_stats(series: pd.Series) -> dict[str, float]:
+    clean = series.dropna().to_numpy()
+    if clean.size == 0:
+        return {
+            "Q1": float("nan"),
+            "Median": float("nan"),
+            "Q3": float("nan"),
+            "Lower_Whisker": float("nan"),
+            "Upper_Whisker": float("nan"),
+        }
+
+    q1, median, q3 = np.percentile(clean, [25, 50, 75])
+    iqr = q3 - q1
+    lower_bound = q1 - 1.5 * iqr
+    upper_bound = q3 + 1.5 * iqr
+
+    sorted_vals = np.sort(clean)
+    lower_whisker = float(sorted_vals[sorted_vals >= lower_bound][0])
+    upper_whisker = float(sorted_vals[sorted_vals <= upper_bound][-1])
+
+    return {
+        "Q1": float(q1),
+        "Median": float(median),
+        "Q3": float(q3),
+        "Lower_Whisker": lower_whisker,
+        "Upper_Whisker": upper_whisker,
+    }
+
+
 def summarize_population_frequencies(
     dosages: pd.DataFrame,
     ancestry: pd.Series,
@@ -116,6 +145,8 @@ def summarize_population_frequencies(
                 subset = merged.loc[merged["Population"] == population, inversion]
 
             mean_dosage, af, lower, upper, n = _compute_frequency_stats(subset)
+            dosage_box = _compute_box_plot_stats(subset)
+            allele_box = _compute_box_plot_stats(subset / 2.0)
             records.append(
                 {
                     "Inversion": inversion,
@@ -126,6 +157,16 @@ def summarize_population_frequencies(
                     "CI95_Lower": lower,
                     "CI95_Upper": upper,
                     "Dosage_STD_All": overall_std,
+                    "Dosage_Q1": dosage_box["Q1"],
+                    "Dosage_Median": dosage_box["Median"],
+                    "Dosage_Q3": dosage_box["Q3"],
+                    "Dosage_Lower_Whisker": dosage_box["Lower_Whisker"],
+                    "Dosage_Upper_Whisker": dosage_box["Upper_Whisker"],
+                    "AF_Q1": allele_box["Q1"],
+                    "AF_Median": allele_box["Median"],
+                    "AF_Q3": allele_box["Q3"],
+                    "AF_Lower_Whisker": allele_box["Lower_Whisker"],
+                    "AF_Upper_Whisker": allele_box["Upper_Whisker"],
                 }
             )
 

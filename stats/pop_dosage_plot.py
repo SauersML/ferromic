@@ -98,12 +98,18 @@ def _prepare_dataframe() -> tuple[pd.DataFrame, np.ndarray, list[str]]:
     }
 
     df["Population_display"] = df["Population"].map(pop_display_map).fillna(df["Population"])
-    df = df[
-        (df["N"] > 1)
-        & df["Allele_Freq"].notna()
-        & df["CI95_Lower"].notna()
-        & df["CI95_Upper"].notna()
-    ].copy()
+    required_cols = [
+        "AF_Q1",
+        "AF_Median",
+        "AF_Q3",
+        "AF_Lower_Whisker",
+        "AF_Upper_Whisker",
+    ]
+
+    df = df[(df["N"] > 1)].copy()
+    for col in required_cols:
+        if col in df.columns:
+            df = df[df[col].notna()]
 
     inversions = np.sort(df["Inversion"].unique())
     pop_order = ["Overall", "AFR", "AMR", "EAS", "EUR", "MID", "SAS"]
@@ -123,6 +129,16 @@ def _plot(df: pd.DataFrame, inversions: np.ndarray, pop_order: list[str]) -> plt
         "SAS": "#d62728",  # red
     }
 
+    for col in [
+        "AF_Q1",
+        "AF_Median",
+        "AF_Q3",
+        "AF_Lower_Whisker",
+        "AF_Upper_Whisker",
+    ]:
+        if col not in df.columns:
+            raise KeyError(f"Required column missing from dataframe: {col}")
+
     num_inv = len(inversions)
     fig_width = max(18, num_inv * 0.6)
     fig, ax = plt.subplots(figsize=(fig_width, 9))
@@ -135,25 +151,70 @@ def _plot(df: pd.DataFrame, inversions: np.ndarray, pop_order: list[str]) -> plt
     for idx, pop in enumerate(pop_order):
         sub = df[df["Population_display"] == pop].set_index("Inversion")
 
-        means = sub.reindex(inversions)["Allele_Freq"]
-        lower = sub.reindex(inversions)["CI95_Lower"]
-        upper = sub.reindex(inversions)["CI95_Upper"]
+        aligned = sub.reindex(inversions)
 
-        yerr = np.vstack((means - lower, upper - means))
-        x_positions = x_base + offset_start + idx * offset_step
+        stats = []
+        positions = []
 
-        ax.errorbar(
-            x_positions,
-            means,
-            yerr=yerr,
-            fmt="o",
+        for x_pos, inv in zip(x_base, inversions):
+            row = aligned.loc[inv]
+
+            q1 = row["AF_Q1"]
+            med = row["AF_Median"]
+            q3 = row["AF_Q3"]
+            whislo = row["AF_Lower_Whisker"]
+            whishi = row["AF_Upper_Whisker"]
+
+            if np.any(pd.isna([q1, med, q3, whislo, whishi])):
+                continue
+
+            stats.append(
+                {
+                    "med": float(med),
+                    "q1": float(q1),
+                    "q3": float(q3),
+                    "whislo": float(whislo),
+                    "whishi": float(whishi),
+                    "fliers": [],
+                }
+            )
+            positions.append(x_pos + offset_start + idx * offset_step)
+
+        if not stats:
+            continue
+
+        ax.bxp(
+            stats,
+            positions=positions,
+            widths=offset_step * 0.8,
+            showfliers=False,
+            patch_artist=True,
+            boxprops=dict(
+                facecolor=color_map.get(pop, "#333333"),
+                linewidth=1.4,
+                alpha=0.5,
+            ),
+            medianprops=dict(
+                color="black",
+                linewidth=1.6,
+            ),
+            whiskerprops=dict(
+                linewidth=1.4,
+            ),
+            capprops=dict(
+                linewidth=1.4,
+            ),
+        )
+
+        ax.plot(
+            [],
+            [],
+            linestyle="",
+            marker="s",
             markersize=10,
-            elinewidth=1.6,
-            capsize=4,
-            color=color_map.get(pop, "#333333"),
+            markerfacecolor=color_map.get(pop, "#333333"),
+            markeredgecolor="none",
             label=pop,
-            linestyle="none",
-            alpha=0.5,
         )
 
     ax.set_xlabel("")
