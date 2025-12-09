@@ -170,7 +170,7 @@ if mask_recur.any():
 ax.set_ylabel("r", labelpad=14, color="black")
 
 # X-axis label — WAY BIGGER
-ax.set_xlabel("Inversion (sorted by r)", labelpad=16, color="black", fontsize=26)
+ax.set_xlabel("Inversion", labelpad=16, color="black", fontsize=26)
 
 # NO title
 ax.set_title("")
