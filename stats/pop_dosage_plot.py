@@ -11,6 +11,7 @@ import pandas as pd
 
 DATA_URL = "https://raw.githubusercontent.com/SauersML/ferromic/refs/heads/main/data/inversion_population_frequencies.tsv"
 DATA_PATH = Path("data/inversion_population_frequencies.tsv")
+INV_PROPERTIES_PATH = Path("data/inv_properties.tsv")
 OUTPUT_BASE = Path("special/pop_allele_frequency_plot")
 
 plt.rcParams.update({
@@ -44,6 +45,48 @@ def _ensure_data_file() -> Path:
         raise RuntimeError(f"Failed to download {DATA_URL}") from exc
 
     return DATA_PATH
+
+
+def _load_inv_properties() -> pd.DataFrame:
+    """Load inversion properties with recurrence and coordinate information."""
+
+    df = pd.read_csv(INV_PROPERTIES_PATH, sep="\t")
+
+    lower_to_actual = {c.lower(): c for c in df.columns}
+
+    def get_col(possible_names: list[str]) -> str:
+        for name in possible_names:
+            key = name.lower()
+            if key in lower_to_actual:
+                return lower_to_actual[key]
+        raise KeyError(
+            f"None of {possible_names} found in columns: {list(df.columns)}"
+        )
+
+    chrom_col = get_col(["Chromosome", "chrom", "chr"])
+    start_col = get_col(["Start", "start"])
+    end_col = get_col(["End", "end"])
+    inversion_col = get_col(["OrigID", "Inversion", "Inv", "inversion_id"])
+    recurrence_col = get_col(["0_single_1_recur_consensus", "recurrence"])
+
+    df[recurrence_col] = pd.to_numeric(df[recurrence_col], errors="coerce")
+    df = df.rename(
+        columns={
+            chrom_col: "Chromosome",
+            start_col: "Start",
+            end_col: "End",
+            inversion_col: "Inversion",
+            recurrence_col: "Recurrence",
+        }
+    )
+
+    df = df[df["Recurrence"].isin([0, 1])].copy()
+
+    df["Start"] = pd.to_numeric(df["Start"], errors="coerce")
+    df["End"] = pd.to_numeric(df["End"], errors="coerce")
+    df = df[df[["Start", "End"]].notna().all(axis=1)]
+
+    return df[["Inversion", "Chromosome", "Start", "End"]]
 
 
 def _load_and_normalize() -> pd.DataFrame:
@@ -84,8 +127,18 @@ def _load_and_normalize() -> pd.DataFrame:
     return df
 
 
-def _prepare_dataframe() -> tuple[pd.DataFrame, np.ndarray, list[str]]:
+def _prepare_dataframe() -> tuple[pd.DataFrame, np.ndarray, list[str], list[str]]:
     df = _load_and_normalize()
+    inv_properties = _load_inv_properties()
+
+    df = df.merge(inv_properties, on="Inversion", how="inner", validate="m:1")
+    df["Label"] = (
+        df["Chromosome"].astype(str)
+        + ":"
+        + df["Start"].astype(str)
+        + "-"
+        + df["End"].astype(str)
+    )
 
     pop_display_map = {
         "ALL": "Overall",
@@ -119,13 +172,17 @@ def _prepare_dataframe() -> tuple[pd.DataFrame, np.ndarray, list[str]]:
         overall.sort_values("AF_Median", ascending=False, na_position="last")
         .index.to_numpy()
     )
+    label_map = df.drop_duplicates("Inversion").set_index("Inversion")["Label"]
+    labels = [label_map.get(inv, inv) for inv in inversions]
     pop_order = ["Overall", "AFR", "AMR", "EAS", "EUR", "MID", "SAS"]
     pop_order = [p for p in pop_order if p in df["Population_display"].unique()]
 
-    return df, inversions, pop_order
+    return df, inversions, labels, pop_order
 
 
-def _plot(df: pd.DataFrame, inversions: np.ndarray, pop_order: list[str]) -> plt.Figure:
+def _plot(
+    df: pd.DataFrame, inversions: np.ndarray, labels: list[str], pop_order: list[str]
+) -> plt.Figure:
     color_map = {
         "Overall": "#1f77b4",  # blue
         "AFR": "#ff7f0e",  # orange
@@ -195,6 +252,7 @@ def _plot(df: pd.DataFrame, inversions: np.ndarray, pop_order: list[str]) -> plt
             positions=positions,
             widths=offset_step * 0.8,
             showfliers=False,
+            showcaps=False,
             patch_artist=True,
             boxprops=dict(
                 facecolor=color_map.get(pop, "#333333"),
@@ -206,10 +264,10 @@ def _plot(df: pd.DataFrame, inversions: np.ndarray, pop_order: list[str]) -> plt
                 linewidth=1.6,
             ),
             whiskerprops=dict(
-                linewidth=1.4,
+                linewidth=0,
             ),
             capprops=dict(
-                linewidth=1.4,
+                linewidth=0,
             ),
         )
 
@@ -230,7 +288,7 @@ def _plot(df: pd.DataFrame, inversions: np.ndarray, pop_order: list[str]) -> plt
     ax.grid(False)
 
     ax.set_xticks(x_base)
-    ax.set_xticklabels(inversions, rotation=60, ha="right")
+    ax.set_xticklabels(labels, rotation=60, ha="right")
 
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
@@ -247,8 +305,8 @@ def _plot(df: pd.DataFrame, inversions: np.ndarray, pop_order: list[str]) -> plt
 
 
 def main() -> None:
-    df, inversions, pop_order = _prepare_dataframe()
-    fig = _plot(df, inversions, pop_order)
+    df, inversions, labels, pop_order = _prepare_dataframe()
+    fig = _plot(df, inversions, labels, pop_order)
 
     OUTPUT_BASE.parent.mkdir(parents=True, exist_ok=True)
     pdf_path = OUTPUT_BASE.with_suffix(".pdf")
