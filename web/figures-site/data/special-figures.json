@@ -54,6 +54,21 @@
           "title": "Inversion Allele Frequency Trajectories",
           "filename": "data/inversion_trajectories_combined.pdf",
           "description": "Four-panel allele frequency trajectories combining empirical points and selection-model fits across representative inversions."
+        },
+        {
+          "title": "Callset vs. Imputed Allele Frequencies",
+          "filename": "special/overall_AF_scatterplot.pdf",
+          "description": "Scatterplot comparing Porubsky et al. 2022 callset allele frequencies against All of Us imputed estimates across consensus inversions."
+        },
+        {
+          "title": "Callset vs. Imputed Allele Frequencies with CI",
+          "filename": "special/overall_AF_scatterplot_with_ci.pdf",
+          "description": "Scatterplot overlaying 95% confidence intervals for Porubsky callset and All of Us imputed allele frequencies."
+        },
+        {
+          "title": "Inversion Imputation Performance",
+          "filename": "special/inversion_r_plot.pdf",
+          "description": "Bar plot of inversion imputation correlations (r) for consensus single-event and recurrent inversions."
         }
       ]
     },
@@ -64,7 +79,7 @@
         {
           "title": "FRF Edge vs. Middle Half-Violins",
           "filename": "frf/frf_violin_from_url.pdf",
-          "description": "Half-violin comparison of FRF means for edge versus middle windows with paired inversion connections and box plots." 
+          "description": "Half-violin comparison of FRF means for edge versus middle windows with paired inversion connections and box plots."
         },
         {
           "title": "FRF Volcano Plot",
