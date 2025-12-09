@@ -239,8 +239,8 @@ FIGURE_TASKS: Sequence[FigureTask] = (
     FigureTask(
         name="Inversion imputation performance",
         script=Path("stats/imputation_plot.py"),
-        outputs=(Path("inversion_r_plot.pdf"),),
-        dependencies=("imputation_results.tsv", "inv_properties.tsv"),
+        outputs=(Path("inversion_r_plot.pdf"), Path("special/inversion_r_plot.pdf")),
+        dependencies=("data/imputation_results_merged.tsv", "data/inv_properties.tsv"),
         group="Associations",
     ),
     FigureTask(
