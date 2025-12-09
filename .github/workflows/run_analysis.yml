@@ -400,12 +400,13 @@ jobs:
               print(name)
           PY)
 
-          missing=()
-          for relpath in "${REQUIRED[@]}"; do
-            if [[ ! -f "artifacts/figures/$relpath" ]]; then
-              missing+=("$relpath")
-            fi
-          done
+            missing=()
+            for relpath in "${REQUIRED[@]}"; do
+              found_path=$(find artifacts/figures -type f -path "*/${relpath}" -print -quit || true)
+              if [[ -z "$found_path" ]]; then
+                missing+=("$relpath")
+              fi
+            done
 
           if [[ ${#missing[@]} -gt 0 ]]; then
             printf "Missing expected special gallery outputs:%s\n" " ${missing[*]}" >&2
