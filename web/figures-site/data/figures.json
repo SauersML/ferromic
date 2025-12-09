@@ -1624,6 +1624,24 @@
           "href": "figures/final_plots/special/spearman_decay_raincloud.pdf",
           "preview": "figures/final_plots/special/spearman_decay_raincloud.pdf",
           "type": "pdf"
+        },
+        {
+          "name": "overall_AF_scatterplot.pdf",
+          "href": "figures/final_plots/special/overall_AF_scatterplot.pdf",
+          "preview": "figures/final_plots/special/overall_AF_scatterplot.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "overall_AF_scatterplot_with_ci.pdf",
+          "href": "figures/final_plots/special/overall_AF_scatterplot_with_ci.pdf",
+          "preview": "figures/final_plots/special/overall_AF_scatterplot_with_ci.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "inversion_r_plot.pdf",
+          "href": "figures/final_plots/special/inversion_r_plot.pdf",
+          "preview": "figures/final_plots/special/inversion_r_plot.pdf",
+          "type": "pdf"
         }
       ]
     },
@@ -3076,6 +3094,36 @@
           "href": "figures/special/spearman_decay_raincloud.png",
           "preview": "figures/special/spearman_decay_raincloud.png",
           "type": "image"
+        },
+        {
+          "name": "overall_AF_scatterplot.pdf",
+          "href": "figures/special/overall_AF_scatterplot.pdf",
+          "preview": "figures/special/overall_AF_scatterplot.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "overall_AF_scatterplot.png",
+          "href": "figures/special/overall_AF_scatterplot.png",
+          "preview": "figures/special/overall_AF_scatterplot.png",
+          "type": "image"
+        },
+        {
+          "name": "overall_AF_scatterplot_with_ci.pdf",
+          "href": "figures/special/overall_AF_scatterplot_with_ci.pdf",
+          "preview": "figures/special/overall_AF_scatterplot_with_ci.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "overall_AF_scatterplot_with_ci.png",
+          "href": "figures/special/overall_AF_scatterplot_with_ci.png",
+          "preview": "figures/special/overall_AF_scatterplot_with_ci.png",
+          "type": "image"
+        },
+        {
+          "name": "inversion_r_plot.pdf",
+          "href": "figures/special/inversion_r_plot.pdf",
+          "preview": "figures/special/inversion_r_plot.pdf",
+          "type": "pdf"
         }
       ]
     }

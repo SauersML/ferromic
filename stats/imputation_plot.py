@@ -1,16 +1,21 @@
+from pathlib import Path
+
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-from matplotlib.patches import Patch
 from matplotlib import ticker
+from matplotlib.patches import Patch
 
 # Ensure text remains editable in PDFs (embed TrueType fonts)
 plt.rcParams["pdf.fonttype"] = 42
 plt.rcParams["ps.fonttype"] = 42
 
+root = Path(__file__).resolve().parent.parent
+data_dir = root / "data"
+
 # ---------- Load & prepare data ----------
-imp = pd.read_csv("imputation_results.tsv", sep="\t", dtype=str)
-inv = pd.read_csv("inv_properties.tsv", sep="\t", dtype=str)
+imp = pd.read_csv(data_dir / "imputation_results_merged.tsv", sep="\t", dtype=str)
+inv = pd.read_csv(data_dir / "inv_properties.tsv", sep="\t", dtype=str)
 
 # Trim whitespace in headers & values
 imp.columns = imp.columns.str.strip()
@@ -19,7 +24,7 @@ inv.columns = inv.columns.str.strip()
 required_imp_cols = {"id", "unbiased_pearson_r2"}
 missing_imp = required_imp_cols.difference(imp.columns)
 if missing_imp:
-    raise RuntimeError(f"Missing columns in imputation_results.tsv: {missing_imp}")
+    raise RuntimeError(f"Missing columns in imputation_results_merged.tsv: {missing_imp}")
 
 # Ensure we have an OrigID in inv_info (or derive from 'OrigIDSize_.kbp.')
 if "OrigID" not in inv.columns:
@@ -194,5 +199,9 @@ plt.margins(x=0.02, y=0.06)
 plt.subplots_adjust(left=0.08, right=0.98, top=0.95, bottom=0.22)
 
 # Save as vectorized PDF with editable text
-out_pdf = "inversion_r_plot.pdf"
+out_pdf = root / "inversion_r_plot.pdf"
+special_pdf = root / "special" / "inversion_r_plot.pdf"
+special_pdf.parent.mkdir(parents=True, exist_ok=True)
+
 plt.savefig(out_pdf, format="pdf", bbox_inches="tight", pad_inches=0.6, transparent=False)
+plt.savefig(special_pdf, format="pdf", bbox_inches="tight", pad_inches=0.6, transparent=False)
