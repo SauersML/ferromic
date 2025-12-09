@@ -8,11 +8,10 @@ from urllib.request import Request, urlopen
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from scipy.stats import t
 
 DATA_URL = "https://raw.githubusercontent.com/SauersML/ferromic/refs/heads/main/data/inversion_population_frequencies.tsv"
 DATA_PATH = Path("data/inversion_population_frequencies.tsv")
-OUTPUT_PATH = Path("special/pop_dosage_plot.pdf")
+OUTPUT_BASE = Path("special/pop_allele_frequency_plot")
 
 plt.rcParams.update({
     "axes.labelsize": 22,
@@ -25,13 +24,13 @@ plt.rcParams.update({
 
 
 def _ensure_data_file() -> Path:
-    """Ensure the inversion dosage summary table is available locally."""
+    """Ensure the inversion allele frequency table is available locally."""
 
     DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
     if DATA_PATH.exists():
         return DATA_PATH
 
-    print(f"Downloading inversion dosage table from {DATA_URL}...")
+    print(f"Downloading inversion allele frequency table from {DATA_URL}...")
     request = Request(DATA_URL, headers={"User-Agent": "Mozilla/5.0"})
 
     try:
@@ -48,7 +47,7 @@ def _ensure_data_file() -> Path:
 
 
 def _load_and_normalize() -> pd.DataFrame:
-    """Load the population dosage table and harmonize column names."""
+    """Load the population allele frequency table and harmonize column names."""
 
     tsv_path = _ensure_data_file()
     df = pd.read_csv(tsv_path, sep="\t")
@@ -65,16 +64,20 @@ def _load_and_normalize() -> pd.DataFrame:
     pop_col = get_col(["Population", "population", "Pop"])
     inv_col = get_col(["Inversion", "inversion", "Inv"])
     mean_col = get_col(["Mean_dosage", "Mean_Dosage", "mean_dosage"])
+    allele_freq_col = get_col(["Allele_Freq", "allele_freq", "Allele_freq"])
+    ci_lower_col = get_col(["CI95_Lower", "ci95_lower", "ci_lower"])
+    ci_upper_col = get_col(["CI95_Upper", "ci95_upper", "ci_upper"])
     n_col = get_col(["N", "n", "count"])
-    std_col = get_col(["Dosage_STD_All", "Dosage_STD", "dosage_std_all", "dosage_std"])
 
     df = df.rename(
         columns={
             pop_col: "Population",
             inv_col: "Inversion",
             mean_col: "Mean_dosage",
+            allele_freq_col: "Allele_Freq",
+            ci_lower_col: "CI95_Lower",
+            ci_upper_col: "CI95_Upper",
             n_col: "N",
-            std_col: "Dosage_STD_All",
         }
     )
 
@@ -95,13 +98,12 @@ def _prepare_dataframe() -> tuple[pd.DataFrame, np.ndarray, list[str]]:
     }
 
     df["Population_display"] = df["Population"].map(pop_display_map).fillna(df["Population"])
-    df = df[(df["N"] > 1) & df["Dosage_STD_All"].notna()].copy()
-
-    df["SE"] = df["Dosage_STD_All"] / np.sqrt(df["N"])
-    df["t_crit"] = t.ppf(0.975, df["N"] - 1)
-    df["margin"] = df["t_crit"] * df["SE"]
-    df["CI_lower"] = df["Mean_dosage"] - df["margin"]
-    df["CI_upper"] = df["Mean_dosage"] + df["margin"]
+    df = df[
+        (df["N"] > 1)
+        & df["Allele_Freq"].notna()
+        & df["CI95_Lower"].notna()
+        & df["CI95_Upper"].notna()
+    ].copy()
 
     inversions = np.sort(df["Inversion"].unique())
     pop_order = ["Overall", "AFR", "AMR", "EAS", "EUR", "MID", "SAS"]
@@ -133,9 +135,9 @@ def _plot(df: pd.DataFrame, inversions: np.ndarray, pop_order: list[str]) -> plt
     for idx, pop in enumerate(pop_order):
         sub = df[df["Population_display"] == pop].set_index("Inversion")
 
-        means = sub.reindex(inversions)["Mean_dosage"]
-        lower = sub.reindex(inversions)["CI_lower"]
-        upper = sub.reindex(inversions)["CI_upper"]
+        means = sub.reindex(inversions)["Allele_Freq"]
+        lower = sub.reindex(inversions)["CI95_Lower"]
+        upper = sub.reindex(inversions)["CI95_Upper"]
 
         yerr = np.vstack((means - lower, upper - means))
         x_positions = x_base + offset_start + idx * offset_step
@@ -155,7 +157,8 @@ def _plot(df: pd.DataFrame, inversions: np.ndarray, pop_order: list[str]) -> plt
         )
 
     ax.set_xlabel("")
-    ax.set_ylabel("Mean dosage")
+    ax.set_ylabel("Allele frequency")
+    ax.set_ylim(0, 1)
     ax.grid(False)
 
     ax.set_xticks(x_base)
@@ -179,11 +182,15 @@ def main() -> None:
     df, inversions, pop_order = _prepare_dataframe()
     fig = _plot(df, inversions, pop_order)
 
-    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(OUTPUT_PATH, bbox_inches="tight")
+    OUTPUT_BASE.parent.mkdir(parents=True, exist_ok=True)
+    pdf_path = OUTPUT_BASE.with_suffix(".pdf")
+    png_path = OUTPUT_BASE.with_suffix(".png")
+
+    fig.savefig(pdf_path, bbox_inches="tight")
+    fig.savefig(png_path, bbox_inches="tight", dpi=300)
     plt.close(fig)
 
-    print(f"Saved population dosage plot to {OUTPUT_PATH}")
+    print(f"Saved population allele frequency plot to {pdf_path} and {png_path}")
 
 
 if __name__ == "__main__":
