@@ -1,12 +1,19 @@
 # For EACH inversion in our list
   #   For EACH significant-or-close-to-it phenotype (q-value less than 0.1) --> parallel queries
     #   Send phenotype name
-    #   Send info about phenotype?
+    #   Send info about phenotype? --> randomize phenotype order to avoid first/last saliency bias
     #   Send list of TARGET phenotypes from external phewas that we want to match to
     #   Recieve and save list
     #   Repeat 2-3x? for consistency /reliability
     #   Get OR, 95% CI, p-value, phenotype name, of what we matched to in external phewas
 #  Correlate / overlap present results. Correlate: -log(raw p), OR. Overlap: CIs.
+
+# TOPMED phenotype + category list: data/phewas v4 - PheWeb TOPMED phenos.tsv
+# https://raw.githubusercontent.com/SauersML/ferromic/refs/heads/main/data/phewas%20v4%20-%20PheWeb%20TOPMED%20phenos.tsv
+# Format:
+# phenostring	category
+# Disorders of iron metabolism	hematopoietic
+# etc.
 
 # What info to send?
 
