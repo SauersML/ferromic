@@ -26,12 +26,12 @@
           "description": "Allele frequencies with 95% confidence intervals across ancestry groups for each inversion."
         },
         {
-          "title": "Mean \u03c0 Overall Violins (40 kb)",
+          "title": "Mean π Overall Violins (40 kb)",
           "filename": "pi_analysis_results_exact_mf_quadrants/total_40kb/pi_mf_overall_violins_total_40kb.pdf",
           "description": "Overall violin-and-line comparison of mean nucleotide diversity across inversion categories using 40 kb windows."
         },
         {
-          "title": "Median \u03c0 vs. Distance to Breakpoints (100 kb)",
+          "title": "Median π vs. Distance to Breakpoints (100 kb)",
           "filename": "length_norm_trend_fast/pi_vs_inversion_edge_bp_cap100kb_grouped_median.pdf",
           "description": "Median per-site nucleotide diversity as a function of distance from inversion breakpoints (100 kb window)."
         },
@@ -41,12 +41,12 @@
           "description": "Hudson's FST pooled ratio-of-sums trend relative to inversion breakpoints (100 kb window)."
         },
         {
-          "title": "Mean \u03c0: Flanks vs. Middle (10 kb flanks / 20 kb middle)",
+          "title": "Mean π: Flanks vs. Middle (10 kb flanks / 20 kb middle)",
           "filename": "pi_analysis_results_exact_mf_quadrants/total_40kb/pi_mf_quadrant_violins_total_40kb.pdf",
           "description": "Two-violin comparison of mean nucleotide diversity between flanking and middle windows with paired connections."
         },
         {
-          "title": "Mean \u03c0 by Category: Flanks vs. Middle",
+          "title": "Mean π by Category: Flanks vs. Middle",
           "filename": "pi_analysis_results_exact_mf_quadrants/total_40kb/pi_mf_recurrence_violins_total_40kb.pdf",
           "description": "Four-panel flank versus middle comparison stratified by recurrence status and orientation."
         },
@@ -116,15 +116,15 @@
         {
           "title": "PheWAS Forest of Significant Associations",
           "filename": "phewas_forest.pdf",
-          "description": "Forest plot summarising significant inversion\u2013phenotype associations with odds ratios and confidence intervals."
+          "description": "Forest plot summarising significant inversion–phenotype associations with odds ratios and confidence intervals."
         },
         {
-          "title": "PheWAS Forest \u2014 chr17:45,585,159-46,292,045 Only",
+          "title": "PheWAS Forest — chr17:45,585,159-46,292,045 Only",
           "filename": "phewas_forest_chr17_only.pdf",
           "description": "Forest plot showing only associations for the chr17:45,585,159-46,292,045 inversion."
         },
         {
-          "title": "PheWAS Forest \u2014 Excluding chr17:45,585,159-46,292,045",
+          "title": "PheWAS Forest — Excluding chr17:45,585,159-46,292,045",
           "filename": "phewas_forest_excluding_chr17.pdf",
           "description": "Forest plot of all significant associations except chr17:45,585,159-46,292,045."
         },
@@ -149,9 +149,9 @@
           "description": "Volcano plot showing effect of polygenic score adjustment on chr17:45,585,159-46,292,045 associations. Arrows connect unadjusted (red) to adjusted (blue) estimates across phenotypes."
         },
         {
-          "title": "QQ Plot \u2014 All PheWAS Results",
+          "title": "QQ Plot — All PheWAS Results",
           "filename": "phewas_plots/qq_plot_overall.pdf",
-          "description": "Quantile-quantile plot of observed versus expected p-values for all PheWAS associations with genomic inflation factor (\u03bb_GC = 1.324)."
+          "description": "Quantile-quantile plot of observed versus expected p-values for all PheWAS associations with genomic inflation factor (λ_GC = 1.324)."
         },
         {
           "title": "Chr17 Inversion vs Tag SNP Correlation",
