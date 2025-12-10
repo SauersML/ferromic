@@ -187,6 +187,13 @@ for lbl in ax.get_xticklabels():
 ax.tick_params(axis="y", colors="black")
 ax.yaxis.set_major_locator(ticker.MaxNLocator(nbins=8))
 
+# Reference line at r = sqrt(0.5)
+threshold = np.sqrt(0.5)
+ax.axhline(threshold, color="black", linewidth=0.9, linestyle="-", alpha=0.7)
+
+# Fix y-axis range to [0, 1]
+ax.set_ylim(0, 1)
+
 # Spines for a clean look
 for spine in ax.spines.values():
     spine.set_color("black")
