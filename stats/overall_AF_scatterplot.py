@@ -84,7 +84,9 @@ def load_inv_properties() -> pd.DataFrame:
     return df
 
 
-def compute_callset_af(row: pd.Series, genotype_cols: Iterable[str]) -> tuple[float, float, float]:
+def compute_callset_af(
+    row: pd.Series, genotype_cols: Iterable[str]
+) -> tuple[float, float, float, int, int]:
     alt_alleles = 0
     valid_calls = 0
 
@@ -92,7 +94,7 @@ def compute_callset_af(row: pd.Series, genotype_cols: Iterable[str]) -> tuple[fl
         gt = row[col]
         if pd.isna(gt):
             continue
-        gt_str = str(gt)
+        gt_str = str(gt).strip()
         if gt_str.lower() == "nan":
             continue
         if gt_str in ALLOWED_GENOTYPES:
@@ -100,12 +102,12 @@ def compute_callset_af(row: pd.Series, genotype_cols: Iterable[str]) -> tuple[fl
             valid_calls += 1
 
     if valid_calls == 0:
-        return (float("nan"), float("nan"), float("nan"))
+        return (float("nan"), float("nan"), float("nan"), 0, 0)
 
     trials = 2 * valid_calls
     af = alt_alleles / trials
     ci_low, ci_high = wilson_ci(alt_alleles, trials)
-    return (af, ci_low, ci_high)
+    return (af, ci_low, ci_high, alt_alleles, trials)
 
 
 def load_callset_afs(allowed_ids: set[str]) -> pd.DataFrame:
@@ -114,6 +116,7 @@ def load_callset_afs(allowed_ids: set[str]) -> pd.DataFrame:
         raise KeyError("Callset file missing 'inv_id' column")
 
     df = df.drop_duplicates(subset=["inv_id"])
+    df["inv_AF"] = pd.to_numeric(df["inv_AF"], errors="coerce")
 
     non_genotype_cols = {
         "seqnames",
@@ -134,7 +137,20 @@ def load_callset_afs(allowed_ids: set[str]) -> pd.DataFrame:
         inv_id = row["inv_id"]
         if inv_id not in allowed_ids:
             continue
-        af, ci_low, ci_high = compute_callset_af(row, genotype_cols)
+        af, ci_low, ci_high, alt_alleles, trials = compute_callset_af(
+            row, genotype_cols
+        )
+
+        inv_af = row.get("inv_AF", float("nan"))
+        if trials > 0 and not pd.isna(inv_af):
+            # Use the Porubsky-reported allele frequency as a sanity check to
+            # ensure our CI calculations are based on the same underlying
+            # genotype counts.
+            if abs(inv_af - af) > 0.02:
+                raise ValueError(
+                    "Callset allele frequency disagrees with published inv_AF "
+                    f"for {inv_id}: computed {af:.4f} vs. reported {inv_af:.4f}"
+                )
         records.append({
             "OrigID": inv_id,
             "callset_af": af,
@@ -206,7 +222,7 @@ def plot_scatter(data: pd.DataFrame, filename: str) -> None:
     low_r2 = data.loc[data["unbiased_pearson_r2"] <= 0.5]
 
     def _plot_subset(
-        subset: pd.DataFrame, color: str, alpha: float
+        subset: pd.DataFrame, color: str, alpha: float, marker: str
     ) -> tuple[float, Line2D | None]:
         if subset.empty:
             return float("nan"), None
@@ -217,6 +233,7 @@ def plot_scatter(data: pd.DataFrame, filename: str) -> None:
             s=70,
             color=color,
             alpha=alpha,
+            marker=marker,
         )
 
         if len(subset) >= 2:
@@ -228,8 +245,10 @@ def plot_scatter(data: pd.DataFrame, filename: str) -> None:
             r_value = float("nan")
         return r_value, scatter
 
-    r_high, scatter_high = _plot_subset(high_r2, CALLSET_POINT_COLOR, POINT_ALPHA)
-    r_low, scatter_low = _plot_subset(low_r2, LOW_R2_COLOR, LOW_R2_ALPHA)
+    r_high, scatter_high = _plot_subset(
+        high_r2, CALLSET_POINT_COLOR, POINT_ALPHA, "^"
+    )
+    r_low, scatter_low = _plot_subset(low_r2, LOW_R2_COLOR, LOW_R2_ALPHA, "o")
 
     ax.annotate(
         (
@@ -264,10 +283,10 @@ def plot_scatter(data: pd.DataFrame, filename: str) -> None:
     legend_labels: list[str] = []
     if scatter_high is not None:
         legend_handles.append(scatter_high)
-        legend_labels.append(f"unbiased r² > 0.5 (N = {len(high_r2)})")
+        legend_labels.append(f"r² > 0.5 (N = {len(high_r2)})")
     if scatter_low is not None:
         legend_handles.append(scatter_low)
-        legend_labels.append(f"unbiased r² ≤ 0.5 (N = {len(low_r2)})")
+        legend_labels.append(f"r² ≤ 0.5 (N = {len(low_r2)})")
     if legend_handles:
         ax.legend(
             legend_handles,
@@ -329,7 +348,7 @@ def plot_scatter_with_ci(data: pd.DataFrame, filename: str) -> None:
     low_r2 = data.loc[data["unbiased_pearson_r2"] <= 0.5]
 
     def _errorbar_subset(
-        subset: pd.DataFrame, color: str, alpha: float
+        subset: pd.DataFrame, color: str, alpha: float, marker: str
     ) -> tuple[float, Line2D | None]:
         if subset.empty:
             return float("nan"), None
@@ -342,7 +361,7 @@ def plot_scatter_with_ci(data: pd.DataFrame, filename: str) -> None:
             subset["aou_af"],
             xerr=subset_xerr,
             yerr=subset_yerr,
-            fmt="o",
+            fmt=marker,
             markersize=6,
             ecolor="#4a4a4a",
             elinewidth=1.0,
@@ -364,8 +383,10 @@ def plot_scatter_with_ci(data: pd.DataFrame, filename: str) -> None:
             r_value = float("nan")
         return r_value, err_lines
 
-    r_high, err_high = _errorbar_subset(high_r2, CALLSET_POINT_COLOR, POINT_ALPHA)
-    r_low, err_low = _errorbar_subset(low_r2, LOW_R2_COLOR, LOW_R2_ALPHA)
+    r_high, err_high = _errorbar_subset(
+        high_r2, CALLSET_POINT_COLOR, POINT_ALPHA, "^"
+    )
+    r_low, err_low = _errorbar_subset(low_r2, LOW_R2_COLOR, LOW_R2_ALPHA, "o")
 
     ax.annotate(
         (
@@ -400,10 +421,10 @@ def plot_scatter_with_ci(data: pd.DataFrame, filename: str) -> None:
     legend_labels: list[str] = []
     if err_high is not None:
         legend_handles.append(err_high)
-        legend_labels.append(f"unbiased r² > 0.5 (N = {len(high_r2)})")
+        legend_labels.append(f"r² > 0.5 (N = {len(high_r2)})")
     if err_low is not None:
         legend_handles.append(err_low)
-        legend_labels.append(f"unbiased r² ≤ 0.5 (N = {len(low_r2)})")
+        legend_labels.append(f"r² ≤ 0.5 (N = {len(low_r2)})")
     if legend_handles:
         ax.legend(
             legend_handles,
