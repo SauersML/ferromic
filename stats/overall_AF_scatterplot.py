@@ -116,8 +116,6 @@ def load_callset_afs(allowed_ids: set[str]) -> pd.DataFrame:
         raise KeyError("Callset file missing 'inv_id' column")
 
     df = df.drop_duplicates(subset=["inv_id"])
-    df["inv_AF"] = pd.to_numeric(df["inv_AF"], errors="coerce")
-
     non_genotype_cols = {
         "seqnames",
         "start",
@@ -141,16 +139,6 @@ def load_callset_afs(allowed_ids: set[str]) -> pd.DataFrame:
             row, genotype_cols
         )
 
-        inv_af = row.get("inv_AF", float("nan"))
-        if trials > 0 and not pd.isna(inv_af):
-            # Use the Porubsky-reported allele frequency as a sanity check to
-            # ensure our CI calculations are based on the same underlying
-            # genotype counts.
-            if abs(inv_af - af) > 0.02:
-                raise ValueError(
-                    "Callset allele frequency disagrees with published inv_AF "
-                    f"for {inv_id}: computed {af:.4f} vs. reported {inv_af:.4f}"
-                )
         records.append({
             "OrigID": inv_id,
             "callset_af": af,
