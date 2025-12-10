@@ -500,10 +500,17 @@ def download_task(target, coords_by_chrom: Dict[str, set] | None = None):
         if url not in urls_to_try:
             urls_to_try.append(url)
 
-    zero_prefixed_codes = []
+    zero_prefixed_codes: list[str] = []
 
     def _maybe_add_zero_variant(code: str):
-        if code and not code.startswith("0"):
+        if not code:
+            return
+
+        # Queue "0{code}" and, if necessary, "00{code}" for sequential retries.
+        # This follows the "prefix with a zero, and if that fails prefix with another" rule.
+        if not code.startswith("0"):
+            zero_prefixed_codes.extend([f"0{code}", f"00{code}"])
+        elif not code.startswith("00"):
             zero_prefixed_codes.append(f"0{code}")
 
     _add_url(f"{BASE_PHEWEB_URL}{phenocode}")
