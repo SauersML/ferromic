@@ -420,7 +420,10 @@ CATEGORY_COLUMN_DEFS: Dict[str, str] = OrderedDict(
 
 IMPUTATION_COLUMN_DEFS: Dict[str, str] = OrderedDict(
     [
-        ("Inversion", "The Inversion ID."),
+        (
+            "Inversion",
+            "Inversion coordinates (chr:start-end, GRCh38) corresponding to the OrigID used for model training.",
+        ),
         ("n_components", "Number of PLS components selected via cross-validation."),
         (
             "unbiased_pearson_r2",
@@ -871,8 +874,8 @@ def _add_population_allele_frequencies(df: pd.DataFrame) -> pd.DataFrame:
     freq_pivot, freq_columns = _load_population_frequency_table()
     imputation_ok_ids = _load_imputation_performance_ids()
 
-    merged = df.merge(freq_pivot, how="left", left_on="OrigID", right_on="Inversion")
-    merged = merged.drop(columns=["Inversion"])
+    freq_pivot = freq_pivot.rename(columns={"Inversion": "OrigID"})
+    merged = df.merge(freq_pivot, how="left", on="OrigID")
 
     for col in freq_columns:
         if col not in merged.columns:
@@ -1228,6 +1231,14 @@ def _load_imputation_results() -> pd.DataFrame:
     )
 
     df = df.merge(inv_properties[["OrigID", "Inversion"]], on="OrigID", how="inner")
+
+    if "Use" not in df.columns:
+        r2 = pd.to_numeric(df.get("unbiased_pearson_r2"), errors="coerce")
+        q_values = pd.to_numeric(df.get("p_fdr_bh"), errors="coerce")
+        use_flag = (r2 > 0.5) & (q_values < 0.05)
+        use_flag = use_flag.astype("boolean")
+        df["Use"] = use_flag.mask(r2.isna() | q_values.isna(), pd.NA)
+
     df = _add_population_allele_frequencies(df)
     return _prune_columns(df, IMPUTATION_COLUMN_DEFS, "Imputation results")
 
