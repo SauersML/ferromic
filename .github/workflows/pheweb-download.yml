@@ -38,12 +38,16 @@ jobs:
             response=$(curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$REPO/actions/artifacts?per_page=100&page=$page")
             count=$(echo "$response" | jq '.artifacts | length')
             echo "Scanning page $page with $count artifacts"
-            echo "$response" | jq -r '.artifacts[] | select(.expired==false and (.name|startswith("pheweb-shard-"))) | [.name, .archive_download_url] | @tsv' | while IFS=$'\t' read -r name url; do
+
+            artifact_rows=$(echo "$response" | jq -r '.artifacts[] | select(.expired==false and (.name|startswith("pheweb-shard-"))) | [.name, .archive_download_url] | @tsv')
+            while IFS=$'\t' read -r name url; do
+              [ -z "$name" ] && continue
               echo "Downloading $name"
               curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" -o "reused_shards/${name}.zip" "$url" || continue
               unzip -o "reused_shards/${name}.zip" -d "reused_shards/${name}" >/dev/null
               found=$((found+1))
-            done
+            done <<< "$artifact_rows"
+
             if [ "$count" -lt 100 ]; then
               break
             fi

@@ -540,6 +540,14 @@ def download_task(target, coords_by_chrom: Dict[str, set] | None = None):
         try:
             with requests.Session() as session:
                 info = _describe_remote(url, session)
+
+                if info.get('status') == '404':
+                    error_msg = f"404 Not Found at {url}"
+                    if zero_prefixed_codes:
+                        zero_code = zero_prefixed_codes.pop(0)
+                        _add_url(f"{BASE_PHEWEB_URL}{zero_code}")
+                    continue
+
                 compression_info = _sniff_compression(url, session, info)
 
                 coords_summary = "no coordinate filter"
@@ -551,13 +559,6 @@ def download_task(target, coords_by_chrom: Dict[str, set] | None = None):
                     f"Range support: {info.get('accept_ranges')}, gzip: {compression_info.get('is_gzip')}, "
                     f"bgzf: {compression_info.get('is_bgzf')}"
                 )
-
-                if info.get('status') == '404':
-                    error_msg = f"404 Not Found at {url}"
-                    if zero_prefixed_codes:
-                        zero_code = zero_prefixed_codes.pop(0)
-                        _add_url(f"{BASE_PHEWEB_URL}{zero_code}")
-                    continue
 
                 try:
                     bytes_downloaded = int(info.get('content_length'))
@@ -664,7 +665,7 @@ def download_targets(targets_to_process, output_path: str, log_path: str, max_wo
 def chunk_targets(targets: Sequence[dict], shard_count: int) -> List[List[dict]]:
     shard_count = max(1, shard_count)
     if not targets:
-        return [[]]
+        return []
 
     shard_count = min(shard_count, len(targets))
 
