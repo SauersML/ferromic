@@ -7,7 +7,8 @@ import threading
 import pandas as pd
 import concurrent.futures
 from typing import List, Dict, Any, Set
-import anthropic
+from google import genai
+from google.genai import types
 
 # ==========================================
 # CONFIGURATION
@@ -16,12 +17,15 @@ CONFIG = {
     # --------------------------------------
     # API SETTINGS
     # --------------------------------------
-    "model_name": "claude-opus-4-5-20251101", 
+    # STRICTLY using the requested model
+    "model_name": "gemini-3-pro-preview", 
     
     # Throttle: How many requests allowed per minute?
+    # Set to 1 as requested.
     "messages_per_minute": 1, 
     
-    # Parallelism (throttled by the rate limiter regardless of this number)
+    # Parallelism
+    # Even if this is high, the rate limiter will throttle execution.
     "max_workers": 1, 
 
     # --------------------------------------
@@ -53,11 +57,11 @@ rate_lock = threading.Lock()  # For rate limiting state
 
 # State for Rate Limiting
 last_call_time = 0.0
+# Calculate delay in seconds (60s / N requests)
 RATE_LIMIT_DELAY = 60.0 / CONFIG["messages_per_minute"]
 
 # Initialize Client
-# Assumes ANTHROPIC_API_KEY is in environment variables
-client = anthropic.Anthropic()
+client = genai.Client()
 
 # ==========================================
 # 1. AUTO-DOWNLOAD & SETUP
@@ -148,7 +152,7 @@ def load_and_prep_data():
         return [], []
 
 # ==========================================
-# 3. HELPER FUNCTIONS
+# 3. HELPER FUNCTIONS (Rate Limit, Parsing)
 # ==========================================
 def wait_for_rate_limit():
     """
@@ -160,30 +164,26 @@ def wait_for_rate_limit():
     with rate_lock:
         current_time = time.time()
         # Determine when we are allowed to fire next
+        # It is the max of (now) OR (last_call + delay)
         next_allowed_time = max(current_time, last_call_time + RATE_LIMIT_DELAY)
         
-        # Update the global last call time
+        # Update the global last call time to this new future slot
         last_call_time = next_allowed_time
     
-    # Sleep outside the lock
+    # Sleep outside the lock so we don't block other threads from calculating their slots
     sleep_duration = next_allowed_time - time.time()
     if sleep_duration > 0:
+        # Print only if significant sleep to avoid log spam
         if sleep_duration > 2:
             print(f"Throttling: Sleeping {sleep_duration:.2f}s...")
         time.sleep(sleep_duration)
 
 def clean_json_string(text: str) -> str:
-    """Extracts JSON from markdown code blocks if present."""
     text = text.strip()
-    # Claude sometimes adds text before or after, so we look for the first { and last }
-    start = text.find('{')
-    end = text.rfind('}')
-    
-    if start != -1 and end != -1:
-        text = text[start:end+1]
-        return text
-    
-    return text
+    if text.startswith("```json"): text = text[7:]
+    elif text.startswith("```"): text = text[3:]
+    if text.endswith("```"): text = text[:-3]
+    return text.strip()
 
 def get_processed_phenotypes() -> Set[str]:
     processed = set()
@@ -229,10 +229,9 @@ def process_phenotype(row: Dict, target_list: List[str]):
     1. Scan the list and identify ALL items that are matches or synonyms.
     2. FROM that list of matches, choose the SINGLE BEST match.
     3. If there are no synonymous or valid matches in the list, set "has_good_match" to false.
-    4. Provide reasoning in a clear paragraph explaining the rationale for your decisions.
+    4. Provide reasoning in a clear paragraph.
 
-    ### OUTPUT FORMAT:
-    Return ONLY a valid JSON object with the following structure:
+    ### OUTPUT FORMAT (JSON ONLY):
     {{
       "all_matches": ["list", "of", "all", "matches", "found"],
       "has_good_match": true,
@@ -249,21 +248,19 @@ def process_phenotype(row: Dict, target_list: List[str]):
         print(f"\n{'='*60}")
         print(f"SENDING PROMPT FOR: {source_name}")
         print(f"{'-'*60}")
-        # Print truncated prompt
-        print(prompt.split('### CANDIDATE TARGET LIST')[0] + "... [Target List Truncated] ...\n" + prompt.split('### OUTPUT FORMAT')[1]) 
+        # Print truncated prompt to avoid console flood, or remove slice to see full
+        print(prompt.split('### CANDIDATE TARGET LIST')[0] + "... [Target List Truncated for Log] ...\n" + prompt.split('### OUTPUT FORMAT')[1]) 
         print(f"{'='*60}")
 
     try:
         # API Call
-        response = client.messages.create(
+        response = client.models.generate_content(
             model=CONFIG["model_name"],
-            max_tokens=4096,
-            messages=[
-                {"role": "user", "content": prompt}
-            ]
+            contents=prompt,
+            config=types.GenerateContentConfig(response_mime_type="application/json")
         )
         
-        raw_text = response.content[0].text
+        raw_text = response.text
         
         # Parse
         parsed = json.loads(clean_json_string(raw_text))
@@ -274,7 +271,6 @@ def process_phenotype(row: Dict, target_list: List[str]):
             "input_icd10": row['icd10_codes'],
             "timestamp": time.time(),
             "status": "success",
-            "model": CONFIG["model_name"],
             "full_prompt_sent": prompt,
             "full_response_text": raw_text,
             "parsed_response": parsed
