@@ -22,7 +22,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install .[test]
+          pip install numpy scikit-allel scipy pandas statsmodels pyarrow tqdm numba pytest pytest-benchmark patchelf
           pip install seaborn matplotlib adjustText requests
 
       - name: Download manual VCF workflow artefacts
