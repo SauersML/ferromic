@@ -8,15 +8,19 @@ New CLI options:
 - --aggregate to merge per-shard outputs into a consolidated TSV.
 """
 import argparse
+import csv
+import gzip
 import json
 import os
 import signal
 import sys
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from threading import Event
-from typing import Iterable, List, Sequence
+from typing import Dict, Iterable, List, Sequence, Tuple
 
+import bgzip
 import pandas as pd
 import requests
 from tqdm import tqdm
@@ -90,6 +94,8 @@ OUTPUT_FILENAME = "merged_phenotype_results.tsv"
 LOG_FILENAME = "completed_phenotypes.log"
 MAX_WORKERS = 4  # Conservative number to prevent timeouts on large files
 DEFAULT_PLAN_FILE = "pheweb_plan.json"
+DEFAULT_COORD_CHUNK = 1_000_000
+BEST_TAGGING_SNPS = Path(__file__).resolve().parent.parent / "data" / "best_tagging_snps_qvalues.tsv"
 
 # Global event to handle interruption cleanly
 stop_event = Event()
@@ -216,7 +222,164 @@ def get_target_list(mapping_dict):
         sys.exit(1)
 
 
-def download_task(target):
+def _describe_remote(url: str, session: requests.Session) -> Dict[str, str]:
+    head = session.head(url, allow_redirects=True, timeout=30)
+    info = {
+        'status': str(head.status_code),
+        'content_type': head.headers.get('content-type', 'unknown'),
+        'content_length': head.headers.get('content-length', 'unknown'),
+        'content_encoding': head.headers.get('content-encoding', 'unknown'),
+        'accept_ranges': head.headers.get('accept-ranges', 'none'),
+    }
+    print(
+        "Remote file info - status: {status}, type: {content_type}, encoding: {content_encoding}, "
+        "length: {content_length}, accept-ranges: {accept_ranges}".format(**info)
+    )
+    return info
+
+
+def _sniff_compression(url: str, session: requests.Session, info: Dict[str, str]) -> Dict[str, str | bool | int]:
+    """Detect gzip vs BGZF and whether the server honors range requests."""
+
+    headers = {}
+    if info.get('accept_ranges') == 'bytes':
+        headers['Range'] = 'bytes=0-255'
+
+    resp = session.get(url, headers=headers, timeout=30)
+    resp.raise_for_status()
+
+    sample = resp.content[:256]
+    is_gzip = sample.startswith(b'\x1f\x8b')
+    is_bgzf = False
+
+    # BGZF has an extra subfield with ID "BC" and length 2
+    if is_gzip and len(sample) >= 18:
+        xlen = int.from_bytes(sample[10:12], 'little')
+        extra = sample[12:12 + xlen]
+        idx = 0
+        while idx + 4 <= len(extra):
+            sub_id = extra[idx:idx + 2]
+            sub_len = int.from_bytes(extra[idx + 2:idx + 4], 'little')
+            if sub_id == b'BC' and sub_len == 2:
+                is_bgzf = True
+                break
+            idx += 4 + sub_len
+
+    status_for_range = resp.status_code
+    if headers and status_for_range != 206:
+        print(
+            "Warning: Range request returned status {status_for_range}; server may ignore range requests."
+            .format(status_for_range=status_for_range)
+        )
+
+    print(
+        "Compression sniff: gzip={is_gzip}, bgzf={is_bgzf}, range_status={status_for_range}, "
+        "bytes_sampled={sampled}".format(
+            is_gzip=is_gzip,
+            is_bgzf=is_bgzf,
+            status_for_range=status_for_range,
+            sampled=len(sample),
+        )
+    )
+
+    return {
+        'is_gzip': is_gzip,
+        'is_bgzf': is_bgzf,
+        'range_status': status_for_range,
+    }
+
+
+def _parse_positions(raw_positions: Sequence[str]) -> Dict[str, set]:
+    parsed: Dict[str, set] = defaultdict(set)
+    for raw in raw_positions:
+        cleaned = raw.strip()
+        if not cleaned:
+            continue
+        chrom = None
+        pos = None
+        if ':' in cleaned:
+            chrom, pos = cleaned.split(':', 1)
+        elif '\t' in cleaned:
+            chrom, pos = cleaned.split('\t', 1)
+        else:
+            parts = cleaned.replace(',', ':').split(':')
+            if len(parts) == 2:
+                chrom, pos = parts
+        if chrom is None or pos is None:
+            print(f"Skipping malformed coordinate: {cleaned}")
+            continue
+        try:
+            if '-' in pos:
+                for piece in pos.split('-'):
+                    if piece:
+                        parsed[chrom].add(int(float(piece)))
+            else:
+                parsed[chrom].add(int(float(pos)))
+        except ValueError:
+            print(f"Skipping coordinate with non-integer position: {cleaned}")
+    return parsed
+
+
+def _streaming_gzip_filter(
+    url: str,
+    coords_by_chrom: Dict[str, set],
+    session: requests.Session,
+    info: Dict[str, str] | None = None,
+    compression_info: Dict[str, str] | None = None,
+) -> Tuple[List[str], List[str]]:
+    """Stream-decompress sequentially when random access is unsafe or unavailable."""
+
+    header: List[str] = []
+    filtered_rows: List[List[str]] = []
+    if not coords_by_chrom:
+        return header, filtered_rows
+
+    info = info or _describe_remote(url, session)
+    compression_info = compression_info or {}
+    print("Streaming from start because range/BGZF support is insufficient for targeted seeks...")
+
+    with session.get(url, stream=True, timeout=60) as resp:
+        resp.raise_for_status()
+        compressor = resp.headers.get('content-encoding', info.get('content_encoding', ''))
+        reader = resp.raw
+        if compression_info.get('is_bgzf'):
+            reader = bgzip.BGZipFile(fileobj=resp.raw)
+        elif 'gzip' in compressor or 'gzip' in info.get('content_type', ''):
+            reader = gzip.GzipFile(fileobj=resp.raw)
+
+        for raw_line in reader:
+            try:
+                line = raw_line.decode('utf-8').rstrip('\n')
+            except AttributeError:
+                if isinstance(raw_line, bytes):
+                    line = raw_line.decode('utf-8', errors='replace').rstrip('\n')
+                else:
+                    line = str(raw_line).replace('\n', '')
+            if not line:
+                continue
+            parts = line.split('\t')
+            if not header:
+                header = parts
+                continue
+            chrom = parts[0]
+            try:
+                pos = int(parts[1])
+            except (IndexError, ValueError):
+                continue
+            if pos in coords_by_chrom.get(chrom, set()):
+                filtered_rows.append(parts)
+                coords_by_chrom[chrom].discard(pos)
+                if not coords_by_chrom[chrom]:
+                    coords_by_chrom.pop(chrom)
+                remaining = sum(len(v) for v in coords_by_chrom.values())
+                print(f"Found {chrom}:{pos}. Remaining targets: {remaining}")
+                if remaining == 0:
+                    break
+
+    return header, filtered_rows
+
+
+def download_task(target, coords_by_chrom: Dict[str, set] | None = None):
     """
     Worker function.
     1. Checks stop_event.
@@ -243,21 +406,51 @@ def download_task(target):
 
     for url in urls_to_try:
         try:
-            with requests.get(url, stream=True, timeout=60) as r:
-                if r.status_code == 200:
-                    # Get size for estimation logic
-                    total_length = r.headers.get('content-length')
-                    if total_length:
-                        bytes_downloaded = int(total_length)
+            with requests.Session() as session:
+                info = _describe_remote(url, session)
+                compression_info = _sniff_compression(url, session, info)
 
-                    # Parse
-                    df = pd.read_csv(r.raw, sep='\t', compression='gzip')
-                    break  # Success
-                elif r.status_code == 404:
+                if info.get('status') == '404':
                     error_msg = f"404 Not Found at {url}"
-                    continue  # Try next URL if available
+                    continue
+
+                try:
+                    bytes_downloaded = int(info.get('content_length'))
+                except (TypeError, ValueError):
+                    bytes_downloaded = 0
+
+                if coords_by_chrom:
+                    coords_copy = {chrom: set(values) for chrom, values in coords_by_chrom.items()}
+                    header, rows = _streaming_gzip_filter(
+                        url,
+                        coords_copy,
+                        session,
+                        info=info,
+                        compression_info=compression_info,
+                    )
+
+                    if header:
+                        df = pd.DataFrame(rows, columns=header)
+                    else:
+                        with session.get(url, stream=True, timeout=60) as resp:
+                            resp.raise_for_status()
+                            df = pd.read_csv(resp.raw, sep='\t', compression='gzip')
                 else:
-                    r.raise_for_status()
+                    with session.get(url, stream=True, timeout=60) as resp:
+                        if resp.status_code == 404:
+                            error_msg = f"404 Not Found at {url}"
+                            continue
+                        resp.raise_for_status()
+
+                        total_length = resp.headers.get('content-length')
+                        if total_length:
+                            try:
+                                bytes_downloaded = int(total_length)
+                            except ValueError:
+                                bytes_downloaded = 0
+
+                        df = pd.read_csv(resp.raw, sep='\t', compression='gzip')
+                break
         except Exception as e:
             error_msg = str(e)
             continue
@@ -271,7 +464,7 @@ def download_task(target):
         return {'status': 'failed', 'error': error_msg, 'phenostring': phenostring, 'phenocode': phenocode}
 
 
-def download_targets(targets_to_process, output_path: str, log_path: str, max_workers: int):
+def download_targets(targets_to_process, output_path: str, log_path: str, max_workers: int, coords_by_chrom: Dict[str, set] | None = None):
     print(f"Starting downloads (Output: {output_path})...")
 
     # Check if we need to write header (if output file doesn't exist)
@@ -281,7 +474,7 @@ def download_targets(targets_to_process, output_path: str, log_path: str, max_wo
     files_sized_so_far = 0
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {executor.submit(download_task, t): t for t in targets_to_process}
+        futures = {executor.submit(download_task, t, coords_by_chrom): t for t in targets_to_process}
 
         pbar = tqdm(as_completed(futures), total=len(targets_to_process), unit="file")
 
@@ -310,8 +503,9 @@ def download_targets(targets_to_process, output_path: str, log_path: str, max_wo
                     pbar.set_description(f"Est. Remaining: {est_gb:.2f} GB")
 
                 try:
-                    df.to_csv(output_path, sep='\t', mode='a', header=write_header, index=False)
-                    write_header = False
+                    if not df.empty:
+                        df.to_csv(output_path, sep='\t', mode='a', header=write_header, index=False)
+                        write_header = False
                     append_to_log(phenocode, log_path)
                 except Exception as e:
                     pbar.write(f"Error writing data for {phenocode}: {e}")
@@ -379,20 +573,91 @@ def aggregate_outputs(input_dir: Path, output_path: Path) -> None:
     print(f"Aggregated {len(frames)} file(s) into {output_path}")
 
 
+def _split_identifiers(raw: str) -> List[str]:
+    # Accept comma- or whitespace-delimited input in a single argument
+    parts = []
+    for chunk in raw.replace(",", " ").split():
+        cleaned = chunk.strip()
+        if cleaned:
+            parts.append(cleaned)
+    return parts
+
+
 def parse_requested_phenocodes(args: argparse.Namespace) -> List[str]:
-    requested = list(args.phenocode)
+    requested: List[str] = []
+
+    for group in args.phenocode:
+        for value in group:
+            requested.extend(_split_identifiers(value))
+
+    for value in args.phenocode_arg:
+        requested.extend(_split_identifiers(value))
+
     if args.phenocode_file:
         requested.extend([line.strip() for line in Path(args.phenocode_file).read_text().splitlines() if line.strip()])
+
     return requested
+
+
+def parse_requested_coords(args: argparse.Namespace) -> Dict[str, set]:
+    requested: List[str] = []
+
+    for value in args.coord:
+        requested.extend(_split_identifiers(value))
+
+    if args.coord_file:
+        requested.extend([line.strip() for line in Path(args.coord_file).read_text().splitlines() if line.strip()])
+
+    return _parse_positions(requested)
+
+
+def load_best_tagging_coords(path: Path = BEST_TAGGING_SNPS) -> Dict[str, set]:
+    coords: Dict[str, set] = defaultdict(set)
+    if not path.exists():
+        print(f"Best-tagging SNP list missing at {path}; no coordinate filter will be applied.")
+        return coords
+
+    with path.open() as handle:
+        reader = csv.DictReader(handle, delimiter='\t')
+        for row in reader:
+            chrom = row.get('chromosome_hg37') or row.get('chromosome') or ''
+            hg38_coord = row.get('hg38') or row.get('position_hg38') or ''
+            hg38_coord = hg38_coord.strip()
+            if not hg38_coord:
+                continue
+
+            if ':' in hg38_coord:
+                chrom_part, pos_part = hg38_coord.split(':', 1)
+                chrom = chrom_part.replace('chr', '') or chrom
+            else:
+                pos_part = hg38_coord
+
+            if '-' in pos_part:
+                pieces = [p for p in pos_part.split('-') if p]
+            else:
+                pieces = [pos_part]
+
+            for piece in pieces:
+                try:
+                    coords[str(chrom).replace('chr', '')].add(int(float(piece)))
+                except ValueError:
+                    continue
+
+    total = sum(len(v) for v in coords.values())
+    print(f"Loaded {total} unique coordinate(s) from {path}")
+    return coords
 
 
 def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Download PheWeb phenotype results")
-    parser.add_argument('--phenocode', action='append', default=[], help='Phenocode or phenotype name to download (can be repeated).')
+    parser.add_argument('--phenocode', action='append', nargs='+', default=[], help='Phenocode or phenotype name to download (accepts multiple values per flag).')
     parser.add_argument('--phenocode-file', help='Path to a newline-delimited list of phenocodes or phenotype names.')
+    parser.add_argument('phenocode_arg', nargs='*', default=[], help='Phenocode or phenotype name provided as positional arguments.')
     parser.add_argument('--output', default=OUTPUT_FILENAME, help='Output TSV path.')
     parser.add_argument('--log', default=LOG_FILENAME, help='Log file used to track completed phenocodes.')
     parser.add_argument('--max-workers', type=int, default=MAX_WORKERS, help='Max concurrent download workers.')
+    parser.add_argument('--coord', action='append', default=[], help='Chrom:pos coordinate to retain (comma or whitespace delimited).')
+    parser.add_argument('--coord-file', help='Path to newline-delimited coordinates (chrom\tpos or chrom:pos).')
 
     parser.add_argument('--plan', action='store_true', help='Generate a plan JSON instead of downloading.')
     parser.add_argument('--plan-output', default=DEFAULT_PLAN_FILE, help='Where to write the JSON plan.')
@@ -418,6 +683,11 @@ def main(argv: Iterable[str] | None = None):
     name_to_code = get_phenotype_mapping()
 
     requested_identifiers = parse_requested_phenocodes(args)
+    coords_by_chrom = parse_requested_coords(args)
+    if not coords_by_chrom:
+        coords_by_chrom = load_best_tagging_coords()
+    if not coords_by_chrom:
+        print("Warning: no coordinate filter loaded; downloads will not be restricted to target SNPs.")
     user_provided_targets = bool(args.phenocode or args.phenocode_file)
     targets = resolve_requested_targets(name_to_code, requested_identifiers)
 
@@ -444,7 +714,7 @@ def main(argv: Iterable[str] | None = None):
         print("Nothing left to do.")
         return
 
-    download_targets(targets_to_process, args.output, args.log, args.max_workers)
+    download_targets(targets_to_process, args.output, args.log, args.max_workers, coords_by_chrom if coords_by_chrom else None)
 
 
 if __name__ == "__main__":
