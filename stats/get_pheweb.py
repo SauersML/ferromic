@@ -397,6 +397,26 @@ def _parse_positions(raw_positions: Sequence[str]) -> Dict[str, set]:
     return parsed
 
 
+def _reader_from_response(
+    resp: requests.Response,
+    info: Dict[str, str] | None = None,
+    compression_info: Dict[str, str] | None = None,
+):
+    info = info or {}
+    compression_info = compression_info or {}
+    compressor = resp.headers.get('content-encoding', info.get('content_encoding', ''))
+
+    if compression_info.get('is_bgzf') and HAS_BGZIP_READER:
+        return bgzip.BGZipFile(fileobj=resp.raw)
+    if (
+        'gzip' in compressor
+        or 'gzip' in info.get('content_type', '')
+        or compression_info.get('is_gzip')
+    ):
+        return gzip.GzipFile(fileobj=resp.raw)
+    return resp.raw
+
+
 def _streaming_gzip_filter(
     url: str,
     coords_by_chrom: Dict[str, set],
@@ -451,12 +471,7 @@ def _streaming_gzip_filter(
         print("Streaming from start because range/BGZF support is insufficient for targeted seeks...")
         resp = session.get(url, stream=True, timeout=60)
         resp.raise_for_status()
-        compressor = resp.headers.get('content-encoding', info.get('content_encoding', ''))
-        reader = resp.raw
-        if compression_info.get('is_bgzf') and HAS_BGZIP_READER:
-            reader = bgzip.BGZipFile(fileobj=resp.raw)
-        elif 'gzip' in compressor or 'gzip' in info.get('content_type', ''):
-            reader = gzip.GzipFile(fileobj=resp.raw)
+        reader = _reader_from_response(resp, info=info, compression_info=compression_info)
         line_iter = _iter_lines(reader)
 
     processed = 0
@@ -580,7 +595,8 @@ def download_task(target, coords_by_chrom: Dict[str, set] | None = None):
                     else:
                         with session.get(url, stream=True, timeout=60) as resp:
                             resp.raise_for_status()
-                            df = pd.read_csv(resp.raw, sep='\t', compression='gzip')
+                            reader = _reader_from_response(resp, info=info, compression_info=compression_info)
+                            df = pd.read_csv(reader, sep='\t')
                 else:
                     with session.get(url, stream=True, timeout=60) as resp:
                         if resp.status_code == 404:
@@ -595,7 +611,8 @@ def download_task(target, coords_by_chrom: Dict[str, set] | None = None):
                             except ValueError:
                                 bytes_downloaded = 0
 
-                        df = pd.read_csv(resp.raw, sep='\t', compression='gzip')
+                        reader = _reader_from_response(resp, info=info, compression_info=compression_info)
+                        df = pd.read_csv(reader, sep='\t')
                 break
         except Exception as e:
             error_msg = str(e)
@@ -613,8 +630,15 @@ def download_task(target, coords_by_chrom: Dict[str, set] | None = None):
 def download_targets(targets_to_process, output_path: str, log_path: str, max_workers: int, coords_by_chrom: Dict[str, set] | None = None):
     print(f"Starting downloads (Output: {output_path})...")
 
+    output_file = Path(output_path)
+    log_file = Path(log_path)
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    output_file.touch(exist_ok=True)
+    log_file.touch(exist_ok=True)
+
     # Check if we need to write header (if output file doesn't exist)
-    write_header = not os.path.exists(output_path)
+    write_header = output_file.stat().st_size == 0
 
     total_bytes_so_far = 0
     files_sized_so_far = 0
@@ -703,6 +727,7 @@ def aggregate_outputs(input_dir: Path, output_path: Path) -> None:
     tsv_files = sorted(input_dir.glob('**/*.tsv'))
     if not tsv_files:
         print(f"No TSV files found in {input_dir}; nothing to aggregate.")
+        output_path.write_text("")
         return
 
     frames = []
@@ -714,6 +739,7 @@ def aggregate_outputs(input_dir: Path, output_path: Path) -> None:
 
     if not frames:
         print("No readable TSV files found; aggregation aborted.")
+        output_path.write_text("")
         return
 
     combined = pd.concat(frames, ignore_index=True)
