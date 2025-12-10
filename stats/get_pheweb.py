@@ -34,3 +34,226 @@
 # etc.
 
 # we'll download in parallel (capped) then combine all into a single file. 
+
+import requests
+import pandas as pd
+import os
+import sys
+import signal
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from tqdm import tqdm
+from threading import Event
+
+# --- Configuration ---
+PHENOTYPES_META_URL = "https://raw.githubusercontent.com/SauersML/ferromic/refs/heads/main/data/phenotypes.tsv"
+MAPPINGS_URL = "https://raw.githubusercontent.com/SauersML/ferromic/refs/heads/main/data/mappings_final.tsv"
+BASE_PHEWEB_URL = "https://pheweb.org/UKB-TOPMed/download/"
+OUTPUT_FILENAME = "merged_phenotype_results.tsv"
+LOG_FILENAME = "completed_phenotypes.log"
+MAX_WORKERS = 4  # Conservative number to prevent timeouts on large files
+
+# Global event to handle interruption cleanly
+stop_event = Event()
+
+def signal_handler(signum, frame):
+    print("\nInterrupt received! Stopping new downloads. Please wait for current writes to finish...")
+    stop_event.set()
+
+signal.signal(signal.SIGINT, signal_handler)
+
+def load_completed_phenocodes():
+    """Reads the log file to find which phenocodes are already done."""
+    if not os.path.exists(LOG_FILENAME):
+        return set()
+    with open(LOG_FILENAME, 'r') as f:
+        return set(line.strip() for line in f if line.strip())
+
+def append_to_log(phenocode):
+    """Marks a phenocode as complete."""
+    with open(LOG_FILENAME, 'a') as f:
+        f.write(f"{phenocode}\n")
+
+def get_phenotype_mapping():
+    print(f"Downloading metadata from {PHENOTYPES_META_URL}...")
+    try:
+        df = pd.read_csv(PHENOTYPES_META_URL, sep='\t')
+        # Create dictionary: {"Phenotype Name": "Phenocode"}
+        # Note: Depending on file format, phenocode might be float or string. Force string.
+        mapping = dict(zip(df['phenostring'].str.strip(), df['phenocode'].astype(str)))
+        return mapping
+    except Exception as e:
+        print(f"CRITICAL ERROR: Could not download metadata: {e}")
+        sys.exit(1)
+
+def get_target_list(mapping_dict):
+    print(f"Downloading target list from {MAPPINGS_URL}...")
+    try:
+        df = pd.read_csv(MAPPINGS_URL, sep='\t')
+        
+        target_phenocodes = []
+        missing_phenotypes = set()
+
+        # Iterate over the 'All_Matches' column
+        for entry in df['All_Matches'].dropna():
+            matches = [m.strip() for m in entry.split(';') if m.strip()]
+            
+            for phenotype_name in matches:
+                if phenotype_name in mapping_dict:
+                    target_phenocodes.append({
+                        'phenostring': phenotype_name,
+                        'phenocode': mapping_dict[phenotype_name]
+                    })
+                else:
+                    missing_phenotypes.add(phenotype_name)
+        
+        # Deduplicate based on phenocode, keep unique objects
+        unique_targets = {v['phenocode']: v for v in target_phenocodes}.values()
+        
+        if missing_phenotypes:
+            print(f"\nWarning: {len(missing_phenotypes)} phenotypes from target list were not found in PheWeb metadata:")
+            for mp in sorted(list(missing_phenotypes)):
+                print(f"  - {mp}")
+            print("-" * 30)
+            
+        return list(unique_targets)
+    except Exception as e:
+        print(f"CRITICAL ERROR: Could not process target list: {e}")
+        sys.exit(1)
+
+def download_task(target):
+    """
+    Worker function. 
+    1. Checks stop_event.
+    2. Attempts download.
+    3. Handles 404 retry logic (290.0 -> 290).
+    4. Returns Dataframe and size stats.
+    """
+    if stop_event.is_set():
+        return None
+
+    phenocode = str(target['phenocode'])
+    phenostring = target['phenostring']
+    
+    # Logic for URL construction and retries
+    urls_to_try = [f"{BASE_PHEWEB_URL}{phenocode}"]
+    
+    # If code looks like "290.0", add "290" as a fallback
+    if phenocode.endswith(".0"):
+        urls_to_try.append(f"{BASE_PHEWEB_URL}{phenocode[:-2]}")
+
+    df = None
+    bytes_downloaded = 0
+    final_url_used = ""
+    error_msg = ""
+
+    for url in urls_to_try:
+        try:
+            with requests.get(url, stream=True, timeout=60) as r:
+                if r.status_code == 200:
+                    # Get size for estimation logic
+                    total_length = r.headers.get('content-length')
+                    if total_length:
+                        bytes_downloaded = int(total_length)
+                    
+                    # Parse
+                    df = pd.read_csv(r.raw, sep='\t', compression='gzip')
+                    final_url_used = url
+                    break # Success
+                elif r.status_code == 404:
+                    error_msg = f"404 Not Found at {url}"
+                    continue # Try next URL if available
+                else:
+                    r.raise_for_status()
+        except Exception as e:
+            error_msg = str(e)
+            continue
+
+    if df is not None:
+        # Add identifying columns
+        df.insert(0, 'phenostring', phenostring)
+        df.insert(1, 'phenocode', phenocode)
+        return {'status': 'success', 'data': df, 'bytes': bytes_downloaded, 'phenocode': phenocode}
+    else:
+        return {'status': 'failed', 'error': error_msg, 'phenostring': phenostring, 'phenocode': phenocode}
+
+def main():
+    # 1. Setup maps
+    name_to_code = get_phenotype_mapping()
+    all_targets = get_target_list(name_to_code)
+    
+    # 2. Resumability check
+    completed_codes = load_completed_phenocodes()
+    
+    # Filter targets
+    targets_to_process = [t for t in all_targets if str(t['phenocode']) not in completed_codes]
+    
+    print(f"\nTotal targets: {len(all_targets)}")
+    print(f"Already completed: {len(completed_codes)}")
+    print(f"Remaining to download: {len(targets_to_process)}")
+
+    if not targets_to_process:
+        print("Nothing left to do.")
+        return
+
+    # 3. Processing stats
+    total_bytes_so_far = 0
+    files_sized_so_far = 0
+    
+    # Check if we need to write header (if output file doesn't exist)
+    write_header = not os.path.exists(OUTPUT_FILENAME)
+    mode = 'w' if write_header else 'a'
+
+    print(f"Starting downloads (Output: {OUTPUT_FILENAME})...")
+    
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        # Map futures to targets
+        futures = {executor.submit(download_task, t): t for t in targets_to_process}
+        
+        # Use tqdm for progress bar
+        pbar = tqdm(as_completed(futures), total=len(targets_to_process), unit="file")
+        
+        for future in pbar:
+            if stop_event.is_set():
+                break
+
+            result = future.result()
+            
+            # Result might be None if we triggered stop_event inside the thread
+            if not result:
+                continue
+
+            if result['status'] == 'success':
+                df = result['data']
+                phenocode = result['phenocode']
+                file_bytes = result['bytes']
+
+                # --- Size Estimation Logic ---
+                if file_bytes > 0:
+                    total_bytes_so_far += file_bytes
+                    files_sized_so_far += 1
+                    
+                    avg_size = total_bytes_so_far / files_sized_so_far
+                    remaining_files = len(targets_to_process) - files_sized_so_far # approx
+                    est_remaining_bytes = avg_size * (len(targets_to_process) - pbar.n)
+                    est_gb = est_remaining_bytes / (1024**3)
+                    
+                    pbar.set_description(f"Est. Remaining: {est_gb:.2f} GB")
+
+                # --- Atomic-ish Write ---
+                try:
+                    df.to_csv(OUTPUT_FILENAME, sep='\t', mode='a', header=write_header, index=False)
+                    # Only write header once
+                    write_header = False 
+                    
+                    # Mark as complete in log
+                    append_to_log(phenocode)
+                except Exception as e:
+                    pbar.write(f"Error writing data for {phenocode}: {e}")
+
+            else:
+                pbar.write(f"Failed to download {result['phenostring']} ({result['phenocode']}): {result['error']}")
+
+    print("\nProcessing finished.")
+
+if __name__ == "__main__":
+    main()
