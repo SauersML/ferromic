@@ -77,9 +77,6 @@ merged["End"] = pd.to_numeric(merged["End"], errors="coerce")
 plot_df = merged[merged[cons_col].isin([0, 1])].copy()
 plot_df = plot_df.dropna(subset=["unbiased_pearson_r2", "Chromosome", "Start", "End"])
 
-# Keep only well-imputed inversions
-plot_df = plot_df[plot_df["unbiased_pearson_r2"] > 0.5]
-
 # Compute r from r^2
 plot_df["r"] = np.sqrt(np.clip(plot_df["unbiased_pearson_r2"].values, 0, None))
 
