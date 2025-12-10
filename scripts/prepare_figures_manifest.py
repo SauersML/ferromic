@@ -7,43 +7,11 @@ import argparse
 import json
 import re
 import shutil
-import subprocess
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
 ALLOWED_EXTENSIONS = {".png", ".svg", ".pdf"}
-
-
-def _generate_pop_dosage_plot(figures_root: Path) -> None:
-    """Generate the population dosage plot if it's missing from artifacts.
-
-    The build step sometimes downloads figure artifacts that omit the
-    ``special/pop_dosage_plot.pdf`` output produced by ``stats/pop_dosage_plot.py``
-    in the run-analysis workflow. To keep the gallery build resilient, run the
-    script locally and copy the outputs into the expected figures root when the
-    required asset is absent.
-    """
-
-    project_root = Path(__file__).resolve().parent.parent
-    script_path = project_root / "stats/pop_dosage_plot.py"
-
-    if not script_path.exists():
-        print(f"Population dosage script not found at {script_path}; skipping generation.")
-        return
-
-    print("special/pop_dosage_plot.pdf missing; generating via stats/pop_dosage_plot.py...")
-    subprocess.run([sys.executable, str(script_path)], check=True, cwd=project_root)
-
-    for ext in (".pdf", ".png"):
-        source = project_root / f"special/pop_dosage_plot{ext}"
-        if not source.exists():
-            continue
-
-        destination_dir = figures_root / "special"
-        destination_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, destination_dir / source.name)
 
 
 def parse_args() -> argparse.Namespace:
@@ -170,6 +138,25 @@ def load_required_figures(config_paths: Iterable[Path]) -> tuple[set[Path], dict
     return required, per_config
 
 
+def resolve_figures_root(root: Path, required_dirs: set[Path]) -> Path:
+    """Return a figures root that contains the required subdirectories."""
+
+    if all((root / rel_dir).is_dir() for rel_dir in required_dirs):
+        return root
+
+    for candidate in root.rglob("*"):
+        if not candidate.is_dir():
+            continue
+        if all((candidate / rel_dir).is_dir() for rel_dir in required_dirs):
+            print(
+                "Figures root does not contain required directories; "
+                f"using nested directory {candidate} instead."
+            )
+            return candidate
+
+    return root
+
+
 def copy_figures(figures: dict[Path, Path], destination_root: Path) -> dict[Path, list[Path]]:
     destination_root = destination_root.resolve()
     shutil.rmtree(destination_root, ignore_errors=True)
@@ -222,9 +209,8 @@ def main() -> None:
     manifest_path = args.manifest_path.resolve()
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
 
-    figure_index = build_figure_index(
-        collect_figure_files(figures_root), figures_root
-    )
+    required_figures: set[Path] = set()
+    required_dirs: set[Path] = set()
 
     if args.required_figures_config:
         required_figures, _ = load_required_figures(args.required_figures_config)
@@ -234,6 +220,15 @@ def main() -> None:
             for path in required_figures
             if path.parent.as_posix() not in {".", ""}
         }
+
+        if required_dirs:
+            figures_root = resolve_figures_root(figures_root, required_dirs)
+
+    figure_index = build_figure_index(
+        collect_figure_files(figures_root), figures_root
+    )
+
+    if required_figures:
         missing_required_dirs = sorted(
             rel_dir.as_posix()
             for rel_dir in required_dirs
@@ -247,13 +242,6 @@ def main() -> None:
             )
 
         missing = {rel for rel in required_figures if rel not in figure_index}
-
-        if Path("special/pop_dosage_plot.pdf") in missing:
-            _generate_pop_dosage_plot(args.figures_root)
-            figure_index = build_figure_index(
-                collect_figure_files(args.figures_root), args.figures_root
-            )
-            missing = {rel for rel in required_figures if rel not in figure_index}
 
         if missing:
             missing_list = "\n".join(sorted(rel.as_posix() for rel in missing))
