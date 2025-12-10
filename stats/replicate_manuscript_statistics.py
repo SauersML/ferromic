@@ -10,7 +10,7 @@ from contextlib import contextmanager
 import gzip
 import shutil
 import zipfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable, List, Tuple
 import tempfile
@@ -1739,15 +1739,6 @@ def summarize_phewas_scale() -> List[str]:
     return lines
 
 
-@dataclass
-class AssocSpec:
-    inversion: str
-    label: str
-    search_terms: Tuple[str, ...]
-    table_name: str = "phewas_results.tsv"
-    ancestry_targets: List[str] = field(default_factory=list)
-
-
 def _format_or(row: pd.Series) -> str:
     or_col = None
     for candidate in ["OR", "Odds_Ratio", "OR_overall"]:
@@ -1786,219 +1777,45 @@ def _format_or(row: pd.Series) -> str:
 
 
 def summarize_key_associations() -> List[str]:
-    SOURCE_LABELS = {
-        "phewas_results.tsv": "MAIN IMPUTED",
-        "all_pop_phewas_tag.tsv": "TAG SNP",
-        "PGS_controls.tsv": "PGS CONTROL",
-    }
+    path = DATA_DIR / "phewas_results.tsv"
+    if not path.exists():
+        return ["Per-phenotype association tables not found; skipping highlights (phewas_results.tsv)."]
 
-    targets = [
-        AssocSpec(
-            "chr10-79542902-INV-674513",
-            "Positive DNA test for high-risk HPV types",
-            ("hpv", "dna", "positive"),
-        ),
-        AssocSpec(
-            "chr6-141867315-INV-29159",
-            "Laryngitis and tracheitis",
-            ("laryngitis", "tracheitis"),
-            ancestry_targets=["AFR"],
-        ),
-        AssocSpec(
-            "chr12-46897663-INV-16289",
-            "Conjunctivitis",
-            ("conjunct",),
-        ),
-        AssocSpec(
-            "chr12-46897663-INV-16289",
-            "Acne",
-            ("acne",),
-        ),
-        AssocSpec(
-            "chr12-46897663-INV-16289",
-            "Epidermal thickening",
-            ("epidermal", "thicken"),
-        ),
-        AssocSpec(
-            "chr12-46897663-INV-16289",
-            "Inflammation of the eye",
-            ("inflamm", "eye"),
-        ),
-        AssocSpec(
-            "chr12-46897663-INV-16289",
-            "Migraine",
-            ("migraine",),
-        ),
-        AssocSpec(
-            "chr12-46897663-INV-16289",
-            "Disorder of nervous system",
-            ("disorder", "nervous"),
-        ),
-        AssocSpec(
-            # The main imputed Morbid obesity signal comes from the 17q21 inversion
-            # (chr17-45585160-INV-706887). The tag-SNP analyses use a synthetic
-            # identifier (chr17-45974480-INV-29218), so we keep the tag-SNP
-            # entries below on that ID but point the main PheWAS summary at the
-            # true inversion identifier so the odds ratios reported here match
-            # the imputed results discussed in the manuscript.
-            "chr17-45585160-INV-706887",
-            "Morbid obesity (Main Imputed)",
-            ("morbid", "obesity"),
-            table_name="phewas_results.tsv",
-            ancestry_targets=["EUR", "AFR"],
-        ),
-        AssocSpec(
-            "chr17-45585160-INV-706887",
-            "Breast lump or abnormal exam (Main Imputed)",
-            ("lump", "breast"),
-            table_name="phewas_results.tsv",
-            ancestry_targets=["EUR"],
-        ),
-        AssocSpec(
-            "chr17-45585160-INV-706887",
-            "Abnormal mammogram (Main Imputed)",
-            ("mammogram",),
-            table_name="phewas_results.tsv",
-            ancestry_targets=["EUR"],
-        ),
-        AssocSpec(
-            "chr17-45585160-INV-706887",
-            "Mild cognitive impairment (Main Imputed)",
-            ("mild", "cognitive"),
-            table_name="phewas_results.tsv",
-            ancestry_targets=["EUR", "AMR"],
-        ),
-        AssocSpec(
-            "chr17-45585160-INV-706887",
-            "Abnormal Papanicolaou smear",
-            ("papanicolaou", "smear"),
-            table_name="phewas_results.tsv",
-        ),
-        AssocSpec(
-            "chr17-45585160-INV-706887",
-            "Melanocytic nevi",
-            ("melanocytic", "nevi"),
-            table_name="phewas_results.tsv",
-        ),
-        AssocSpec(
-            "chr17-45585160-INV-706887",
-            "Benign neoplasm of the skin",
-            ("benign", "neoplasm", "skin"),
-            table_name="phewas_results.tsv",
-        ),
-        AssocSpec(
-            "chr17-45585160-INV-706887",
-            "Diastolic Heart Failure",
-            ("diastolic", "heart", "failure"),
-            table_name="phewas_results.tsv",
-        ),
-        AssocSpec(
-            "chr17-45585160-INV-706887",
-            "Breast Cancer (Malignant neoplasm)",
-            ("malignant", "neoplasm", "breast"),
-            table_name="phewas_results.tsv",
-        ),
-        AssocSpec(
-            "chr17-45974480-INV-29218",
-            "Morbid obesity (Tag SNP)",
-            ("morbid", "obesity"),
-            table_name="all_pop_phewas_tag.tsv",
-            ancestry_targets=["EUR", "AFR"],
-        ),
-        AssocSpec(
-            "chr17-45974480-INV-29218",
-            "Breast lump or abnormal exam (Tag SNP)",
-            ("lump", "breast"),
-            table_name="all_pop_phewas_tag.tsv",
-            ancestry_targets=["EUR"],
-        ),
-        AssocSpec(
-            "chr17-45974480-INV-29218",
-            "Abnormal mammogram (Tag SNP)",
-            ("mammogram",),
-            table_name="all_pop_phewas_tag.tsv",
-            ancestry_targets=["EUR"],
-        ),
-        AssocSpec(
-            "chr17-45974480-INV-29218",
-            "Mild cognitive impairment (Tag SNP)",
-            ("mild", "cognitive"),
-            table_name="all_pop_phewas_tag.tsv",
-            ancestry_targets=["EUR", "AMR"],
-        ),
-    ]
+    df = pd.read_csv(path, sep="\t", low_memory=False)
+    required_cols = {"Phenotype", "Inversion", "Q_GLOBAL"}
+    if not required_cols.issubset(df.columns):
+        missing = ", ".join(sorted(required_cols - set(df.columns)))
+        return [f"PheWAS results missing required columns: {missing}."]
 
-    table_names = sorted({spec.table_name for spec in targets})
-    tables: dict[str, pd.DataFrame] = {}
-    missing_tables: List[str] = []
     inv_meta_path = DATA_DIR / "inv_properties.tsv"
-    for name in table_names:
-        path = DATA_DIR / name
-        if not path.exists():
-            missing_tables.append(name)
-            continue
-        df = pd.read_csv(path, sep="\t", low_memory=False)
-        if "Phenotype" not in df.columns or "Inversion" not in df.columns:
-            missing_tables.append(name)
-            continue
-        df["Phenotype"] = df["Phenotype"].astype(str)
-        df["Inversion"] = df["Inversion"].astype(str)
-        df["Inversion"] = map_inversion_series(df["Inversion"], inv_info_path=str(inv_meta_path))
-        tables[name] = df
+    df["Phenotype"] = df["Phenotype"].astype(str)
+    df["Inversion"] = df["Inversion"].astype(str)
+    df["Inversion"] = map_inversion_series(df["Inversion"], inv_info_path=str(inv_meta_path))
 
-    if not tables:
-        missing_desc = f" ({', '.join(sorted(set(missing_tables)))})" if missing_tables else ""
-        return [
-            "Per-phenotype association tables not found; skipping highlights" + missing_desc + "."
-        ]
+    df["Q_GLOBAL"] = pd.to_numeric(df["Q_GLOBAL"], errors="coerce")
+    significant = df[df["Q_GLOBAL"] < 0.06].copy()
+    ancestry_prefixes = sorted(
+        {
+            col[:-2]
+            for col in df.columns
+            if col.endswith("_P") and len(col) > 2 and not col.startswith("P_")
+        }
+    )
 
-    available_sources = list(tables.keys())
     lines: List[str] = [
         "Selected inversion–phenotype associations (logistic regression with LRT p-values):",
-        "  Available source tables: " + ", ".join(available_sources) + ".",
+        "  Source table: phewas_results.tsv (MAIN IMPUTED).",
     ]
-    if missing_tables:
-        lines.append("  Missing source tables: " + ", ".join(sorted(set(missing_tables))) + ".")
 
-    for spec in targets:
-        table = tables.get(spec.table_name)
-        if table is None:
-            lines.append(
-                f"  {spec.inversion}: source table {spec.table_name} not available locally; "
-                f"cannot summarize {spec.label}."
-            )
-            continue
+    if significant.empty:
+        lines.append("  No associations with q < 0.06 found in phewas_results.tsv.")
+        return lines
 
-        target_inv_id = map_inversion_value(spec.inversion, inv_info_path=str(inv_meta_path))
-        subset = table[table["Inversion"].str.strip() == target_inv_id]
-        if subset.empty:
-            lines.append(
-                f"  {spec.inversion}: no PheWAS results available locally for {spec.label}."
-            )
-            continue
+    sort_cols = [col for col in ["Q_GLOBAL", "P_Value", "P_LRT_Overall", "P_Value_LRT_Bootstrap"] if col in significant.columns]
+    if sort_cols:
+        significant = significant.sort_values(sort_cols)
 
-        mask = np.ones(len(subset), dtype=bool)
-        norm_labels = subset["Phenotype"].astype(str).str.lower()
-        for term in spec.search_terms:
-            mask &= norm_labels.str.contains(term, na=False)
-        candidates = subset[mask]
-
-        if candidates.empty:
-            lines.append(
-                f"  {spec.inversion} × {spec.label}: matching phenotype not found in {spec.table_name}."
-            )
-            continue
-
-        sort_columns = [
-            col
-            for col in ["P_Value", "P_Value_y", "P_Value_x", "P_LRT_Overall"]
-            if col in candidates.columns
-        ]
-        if sort_columns:
-            r = candidates.sort_values(sort_columns).iloc[0]
-        else:
-            r = candidates.iloc[0]
-
+    for _, r in significant.iterrows():
         pval = None
         for col in [
             "P_Value",
@@ -2012,29 +1829,23 @@ def summarize_key_associations() -> List[str]:
                 pval = value
                 break
 
-        bh = None
-        for col in ["Q_GLOBAL", "BH_FDR_Q"]:
-            value = r.get(col)
-            if value is not None and not pd.isna(value):
-                bh = value
-                break
-        if bh is None:
+        bh = r.get("Q_GLOBAL")
+        if bh is None or pd.isna(bh):
             bh = pval
         parts = _format_or(r)
-        source_lbl = SOURCE_LABELS.get(spec.table_name, "UNKNOWN SOURCE")
         lines.append(
-            f"  [{source_lbl}] {spec.inversion} vs {spec.label}: {parts}, "
-            f"BH-adjusted p ≈ {_fmt(bh, 3)} (raw p = {_fmt(pval, 3)})."
+            f"  [MAIN IMPUTED] {r['Inversion']} vs {r['Phenotype']}: {parts}, "
+            f"BH-adjusted p ≈ {_fmt(bh, 3)} (raw p = {_fmt(pval, 3)}).",
         )
 
         interaction_col = "P_LRT_AncestryxDosage"
         interaction_val = r.get(interaction_col) if interaction_col in r.index else None
         if interaction_val is not None and not pd.isna(interaction_val):
             lines.append(
-                f"    Interaction (Ancestry × Dosage): p = {_fmt(interaction_val, 3)}."
+                f"    Interaction (Ancestry × Dosage): p = {_fmt(interaction_val, 3)}.",
             )
 
-        for anc in spec.ancestry_targets:
+        for anc in ancestry_prefixes:
             p_col = f"{anc}_P"
             or_col = f"{anc}_OR"
             lo_col = f"{anc}_CI_LO_OR"
@@ -2059,8 +1870,8 @@ def summarize_key_associations() -> List[str]:
                 else:
                     line += f", OR = {_fmt(or_val, 3)}"
             lines.append(line + ".")
-    return lines
 
+    return lines
 
 def summarize_category_tests() -> List[str]:
     cat_path = DATA_DIR / "phewas v2 - categories.tsv"
