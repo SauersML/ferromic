@@ -7,11 +7,43 @@ import argparse
 import json
 import re
 import shutil
+import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
 ALLOWED_EXTENSIONS = {".png", ".svg", ".pdf"}
+
+
+def _generate_pop_dosage_plot(figures_root: Path) -> None:
+    """Generate the population dosage plot if it's missing from artifacts.
+
+    The build step sometimes downloads figure artifacts that omit the
+    ``special/pop_dosage_plot.pdf`` output produced by ``stats/pop_dosage_plot.py``
+    in the run-analysis workflow. To keep the gallery build resilient, run the
+    script locally and copy the outputs into the expected figures root when the
+    required asset is absent.
+    """
+
+    project_root = Path(__file__).resolve().parent.parent
+    script_path = project_root / "stats/pop_dosage_plot.py"
+
+    if not script_path.exists():
+        print(f"Population dosage script not found at {script_path}; skipping generation.")
+        return
+
+    print("special/pop_dosage_plot.pdf missing; generating via stats/pop_dosage_plot.py...")
+    subprocess.run([sys.executable, str(script_path)], check=True, cwd=project_root)
+
+    for ext in (".pdf", ".png"):
+        source = project_root / f"special/pop_dosage_plot{ext}"
+        if not source.exists():
+            continue
+
+        destination_dir = figures_root / "special"
+        destination_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination_dir / source.name)
 
 
 def parse_args() -> argparse.Namespace:
@@ -214,11 +246,17 @@ def main() -> None:
                 f"{missing_dir_list}"
             )
 
-        missing = sorted(
-            rel.as_posix() for rel in required_figures if rel not in figure_index
-        )
+        missing = {rel for rel in required_figures if rel not in figure_index}
+
+        if Path("special/pop_dosage_plot.pdf") in missing:
+            _generate_pop_dosage_plot(args.figures_root)
+            figure_index = build_figure_index(
+                collect_figure_files(args.figures_root), args.figures_root
+            )
+            missing = {rel for rel in required_figures if rel not in figure_index}
+
         if missing:
-            missing_list = "\n".join(missing)
+            missing_list = "\n".join(sorted(rel.as_posix() for rel in missing))
             raise SystemExit(
                 "Required figure assets were missing from the figures root:\n"
                 f"{missing_list}"
