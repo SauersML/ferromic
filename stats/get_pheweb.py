@@ -121,6 +121,17 @@ def load_completed_phenocodes(log_path: str) -> set:
         return set(line.strip() for line in f if line.strip())
 
 
+def load_skip_phenocodes(log_paths: Sequence[str] | None) -> set:
+    """Aggregate completed phenocodes from multiple log files."""
+    codes: set[str] = set()
+    if not log_paths:
+        return codes
+
+    for path in log_paths:
+        codes.update(load_completed_phenocodes(path))
+    return codes
+
+
 def append_to_log(phenocode: str, log_path: str) -> None:
     """Marks a phenocode as complete."""
     with open(log_path, 'a') as f:
@@ -653,7 +664,9 @@ def download_targets(targets_to_process, output_path: str, log_path: str, max_wo
 def chunk_targets(targets: Sequence[dict], shard_count: int) -> List[List[dict]]:
     shard_count = max(1, shard_count)
     if not targets:
-        return [[] for _ in range(shard_count)]
+        return [[]]
+
+    shard_count = min(shard_count, len(targets))
 
     base_size = len(targets) // shard_count
     remainder = len(targets) % shard_count
@@ -803,6 +816,7 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     parser.add_argument('--plan', action='store_true', help='Generate a plan JSON instead of downloading.')
     parser.add_argument('--plan-output', default=DEFAULT_PLAN_FILE, help='Where to write the JSON plan.')
     parser.add_argument('--shards', type=int, default=20, help='Number of shards to split downloads across when planning.')
+    parser.add_argument('--skip-log', action='append', default=[], help='Log file(s) containing phenocodes to skip (reused artifacts).')
 
     parser.add_argument('--aggregate', action='store_true', help='Aggregate TSV artifacts from a directory instead of downloading.')
     parser.add_argument('--input-dir', default='artifacts', help='Directory containing TSV files to aggregate.')
@@ -839,12 +853,20 @@ def main(argv: Iterable[str] | None = None):
     if not targets:
         targets = get_target_list(name_to_code)
 
+    skip_codes = load_skip_phenocodes(args.skip_log)
+
+    if skip_codes:
+        before = len(targets)
+        targets = [t for t in targets if str(t['phenocode']) not in skip_codes]
+        skipped = before - len(targets)
+        print(f"Skipping {skipped} target(s) already listed in provided log(s).")
+
     if args.plan:
         plan_targets(targets, args.shards, args.plan_output)
         return
 
     # Download mode
-    completed_codes = load_completed_phenocodes(args.log)
+    completed_codes = skip_codes | load_completed_phenocodes(args.log)
     targets_to_process = [t for t in targets if str(t['phenocode']) not in completed_codes]
 
     print(f"\nTotal targets: {len(targets)}")
