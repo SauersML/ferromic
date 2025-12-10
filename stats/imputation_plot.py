@@ -77,8 +77,8 @@ merged["End"] = pd.to_numeric(merged["End"], errors="coerce")
 plot_df = merged[merged[cons_col].isin([0, 1])].copy()
 plot_df = plot_df.dropna(subset=["unbiased_pearson_r2", "Chromosome", "Start", "End"])
 
-# Compute r from r^2
-plot_df["r"] = np.sqrt(np.clip(plot_df["unbiased_pearson_r2"].values, 0, None))
+# Compute r^2 values (clip negatives to zero)
+plot_df["r2"] = np.clip(plot_df["unbiased_pearson_r2"].values, 0, None)
 
 # Build chr:start-end label with thousands separators
 def fmt_coord(row):
@@ -89,8 +89,8 @@ def fmt_coord(row):
 
 plot_df["label"] = plot_df.apply(fmt_coord, axis=1)
 
-# Sort by r (descending)
-plot_df = plot_df.sort_values("r", ascending=False).reset_index(drop=True)
+# Sort by r^2 (descending)
+plot_df = plot_df.sort_values("r2", ascending=False).reset_index(drop=True)
 if plot_df.empty:
     raise RuntimeError("No inversions with consensus 0/1 were found after filtering and merging.")
 
@@ -101,7 +101,7 @@ BLUE_LIGHT = "#6fb6ff"   # recurrent
 
 # Positions and values
 x = np.arange(len(plot_df))
-y = plot_df["r"].values
+y = plot_df["r2"].values
 labels = plot_df["label"].tolist()
 consensus = plot_df[cons_col].values  # 0 = single-event, 1 = recurrent
 mask_single = (consensus == 0)
@@ -167,7 +167,7 @@ if mask_recur.any():
     )
 
 # Labels
-ax.set_ylabel("r", labelpad=14, color="black")
+ax.set_ylabel("$r^2$", labelpad=14, color="black")
 
 # X-axis label — WAY BIGGER
 ax.set_xlabel("Inversion", labelpad=16, color="black", fontsize=26)
@@ -187,8 +187,8 @@ for lbl in ax.get_xticklabels():
 ax.tick_params(axis="y", colors="black")
 ax.yaxis.set_major_locator(ticker.MaxNLocator(nbins=8))
 
-# Reference line at r = sqrt(0.5)
-threshold = np.sqrt(0.5)
+# Reference line at r^2 = 0.5
+threshold = 0.5
 ax.axhline(threshold, color="black", linewidth=0.9, linestyle="-", alpha=0.7)
 
 # Fix y-axis range to [0, 1]
