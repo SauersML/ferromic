@@ -6,14 +6,16 @@ This helper mirrors the filtering logic in:
 - stats/overall_AF_scatterplot.py
 
 The r plot starts from imputation metrics and only drops entries that
-lack consensus, coordinates, or r² values. The population dosage and
-overall AF plots first intersect inversion metadata with the population
-frequency table derived from the dosage file, and then (for the AF
-scatterplot) also require a Porubsky callset entry. Because the All of
-Us frequencies are sourced from the same dosage-derived table, missing
-rows there reflect limited dosage coverage rather than missing WGS data.
-This script reports the resulting counts and lists inversions that are
-present in the r plot but absent from the other figures.
+lack consensus, coordinates, or r² values (no quality threshold is
+applied). The population dosage and overall AF plots first intersect
+inversion metadata with the population frequency table derived from the
+dosage file, restrict to inversions with unbiased_pearson_r2 > 0.5,
+and then (for the AF scatterplot) also require a Porubsky callset entry.
+Because the All of Us frequencies are sourced from the same
+dosage-derived table, missing rows there reflect limited dosage coverage
+rather than missing WGS data. This script reports the resulting counts
+and lists inversions that are present in the r plot but absent from the
+other figures.
 """
 
 from __future__ import annotations
@@ -76,11 +78,21 @@ def load_inversion_r_plot_set(data_dir: Path, debug: bool = False) -> set[str]:
 def load_pop_dosage_set(
     data_dir: Path, debug: bool = False
 ) -> tuple[set[str], dict[str, set[str]]]:
+    imp = pd.read_csv(data_dir / "imputation_results_merged.tsv", sep="\t", dtype=str)
+    imp.columns = imp.columns.str.strip()
+    imp["id"] = imp["id"].astype(str).str.strip()
+    imp["unbiased_pearson_r2"] = pd.to_numeric(imp["unbiased_pearson_r2"], errors="coerce")
+    high_quality_imputed = set(imp.loc[imp["unbiased_pearson_r2"] > 0.5, "id"])
+
     freq = pd.read_csv(data_dir / "inversion_population_frequencies.tsv", sep="\t")
-    freq_raw_overall = freq[freq["Population"] == "ALL"][["Inversion"]].drop_duplicates()
     inv_props = pd.read_csv(data_dir / "inv_properties.tsv", sep="\t")
     freq.columns = freq.columns.str.strip()
     inv_props.columns = inv_props.columns.str.strip()
+
+    freq["Inversion"] = freq["Inversion"].astype(str).str.strip()
+    freq = freq[freq["Inversion"].isin(high_quality_imputed)]
+
+    freq_raw_overall = freq[freq["Population"] == "ALL"][["Inversion"]].drop_duplicates()
 
     inv_props[CONS_COL] = pd.to_numeric(inv_props[CONS_COL], errors="coerce")
     inv_props = inv_props[inv_props[CONS_COL].isin([0, 1])].copy()
@@ -88,6 +100,7 @@ def load_pop_dosage_set(
     inv_props["End"] = pd.to_numeric(inv_props["End"], errors="coerce")
     inv_props = inv_props[inv_props[["Start", "End"]].notna().all(axis=1)]
     inv_props = inv_props.rename(columns={"OrigID": "Inversion"})
+    inv_props["Inversion"] = inv_props["Inversion"].astype(str).str.strip()
 
     freq["N"] = pd.to_numeric(freq["N"], errors="coerce")
     freq = freq[freq["N"] > 1]
