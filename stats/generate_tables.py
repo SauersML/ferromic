@@ -88,6 +88,34 @@ INVERSION_COLUMN_DEFS: Dict[str, str] = OrderedDict(
             "Inversion allele frequency",
             "The frequency of the inverted allele observed in the phased reference panel (n=88 haplotypes).",
         ),
+        (
+            "overall_allele_frequency",
+            "Allele frequency of the inverted allele across all populations when imputation performance meets the unbiased Pearson r² > 0.5 threshold.",
+        ),
+        (
+            "afr_allele_frequency",
+            "Allele frequency of the inverted allele in African (afr) samples when unbiased Pearson r² > 0.5.",
+        ),
+        (
+            "amr_allele_frequency",
+            "Allele frequency of the inverted allele in American (amr) samples when unbiased Pearson r² > 0.5.",
+        ),
+        (
+            "eas_allele_frequency",
+            "Allele frequency of the inverted allele in East Asian (eas) samples when unbiased Pearson r² > 0.5.",
+        ),
+        (
+            "eur_allele_frequency",
+            "Allele frequency of the inverted allele in European (eur) samples when unbiased Pearson r² > 0.5.",
+        ),
+        (
+            "mid_allele_frequency",
+            "Allele frequency of the inverted allele in Middle Eastern (mid) samples when unbiased Pearson r² > 0.5.",
+        ),
+        (
+            "sas_allele_frequency",
+            "Allele frequency of the inverted allele in South Asian (sas) samples when unbiased Pearson r² > 0.5.",
+        ),
         ("verdictRecurrence_hufsah", "Recurrence classification based on the Hufsah algorithm."),
         ("verdictRecurrence_benson", "Recurrence classification based on the Benson algorithm."),
         (
@@ -540,8 +568,13 @@ CATEGORIES_RESULTS_CANDIDATES = (
 IMPUTATION_RESULTS = DATA_DIR / "imputation_results.tsv"
 INV_PROPERTIES = DATA_DIR / "inv_properties.tsv"
 POPULATION_METRICS = DATA_DIR / "output.csv"
+POPULATION_FREQUENCIES = DATA_DIR / "inversion_population_frequencies.tsv"
 BEST_TAGGING_RESULTS = DATA_DIR / BEST_TAGGING_FILENAME
 PAML_RESULTS = DATA_DIR / "GRAND_PAML_RESULTS.tsv"
+IMPUTATION_RESULTS_MERGED_URL = (
+    "https://raw.githubusercontent.com/SauersML/ferromic/refs/heads/main/data/"
+    "imputation_results_merged.tsv"
+)
 
 TABLE_S1 = DATA_DIR / "tables.xlsx - Table S1.tsv"
 TABLE_S2 = DATA_DIR / "tables.xlsx - Table S2.tsv"
@@ -774,6 +807,90 @@ def _merge_population_metrics(inv_df: pd.DataFrame) -> pd.DataFrame:
     return merged.drop(columns=helper_cols)
 
 
+def _load_imputation_performance_ids(min_r2: float = 0.5) -> set[str]:
+    try:
+        df = pd.read_csv(IMPUTATION_RESULTS_MERGED_URL, sep="\t", dtype=str, low_memory=False)
+    except (HTTPError, URLError) as exc:
+        raise SupplementaryTablesError(
+            "Unable to download imputation performance results from GitHub. Please ensure network access is available or provide a local copy of imputation_results_merged.tsv."
+        ) from exc
+    except Exception as exc:  # pragma: no cover - defensive guardrail
+        raise SupplementaryTablesError(
+            "Failed to load imputation performance results from GitHub."
+        ) from exc
+
+    required_cols = {"id", "unbiased_pearson_r2"}
+    missing_cols = required_cols - set(df.columns)
+    if missing_cols:
+        raise SupplementaryTablesError(
+            "Imputation performance results are missing required columns: "
+            + ", ".join(sorted(missing_cols))
+        )
+
+    df = df[list(required_cols)].copy()
+    df["unbiased_pearson_r2"] = pd.to_numeric(df["unbiased_pearson_r2"], errors="coerce")
+    return set(df.loc[df["unbiased_pearson_r2"] > min_r2, "id"].dropna().astype(str).str.strip())
+
+
+def _load_population_frequency_table() -> tuple[pd.DataFrame, List[str]]:
+    if not POPULATION_FREQUENCIES.exists():
+        raise SupplementaryTablesError(
+            f"Inversion population frequency TSV not found: {POPULATION_FREQUENCIES}"
+        )
+
+    freq_df = pd.read_csv(POPULATION_FREQUENCIES, sep="\t", dtype=str, low_memory=False)
+    required_cols = {"Inversion", "Population", "Allele_Freq"}
+    missing_cols = required_cols - set(freq_df.columns)
+    if missing_cols:
+        raise SupplementaryTablesError(
+            "Inversion population frequency TSV is missing required columns: "
+            + ", ".join(sorted(missing_cols))
+        )
+
+    freq_df = freq_df[list(required_cols)].copy()
+    freq_df["Population"] = freq_df["Population"].str.strip().str.lower()
+    freq_df["Allele_Freq"] = pd.to_numeric(freq_df["Allele_Freq"], errors="coerce")
+    freq_df["column_name"] = freq_df["Population"].replace({"all": "overall"}) + "_allele_frequency"
+
+    duplicate_mask = freq_df.duplicated(subset=["Inversion", "Population"], keep=False)
+    if duplicate_mask.any():
+        dup_rows = freq_df.loc[duplicate_mask, ["Inversion", "Population"]].drop_duplicates()
+        raise SupplementaryTablesError(
+            "Inversion population frequency TSV contains duplicate inversion/population pairs:\n"
+            + dup_rows.to_csv(index=False)
+        )
+
+    pivot = freq_df.pivot(index="Inversion", columns="column_name", values="Allele_Freq").reset_index()
+    column_names = sorted(freq_df["column_name"].unique())
+    return pivot, column_names
+
+
+def _add_population_allele_frequencies(inv_df: pd.DataFrame) -> pd.DataFrame:
+    freq_pivot, freq_columns = _load_population_frequency_table()
+    imputation_ok_ids = _load_imputation_performance_ids()
+
+    merged = inv_df.merge(freq_pivot, how="left", left_on="OrigID", right_on="Inversion")
+    merged = merged.drop(columns=["Inversion"])
+
+    for col in freq_columns:
+        if col not in merged.columns:
+            merged[col] = pd.NA
+
+    merged = merged.copy()
+    freq_cols_existing = [c for c in freq_columns if c in merged.columns]
+
+    if not imputation_ok_ids:
+        for col in freq_cols_existing:
+            merged[col] = pd.NA
+        return merged
+
+    valid_mask = merged["OrigID"].isin(imputation_ok_ids)
+    for col in freq_cols_existing:
+        merged.loc[~valid_mask, col] = pd.NA
+
+    return merged
+
+
 def ensure_cds_summary() -> Path:
     """Ensure cds_identical_proportions.tsv exists, generating it if .phy files are available."""
     if CDS_SUMMARY_TSV.exists():
@@ -895,6 +1012,7 @@ def _load_inversion_catalog() -> pd.DataFrame:
 
     df = df[INV_COLUMNS_KEEP].copy()
     df = _merge_population_metrics(df)
+    df = _add_population_allele_frequencies(df)
     df = df.rename(columns=INV_RENAME_MAP)
     return _prune_columns(df, INVERSION_COLUMN_DEFS, "Inversion catalog")
 
