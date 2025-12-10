@@ -287,51 +287,281 @@ PheWAS scale summary:
 
 KEY ASSOCIATIONS
 Selected inversion–phenotype associations (logistic regression with LRT p-values):
-  Available source tables: all_pop_phewas_tag.tsv, phewas_results.tsv.
-  [MAIN IMPUTED] chr10-79542902-INV-674513 vs Positive DNA test for high-risk HPV types: OR = 1.240 (95% CI 1.113–1.382), BH-adjusted p ≈ 0.036 (raw p = 1.187e-04).
+  Source table: phewas_results.tsv (MAIN IMPUTED).
+  [MAIN IMPUTED] chr17:45,585,159-46,292,045 vs Melanocytic_nevi: OR = 0.898 (95% CI 0.870–0.928), BH-adjusted p ≈ 3.978e-07 (raw p = 5.397e-11).
+    Interaction (Ancestry × Dosage): p = 5.812e-05.
+    [AFR] p = 0.424, OR = 1.111 (95% CI 0.857–1.408).
+    [AMR] p = 0.589, OR = 0.963 (95% CI 0.854–1.094).
+    [EAS] p = 0.046, OR = 2.920 (95% CI 1.020–4.726).
+    [EUR] p = 1.993e-11, OR = 0.892.
+    [MID] p = 0.678, OR = 1.128 (95% CI 0.662–1.678).
+    [SAS] p = 0.020, OR = 1.958 (95% CI 1.115–2.692).
+  [MAIN IMPUTED] chr17:45,585,159-46,292,045 vs Benign_neoplasm_of_the_skin: OR = 0.919 (95% CI 0.895–0.945), BH-adjusted p ≈ 3.486e-06 (raw p = 9.458e-10).
+    Interaction (Ancestry × Dosage): p = 0.010.
+    [AFR] p = 0.517, OR = 0.943 (95% CI 0.792–1.122).
+    [AMR] p = 0.954, OR = 1.003 (95% CI 0.917–1.093).
+    [EAS] p = 0.287, OR = 1.641 (95% CI 0.652–3.322).
+    [EUR] p = 7.312e-10, OR = 0.914.
+    [MID] p = 0.679, OR = 1.109 (95% CI 0.701–1.586).
+    [SAS] p = 0.115, OR = 1.421 (95% CI 0.918–2.023).
+  [MAIN IMPUTED] chr12:46,896,694-46,915,975 vs Conjunctivitis: OR = 1.147 (95% CI 1.091–1.205), BH-adjusted p ≈ 2.376e-04 (raw p = 9.670e-08).
+    Interaction (Ancestry × Dosage): p = 0.813.
+    [AFR] p = 0.727, OR = 1.045 (95% CI 0.814–1.319).
+    [AMR] p = 0.239, OR = 1.090 (95% CI 0.945–1.227).
+    [EAS] p = 0.584, OR = 1.421 (95% CI 0.359–3.780).
+    [EUR] p = 9.713e-07, OR = 1.150.
+    [SAS] p = 0.422, OR = 1.171 (95% CI 0.804–1.489).
+  [MAIN IMPUTED] chr17:45,585,159-46,292,045 vs Scar_conditions_and_fibrosis_of_skin: OR = 0.876 (95% CI 0.832–0.922), BH-adjusted p ≈ 7.396e-04 (raw p = 4.014e-07).
+    Interaction (Ancestry × Dosage): p = 0.933.
+    [AFR] p = 0.448, OR = 0.899 (95% CI 0.681–1.178).
+    [AMR] p = 0.558, OR = 0.947 (95% CI 0.802–1.125).
+    [EAS] p = 0.540, OR = 0.527 (95% CI 0.048–3.267).
+    [EUR] p = 1.406e-06, OR = 0.874.
+  [MAIN IMPUTED] chr12:46,896,694-46,915,975 vs Inflammation_of_the_eye: OR = 1.118 (95% CI 1.070–1.169), BH-adjusted p ≈ 1.049e-03 (raw p = 7.116e-07).
+    Interaction (Ancestry × Dosage): p = 0.779.
+    [AFR] p = 0.394, OR = 1.097 (95% CI 0.885–1.338).
+    [AMR] p = 0.216, OR = 1.081 (95% CI 0.956–1.197).
+    [EAS] p = 0.941, OR = 0.956 (95% CI 0.246–2.699).
+    [EUR] p = 1.545e-05, OR = 1.115 (95% CI 1.072–1.121).
+    [MID] p = 0.746, OR = 0.909 (95% CI 0.525–1.486).
+    [SAS] p = 0.125, OR = 1.281 (95% CI 0.935–1.479).
+  [MAIN IMPUTED] chr17:45,585,159-46,292,045 vs Skin_changes_due_to_solar_radiation: OR = 0.922 (95% CI 0.891–0.953), BH-adjusted p ≈ 2.511e-03 (raw p = 2.044e-06).
+    Interaction (Ancestry × Dosage): p = 0.652.
+    [AFR] p = 0.221, OR = 1.282 (95% CI 0.859–1.792).
+    [AMR] p = 0.029, OR = 0.836 (95% CI 0.744–0.982).
+    [EAS] p = 0.759, OR = 1.905 (95% CI 0.171–10.102).
+    [EUR] p = 1.542e-05, OR = 0.926 (95% CI 0.923–0.952).
+  [MAIN IMPUTED] chr17:45,585,159-46,292,045 vs Hypertrophic_conditions_of_skin: OR = 0.911 (95% CI 0.911–0.936), BH-adjusted p ≈ 2.675e-03 (raw p = 2.622e-06).
+    Interaction (Ancestry × Dosage): p = 0.506.
+    [AFR] p = 0.744, OR = 0.969 (95% CI 0.804–1.165).
+    [AMR] p = 0.919, OR = 0.993 (95% CI 0.884–1.114).
+    [EAS] p = 0.905, OR = 1.084 (95% CI 0.263–3.241).
+    [EUR] p = 8.426e-06, OR = 0.909 (95% CI 0.905–0.938).
+    [SAS] p = 0.107, OR = 0.603 (95% CI 0.331–1.111).
+  [MAIN IMPUTED] chr12:46,896,694-46,915,975 vs Acne: OR = 1.158 (95% CI 1.090–1.231), BH-adjusted p ≈ 2.675e-03 (raw p = 2.903e-06).
+    Interaction (Ancestry × Dosage): p = 0.840.
+    [AFR] p = 0.698, OR = 0.939 (95% CI 0.679–1.274).
+    [AMR] p = 0.318, OR = 1.097 (95% CI 0.915–1.274).
+    [EAS] p = 0.922, OR = 1.065 (95% CI 0.263–3.040).
+    [EUR] p = 8.218e-06, OR = 1.170.
+    [SAS] p = 0.463, OR = 1.137 (95% CI 0.816–1.424).
+  [MAIN IMPUTED] chr17:45,585,159-46,292,045 vs Rosacea: OR = 0.884 (95% CI 0.880–0.918), BH-adjusted p ≈ 3.026e-03 (raw p = 3.694e-06).
+    Interaction (Ancestry × Dosage): p = 0.698.
+    [AFR] p = 0.503, OR = 1.183 (95% CI 0.717–1.810).
+    [AMR] p = 0.315, OR = 0.903 (95% CI 0.759–1.095).
+    [EUR] p = 1.052e-05, OR = 0.884 (95% CI 0.876–0.923).
+  [MAIN IMPUTED] chr17:45,585,159-46,292,045 vs Lump_or_mass_in_breast_or_nonspecific_abnormal_breast_exam: OR = 0.930 (95% CI 0.929–0.951), BH-adjusted p ≈ 3.290e-03 (raw p = 4.464e-06).
+    Interaction (Ancestry × Dosage): p = 0.025.
+    [AFR] p = 0.875, OR = 1.010 (95% CI 0.893–1.140).
+    [AMR] p = 0.325, OR = 0.958 (95% CI 0.892–1.042).
+    [EAS] p = 0.367, OR = 1.568 (95% CI 0.585–3.523).
+    [EUR] p = 1.137e-05, OR = 0.925 (95% CI 0.924–0.949).
+    [MID] p = 0.924, OR = 1.026 (95% CI 0.631–1.592).
+    [SAS] p = 0.178, OR = 1.380 (95% CI 0.863–2.066).
+  [MAIN IMPUTED] chr17:45,585,159-46,292,045 vs Morbid_obesity: OR = 1.078 (95% CI 1.043–1.113), BH-adjusted p ≈ 4.536e-03 (raw p = 6.769e-06).
+    Interaction (Ancestry × Dosage): p = 2.982e-03.
+    [AFR] p = 4.445e-04, OR = 1.226 (95% CI 1.096–1.349).
+    [AMR] p = 0.102, OR = 1.070 (95% CI 0.987–1.132).
+    [EAS] p = 0.734, OR = 0.829 (95% CI 0.206–2.629).
+    [EUR] p = 5.111e-04, OR = 1.069 (95% CI 1.033–1.079).
+    [SAS] p = 0.365, OR = 1.347 (95% CI 0.703–2.258).
+  [MAIN IMPUTED] chr17:45,585,159-46,292,045 vs Skin_changes_due_to_chronic_exposure_to_nonionizing_radiation: OR = 0.924 (95% CI 0.923–0.948), BH-adjusted p ≈ 4.740e-03 (raw p = 7.716e-06).
+    Interaction (Ancestry × Dosage): p = 0.622.
+    [AFR] p = 0.156, OR = 1.439 (95% CI 0.867–2.128).
+    [AMR] p = 0.059, OR = 0.845 (95% CI 0.740–1.006).
+    [EAS] p = 0.649, OR = 2.396 (95% CI 0.202–13.133).
+    [EUR] p = 3.628e-05, OR = 0.928 (95% CI 0.922–0.956).
+  [MAIN IMPUTED] chr17:45,585,159-46,292,045 vs Abnormal_mammogram: OR = 0.906 (95% CI 0.898–0.940), BH-adjusted p ≈ 9.094e-03 (raw p = 1.604e-05).
+    Interaction (Ancestry × Dosage): p = 0.023.
+    [AFR] p = 0.788, OR = 1.025 (95% CI 0.859–1.215).
+    [AMR] p = 0.980, OR = 0.998 (95% CI 0.883–1.124).
+    [EAS] p = 0.668, OR = 1.355 (95% CI 0.318–4.012).
+    [EUR] p = 5.624e-06, OR = 0.891 (95% CI 0.888–0.924).
+    [SAS] p = 0.099, OR = 1.806 (95% CI 0.893–3.060).
+  [MAIN IMPUTED] chr17:45,585,159-46,292,045 vs Other_skin_and_subcutaneous_disorders: OR = 0.938 (95% CI 0.934–0.961), BH-adjusted p ≈ 0.012 (raw p = 2.217e-05).
+    Interaction (Ancestry × Dosage): p = 0.016.
+    [AFR] p = 0.413, OR = 0.941 (95% CI 0.816–1.086).
+    [AMR] p = 0.519, OR = 0.969 (95% CI 0.892–1.061).
+    [EAS] p = 0.998, OR = 0.999 (95% CI 0.295–2.723).
+    [EUR] p = 8.027e-05, OR = 0.938 (95% CI 0.931–0.964).
+    [MID] p = 0.777, OR = 0.925 (95% CI 0.564–1.474).
+    [SAS] p = 4.176e-03, OR = 1.958 (95% CI 1.244–2.552).
+  [MAIN IMPUTED] chr17:45,585,159-46,292,045 vs Other_follicular_disorders: OR = 0.942 (95% CI 0.937–0.964), BH-adjusted p ≈ 0.017 (raw p = 3.494e-05).
+    Interaction (Ancestry × Dosage): p = 0.581.
+    [AFR] p = 0.379, OR = 0.946 (95% CI 0.837–1.070).
+    [AMR] p = 0.140, OR = 0.938 (95% CI 0.879–1.020).
+    [EAS] p = 0.775, OR = 1.142 (95% CI 0.447–2.522).
+    [EUR] p = 6.683e-04, OR = 0.947 (95% CI 0.936–0.975).
+    [MID] p = 0.634, OR = 1.105 (95% CI 0.749–1.502).
+    [SAS] p = 0.924, OR = 1.018 (95% CI 0.701–1.452).
+  [MAIN IMPUTED] chr8:7,301,024-12,598,379 vs Multinodular_goiter: OR = 0.835 (95% CI 0.767–0.910), BH-adjusted p ≈ 0.017 (raw p = 3.600e-05).
+    Interaction (Ancestry × Dosage): p = 3.448e-03.
+    [AFR] p = 0.478, OR = 1.079.
+    [AMR] p = 0.139, OR = 0.840.
+    [EAS] p = 4.998e-04, OR = 0.161 (95% CI 0.124–0.215).
+    [EUR] p = 1.741e-05, OR = 0.796.
+  [MAIN IMPUTED] chr17:45,585,159-46,292,045 vs Benign_sarcoma_related_cancers: OR = 0.936 (95% CI 0.930–0.961), BH-adjusted p ≈ 0.017 (raw p = 3.906e-05).
+    Interaction (Ancestry × Dosage): p = 1.015e-03.
+    [AFR] p = 0.963, OR = 1.004 (95% CI 0.857–1.172).
+    [AMR] p = 0.470, OR = 1.041 (95% CI 0.937–1.136).
+    [EAS] p = 0.734, OR = 1.256 (95% CI 0.315–3.620).
+    [EUR] p = 1.558e-05, OR = 0.928 (95% CI 0.925–0.953).
+    [MID] p = 0.806, OR = 1.074 (95% CI 0.634–1.645).
+    [SAS] p = 1.727e-03, OR = 2.378 (95% CI 1.400–3.065).
+  [MAIN IMPUTED] chr12:46,896,694-46,915,975 vs Disorder_of_nervous_system: OR = 1.168 (95% CI 1.095–1.184), BH-adjusted p ≈ 0.021 (raw p = 5.102e-05).
+    Interaction (Ancestry × Dosage): p = 0.689.
+    [AFR] p = 0.368, OR = 1.178 (95% CI 0.820–1.619).
+    [AMR] p = 0.026, OR = 1.277 (95% CI 1.031–1.464).
+    [EAS] p = 4.998e-04, OR = 0.687 (95% CI 1.120e-03–8.562).
+    [EUR] p = 1.345e-03, OR = 1.146 (95% CI 1.059–1.184).
+  [MAIN IMPUTED] chr17:45,585,159-46,292,045 vs Aphagia_and_dysphagia: OR = 0.928 (95% CI 0.919–0.958), BH-adjusted p ≈ 0.021 (raw p = 5.353e-05).
+    Interaction (Ancestry × Dosage): p = 0.031.
+    [AFR] p = 0.185, OR = 0.900 (95% CI 0.773–1.051).
+    [AMR] p = 0.200, OR = 1.071 (95% CI 0.965–1.156).
+    [EAS] p = 0.043, OR = 0.135 (95% CI 0.020–0.942).
+    [EUR] p = 6.756e-06, OR = 0.913 (95% CI 0.910–0.940).
+    [SAS] p = 0.115, OR = 1.619 (95% CI 0.887–2.539).
+  [MAIN IMPUTED] chr8:7,301,024-12,598,379 vs Alopecia_Areata: OR = 1.656 (95% CI 1.289–2.127), BH-adjusted p ≈ 0.028 (raw p = 7.697e-05).
+    Interaction (Ancestry × Dosage): p = 0.327.
+    [AFR] p = 0.692, OR = 1.121.
+    [AMR] p = 0.058, OR = 1.646 (95% CI 1.097–NA).
+    [EUR] p = 4.667e-04, OR = 1.872.
+  [MAIN IMPUTED] chr12:46,896,694-46,915,975 vs Epidermal_thickening: OR = 1.111 (95% CI 1.060–1.128), BH-adjusted p ≈ 0.032 (raw p = 9.117e-05).
+    Interaction (Ancestry × Dosage): p = 0.800.
+    [AFR] p = 0.545, OR = 1.077 (95% CI 0.845–1.351).
+    [AMR] p = 0.049, OR = 1.179 (95% CI 1.001–1.324).
+    [EAS] p = 0.789, OR = 1.239 (95% CI 0.199–4.163).
+    [EUR] p = 1.769e-03, OR = 1.097 (95% CI 1.038–1.127).
+    [SAS] p = 0.039, OR = 1.463 (95% CI 1.020–1.588).
+  [MAIN IMPUTED] chr17:45,585,159-46,292,045 vs Abnormal_cytological_findings_in_specimens_from_genital_organs: OR = 0.912 (95% CI 0.898–0.951), BH-adjusted p ≈ 0.036 (raw p = 1.070e-04).
+    Interaction (Ancestry × Dosage): p = 0.072.
+    [AFR] p = 0.340, OR = 0.923 (95% CI 0.784–1.087).
+    [AMR] p = 0.516, OR = 0.961 (95% CI 0.864–1.078).
+    [EAS] p = 0.273, OR = 0.420 (95% CI 0.076–1.842).
+    [EUR] p = 1.573e-03, OR = 0.917 (95% CI 0.894–0.965).
+    [SAS] p = 0.636, OR = 1.177 (95% CI 0.583–2.228).
+  [MAIN IMPUTED] chr17:45,585,159-46,292,045 vs Abnormal_Papanicolaou_smear: OR = 0.898 (95% CI 0.881–0.943), BH-adjusted p ≈ 0.036 (raw p = 1.120e-04).
+    Interaction (Ancestry × Dosage): p = 0.169.
+    [AFR] p = 0.137, OR = 0.866 (95% CI 0.719–1.046).
+    [AMR] p = 0.225, OR = 0.918 (95% CI 0.817–1.052).
+    [EAS] p = 0.547, OR = 0.580 (95% CI 0.082–2.789).
+    [EUR] p = 5.103e-03, OR = 0.914 (95% CI 0.882–0.972).
+  [MAIN IMPUTED] chr10:79,542,901-80,217,413 vs High_risk_human_papillomavirus_HPV_DNA_test_positive: OR = 1.240 (95% CI 1.113–1.382), BH-adjusted p ≈ 0.036 (raw p = 1.187e-04).
     Interaction (Ancestry × Dosage): p = 0.077.
-  [MAIN IMPUTED] chr6-141867315-INV-29159 vs Laryngitis and tracheitis: OR = 0.572 (95% CI 0.491–0.752), BH-adjusted p ≈ 0.044 (raw p = 2.236e-04).
+    [AFR] p = 0.469, OR = 1.138 (95% CI 0.810–1.476).
+    [AMR] p = 3.554e-05, OR = 1.475.
+    [EUR] p = 0.115, OR = 1.131 (95% CI 0.970–1.252).
+  [MAIN IMPUTED] chr12:46,896,694-46,915,975 vs Flat_foot_pes_planus: OR = 1.198 (95% CI 1.101–1.228), BH-adjusted p ≈ 0.042 (raw p = 1.548e-04).
+    Interaction (Ancestry × Dosage): p = 0.136.
+    [AFR] p = 0.218, OR = 1.251 (95% CI 0.872–1.712).
+    [AMR] p = 0.081, OR = 1.293 (95% CI 0.969–1.570).
+    [EUR] p = 8.676e-04, OR = 1.195 (95% CI 1.083–1.238).
+  [MAIN IMPUTED] chr17:45,585,159-46,292,045 vs Mild_cognitive_impairment: OR = 0.857 (95% CI 0.826–0.922), BH-adjusted p ≈ 0.042 (raw p = 1.706e-04).
+    Interaction (Ancestry × Dosage): p = 0.013.
+    [AFR] p = 0.288, OR = 1.216 (95% CI 0.846–1.676).
+    [AMR] p = 0.026, OR = 0.735 (95% CI 0.589–0.963).
+    [EUR] p = 3.848e-04, OR = 0.854 (95% CI 0.818–0.926).
+  [MAIN IMPUTED] chr8:7,301,024-12,598,379 vs Viral_infections: OR = 1.061 (95% CI 1.029–1.094), BH-adjusted p ≈ 0.042 (raw p = 1.712e-04).
+    Interaction (Ancestry × Dosage): p = 0.297.
+    [AFR] p = 0.083, OR = 1.070.
+    [AMR] p = 0.037, OR = 1.077.
+    [EAS] p = 0.726, OR = 1.060 (95% CI 0.922–1.089).
+    [EUR] p = 9.073e-03, OR = 1.054.
+    [MID] p = 0.018, OR = 1.926.
+    [SAS] p = 0.407, OR = 1.124.
+  [MAIN IMPUTED] chr12:46,896,694-46,915,975 vs Migraine: OR = 1.086 (95% CI 1.044–1.103), BH-adjusted p ≈ 0.042 (raw p = 1.725e-04).
+    Interaction (Ancestry × Dosage): p = 0.021.
+    [AFR] p = 0.540, OR = 1.072 (95% CI 0.857–1.321).
+    [AMR] p = 0.678, OR = 1.025 (95% CI 0.915–1.139).
+    [EAS] p = 0.054, OR = 2.911 (95% CI 0.980–5.915).
+    [EUR] p = 2.421e-04, OR = 1.094 (95% CI 1.047–1.112).
+    [MID] p = 0.870, OR = 0.950 (95% CI 0.527–1.578).
+    [SAS] p = 0.906, OR = 1.023 (95% CI 0.714–1.382).
+  [MAIN IMPUTED] chr17:45,585,159-46,292,045 vs Diastolic_heart_failure: OR = 1.116 (95% CI 1.061–1.127), BH-adjusted p ≈ 0.042 (raw p = 1.736e-04).
+    Interaction (Ancestry × Dosage): p = 0.398.
+    [AFR] p = 0.242, OR = 1.129 (95% CI 0.921–1.365).
+    [AMR] p = 0.012, OR = 1.232 (95% CI 1.048–1.320).
+    [EUR] p = 4.727e-03, OR = 1.097 (95% CI 1.030–1.127).
+  [MAIN IMPUTED] chr12:46,896,694-46,915,975 vs Hearing_impairment: OR = 1.082 (95% CI 1.042–1.098), BH-adjusted p ≈ 0.042 (raw p = 1.837e-04).
+    Interaction (Ancestry × Dosage): p = 0.984.
+    [AFR] p = 0.894, OR = 0.983 (95% CI 0.763–1.253).
+    [AMR] p = 0.161, OR = 1.104 (95% CI 0.961–1.234).
+    [EAS] p = 0.477, OR = 1.697 (95% CI 0.344–5.155).
+    [EUR] p = 7.009e-04, OR = 1.080 (95% CI 1.036–1.101).
+    [MID] p = 0.822, OR = 0.939 (95% CI 0.563–1.504).
+    [SAS] p = 0.981, OR = 0.996 (95% CI 0.712–1.346).
+  [MAIN IMPUTED] chr12:46,896,694-46,915,975 vs Urinary_incontinence_and_enuresis: OR = 1.097 (95% CI 1.050–1.116), BH-adjusted p ≈ 0.042 (raw p = 1.860e-04).
+    Interaction (Ancestry × Dosage): p = 0.897.
+    [AFR] p = 0.694, OR = 1.051 (95% CI 0.821–1.325).
+    [AMR] p = 0.042, OR = 1.157 (95% CI 1.005–1.281).
+    [EAS] p = 0.266, OR = 2.366 (95% CI 0.472–6.570).
+    [EUR] p = 1.600e-03, OR = 1.090 (95% CI 1.035–1.118).
+    [SAS] p = 0.677, OR = 0.899 (95% CI 0.574–1.377).
+  [MAIN IMPUTED] chr8:7,301,024-12,598,379 vs Uninodular_goiter_single_thyroid_nodule: OR = 0.872 (95% CI 0.811–0.937), BH-adjusted p ≈ 0.042 (raw p = 1.877e-04).
+    Interaction (Ancestry × Dosage): p = 0.014.
+    [AFR] p = 0.944, OR = 0.993 (95% CI 0.961–1.038).
+    [AMR] p = 0.041, OR = 0.820.
+    [EAS] p = 2.145e-04, OR = 0.207.
+    [EUR] p = 2.389e-03, OR = 0.874.
+    [SAS] p = 0.481, OR = 0.770 (95% CI 0.633–0.952).
+  [MAIN IMPUTED] chr12:46,896,694-46,915,975 vs Lump_or_mass_in_breast_or_nonspecific_abnormal_breast_exam: OR = 1.086 (95% CI 1.044–1.104), BH-adjusted p ≈ 0.042 (raw p = 1.909e-04).
+    Interaction (Ancestry × Dosage): p = 0.078.
+    [AFR] p = 0.627, OR = 1.053 (95% CI 0.856–1.282).
+    [AMR] p = 0.841, OR = 1.013 (95% CI 0.898–1.135).
+    [EAS] p = 0.515, OR = 1.528 (95% CI 0.395–4.508).
+    [EUR] p = 8.417e-05, OR = 1.102 (95% CI 1.056–1.117).
+    [MID] p = 0.696, OR = 0.899 (95% CI 0.563–1.445).
+    [SAS] p = 0.133, OR = 0.762 (95% CI 0.593–1.081).
+  [MAIN IMPUTED] chr17:45,585,159-46,292,045 vs Goiter: OR = 0.927 (95% CI 0.914–0.961), BH-adjusted p ≈ 0.042 (raw p = 2.052e-04).
+    Interaction (Ancestry × Dosage): p = 0.079.
+    [AFR] p = 0.508, OR = 0.947 (95% CI 0.806–1.112).
+    [AMR] p = 0.019, OR = 0.867 (95% CI 0.798–0.977).
+    [EAS] p = 0.088, OR = 0.230 (95% CI 0.037–1.221).
+    [EUR] p = 6.406e-03, OR = 0.940 (95% CI 0.917–0.982).
+    [MID] p = 0.187, OR = 0.641 (95% CI 0.377–1.219).
+    [SAS] p = 0.168, OR = 1.466 (95% CI 0.849–2.267).
+  [MAIN IMPUTED] chr12:46,896,694-46,915,975 vs Sensorineural_hearing_loss: OR = 1.096 (95% CI 1.049–1.115), BH-adjusted p ≈ 0.042 (raw p = 2.066e-04).
+    Interaction (Ancestry × Dosage): p = 0.956.
+    [AFR] p = 0.940, OR = 1.012 (95% CI 0.742–1.353).
+    [AMR] p = 0.164, OR = 1.135 (95% CI 0.950–1.305).
+    [EAS] p = 0.274, OR = 2.701 (95% CI 0.397–8.809).
+    [EUR] p = 1.039e-03, OR = 1.090 (95% CI 1.038–1.115).
+    [SAS] p = 0.970, OR = 1.009 (95% CI 0.645–1.476).
+  [MAIN IMPUTED] chr12:46,896,694-46,915,975 vs Rosacea: OR = 1.144 (95% CI 1.072–1.167), BH-adjusted p ≈ 0.042 (raw p = 2.069e-04).
+    Interaction (Ancestry × Dosage): p = 0.539.
+    [AFR] p = 0.975, OR = 1.013 (95% CI 0.403–2.096).
+    [AMR] p = 0.459, OR = 0.896 (95% CI 0.674–1.183).
+    [EUR] p = 1.365e-04, OR = 1.155 (95% CI 1.081–1.176).
+  [MAIN IMPUTED] chr6:141,866,310-141,898,728 vs Laryngitis_and_tracheitis: OR = 0.572 (95% CI 0.491–0.752), BH-adjusted p ≈ 0.044 (raw p = 2.236e-04).
     Interaction (Ancestry × Dosage): p = 5.851e-05.
     [AFR] p = 7.470e-05, OR = 0.519 (95% CI 0.451–0.690).
-  [MAIN IMPUTED] chr12-46897663-INV-16289 vs Conjunctivitis: OR = 1.147 (95% CI 1.091–1.205), BH-adjusted p ≈ 2.376e-04 (raw p = 9.670e-08).
-    Interaction (Ancestry × Dosage): p = 0.813.
-  [MAIN IMPUTED] chr12-46897663-INV-16289 vs Acne: OR = 1.158 (95% CI 1.090–1.231), BH-adjusted p ≈ 2.675e-03 (raw p = 2.903e-06).
-    Interaction (Ancestry × Dosage): p = 0.840.
-  [MAIN IMPUTED] chr12-46897663-INV-16289 vs Epidermal thickening: OR = 1.111 (95% CI 1.060–1.128), BH-adjusted p ≈ 0.032 (raw p = 9.117e-05).
-    Interaction (Ancestry × Dosage): p = 0.800.
-  [MAIN IMPUTED] chr12-46897663-INV-16289 vs Inflammation of the eye: OR = 1.118 (95% CI 1.070–1.169), BH-adjusted p ≈ 1.049e-03 (raw p = 7.116e-07).
-    Interaction (Ancestry × Dosage): p = 0.779.
-  [MAIN IMPUTED] chr12-46897663-INV-16289 vs Migraine: OR = 1.086 (95% CI 1.044–1.103), BH-adjusted p ≈ 0.042 (raw p = 1.725e-04).
-    Interaction (Ancestry × Dosage): p = 0.021.
-  [MAIN IMPUTED] chr12-46897663-INV-16289 vs Disorder of nervous system: OR = 1.168 (95% CI 1.095–1.184), BH-adjusted p ≈ 0.021 (raw p = 5.102e-05).
-    Interaction (Ancestry × Dosage): p = 0.689.
-  [MAIN IMPUTED] chr17-45585160-INV-706887 vs Morbid obesity (Main Imputed): OR = 1.078 (95% CI 1.043–1.113), BH-adjusted p ≈ 4.536e-03 (raw p = 6.769e-06).
-    Interaction (Ancestry × Dosage): p = 2.982e-03.
-    [EUR] p = 5.111e-04, OR = 1.069 (95% CI 1.033–1.079).
-    [AFR] p = 4.445e-04, OR = 1.226 (95% CI 1.096–1.349).
-  [MAIN IMPUTED] chr17-45585160-INV-706887 vs Breast lump or abnormal exam (Main Imputed): OR = 0.930 (95% CI 0.929–0.951), BH-adjusted p ≈ 3.290e-03 (raw p = 4.464e-06).
-    Interaction (Ancestry × Dosage): p = 0.025.
-    [EUR] p = 1.137e-05, OR = 0.925 (95% CI 0.924–0.949).
-  [MAIN IMPUTED] chr17-45585160-INV-706887 vs Abnormal mammogram (Main Imputed): OR = 0.906 (95% CI 0.898–0.940), BH-adjusted p ≈ 9.094e-03 (raw p = 1.604e-05).
-    Interaction (Ancestry × Dosage): p = 0.023.
-    [EUR] p = 5.624e-06, OR = 0.891 (95% CI 0.888–0.924).
-  [MAIN IMPUTED] chr17-45585160-INV-706887 vs Mild cognitive impairment (Main Imputed): OR = 0.857 (95% CI 0.826–0.922), BH-adjusted p ≈ 0.042 (raw p = 1.706e-04).
-    Interaction (Ancestry × Dosage): p = 0.013.
-    [EUR] p = 3.848e-04, OR = 0.854 (95% CI 0.818–0.926).
-    [AMR] p = 0.026, OR = 0.735 (95% CI 0.589–0.963).
-  [MAIN IMPUTED] chr17-45585160-INV-706887 vs Abnormal Papanicolaou smear: OR = 0.898 (95% CI 0.881–0.943), BH-adjusted p ≈ 0.036 (raw p = 1.120e-04).
-    Interaction (Ancestry × Dosage): p = 0.169.
-  [MAIN IMPUTED] chr17-45585160-INV-706887 vs Melanocytic nevi: OR = 0.898 (95% CI 0.870–0.928), BH-adjusted p ≈ 3.978e-07 (raw p = 5.397e-11).
-    Interaction (Ancestry × Dosage): p = 5.812e-05.
-  [MAIN IMPUTED] chr17-45585160-INV-706887 vs Benign neoplasm of the skin: OR = 0.919 (95% CI 0.895–0.945), BH-adjusted p ≈ 3.486e-06 (raw p = 9.458e-10).
-    Interaction (Ancestry × Dosage): p = 0.010.
-  [MAIN IMPUTED] chr17-45585160-INV-706887 vs Diastolic Heart Failure: OR = 1.116 (95% CI 1.061–1.127), BH-adjusted p ≈ 0.042 (raw p = 1.736e-04).
-    Interaction (Ancestry × Dosage): p = 0.398.
-  [MAIN IMPUTED] chr17-45585160-INV-706887 vs Breast Cancer (Malignant neoplasm): OR = 0.901 (95% CI 0.881–0.949), BH-adjusted p ≈ 0.050 (raw p = 2.942e-04).
-  [TAG SNP] chr17-45974480-INV-29218 vs Morbid obesity (Tag SNP): OR = 1.054 (95% CI 1.031–1.078), BH-adjusted p ≈ 8.151e-04 (raw p = 3.650e-06).
-  [TAG SNP] chr17-45974480-INV-29218 vs Breast lump or abnormal exam (Tag SNP): OR = 0.956 (95% CI 0.936–0.977), BH-adjusted p ≈ 6.375e-03 (raw p = 4.280e-05).
-  [TAG SNP] chr17-45974480-INV-29218 vs Abnormal mammogram (Tag SNP): OR = 0.939 (95% CI 0.910–0.969), BH-adjusted p ≈ 7.326e-03 (raw p = 6.870e-05).
-  [TAG SNP] chr17-45974480-INV-29218 vs Mild cognitive impairment (Tag SNP): OR = 0.903 (95% CI 0.853–0.956), BH-adjusted p ≈ 0.017 (raw p = 3.708e-04).
+    [AMR] p = 0.863, OR = 1.076 (95% CI 0.451–2.238).
+    [EUR] p = 0.169, OR = 0.225 (95% CI 0.011–1.701).
+  [MAIN IMPUTED] chr12:46,896,694-46,915,975 vs Pure_hypercholesterolemia: OR = 1.082 (95% CI 1.041–1.100), BH-adjusted p ≈ 0.044 (raw p = 2.285e-04).
+    Interaction (Ancestry × Dosage): p = 0.656.
+    [AFR] p = 0.475, OR = 0.920 (95% CI 0.734–1.152).
+    [AMR] p = 0.131, OR = 1.103 (95% CI 0.971–1.223).
+    [EAS] p = 0.672, OR = 1.306 (95% CI 0.347–3.758).
+    [EUR] p = 8.039e-04, OR = 1.082 (95% CI 1.036–1.104).
+    [MID] p = 0.159, OR = 0.663 (95% CI 0.421–1.162).
+    [SAS] p = 0.385, OR = 1.155 (95% CI 0.844–1.429).
+  [MAIN IMPUTED] chr17:45,585,159-46,292,045 vs Pain_in_shoulder: OR = 0.952 (95% CI 0.943–0.975), BH-adjusted p ≈ 0.049 (raw p = 2.606e-04).
+    Interaction (Ancestry × Dosage): p = 0.200.
+    [AFR] p = 0.204, OR = 0.933 (95% CI 0.842–1.038).
+    [AMR] p = 0.557, OR = 1.023 (95% CI 0.951–1.090).
+    [EAS] p = 0.695, OR = 0.824 (95% CI 0.301–2.049).
+    [EUR] p = 3.209e-04, OR = 0.947 (95% CI 0.938–0.973).
+    [MID] p = 0.909, OR = 0.975 (95% CI 0.659–1.423).
+    [SAS] p = 0.086, OR = 1.390 (95% CI 0.955–1.927).
+  [MAIN IMPUTED] chr17:45,585,159-46,292,045 vs Nonspecific_reaction_to_test_for_tuberculosis: OR = 0.853 (95% CI 0.816–0.924), BH-adjusted p ≈ 0.050 (raw p = 2.758e-04).
+  [MAIN IMPUTED] chr12:46,896,694-46,915,975 vs Acquired_deformities_of_the_ankle_and_foot: OR = 1.133 (95% CI 1.065–1.160), BH-adjusted p ≈ 0.050 (raw p = 2.829e-04).
+  [MAIN IMPUTED] chr17:45,585,159-46,292,045 vs Diseases_of_vocal_cords_and_larynx_not_elsewhere_classified: OR = 0.888 (95% CI 0.864–0.942), BH-adjusted p ≈ 0.050 (raw p = 2.896e-04).
+  [MAIN IMPUTED] chr17:45,585,159-46,292,045 vs Malignant_neoplasm_of_the_breast: OR = 0.901 (95% CI 0.881–0.949), BH-adjusted p ≈ 0.050 (raw p = 2.942e-04).
+  [MAIN IMPUTED] chr17:45,585,159-46,292,045 vs Benign_mammary_dysplasias: OR = 0.917 (95% CI 0.900–0.958), BH-adjusted p ≈ 0.051 (raw p = 3.063e-04).
+  [MAIN IMPUTED] chr17:45,585,159-46,292,045 vs Sebaceous_cyst_Epidermal_cyst: OR = 0.928 (95% CI 0.913–0.963), BH-adjusted p ≈ 0.052 (raw p = 3.160e-04).
+  [MAIN IMPUTED] chr17:45,585,159-46,292,045 vs Malignant_neoplasm_of_the_breast_female: OR = 0.898 (95% CI 0.876–0.948), BH-adjusted p ≈ 0.053 (raw p = 3.295e-04).
+  [MAIN IMPUTED] chr12:46,896,694-46,915,975 vs Abnormal_findings_on_diagnostic_test_of_central_nervous_system: OR = 1.157 (95% CI 1.074–1.188), BH-adjusted p ≈ 0.059 (raw p = 3.740e-04).
+  [MAIN IMPUTED] chr12:46,896,694-46,915,975 vs Hypothyroidism_not_specified_as_secondary: OR = 1.083 (95% CI 1.040–1.103), BH-adjusted p ≈ 0.059 (raw p = 3.832e-04).
 
 CATEGORY TESTS
 Phecode category omnibus and directional tests:
