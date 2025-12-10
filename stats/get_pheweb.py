@@ -99,6 +99,7 @@ DEFAULT_COORD_CHUNK = 1_000_000
 BEST_TAGGING_SNPS = Path(__file__).resolve().parent.parent / "data" / "best_tagging_snps_qvalues.tsv"
 
 RANGE_CHUNK_SIZE = 512 * 1024  # 512 KiB chunks for ranged BGZF reads
+HAS_BGZIP_READER = hasattr(bgzip, "BGZipFile")
 
 # Global event to handle interruption cleanly
 stop_event = Event()
@@ -118,6 +119,17 @@ def load_completed_phenocodes(log_path: str) -> set:
         return set()
     with open(log_path, 'r') as f:
         return set(line.strip() for line in f if line.strip())
+
+
+def load_skip_phenocodes(log_paths: Sequence[str] | None) -> set:
+    """Aggregate completed phenocodes from multiple log files."""
+    codes: set[str] = set()
+    if not log_paths:
+        return codes
+
+    for path in log_paths:
+        codes.update(load_completed_phenocodes(path))
+    return codes
 
 
 def append_to_log(phenocode: str, log_path: str) -> None:
@@ -416,7 +428,7 @@ def _streaming_gzip_filter(
                     yield str(raw_line).replace('\n', '')
 
     # Prefer ranged BGZF reads so we can stop early without downloading the world
-    if compression_info.get('is_bgzf') and supports_range:
+    if compression_info.get('is_bgzf') and supports_range and HAS_BGZIP_READER:
         try:
             content_length = int(info.get('content_length', 0))
         except ValueError:
@@ -432,13 +444,16 @@ def _streaming_gzip_filter(
     else:
         line_iter = None
 
+    if compression_info.get('is_bgzf') and not HAS_BGZIP_READER:
+        print("BGZF support unavailable in bgzip module; falling back to streaming gzip reader.")
+
     if line_iter is None:
         print("Streaming from start because range/BGZF support is insufficient for targeted seeks...")
         resp = session.get(url, stream=True, timeout=60)
         resp.raise_for_status()
         compressor = resp.headers.get('content-encoding', info.get('content_encoding', ''))
         reader = resp.raw
-        if compression_info.get('is_bgzf'):
+        if compression_info.get('is_bgzf') and HAS_BGZIP_READER:
             reader = bgzip.BGZipFile(fileobj=resp.raw)
         elif 'gzip' in compressor or 'gzip' in info.get('content_type', ''):
             reader = gzip.GzipFile(fileobj=resp.raw)
@@ -490,11 +505,32 @@ def download_task(target, coords_by_chrom: Dict[str, set] | None = None):
     phenostring = target['phenostring']
 
     # Logic for URL construction and retries
-    urls_to_try = [f"{BASE_PHEWEB_URL}{phenocode}"]
+    urls_to_try = []
+
+    def _add_url(url: str):
+        if url not in urls_to_try:
+            urls_to_try.append(url)
+
+    zero_prefixed_codes: list[str] = []
+
+    def _maybe_add_zero_variant(code: str):
+        if not code:
+            return
+
+        # Queue "0{code}" and, if necessary, "00{code}" for sequential retries.
+        # This follows the "prefix with a zero, and if that fails prefix with another" rule.
+        if not code.startswith("0"):
+            zero_prefixed_codes.extend([f"0{code}", f"00{code}"])
+        elif not code.startswith("00"):
+            zero_prefixed_codes.append(f"0{code}")
+
+    _add_url(f"{BASE_PHEWEB_URL}{phenocode}")
+    _maybe_add_zero_variant(phenocode)
 
     # If code looks like "290.0", add "290" as a fallback
     if phenocode.endswith(".0"):
-        urls_to_try.append(f"{BASE_PHEWEB_URL}{phenocode[:-2]}")
+        _add_url(f"{BASE_PHEWEB_URL}{phenocode[:-2]}")
+        _maybe_add_zero_variant(phenocode[:-2])
 
     df = None
     bytes_downloaded = 0
@@ -504,6 +540,14 @@ def download_task(target, coords_by_chrom: Dict[str, set] | None = None):
         try:
             with requests.Session() as session:
                 info = _describe_remote(url, session)
+
+                if info.get('status') == '404':
+                    error_msg = f"404 Not Found at {url}"
+                    if zero_prefixed_codes:
+                        zero_code = zero_prefixed_codes.pop(0)
+                        _add_url(f"{BASE_PHEWEB_URL}{zero_code}")
+                    continue
+
                 compression_info = _sniff_compression(url, session, info)
 
                 coords_summary = "no coordinate filter"
@@ -515,10 +559,6 @@ def download_task(target, coords_by_chrom: Dict[str, set] | None = None):
                     f"Range support: {info.get('accept_ranges')}, gzip: {compression_info.get('is_gzip')}, "
                     f"bgzf: {compression_info.get('is_bgzf')}"
                 )
-
-                if info.get('status') == '404':
-                    error_msg = f"404 Not Found at {url}"
-                    continue
 
                 try:
                     bytes_downloaded = int(info.get('content_length'))
@@ -625,7 +665,9 @@ def download_targets(targets_to_process, output_path: str, log_path: str, max_wo
 def chunk_targets(targets: Sequence[dict], shard_count: int) -> List[List[dict]]:
     shard_count = max(1, shard_count)
     if not targets:
-        return [[] for _ in range(shard_count)]
+        return []
+
+    shard_count = min(shard_count, len(targets))
 
     base_size = len(targets) // shard_count
     remainder = len(targets) % shard_count
@@ -775,6 +817,7 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     parser.add_argument('--plan', action='store_true', help='Generate a plan JSON instead of downloading.')
     parser.add_argument('--plan-output', default=DEFAULT_PLAN_FILE, help='Where to write the JSON plan.')
     parser.add_argument('--shards', type=int, default=20, help='Number of shards to split downloads across when planning.')
+    parser.add_argument('--skip-log', action='append', default=[], help='Log file(s) containing phenocodes to skip (reused artifacts).')
 
     parser.add_argument('--aggregate', action='store_true', help='Aggregate TSV artifacts from a directory instead of downloading.')
     parser.add_argument('--input-dir', default='artifacts', help='Directory containing TSV files to aggregate.')
@@ -811,12 +854,20 @@ def main(argv: Iterable[str] | None = None):
     if not targets:
         targets = get_target_list(name_to_code)
 
+    skip_codes = load_skip_phenocodes(args.skip_log)
+
+    if skip_codes:
+        before = len(targets)
+        targets = [t for t in targets if str(t['phenocode']) not in skip_codes]
+        skipped = before - len(targets)
+        print(f"Skipping {skipped} target(s) already listed in provided log(s).")
+
     if args.plan:
         plan_targets(targets, args.shards, args.plan_output)
         return
 
     # Download mode
-    completed_codes = load_completed_phenocodes(args.log)
+    completed_codes = skip_codes | load_completed_phenocodes(args.log)
     targets_to_process = [t for t in targets if str(t['phenocode']) not in completed_codes]
 
     print(f"\nTotal targets: {len(targets)}")
