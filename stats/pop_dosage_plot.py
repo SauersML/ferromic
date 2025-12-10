@@ -12,7 +12,9 @@ import pandas as pd
 DATA_URL = "https://raw.githubusercontent.com/SauersML/ferromic/refs/heads/main/data/inversion_population_frequencies.tsv"
 DATA_PATH = Path("data/inversion_population_frequencies.tsv")
 INV_PROPERTIES_PATH = Path("data/inv_properties.tsv")
-OUTPUT_BASE = Path("special/pop_allele_frequency_plot")
+# Keep this basename aligned with scripts/replicate_figures.py outputs to satisfy
+# the run-analysis artifact checks.
+OUTPUT_BASE = Path("special/pop_dosage_plot")
 
 plt.rcParams.update({
     "axes.labelsize": 22,
@@ -316,7 +318,7 @@ def main() -> None:
     fig.savefig(png_path, bbox_inches="tight", dpi=300)
     plt.close(fig)
 
-    print(f"Saved population allele frequency plot to {pdf_path} and {png_path}")
+    print(f"Saved population dosage plot to {pdf_path} and {png_path}")
 
 
 if __name__ == "__main__":
