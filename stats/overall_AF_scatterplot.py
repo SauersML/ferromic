@@ -18,7 +18,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from plot_style import CALLSET_POINT_COLOR, IMPUTED_POINT_COLOR, POINT_ALPHA
+# Matplotlib default blue/orange palette for consistency across figures.
+# Keep these inline (instead of importing a shared style module) to avoid
+# introducing a dependency that is absent in the CI/replication environment.
+CALLSET_POINT_COLOR = "#1f77b4"
+IMPUTED_POINT_COLOR = "#ff7f0e"
+# Slight transparency to reduce overplotting.
+POINT_ALPHA = 0.75
 
 plt.rcParams.update({
     "pdf.fonttype": 42,
