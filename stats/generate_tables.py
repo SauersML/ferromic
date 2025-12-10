@@ -1070,14 +1070,17 @@ def _load_phewas_tagging() -> pd.DataFrame:
 
 def _load_imputation_results() -> pd.DataFrame:
     df = _load_simple_tsv(IMPUTATION_RESULTS)
-    # Rename columns to match definitions and retain the original inversion ID for merging
-    df = df.rename(
-        columns={
-            "id": "OrigID",
-            "best_n_components": "n_components",
-            "model_p_value": "p_value",
-        }
-    )
+    # Ensure we have a single OrigID column for merging
+    if "OrigID" in df.columns:
+        if "id" in df.columns:
+            df = df.drop(columns=["id"])
+    elif "id" in df.columns:
+        df = df.rename(columns={"id": "OrigID"})
+    else:
+        raise SupplementaryTablesError("Imputation results are missing 'OrigID' or 'id' column.")
+
+    # Rename remaining columns to match definitions
+    df = df.rename(columns={"best_n_components": "n_components", "model_p_value": "p_value"})
 
     # Remove unnamed columns (Column 6 and Column 9)
     columns_to_drop = ["Column 6", "Column 9"]
