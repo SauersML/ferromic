@@ -88,34 +88,6 @@ INVERSION_COLUMN_DEFS: Dict[str, str] = OrderedDict(
             "Inversion allele frequency",
             "The frequency of the inverted allele observed in the phased reference panel (n=88 haplotypes).",
         ),
-        (
-            "overall_allele_frequency",
-            "Allele frequency of the inverted allele across all populations when imputation performance meets the unbiased Pearson r² > 0.5 threshold.",
-        ),
-        (
-            "afr_allele_frequency",
-            "Allele frequency of the inverted allele in African (afr) samples when unbiased Pearson r² > 0.5.",
-        ),
-        (
-            "amr_allele_frequency",
-            "Allele frequency of the inverted allele in American (amr) samples when unbiased Pearson r² > 0.5.",
-        ),
-        (
-            "eas_allele_frequency",
-            "Allele frequency of the inverted allele in East Asian (eas) samples when unbiased Pearson r² > 0.5.",
-        ),
-        (
-            "eur_allele_frequency",
-            "Allele frequency of the inverted allele in European (eur) samples when unbiased Pearson r² > 0.5.",
-        ),
-        (
-            "mid_allele_frequency",
-            "Allele frequency of the inverted allele in Middle Eastern (mid) samples when unbiased Pearson r² > 0.5.",
-        ),
-        (
-            "sas_allele_frequency",
-            "Allele frequency of the inverted allele in South Asian (sas) samples when unbiased Pearson r² > 0.5.",
-        ),
         ("verdictRecurrence_hufsah", "Recurrence classification based on the Hufsah algorithm."),
         ("verdictRecurrence_benson", "Recurrence classification based on the Benson algorithm."),
         (
@@ -456,6 +428,34 @@ IMPUTATION_COLUMN_DEFS: Dict[str, str] = OrderedDict(
         ),
         ("p_value", "P-value comparing the trained model against a null intercept-only model."),
         ("p_fdr_bh", "FDR adjusted p-value."),
+        (
+            "overall_allele_frequency_AoU",
+            "Allele frequency of the inverted allele across all (overall) populations in the All of Us dataset when imputation performance meets the unbiased Pearson r² > 0.5 threshold.",
+        ),
+        (
+            "afr_allele_frequency_AoU",
+            "Allele frequency of the inverted allele in African (afr) samples in the All of Us dataset when unbiased Pearson r² > 0.5.",
+        ),
+        (
+            "amr_allele_frequency_AoU",
+            "Allele frequency of the inverted allele in American (amr) samples in the All of Us dataset when unbiased Pearson r² > 0.5.",
+        ),
+        (
+            "eas_allele_frequency_AoU",
+            "Allele frequency of the inverted allele in East Asian (eas) samples in the All of Us dataset when unbiased Pearson r² > 0.5.",
+        ),
+        (
+            "eur_allele_frequency_AoU",
+            "Allele frequency of the inverted allele in European (eur) samples in the All of Us dataset when unbiased Pearson r² > 0.5.",
+        ),
+        (
+            "mid_allele_frequency_AoU",
+            "Allele frequency of the inverted allele in Middle Eastern (mid) samples in the All of Us dataset when unbiased Pearson r² > 0.5.",
+        ),
+        (
+            "sas_allele_frequency_AoU",
+            "Allele frequency of the inverted allele in South Asian (sas) samples in the All of Us dataset when unbiased Pearson r² > 0.5.",
+        ),
         (
             "Use",
             "Boolean flag indicating if the inversion met the quality threshold (r² > 0.5 and q < 0.05) for inclusion in the PheWAS.",
@@ -850,7 +850,9 @@ def _load_population_frequency_table() -> tuple[pd.DataFrame, List[str]]:
     freq_df = freq_df[list(required_cols)].copy()
     freq_df["Population"] = freq_df["Population"].str.strip().str.lower()
     freq_df["Allele_Freq"] = pd.to_numeric(freq_df["Allele_Freq"], errors="coerce")
-    freq_df["column_name"] = freq_df["Population"].replace({"all": "overall"}) + "_allele_frequency"
+    freq_df["column_name"] = (
+        freq_df["Population"].replace({"all": "overall"}) + "_allele_frequency_AoU"
+    )
 
     duplicate_mask = freq_df.duplicated(subset=["Inversion", "Population"], keep=False)
     if duplicate_mask.any():
@@ -865,11 +867,11 @@ def _load_population_frequency_table() -> tuple[pd.DataFrame, List[str]]:
     return pivot, column_names
 
 
-def _add_population_allele_frequencies(inv_df: pd.DataFrame) -> pd.DataFrame:
+def _add_population_allele_frequencies(df: pd.DataFrame) -> pd.DataFrame:
     freq_pivot, freq_columns = _load_population_frequency_table()
     imputation_ok_ids = _load_imputation_performance_ids()
 
-    merged = inv_df.merge(freq_pivot, how="left", left_on="OrigID", right_on="Inversion")
+    merged = df.merge(freq_pivot, how="left", left_on="OrigID", right_on="Inversion")
     merged = merged.drop(columns=["Inversion"])
 
     for col in freq_columns:
@@ -1012,7 +1014,6 @@ def _load_inversion_catalog() -> pd.DataFrame:
 
     df = df[INV_COLUMNS_KEEP].copy()
     df = _merge_population_metrics(df)
-    df = _add_population_allele_frequencies(df)
     df = df.rename(columns=INV_RENAME_MAP)
     return _prune_columns(df, INVERSION_COLUMN_DEFS, "Inversion catalog")
 
@@ -1227,6 +1228,7 @@ def _load_imputation_results() -> pd.DataFrame:
     )
 
     df = df.merge(inv_properties[["OrigID", "Inversion"]], on="OrigID", how="inner")
+    df = _add_population_allele_frequencies(df)
     return _prune_columns(df, IMPUTATION_COLUMN_DEFS, "Imputation results")
 
 
@@ -1515,7 +1517,7 @@ def build_workbook(output_path: Path) -> None:
             name="Imputation results",
             description=(
                 "Performance metrics for the machine learning models (Partial Least Squares regression) used to impute inversion "
-                "dosage from flanking SNP genotypes. Models were trained on the 88 phased haplotypes from the reference panel."
+                "dosage from flanking SNP genotypes. Models were trained on the 82 phased haplotypes from the reference panel."
             ),
             column_defs=IMPUTATION_COLUMN_DEFS,
             loader=_load_imputation_results,
