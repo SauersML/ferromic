@@ -276,8 +276,7 @@ Breakpoint enrichment (Flat–Ramp–Flat Model):
 
 IMPUTATION
 Imputation performance summary:
-  Models evaluated: 158; models with r² > 0.3 and BH p < 0.05: 30.
-  Models flagged for downstream PheWAS (Use == True): 30.
+  Models evaluated: 158; models with r² > 0.3 and BH p < 0.05: 21.
 
 PHEWAS SCALE
 PheWAS scale summary:
