@@ -99,6 +99,28 @@ jobs:
           mkdir -p "$(dirname "$MANIFEST_PATH")"
           mkdir -p "$APP_PATH/public"
 
+          REQUIRED_DIRS=$(jq -r '
+            def filenames:
+              .. | objects | .filename? // empty | select(. != "");
+
+            filenames
+            | split("/")
+            | .[:-1]
+            | select(length > 0)
+            | join("/")
+          ' "$APP_PATH/data/special-figures.json" "$APP_PATH/data/phewas-figures.json" | sort -u)
+
+          has_required_dirs() {
+            local root="$1"
+            while IFS= read -r dir; do
+              [ -z "$dir" ] && continue
+              if [ ! -d "$root/$dir" ]; then
+                return 1
+              fi
+            done <<< "$REQUIRED_DIRS"
+            return 0
+          }
+
           TRIGGER_WORKFLOW="${{ github.event.workflow_run && github.event.workflow_run.name || '' }}"
           RUN_ID="${{ github.event.workflow_run && github.event.workflow_run.id || '' }}"
           if [ "$TRIGGER_WORKFLOW" != 'run-analysis' ]; then
@@ -140,33 +162,24 @@ jobs:
           fi
 
           if [ -z "$FIGURES_ROOT" ]; then
+            FIGURES_ROOT=$(find "$SEARCH_ROOT" -type d -print | while read -r candidate; do
+              if has_required_dirs "$candidate"; then
+                echo "$candidate"
+                break
+              fi
+            done)
+          fi
+
+          if [ -z "$FIGURES_ROOT" ] && has_required_dirs "$SEARCH_ROOT"; then
+            FIGURES_ROOT="$SEARCH_ROOT"
+          fi
+
+          if [ -z "$FIGURES_ROOT" ]; then
             echo "Figures directory not found in artifact; failing build."
             exit 1
           else
             echo "Using figures root: $FIGURES_ROOT"
           fi
-
-          REQUIRED_DIRS=$(jq -r '
-            def filenames:
-              .. | objects | .filename? // empty | select(. != "");
-
-            filenames
-            | split("/")
-            | .[:-1]
-            | select(length > 0)
-            | join("/")
-          ' "$APP_PATH/data/special-figures.json" "$APP_PATH/data/phewas-figures.json" | sort -u)
-
-          has_required_dirs() {
-            local root="$1"
-            while IFS= read -r dir; do
-              [ -z "$dir" ] && continue
-              if [ ! -d "$root/$dir" ]; then
-                return 1
-              fi
-            done <<< "$REQUIRED_DIRS"
-            return 0
-          }
 
           if ! has_required_dirs "$FIGURES_ROOT"; then
             echo "Figures root $FIGURES_ROOT is missing required figure directories; searching for an alternative root."
