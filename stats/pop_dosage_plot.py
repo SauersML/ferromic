@@ -11,6 +11,8 @@ import pandas as pd
 
 DATA_URL = "https://raw.githubusercontent.com/SauersML/ferromic/refs/heads/main/data/inversion_population_frequencies.tsv"
 DATA_PATH = Path("data/inversion_population_frequencies.tsv")
+IMPUTATION_DATA_URL = "https://raw.githubusercontent.com/SauersML/ferromic/refs/heads/main/data/imputation_results_merged.tsv"
+IMPUTATION_DATA_PATH = Path("data/imputation_results_merged.tsv")
 INV_PROPERTIES_PATH = Path("data/inv_properties.tsv")
 # Keep this basename aligned with scripts/replicate_figures.py outputs to satisfy
 # the run-analysis artifact checks.
@@ -49,6 +51,31 @@ def _ensure_data_file() -> Path:
     return DATA_PATH
 
 
+def _ensure_imputation_file() -> Path:
+    """Ensure the imputation summary table is available locally."""
+
+    IMPUTATION_DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
+    if IMPUTATION_DATA_PATH.exists():
+        return IMPUTATION_DATA_PATH
+
+    print(f"Downloading imputation metrics from {IMPUTATION_DATA_URL}...")
+    request = Request(IMPUTATION_DATA_URL, headers={"User-Agent": "Mozilla/5.0"})
+
+    try:
+        with urlopen(request) as response, IMPUTATION_DATA_PATH.open("wb") as handle:
+            if response.status != 200:
+                raise HTTPError(
+                    IMPUTATION_DATA_URL, response.status, "Bad status", response.headers, None
+                )
+            shutil.copyfileobj(response, handle)
+    except (URLError, HTTPError) as exc:
+        if IMPUTATION_DATA_PATH.exists():
+            IMPUTATION_DATA_PATH.unlink()
+        raise RuntimeError(f"Failed to download {IMPUTATION_DATA_URL}") from exc
+
+    return IMPUTATION_DATA_PATH
+
+
 def _load_inv_properties() -> pd.DataFrame:
     """Load inversion properties with recurrence and coordinate information."""
 
@@ -82,6 +109,8 @@ def _load_inv_properties() -> pd.DataFrame:
         }
     )
 
+    df["Inversion"] = df["Inversion"].astype(str).str.strip()
+    df["Chromosome"] = df["Chromosome"].astype(str).str.strip()
     df = df[df["Recurrence"].isin([0, 1])].copy()
 
     df["Start"] = pd.to_numeric(df["Start"], errors="coerce")
@@ -89,6 +118,25 @@ def _load_inv_properties() -> pd.DataFrame:
     df = df[df[["Start", "End"]].notna().all(axis=1)]
 
     return df[["Inversion", "Chromosome", "Start", "End"]]
+
+
+def _load_imputation_quality() -> set[str]:
+    """Return inversion IDs that pass the imputation r² threshold."""
+
+    imp_path = _ensure_imputation_file()
+    df = pd.read_csv(imp_path, sep="\t", dtype=str)
+    df.columns = df.columns.str.strip()
+
+    required_cols = {"id", "unbiased_pearson_r2"}
+    missing = required_cols.difference(df.columns)
+    if missing:
+        raise KeyError(f"Missing columns in imputation summary: {sorted(missing)}")
+
+    df["id"] = df["id"].astype(str).str.strip()
+    df["unbiased_pearson_r2"] = pd.to_numeric(df["unbiased_pearson_r2"], errors="coerce")
+
+    passing = df[df["unbiased_pearson_r2"] > 0.5]
+    return set(passing["id"])
 
 
 def _load_and_normalize() -> pd.DataFrame:
@@ -126,12 +174,40 @@ def _load_and_normalize() -> pd.DataFrame:
         }
     )
 
+    df["Inversion"] = df["Inversion"].astype(str).str.strip()
+
+    freq_cols = [
+        "Allele_Freq",
+        "CI95_Lower",
+        "CI95_Upper",
+        "AF_Q1",
+        "AF_Median",
+        "AF_Q3",
+        "AF_Lower_Whisker",
+        "AF_Upper_Whisker",
+    ]
+    numeric_cols = ["Mean_dosage"] + freq_cols
+
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").clip(lower=0)
+
+    for col in freq_cols:
+        if col in df.columns:
+            df[col] = df[col].clip(upper=1)
+
     return df
 
 
 def _prepare_dataframe() -> tuple[pd.DataFrame, np.ndarray, list[str], list[str]]:
     df = _load_and_normalize()
     inv_properties = _load_inv_properties()
+    high_quality_ids = _load_imputation_quality()
+
+    if not high_quality_ids:
+        raise RuntimeError("No inversions passed the unbiased_pearson_r2 > 0.5 filter")
+
+    df = df[df["Inversion"].isin(high_quality_ids)]
 
     df = df.merge(inv_properties, on="Inversion", how="inner", validate="m:1")
     df["Label"] = (
