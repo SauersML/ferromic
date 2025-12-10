@@ -1,0 +1,98 @@
+name: PheWeb downloads
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "stats/get_pheweb.py"
+      - ".github/workflows/pheweb-download.yml"
+
+jobs:
+  plan:
+    name: Plan shards
+    runs-on: ubuntu-latest
+    outputs:
+      shards: ${{ steps.plan.outputs.shards }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Generate download plan
+        run: |
+          python stats/get_pheweb.py --plan --shards 20 --plan-output pheweb_plan.json
+      - id: plan
+        name: Export plan for matrix
+        run: |
+          SHARDS=$(python - <<'PY'
+import json
+with open('pheweb_plan.json') as f:
+    data = json.load(f)
+print(json.dumps(data['shards']))
+PY
+)
+          echo "shards=$SHARDS" >> "$GITHUB_OUTPUT"
+      - name: Upload plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: pheweb-plan
+          path: pheweb_plan.json
+
+  download:
+    name: Download shard ${{ matrix.shard.id }}
+    needs: plan
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJson(needs.plan.outputs.shards) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Write shard phenocodes
+        run: |
+          python - <<'PY'
+import json
+from pathlib import Path
+shard = json.loads('${{ toJson(matrix.shard) }}')
+Path('phenocodes.txt').write_text("\n".join(shard.get('phenocodes', [])))
+PY
+      - name: Download shard data
+        run: |
+          python stats/get_pheweb.py \
+            --phenocode-file phenocodes.txt \
+            --output shard_${{ matrix.shard.id }}.tsv \
+            --log shard_${{ matrix.shard.id }}.log
+      - name: Upload shard artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pheweb-shard-${{ matrix.shard.id }}
+          path: |
+            shard_${{ matrix.shard.id }}.tsv
+            shard_${{ matrix.shard.id }}.log
+
+  aggregate:
+    name: Aggregate shards
+    needs: download
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Download shard artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: pheweb-shard-*
+          path: artifacts
+          merge-multiple: true
+      - name: Aggregate results
+        run: |
+          python stats/get_pheweb.py --aggregate --input-dir artifacts --output aggregated_phenotype_results.tsv
+      - name: Upload aggregated artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pheweb-aggregated
+          path: aggregated_phenotype_results.tsv
