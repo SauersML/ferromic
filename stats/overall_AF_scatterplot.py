@@ -153,12 +153,19 @@ def load_aou_frequencies() -> pd.DataFrame:
         raise KeyError(f"inversion_population_frequencies.tsv missing columns: {missing}")
 
     df = df.loc[df["Population"] == "ALL", required_cols].copy()
-    df.rename(columns={
-        "Inversion": "OrigID",
-        "Allele_Freq": "aou_af",
-        "CI95_Lower": "aou_ci_low",
-        "CI95_Upper": "aou_ci_high",
-    }, inplace=True)
+    df.rename(
+        columns={
+            "Inversion": "OrigID",
+            "Allele_Freq": "aou_af",
+            "CI95_Lower": "aou_ci_low",
+            "CI95_Upper": "aou_ci_high",
+        },
+        inplace=True,
+    )
+
+    for col in ("aou_af", "aou_ci_low", "aou_ci_high"):
+        df[col] = pd.to_numeric(df[col], errors="coerce").clip(lower=0)
+
     df = df.drop_duplicates(subset=["OrigID"])
     return df
 
@@ -183,6 +190,13 @@ def load_imputation_results() -> pd.DataFrame:
         )
 
     df = df.loc[:, required_cols].drop_duplicates(subset=["OrigID"])
+    return df
+
+
+def _clamp_to_unit(df: pd.DataFrame, cols: Iterable[str]) -> pd.DataFrame:
+    for col in cols:
+        if col in df.columns:
+            df[col] = df[col].clip(lower=0, upper=1)
     return df
 
 
@@ -218,7 +232,11 @@ def plot_scatter(data: pd.DataFrame, filename: str) -> None:
     r_low, scatter_low = _plot_subset(low_r2, LOW_R2_COLOR, LOW_R2_ALPHA)
 
     ax.annotate(
-        f"r = {r_high:.2f}" if not math.isnan(r_high) else "r = NA",
+        (
+            f"r = {r_high:.2f} (N = {len(high_r2)})"
+            if not math.isnan(r_high)
+            else f"r = NA (N = {len(high_r2)})"
+        ),
         xy=(0.05, 0.95),
         xycoords="axes fraction",
         ha="left",
@@ -228,7 +246,11 @@ def plot_scatter(data: pd.DataFrame, filename: str) -> None:
         bbox={"facecolor": "white", "alpha": 0.9, "edgecolor": "none"},
     )
     ax.annotate(
-        f"r = {r_low:.2f}" if not math.isnan(r_low) else "r = NA",
+        (
+            f"r = {r_low:.2f} (N = {len(low_r2)})"
+            if not math.isnan(r_low)
+            else f"r = NA (N = {len(low_r2)})"
+        ),
         xy=(0.05, 0.86),
         xycoords="axes fraction",
         ha="left",
@@ -242,10 +264,10 @@ def plot_scatter(data: pd.DataFrame, filename: str) -> None:
     legend_labels: list[str] = []
     if scatter_high is not None:
         legend_handles.append(scatter_high)
-        legend_labels.append("unbiased r² > 0.5")
+        legend_labels.append(f"unbiased r² > 0.5 (N = {len(high_r2)})")
     if scatter_low is not None:
         legend_handles.append(scatter_low)
-        legend_labels.append("unbiased r² ≤ 0.5")
+        legend_labels.append(f"unbiased r² ≤ 0.5 (N = {len(low_r2)})")
     if legend_handles:
         ax.legend(
             legend_handles,
@@ -257,6 +279,8 @@ def plot_scatter(data: pd.DataFrame, filename: str) -> None:
 
     ax.set_xlabel("Porubsky et al. 2022 Callset Allele Frequency", fontsize=16)
     ax.set_ylabel("All of Us Cohort Imputed Allele Frequency", fontsize=16)
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
     ax.tick_params(labelsize=14)
 
     output_base = Path(filename)
@@ -344,7 +368,11 @@ def plot_scatter_with_ci(data: pd.DataFrame, filename: str) -> None:
     r_low, err_low = _errorbar_subset(low_r2, LOW_R2_COLOR, LOW_R2_ALPHA)
 
     ax.annotate(
-        f"r = {r_high:.2f}" if not math.isnan(r_high) else "r = NA",
+        (
+            f"r = {r_high:.2f} (N = {len(high_r2)})"
+            if not math.isnan(r_high)
+            else f"r = NA (N = {len(high_r2)})"
+        ),
         xy=(0.05, 0.95),
         xycoords="axes fraction",
         ha="left",
@@ -354,7 +382,11 @@ def plot_scatter_with_ci(data: pd.DataFrame, filename: str) -> None:
         bbox={"facecolor": "white", "alpha": 0.9, "edgecolor": "none"},
     )
     ax.annotate(
-        f"r = {r_low:.2f}" if not math.isnan(r_low) else "r = NA",
+        (
+            f"r = {r_low:.2f} (N = {len(low_r2)})"
+            if not math.isnan(r_low)
+            else f"r = NA (N = {len(low_r2)})"
+        ),
         xy=(0.05, 0.86),
         xycoords="axes fraction",
         ha="left",
@@ -368,10 +400,10 @@ def plot_scatter_with_ci(data: pd.DataFrame, filename: str) -> None:
     legend_labels: list[str] = []
     if err_high is not None:
         legend_handles.append(err_high)
-        legend_labels.append("unbiased r² > 0.5")
+        legend_labels.append(f"unbiased r² > 0.5 (N = {len(high_r2)})")
     if err_low is not None:
         legend_handles.append(err_low)
-        legend_labels.append("unbiased r² ≤ 0.5")
+        legend_labels.append(f"unbiased r² ≤ 0.5 (N = {len(low_r2)})")
     if legend_handles:
         ax.legend(
             legend_handles,
@@ -383,6 +415,8 @@ def plot_scatter_with_ci(data: pd.DataFrame, filename: str) -> None:
 
     ax.set_xlabel("Porubsky et al. 2022 Callset Allele Frequency", fontsize=16)
     ax.set_ylabel("All of Us Cohort Imputed Allele Frequency", fontsize=16)
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
     ax.tick_params(labelsize=14)
 
     output_base = Path(filename)
@@ -410,6 +444,11 @@ def main() -> None:
     )
 
     merged = merged.dropna(subset=["callset_af", "aou_af"])
+
+    merged = _clamp_to_unit(
+        merged,
+        ["callset_af", "callset_ci_low", "callset_ci_high", "aou_af", "aou_ci_low", "aou_ci_high"],
+    )
 
     valid_r2_mask = merged["unbiased_pearson_r2"].notna()
     if not valid_r2_mask.all():
