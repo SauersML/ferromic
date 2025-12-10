@@ -17,14 +17,18 @@ from typing import Iterable
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.lines import Line2D
 
 # Matplotlib default blue/orange palette for consistency across figures.
 # Keep these inline (instead of importing a shared style module) to avoid
 # introducing a dependency that is absent in the CI/replication environment.
 CALLSET_POINT_COLOR = "#1f77b4"
 IMPUTED_POINT_COLOR = "#ff7f0e"
+# Used for inversions with low imputation performance.
+LOW_R2_COLOR = "#7f7f7f"
 # Slight transparency to reduce overplotting.
 POINT_ALPHA = 0.75
+LOW_R2_ALPHA = 0.3
 
 plt.rcParams.update({
     "pdf.fonttype": 42,
@@ -36,6 +40,7 @@ CALLSET_PATH = "data/2AGRCh38_unifiedCallset - 2AGRCh38_unifiedCallset.tsv"
 INV_PROPERTIES_PATH = "data/inv_properties.tsv"
 AOU_FREQUENCIES_PATH = "data/inversion_population_frequencies.tsv"
 OUTPUT_BASE = Path("special/overall_AF_scatterplot")
+IMPUTATION_RESULTS_PATH = "data/imputation_results_merged.tsv"
 
 # Allowed diploid genotypes and the number of alternate alleles they carry
 ALLOWED_GENOTYPES = {
@@ -158,18 +163,97 @@ def load_aou_frequencies() -> pd.DataFrame:
     return df
 
 
+def load_imputation_results() -> pd.DataFrame:
+    df = pd.read_csv(_ensure_exists(IMPUTATION_RESULTS_PATH), sep="\t")
+    required_cols = ["OrigID", "unbiased_pearson_r2"]
+    missing = [col for col in required_cols if col not in df.columns]
+    if missing:
+        raise KeyError(
+            "imputation_results_merged.tsv missing columns: " f"{missing}"
+        )
+
+    raw_r2 = df["unbiased_pearson_r2"]
+    df["unbiased_pearson_r2"] = pd.to_numeric(raw_r2, errors="coerce")
+    invalid_mask = raw_r2.notna() & df["unbiased_pearson_r2"].isna()
+    if invalid_mask.any():
+        invalid_ids = df.loc[invalid_mask, "OrigID"].tolist()
+        print(
+            "Warning: non-numeric unbiased_pearson_r2 for OrigID(s): "
+            f"{', '.join(map(str, invalid_ids))}. Omitting these from plots."
+        )
+
+    df = df.loc[:, required_cols].drop_duplicates(subset=["OrigID"])
+    return df
+
+
 def plot_scatter(data: pd.DataFrame, filename: str) -> None:
     fig, ax = plt.subplots(figsize=(6, 6))
-    ax.scatter(
-        data["callset_af"],
-        data["aou_af"],
-        s=70,
+    high_r2 = data.loc[data["unbiased_pearson_r2"] > 0.5]
+    low_r2 = data.loc[data["unbiased_pearson_r2"] <= 0.5]
+
+    def _plot_subset(
+        subset: pd.DataFrame, color: str, alpha: float
+    ) -> tuple[float, Line2D | None]:
+        if subset.empty:
+            return float("nan"), None
+
+        scatter = ax.scatter(
+            subset["callset_af"],
+            subset["aou_af"],
+            s=70,
+            color=color,
+            alpha=alpha,
+        )
+
+        if len(subset) >= 2:
+            slope, intercept = np.polyfit(subset["callset_af"], subset["aou_af"], 1)
+            x_vals = np.linspace(subset["callset_af"].min(), subset["callset_af"].max(), 100)
+            ax.plot(x_vals, slope * x_vals + intercept, color=color, linestyle="--")
+            r_value = np.corrcoef(subset["callset_af"], subset["aou_af"])[0, 1]
+        else:
+            r_value = float("nan")
+        return r_value, scatter
+
+    r_high, scatter_high = _plot_subset(high_r2, CALLSET_POINT_COLOR, POINT_ALPHA)
+    r_low, scatter_low = _plot_subset(low_r2, LOW_R2_COLOR, LOW_R2_ALPHA)
+
+    ax.annotate(
+        f"r = {r_high:.2f}" if not math.isnan(r_high) else "r = NA",
+        xy=(0.05, 0.95),
+        xycoords="axes fraction",
+        ha="left",
+        va="top",
+        fontsize=16,
         color=CALLSET_POINT_COLOR,
-        alpha=POINT_ALPHA,
+        bbox={"facecolor": "white", "alpha": 0.9, "edgecolor": "none"},
+    )
+    ax.annotate(
+        f"r = {r_low:.2f}" if not math.isnan(r_low) else "r = NA",
+        xy=(0.05, 0.86),
+        xycoords="axes fraction",
+        ha="left",
+        va="top",
+        fontsize=16,
+        color=LOW_R2_COLOR,
+        bbox={"facecolor": "white", "alpha": 0.9, "edgecolor": "none"},
     )
 
-    r = np.corrcoef(data["callset_af"], data["aou_af"])[0, 1]
-    ax.annotate(f"r = {r:.2f}", xy=(0.05, 0.95), xycoords="axes fraction", ha="left", va="top", fontsize=16)
+    legend_handles: list[Line2D] = []
+    legend_labels: list[str] = []
+    if scatter_high is not None:
+        legend_handles.append(scatter_high)
+        legend_labels.append("unbiased r² > 0.5")
+    if scatter_low is not None:
+        legend_handles.append(scatter_low)
+        legend_labels.append("unbiased r² ≤ 0.5")
+    if legend_handles:
+        ax.legend(
+            legend_handles,
+            legend_labels,
+            loc="lower right",
+            frameon=True,
+            framealpha=0.95,
+        )
 
     ax.set_xlabel("Porubsky et al. 2022 Callset Allele Frequency", fontsize=16)
     ax.set_ylabel("All of Us Cohort Imputed Allele Frequency", fontsize=16)
@@ -217,24 +301,85 @@ def plot_scatter_with_ci(data: pd.DataFrame, filename: str) -> None:
         ),
     )
 
-    ax.errorbar(
-        data["callset_af"],
-        data["aou_af"],
-        xerr=xerr,
-        yerr=yerr,
-        fmt="o",
-        markersize=6,
-        ecolor="#4a4a4a",
-        elinewidth=1.0,
-        capsize=3,
-        color=IMPUTED_POINT_COLOR,
-        markerfacecolor=IMPUTED_POINT_COLOR,
-        markeredgecolor=IMPUTED_POINT_COLOR,
-        alpha=POINT_ALPHA,
+    high_r2 = data.loc[data["unbiased_pearson_r2"] > 0.5]
+    low_r2 = data.loc[data["unbiased_pearson_r2"] <= 0.5]
+
+    def _errorbar_subset(
+        subset: pd.DataFrame, color: str, alpha: float
+    ) -> tuple[float, Line2D | None]:
+        if subset.empty:
+            return float("nan"), None
+
+        subset_xerr = xerr[:, subset.index]
+        subset_yerr = yerr[:, subset.index]
+
+        (err_lines, _, _) = ax.errorbar(
+            subset["callset_af"],
+            subset["aou_af"],
+            xerr=subset_xerr,
+            yerr=subset_yerr,
+            fmt="o",
+            markersize=6,
+            ecolor="#4a4a4a",
+            elinewidth=1.0,
+            capsize=3,
+            color=color,
+            markerfacecolor=color,
+            markeredgecolor=color,
+            alpha=alpha,
+        )
+
+        if len(subset) >= 2:
+            slope, intercept = np.polyfit(
+                subset["callset_af"], subset["aou_af"], 1
+            )
+            x_vals = np.linspace(subset["callset_af"].min(), subset["callset_af"].max(), 100)
+            ax.plot(x_vals, slope * x_vals + intercept, color=color, linestyle="--")
+            r_value = np.corrcoef(subset["callset_af"], subset["aou_af"])[0, 1]
+        else:
+            r_value = float("nan")
+        return r_value, err_lines
+
+    r_high, err_high = _errorbar_subset(high_r2, CALLSET_POINT_COLOR, POINT_ALPHA)
+    r_low, err_low = _errorbar_subset(low_r2, LOW_R2_COLOR, LOW_R2_ALPHA)
+
+    ax.annotate(
+        f"r = {r_high:.2f}" if not math.isnan(r_high) else "r = NA",
+        xy=(0.05, 0.95),
+        xycoords="axes fraction",
+        ha="left",
+        va="top",
+        fontsize=16,
+        color=CALLSET_POINT_COLOR,
+        bbox={"facecolor": "white", "alpha": 0.9, "edgecolor": "none"},
+    )
+    ax.annotate(
+        f"r = {r_low:.2f}" if not math.isnan(r_low) else "r = NA",
+        xy=(0.05, 0.86),
+        xycoords="axes fraction",
+        ha="left",
+        va="top",
+        fontsize=16,
+        color=LOW_R2_COLOR,
+        bbox={"facecolor": "white", "alpha": 0.9, "edgecolor": "none"},
     )
 
-    r = np.corrcoef(data["callset_af"], data["aou_af"])[0, 1]
-    ax.annotate(f"r = {r:.2f}", xy=(0.05, 0.95), xycoords="axes fraction", ha="left", va="top", fontsize=16)
+    legend_handles: list[Line2D] = []
+    legend_labels: list[str] = []
+    if err_high is not None:
+        legend_handles.append(err_high)
+        legend_labels.append("unbiased r² > 0.5")
+    if err_low is not None:
+        legend_handles.append(err_low)
+        legend_labels.append("unbiased r² ≤ 0.5")
+    if legend_handles:
+        ax.legend(
+            legend_handles,
+            legend_labels,
+            loc="lower right",
+            frameon=True,
+            framealpha=0.95,
+        )
 
     ax.set_xlabel("Porubsky et al. 2022 Callset Allele Frequency", fontsize=16)
     ax.set_ylabel("All of Us Cohort Imputed Allele Frequency", fontsize=16)
@@ -255,14 +400,26 @@ def main() -> None:
 
     callset_df = load_callset_afs(allowed_ids)
     aou_df = load_aou_frequencies()
+    imputation_df = load_imputation_results()
 
     merged = (
         inv_props[["OrigID", "coordinate"]]
         .merge(callset_df, on="OrigID", how="inner")
         .merge(aou_df, on="OrigID", how="inner")
+        .merge(imputation_df, on="OrigID", how="left")
     )
 
     merged = merged.dropna(subset=["callset_af", "aou_af"])
+
+    valid_r2_mask = merged["unbiased_pearson_r2"].notna()
+    if not valid_r2_mask.all():
+        missing_r2_ids = merged.loc[~valid_r2_mask, "OrigID"].tolist()
+        if missing_r2_ids:
+            print(
+                "Warning: missing or non-numeric unbiased_pearson_r2 for OrigID(s): "
+                f"{', '.join(map(str, missing_r2_ids))}. Omitting these from plots."
+            )
+    merged = merged.loc[valid_r2_mask]
 
     if merged.empty:
         raise ValueError("No overlapping inversions after filtering by consensus and availability.")
