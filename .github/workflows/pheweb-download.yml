@@ -17,6 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       shards: ${{ steps.plan.outputs.shards }}
+      reuse-log: ${{ steps.collect-reuse.outputs.reuse-log }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -24,14 +25,61 @@ jobs:
           python-version: '3.11'
       - name: Install dependencies
         run: pip install pandas requests tqdm bgzip
+      - name: Restore reusable shard artifacts
+        id: reuse
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          mkdir -p reused_shards
+          page=1
+          found=0
+          while true; do
+            response=$(curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$REPO/actions/artifacts?per_page=100&page=$page")
+            count=$(echo "$response" | jq '.artifacts | length')
+            echo "Scanning page $page with $count artifacts"
+            echo "$response" | jq -r '.artifacts[] | select(.expired==false and (.name|startswith("pheweb-shard-"))) | [.name, .archive_download_url] | @tsv' | while IFS=$'\t' read -r name url; do
+              echo "Downloading $name"
+              curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" -o "reused_shards/${name}.zip" "$url" || continue
+              unzip -o "reused_shards/${name}.zip" -d "reused_shards/${name}" >/dev/null
+              found=$((found+1))
+            done
+            if [ "$count" -lt 100 ]; then
+              break
+            fi
+            page=$((page+1))
+          done
+          echo "reused_count=$found" >> "$GITHUB_OUTPUT"
+      - name: Collect completed phenocodes from reused logs
+        id: collect-reuse
+        run: |
+          shopt -s globstar nullglob
+          if compgen -G "reused_shards/**/*.log" > /dev/null; then
+            cat reused_shards/**/*.log | sort -u > reused_completed.log
+            echo "Reuse log contains $(wc -l < reused_completed.log) phenocode(s)."
+            echo "reuse-log=reused_completed.log" >> "$GITHUB_OUTPUT"
+          else
+            echo "No reusable logs found."
+          fi
       - name: Generate download plan
         run: |
-          python stats/get_pheweb.py --plan --shards 20 --plan-output pheweb_plan.json
+          SKIP_FLAG=""
+          if [ -n "${{ steps.collect-reuse.outputs.reuse-log }}" ]; then
+            SKIP_FLAG="--skip-log ${{ steps.collect-reuse.outputs.reuse-log }}"
+          fi
+          python stats/get_pheweb.py --plan --shards 20 --plan-output pheweb_plan.json $SKIP_FLAG
       - id: plan
         name: Export plan for matrix
         run: |
           SHARDS=$(jq -c '.shards' pheweb_plan.json)
           echo "shards=$SHARDS" >> "$GITHUB_OUTPUT"
+      - name: Upload reused shard artifacts
+        if: steps.reuse.outputs.reused_count != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pheweb-shard-reused
+          path: reused_shards
+          retention-days: 7
       - name: Upload plan
         uses: actions/upload-artifact@v4
         with:
