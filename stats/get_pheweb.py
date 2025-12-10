@@ -12,10 +12,12 @@ import json
 import os
 import signal
 import sys
+import zlib
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from threading import Event
-from typing import Iterable, List, Sequence
+from typing import Dict, Iterable, List, Sequence, Tuple
 
 import pandas as pd
 import requests
@@ -90,6 +92,7 @@ OUTPUT_FILENAME = "merged_phenotype_results.tsv"
 LOG_FILENAME = "completed_phenotypes.log"
 MAX_WORKERS = 4  # Conservative number to prevent timeouts on large files
 DEFAULT_PLAN_FILE = "pheweb_plan.json"
+DEFAULT_COORD_CHUNK = 1_000_000
 
 # Global event to handle interruption cleanly
 stop_event = Event()
@@ -216,7 +219,149 @@ def get_target_list(mapping_dict):
         sys.exit(1)
 
 
-def download_task(target):
+def _describe_remote(url: str, session: requests.Session) -> Dict[str, str]:
+    head = session.head(url, allow_redirects=True, timeout=30)
+    info = {
+        'status': str(head.status_code),
+        'content_type': head.headers.get('content-type', 'unknown'),
+        'content_length': head.headers.get('content-length', 'unknown'),
+        'content_encoding': head.headers.get('content-encoding', 'unknown'),
+        'accept_ranges': head.headers.get('accept-ranges', 'none'),
+    }
+    print(
+        "Remote file info - status: {status}, type: {content_type}, encoding: {content_encoding}, "
+        "length: {content_length}, accept-ranges: {accept_ranges}".format(**info)
+    )
+    return info
+
+
+def _parse_positions(raw_positions: Sequence[str]) -> Dict[str, set]:
+    parsed: Dict[str, set] = defaultdict(set)
+    for raw in raw_positions:
+        cleaned = raw.strip()
+        if not cleaned:
+            continue
+        if ':' in cleaned:
+            chrom, pos = cleaned.split(':', 1)
+        elif '\t' in cleaned:
+            chrom, pos = cleaned.split('\t', 1)
+        else:
+            parts = cleaned.replace(',', ':').split(':')
+            if len(parts) != 2:
+                print(f"Skipping malformed coordinate: {cleaned}")
+                continue
+            chrom, pos = parts
+        try:
+            parsed[chrom].add(int(pos))
+        except ValueError:
+            print(f"Skipping coordinate with non-integer position: {cleaned}")
+    return parsed
+
+
+def _ranged_gzip_filter(
+    url: str,
+    coords_by_chrom: Dict[str, set],
+    session: requests.Session,
+    chunk_size: int = DEFAULT_COORD_CHUNK,
+) -> Tuple[List[str], List[str]]:
+    header = []
+    filtered_rows: List[List[str]] = []
+    if not coords_by_chrom:
+        return header, filtered_rows
+
+    info = _describe_remote(url, session)
+    total_length = info.get('content_length')
+    try:
+        total_length_int = int(total_length) if total_length and total_length != 'unknown' else None
+    except ValueError:
+        total_length_int = None
+
+    remaining = sum(len(v) for v in coords_by_chrom.values())
+    print(f"Filtering for {remaining} coordinate(s) using chunked range reads of {chunk_size} bytes...")
+
+    decompressor = zlib.decompressobj(16 + zlib.MAX_WBITS)
+    pending_buffer = ""
+    offset = 0
+    chunk_index = 0
+
+    while remaining > 0:
+        end = offset + chunk_size - 1 if total_length_int else offset + chunk_size - 1
+        headers = {'Range': f'bytes={offset}-{end}'} if info.get('accept_ranges') == 'bytes' else {}
+        resp = session.get(url, headers=headers, timeout=60)
+        if resp.status_code not in (200, 206):
+            raise RuntimeError(f"Unexpected status code {resp.status_code} for range {offset}-{end}")
+
+        chunk_index += 1
+        offset += len(resp.content)
+
+        decompressed = decompressor.decompress(resp.content).decode('utf-8', errors='replace')
+        pending_buffer += decompressed
+
+        lines = pending_buffer.split('\n')
+        pending_buffer = lines.pop()  # carry incomplete line if any
+
+        for line in lines:
+            if not line:
+                continue
+            parts = line.split('\t')
+            if not header:
+                header = parts
+                continue
+            chrom = parts[0]
+            try:
+                pos = int(parts[1])
+            except (IndexError, ValueError):
+                continue
+            if pos in coords_by_chrom.get(chrom, set()):
+                filtered_rows.append(parts)
+                coords_by_chrom[chrom].discard(pos)
+                if not coords_by_chrom[chrom]:
+                    coords_by_chrom.pop(chrom)
+                remaining = sum(len(v) for v in coords_by_chrom.values())
+                print(f"Found {chrom}:{pos}. Remaining targets: {remaining}")
+                if remaining == 0:
+                    break
+        else:
+            # only runs if inner loop did not break
+            pass
+
+        if remaining == 0:
+            break
+
+        if decompressor.eof:
+            break
+
+        if total_length_int and offset >= total_length_int and not resp.content:
+            break
+
+        if chunk_index % 5 == 0:
+            fetched_mb = offset / (1024 ** 2)
+            print(f"Progress: fetched ~{fetched_mb:.2f} MiB; remaining targets: {remaining}")
+
+    # Flush any remaining buffer at EOF
+    if remaining > 0:
+        tail = decompressor.flush().decode('utf-8', errors='replace')
+        pending_buffer += tail
+        for line in pending_buffer.split('\n'):
+            if not line:
+                continue
+            parts = line.split('\t')
+            if not header:
+                header = parts
+                continue
+            chrom = parts[0]
+            try:
+                pos = int(parts[1])
+            except (IndexError, ValueError):
+                continue
+            if pos in coords_by_chrom.get(chrom, set()):
+                filtered_rows.append(parts)
+                coords_by_chrom[chrom].discard(pos)
+
+    return header, filtered_rows
+
+
+def download_task(target, coords_by_chrom: Dict[str, set] | None = None):
     """
     Worker function.
     1. Checks stop_event.
@@ -243,21 +388,34 @@ def download_task(target):
 
     for url in urls_to_try:
         try:
-            with requests.get(url, stream=True, timeout=60) as r:
-                if r.status_code == 200:
-                    # Get size for estimation logic
-                    total_length = r.headers.get('content-length')
-                    if total_length:
-                        bytes_downloaded = int(total_length)
-
-                    # Parse
-                    df = pd.read_csv(r.raw, sep='\t', compression='gzip')
-                    break  # Success
-                elif r.status_code == 404:
+            with requests.Session() as session:
+                resp = session.get(url, stream=True, timeout=60)
+                if resp.status_code == 404:
                     error_msg = f"404 Not Found at {url}"
-                    continue  # Try next URL if available
+                    continue
+                resp.raise_for_status()
+
+                total_length = resp.headers.get('content-length')
+                if total_length:
+                    try:
+                        bytes_downloaded = int(total_length)
+                    except ValueError:
+                        bytes_downloaded = 0
+
+                if coords_by_chrom:
+                    header, rows = _ranged_gzip_filter(
+                        url,
+                        {chrom: set(values) for chrom, values in coords_by_chrom.items()},
+                        session,
+                    )
+                    if not header:
+                        # fall back to stream if header was not discovered
+                        df = pd.read_csv(resp.raw, sep='\t', compression='gzip')
+                    else:
+                        df = pd.DataFrame(rows, columns=header)
                 else:
-                    r.raise_for_status()
+                    df = pd.read_csv(resp.raw, sep='\t', compression='gzip')
+                break
         except Exception as e:
             error_msg = str(e)
             continue
@@ -271,7 +429,7 @@ def download_task(target):
         return {'status': 'failed', 'error': error_msg, 'phenostring': phenostring, 'phenocode': phenocode}
 
 
-def download_targets(targets_to_process, output_path: str, log_path: str, max_workers: int):
+def download_targets(targets_to_process, output_path: str, log_path: str, max_workers: int, coords_by_chrom: Dict[str, set] | None = None):
     print(f"Starting downloads (Output: {output_path})...")
 
     # Check if we need to write header (if output file doesn't exist)
@@ -281,7 +439,7 @@ def download_targets(targets_to_process, output_path: str, log_path: str, max_wo
     files_sized_so_far = 0
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {executor.submit(download_task, t): t for t in targets_to_process}
+        futures = {executor.submit(download_task, t, coords_by_chrom): t for t in targets_to_process}
 
         pbar = tqdm(as_completed(futures), total=len(targets_to_process), unit="file")
 
@@ -310,8 +468,9 @@ def download_targets(targets_to_process, output_path: str, log_path: str, max_wo
                     pbar.set_description(f"Est. Remaining: {est_gb:.2f} GB")
 
                 try:
-                    df.to_csv(output_path, sep='\t', mode='a', header=write_header, index=False)
-                    write_header = False
+                    if not df.empty:
+                        df.to_csv(output_path, sep='\t', mode='a', header=write_header, index=False)
+                        write_header = False
                     append_to_log(phenocode, log_path)
                 except Exception as e:
                     pbar.write(f"Error writing data for {phenocode}: {e}")
@@ -405,6 +564,18 @@ def parse_requested_phenocodes(args: argparse.Namespace) -> List[str]:
     return requested
 
 
+def parse_requested_coords(args: argparse.Namespace) -> Dict[str, set]:
+    requested: List[str] = []
+
+    for value in args.coord:
+        requested.extend(_split_identifiers(value))
+
+    if args.coord_file:
+        requested.extend([line.strip() for line in Path(args.coord_file).read_text().splitlines() if line.strip()])
+
+    return _parse_positions(requested)
+
+
 def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Download PheWeb phenotype results")
     parser.add_argument('--phenocode', action='append', nargs='+', default=[], help='Phenocode or phenotype name to download (accepts multiple values per flag).')
@@ -413,6 +584,8 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     parser.add_argument('--output', default=OUTPUT_FILENAME, help='Output TSV path.')
     parser.add_argument('--log', default=LOG_FILENAME, help='Log file used to track completed phenocodes.')
     parser.add_argument('--max-workers', type=int, default=MAX_WORKERS, help='Max concurrent download workers.')
+    parser.add_argument('--coord', action='append', default=[], help='Chrom:pos coordinate to retain (comma or whitespace delimited).')
+    parser.add_argument('--coord-file', help='Path to newline-delimited coordinates (chrom\tpos or chrom:pos).')
 
     parser.add_argument('--plan', action='store_true', help='Generate a plan JSON instead of downloading.')
     parser.add_argument('--plan-output', default=DEFAULT_PLAN_FILE, help='Where to write the JSON plan.')
@@ -438,6 +611,7 @@ def main(argv: Iterable[str] | None = None):
     name_to_code = get_phenotype_mapping()
 
     requested_identifiers = parse_requested_phenocodes(args)
+    coords_by_chrom = parse_requested_coords(args)
     user_provided_targets = bool(args.phenocode or args.phenocode_file)
     targets = resolve_requested_targets(name_to_code, requested_identifiers)
 
@@ -464,7 +638,7 @@ def main(argv: Iterable[str] | None = None):
         print("Nothing left to do.")
         return
 
-    download_targets(targets_to_process, args.output, args.log, args.max_workers)
+    download_targets(targets_to_process, args.output, args.log, args.max_workers, coords_by_chrom if coords_by_chrom else None)
 
 
 if __name__ == "__main__":
