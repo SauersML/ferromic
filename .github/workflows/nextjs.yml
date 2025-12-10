@@ -9,6 +9,12 @@ on:
       - ".github/workflows/**"
       - "web/figures-site/**"
 
+  pull_request:
+    paths:
+      - "data/**"
+      - ".github/workflows/nextjs.yml"
+      - "web/figures-site/**"
+
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
@@ -134,46 +140,22 @@ jobs:
           fi
 
           if [ -z "$FIGURES_ROOT" ]; then
-            FIGURES_ROOT=$(python3 scripts/find_figures_root.py --search-root "$SEARCH_ROOT")
-
-          fi
-
-          if [ -z "$FIGURES_ROOT" ]; then
             echo "Figures directory not found in artifact; failing build."
             exit 1
           else
             echo "Using figures root: $FIGURES_ROOT"
           fi
 
-          REQUIRED_DIRS=$(python3 - <<'PY'
-            import json
-            from pathlib import Path
+          REQUIRED_DIRS=$(jq -r '
+            def filenames:
+              .. | objects | .filename? // empty | select(. != "");
 
-            required_dirs = set()
-            for path in ["${APP_PATH}/data/special-figures.json", "${APP_PATH}/data/phewas-figures.json"]:
-                with open(path, "r", encoding="utf-8") as fh:
-                    data = json.load(fh)
-
-                def record(filename: str) -> None:
-                    if not filename:
-                        return
-                    parent = Path(filename).parent.as_posix()
-                    if parent not in {"", "."}:
-                        required_dirs.add(parent)
-
-                if isinstance(data, list):
-                    for entry in data:
-                        if isinstance(entry, dict):
-                            record(entry.get("filename", ""))
-                elif isinstance(data, dict):
-                    for group in data.get("groups", []):
-                        for fig in group.get("figures", []):
-                            if isinstance(fig, dict):
-                                record(fig.get("filename", ""))
-
-            print("\n".join(sorted(required_dirs)))
-          PY
-          )
+            filenames
+            | split("/")
+            | .[:-1]
+            | select(length > 0)
+            | join("/")
+          ' "$APP_PATH/data/special-figures.json" "$APP_PATH/data/phewas-figures.json" | sort -u)
 
           has_required_dirs() {
             local root="$1"
@@ -276,17 +258,7 @@ jobs:
           fi
 
           export MANIFEST
-          GENERATED=$(python3 - <<'PY'
-          import json
-          import os
-
-          path = os.environ["MANIFEST"]
-          with open(path, "r", encoding="utf-8") as fh:
-              data = json.load(fh)
-
-          print("true" if data.get("generatedAt") else "false")
-          PY
-          )
+          GENERATED=$(jq -r 'if (.generatedAt // "") | tostring | length > 0 then "true" else "false" end' "$MANIFEST")
 
           echo "generated=$GENERATED" >> "$GITHUB_OUTPUT"
 
