@@ -17,15 +17,13 @@ CONFIG = {
     # --------------------------------------
     # API SETTINGS
     # --------------------------------------
-    # STRICTLY using the requested model
+    # STRICTLY using Gemini 3.0 Pro Preview
     "model_name": "gemini-3-pro-preview", 
     
-    # Throttle: How many requests allowed per minute?
-    # Set to 1 as requested.
+    # Throttle: Requests per minute
     "messages_per_minute": 1, 
     
-    # Parallelism
-    # Even if this is high, the rate limiter will throttle execution.
+    # Parallelism (throttled by the rate limiter logic below)
     "max_workers": 1, 
 
     # --------------------------------------
@@ -61,6 +59,7 @@ last_call_time = 0.0
 RATE_LIMIT_DELAY = 60.0 / CONFIG["messages_per_minute"]
 
 # Initialize Client
+# Assumes GEMINI_API_KEY is in environment variables
 client = genai.Client()
 
 # ==========================================
@@ -152,7 +151,7 @@ def load_and_prep_data():
         return [], []
 
 # ==========================================
-# 3. HELPER FUNCTIONS (Rate Limit, Parsing)
+# 3. HELPER FUNCTIONS
 # ==========================================
 def wait_for_rate_limit():
     """
@@ -179,7 +178,21 @@ def wait_for_rate_limit():
         time.sleep(sleep_duration)
 
 def clean_json_string(text: str) -> str:
+    """
+    Robust JSON extraction. Finds the first '{' and last '}'
+    to handle cases where the model wraps JSON in markdown or conversational text.
+    """
     text = text.strip()
+    
+    # Attempt to locate the JSON object boundaries
+    start = text.find('{')
+    end = text.rfind('}')
+    
+    if start != -1 and end != -1:
+        # Extract just the JSON part
+        return text[start:end+1]
+    
+    # Fallback: just remove markdown code blocks if standard finding fails
     if text.startswith("```json"): text = text[7:]
     elif text.startswith("```"): text = text[3:]
     if text.endswith("```"): text = text[:-3]
@@ -248,7 +261,7 @@ def process_phenotype(row: Dict, target_list: List[str]):
         print(f"\n{'='*60}")
         print(f"SENDING PROMPT FOR: {source_name}")
         print(f"{'-'*60}")
-        # Print truncated prompt to avoid console flood, or remove slice to see full
+        # Print prompt (truncated target list for readability)
         print(prompt.split('### CANDIDATE TARGET LIST')[0] + "... [Target List Truncated for Log] ...\n" + prompt.split('### OUTPUT FORMAT')[1]) 
         print(f"{'='*60}")
 
@@ -262,7 +275,7 @@ def process_phenotype(row: Dict, target_list: List[str]):
         
         raw_text = response.text
         
-        # Parse
+        # Parse using the robust cleaner
         parsed = json.loads(clean_json_string(raw_text))
         
         # Result Object
@@ -349,7 +362,6 @@ def main():
         }
         
         for future in concurrent.futures.as_completed(futures):
-            # We catch exceptions inside the worker, but this ensures we wait for completion
             pass
 
     print("Job Complete.")
