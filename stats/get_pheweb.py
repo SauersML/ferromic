@@ -99,6 +99,7 @@ DEFAULT_COORD_CHUNK = 1_000_000
 BEST_TAGGING_SNPS = Path(__file__).resolve().parent.parent / "data" / "best_tagging_snps_qvalues.tsv"
 
 RANGE_CHUNK_SIZE = 512 * 1024  # 512 KiB chunks for ranged BGZF reads
+HAS_BGZIP_READER = hasattr(bgzip, "BGZipFile")
 
 # Global event to handle interruption cleanly
 stop_event = Event()
@@ -416,7 +417,7 @@ def _streaming_gzip_filter(
                     yield str(raw_line).replace('\n', '')
 
     # Prefer ranged BGZF reads so we can stop early without downloading the world
-    if compression_info.get('is_bgzf') and supports_range:
+    if compression_info.get('is_bgzf') and supports_range and HAS_BGZIP_READER:
         try:
             content_length = int(info.get('content_length', 0))
         except ValueError:
@@ -432,13 +433,16 @@ def _streaming_gzip_filter(
     else:
         line_iter = None
 
+    if compression_info.get('is_bgzf') and not HAS_BGZIP_READER:
+        print("BGZF support unavailable in bgzip module; falling back to streaming gzip reader.")
+
     if line_iter is None:
         print("Streaming from start because range/BGZF support is insufficient for targeted seeks...")
         resp = session.get(url, stream=True, timeout=60)
         resp.raise_for_status()
         compressor = resp.headers.get('content-encoding', info.get('content_encoding', ''))
         reader = resp.raw
-        if compression_info.get('is_bgzf'):
+        if compression_info.get('is_bgzf') and HAS_BGZIP_READER:
             reader = bgzip.BGZipFile(fileobj=resp.raw)
         elif 'gzip' in compressor or 'gzip' in info.get('content_type', ''):
             reader = gzip.GzipFile(fileobj=resp.raw)
@@ -490,11 +494,25 @@ def download_task(target, coords_by_chrom: Dict[str, set] | None = None):
     phenostring = target['phenostring']
 
     # Logic for URL construction and retries
-    urls_to_try = [f"{BASE_PHEWEB_URL}{phenocode}"]
+    urls_to_try = []
+
+    def _add_url(url: str):
+        if url not in urls_to_try:
+            urls_to_try.append(url)
+
+    zero_prefixed_codes = []
+
+    def _maybe_add_zero_variant(code: str):
+        if code and not code.startswith("0"):
+            zero_prefixed_codes.append(f"0{code}")
+
+    _add_url(f"{BASE_PHEWEB_URL}{phenocode}")
+    _maybe_add_zero_variant(phenocode)
 
     # If code looks like "290.0", add "290" as a fallback
     if phenocode.endswith(".0"):
-        urls_to_try.append(f"{BASE_PHEWEB_URL}{phenocode[:-2]}")
+        _add_url(f"{BASE_PHEWEB_URL}{phenocode[:-2]}")
+        _maybe_add_zero_variant(phenocode[:-2])
 
     df = None
     bytes_downloaded = 0
@@ -518,6 +536,9 @@ def download_task(target, coords_by_chrom: Dict[str, set] | None = None):
 
                 if info.get('status') == '404':
                     error_msg = f"404 Not Found at {url}"
+                    if zero_prefixed_codes:
+                        zero_code = zero_prefixed_codes.pop(0)
+                        _add_url(f"{BASE_PHEWEB_URL}{zero_code}")
                     continue
 
                 try:
