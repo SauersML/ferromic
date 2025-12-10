@@ -137,4 +137,22 @@ jobs:
           # Prefer newly generated artifacts when resolving conflicts (e.g., add/add on data files)
           git pull https://${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git main --rebase --autostash --strategy=recursive -X ours
 
-          git push https://${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git HEAD:main
+          max_attempts=3
+          attempt=1
+
+          while [ "$attempt" -le "$max_attempts" ]; do
+            if git push https://${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git HEAD:main; then
+              echo "Push succeeded on attempt $attempt"
+              break
+            fi
+
+            echo "Push attempt $attempt failed; pulling latest changes and retrying..."
+            git pull https://${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git main --rebase --autostash --strategy=recursive -X ours
+            attempt=$((attempt + 1))
+            sleep 5
+          done
+
+          if [ "$attempt" -gt "$max_attempts" ]; then
+            echo "Failed to push changes after $max_attempts attempts" >&2
+            exit 1
+          fi
