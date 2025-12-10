@@ -18,6 +18,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from plot_style import CALLSET_POINT_COLOR, IMPUTED_POINT_COLOR, POINT_ALPHA
+
 plt.rcParams.update({
     "pdf.fonttype": 42,
     "ps.fonttype": 42,
@@ -152,7 +154,13 @@ def load_aou_frequencies() -> pd.DataFrame:
 
 def plot_scatter(data: pd.DataFrame, filename: str) -> None:
     fig, ax = plt.subplots(figsize=(6, 6))
-    ax.scatter(data["callset_af"], data["aou_af"], s=70, color="#1f77b4")
+    ax.scatter(
+        data["callset_af"],
+        data["aou_af"],
+        s=70,
+        color=CALLSET_POINT_COLOR,
+        alpha=POINT_ALPHA,
+    )
 
     r = np.corrcoef(data["callset_af"], data["aou_af"])[0, 1]
     ax.annotate(f"r = {r:.2f}", xy=(0.05, 0.95), xycoords="axes fraction", ha="left", va="top", fontsize=16)
@@ -213,7 +221,10 @@ def plot_scatter_with_ci(data: pd.DataFrame, filename: str) -> None:
         ecolor="#4a4a4a",
         elinewidth=1.0,
         capsize=3,
-        color="#2ca02c",
+        color=IMPUTED_POINT_COLOR,
+        markerfacecolor=IMPUTED_POINT_COLOR,
+        markeredgecolor=IMPUTED_POINT_COLOR,
+        alpha=POINT_ALPHA,
     )
 
     r = np.corrcoef(data["callset_af"], data["aou_af"])[0, 1]
