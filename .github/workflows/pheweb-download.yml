@@ -24,13 +24,7 @@ jobs:
       - id: plan
         name: Export plan for matrix
         run: |
-          SHARDS=$(python - <<'PY'
-import json
-with open('pheweb_plan.json') as f:
-    data = json.load(f)
-print(json.dumps(data['shards']))
-PY
-)
+          SHARDS=$(jq -c '.shards' pheweb_plan.json)
           echo "shards=$SHARDS" >> "$GITHUB_OUTPUT"
       - name: Upload plan
         uses: actions/upload-artifact@v4
@@ -53,12 +47,7 @@ PY
           python-version: '3.11'
       - name: Write shard phenocodes
         run: |
-          python - <<'PY'
-import json
-from pathlib import Path
-shard = json.loads('${{ toJson(matrix.shard) }}')
-Path('phenocodes.txt').write_text("\n".join(shard.get('phenocodes', [])))
-PY
+          jq -r '.phenocodes[]?' <<< '${{ toJson(matrix.shard) }}' > phenocodes.txt
       - name: Download shard data
         run: |
           python stats/get_pheweb.py \

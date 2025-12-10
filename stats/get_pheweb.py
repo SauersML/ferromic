@@ -379,17 +379,37 @@ def aggregate_outputs(input_dir: Path, output_path: Path) -> None:
     print(f"Aggregated {len(frames)} file(s) into {output_path}")
 
 
+def _split_identifiers(raw: str) -> List[str]:
+    # Accept comma- or whitespace-delimited input in a single argument
+    parts = []
+    for chunk in raw.replace(",", " ").split():
+        cleaned = chunk.strip()
+        if cleaned:
+            parts.append(cleaned)
+    return parts
+
+
 def parse_requested_phenocodes(args: argparse.Namespace) -> List[str]:
-    requested = list(args.phenocode)
+    requested: List[str] = []
+
+    for group in args.phenocode:
+        for value in group:
+            requested.extend(_split_identifiers(value))
+
+    for value in args.phenocode_arg:
+        requested.extend(_split_identifiers(value))
+
     if args.phenocode_file:
         requested.extend([line.strip() for line in Path(args.phenocode_file).read_text().splitlines() if line.strip()])
+
     return requested
 
 
 def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Download PheWeb phenotype results")
-    parser.add_argument('--phenocode', action='append', default=[], help='Phenocode or phenotype name to download (can be repeated).')
+    parser.add_argument('--phenocode', action='append', nargs='+', default=[], help='Phenocode or phenotype name to download (accepts multiple values per flag).')
     parser.add_argument('--phenocode-file', help='Path to a newline-delimited list of phenocodes or phenotype names.')
+    parser.add_argument('phenocode_arg', nargs='*', default=[], help='Phenocode or phenotype name provided as positional arguments.')
     parser.add_argument('--output', default=OUTPUT_FILENAME, help='Output TSV path.')
     parser.add_argument('--log', default=LOG_FILENAME, help='Log file used to track completed phenocodes.')
     parser.add_argument('--max-workers', type=int, default=MAX_WORKERS, help='Max concurrent download workers.')
