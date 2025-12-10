@@ -45,7 +45,6 @@ Header assumptions for tagging_snps.tsv (same as your local file):
 
 import csv
 import io
-import math
 import sys
 import time
 import zipfile
@@ -55,6 +54,7 @@ from urllib.request import urlopen
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import WebDriverException
+
 
 # ----------------------------------------------------------------------
 # Constants / configuration
@@ -102,14 +102,15 @@ def make_driver() -> webdriver.Chrome:
       - chromedriver available on PATH
     """
     options = Options()
-    # Headless mode
     options.add_argument("--headless=new")  # or "--headless" for older chromes
     options.add_argument("--disable-gpu")
     options.add_argument("--no-sandbox")
     options.add_argument("--window-size=1920,1080")
-    options.add_argument("user-agent=Mozilla/5.0 (X11; Linux x86_64) "
-                         "AppleWebKit/537.36 (KHTML, like Gecko) "
-                         "Chrome/122.0.0.0 Safari/537.36")
+    options.add_argument(
+        "user-agent=Mozilla/5.0 (X11; Linux x86_64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/122.0.0.0 Safari/537.36"
+    )
 
     driver = webdriver.Chrome(options=options)
     return driver
@@ -421,7 +422,9 @@ def main() -> None:
                     (inversion_allele, direct_allele),
                     (direct_allele, inversion_allele),
                 ):
-                    url, html = fetch_variant_html_with_browser(driver, chrom, pos, a1, a2)
+                    url, html = fetch_variant_html_with_browser(
+                        driver, chrom, pos, a1, a2
+                    )
 
                     flag_na = contains_token_flag(html, token_na)
                     flag_ct = contains_token_flag(html, token_ct)
