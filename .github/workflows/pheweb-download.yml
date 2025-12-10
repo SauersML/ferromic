@@ -40,6 +40,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      max-parallel: 20
       matrix:
         shard: ${{ fromJson(needs.plan.outputs.shards) }}
     steps:
@@ -65,6 +66,7 @@ jobs:
           path: |
             shard_${{ matrix.shard.id }}.tsv
             shard_${{ matrix.shard.id }}.log
+          retention-days: 7
 
   aggregate:
     name: Aggregate shards
@@ -91,3 +93,4 @@ jobs:
         with:
           name: pheweb-aggregated
           path: aggregated_phenotype_results.tsv
+          retention-days: 30

@@ -14,6 +14,7 @@ import json
 import os
 import signal
 import sys
+import threading
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -96,6 +97,8 @@ MAX_WORKERS = 4  # Conservative number to prevent timeouts on large files
 DEFAULT_PLAN_FILE = "pheweb_plan.json"
 DEFAULT_COORD_CHUNK = 1_000_000
 BEST_TAGGING_SNPS = Path(__file__).resolve().parent.parent / "data" / "best_tagging_snps_qvalues.tsv"
+
+RANGE_CHUNK_SIZE = 512 * 1024  # 512 KiB chunks for ranged BGZF reads
 
 # Global event to handle interruption cleanly
 stop_event = Event()
@@ -289,6 +292,68 @@ def _sniff_compression(url: str, session: requests.Session, info: Dict[str, str]
     }
 
 
+class HTTPRangeReader:
+    """Minimal random-access HTTP reader that caches byte ranges."""
+
+    def __init__(self, url: str, session: requests.Session, size: int, chunk_size: int = RANGE_CHUNK_SIZE):
+        self.url = url
+        self.session = session
+        self.size = size
+        self.chunk_size = chunk_size
+        self._cache: Dict[Tuple[int, int], bytes] = {}
+        self._pos = 0
+        self._lock = threading.Lock()
+
+    def tell(self) -> int:
+        return self._pos
+
+    def seek(self, offset: int, whence: int = 0) -> int:
+        if whence == 0:
+            new_pos = offset
+        elif whence == 1:
+            new_pos = self._pos + offset
+        elif whence == 2:
+            new_pos = self.size + offset
+        else:
+            raise ValueError(f"Invalid whence: {whence}")
+
+        self._pos = max(0, min(self.size, new_pos))
+        return self._pos
+
+    def _fetch(self, start: int, end: int) -> bytes:
+        key = (start, end)
+        if key in self._cache:
+            return self._cache[key]
+
+        headers = {"Range": f"bytes={start}-{end - 1}"}
+        resp = self.session.get(self.url, headers=headers, timeout=60)
+        resp.raise_for_status()
+        data = resp.content
+        self._cache[key] = data
+        return data
+
+    def read(self, size: int = -1) -> bytes:
+        if size == 0:
+            return b""
+        if size < 0:
+            size = self.size - self._pos
+
+        with self._lock:
+            start = self._pos
+            end = min(self.size, start + size)
+            data = bytearray()
+            cursor = start
+            while cursor < end:
+                chunk_end = min(end, cursor + self.chunk_size)
+                data.extend(self._fetch(cursor, chunk_end))
+                cursor = chunk_end
+            self._pos = end
+        return bytes(data)
+
+    def close(self):
+        self._cache.clear()
+
+
 def _parse_positions(raw_positions: Sequence[str]) -> Dict[str, set]:
     parsed: Dict[str, set] = defaultdict(set)
     for raw in raw_positions:
@@ -336,9 +401,40 @@ def _streaming_gzip_filter(
 
     info = info or _describe_remote(url, session)
     compression_info = compression_info or {}
-    print("Streaming from start because range/BGZF support is insufficient for targeted seeks...")
 
-    with session.get(url, stream=True, timeout=60) as resp:
+    total_targets = sum(len(v) for v in coords_by_chrom.values())
+    supports_range = info.get('accept_ranges') == 'bytes'
+
+    def _iter_lines(reader_obj):
+        for raw_line in reader_obj:
+            try:
+                yield raw_line.decode('utf-8').rstrip('\n')
+            except AttributeError:
+                if isinstance(raw_line, bytes):
+                    yield raw_line.decode('utf-8', errors='replace').rstrip('\n')
+                else:
+                    yield str(raw_line).replace('\n', '')
+
+    # Prefer ranged BGZF reads so we can stop early without downloading the world
+    if compression_info.get('is_bgzf') and supports_range:
+        try:
+            content_length = int(info.get('content_length', 0))
+        except ValueError:
+            content_length = 0
+
+        if content_length > 0:
+            print("Using ranged BGZF reads with cached byte windows for targeted lookup...")
+            reader = HTTPRangeReader(url, session, size=content_length)
+            gz_reader = bgzip.BGZipFile(fileobj=reader)
+            line_iter = _iter_lines(gz_reader)
+        else:
+            line_iter = None
+    else:
+        line_iter = None
+
+    if line_iter is None:
+        print("Streaming from start because range/BGZF support is insufficient for targeted seeks...")
+        resp = session.get(url, stream=True, timeout=60)
         resp.raise_for_status()
         compressor = resp.headers.get('content-encoding', info.get('content_encoding', ''))
         reader = resp.raw
@@ -346,35 +442,35 @@ def _streaming_gzip_filter(
             reader = bgzip.BGZipFile(fileobj=resp.raw)
         elif 'gzip' in compressor or 'gzip' in info.get('content_type', ''):
             reader = gzip.GzipFile(fileobj=resp.raw)
+        line_iter = _iter_lines(reader)
 
-        for raw_line in reader:
-            try:
-                line = raw_line.decode('utf-8').rstrip('\n')
-            except AttributeError:
-                if isinstance(raw_line, bytes):
-                    line = raw_line.decode('utf-8', errors='replace').rstrip('\n')
-                else:
-                    line = str(raw_line).replace('\n', '')
-            if not line:
-                continue
-            parts = line.split('\t')
-            if not header:
-                header = parts
-                continue
-            chrom = parts[0]
-            try:
-                pos = int(parts[1])
-            except (IndexError, ValueError):
-                continue
-            if pos in coords_by_chrom.get(chrom, set()):
-                filtered_rows.append(parts)
-                coords_by_chrom[chrom].discard(pos)
-                if not coords_by_chrom[chrom]:
-                    coords_by_chrom.pop(chrom)
-                remaining = sum(len(v) for v in coords_by_chrom.values())
-                print(f"Found {chrom}:{pos}. Remaining targets: {remaining}")
-                if remaining == 0:
-                    break
+    processed = 0
+    for line in line_iter:
+        if not line:
+            continue
+        processed += 1
+        if processed % 100000 == 0:
+            remaining = sum(len(v) for v in coords_by_chrom.values())
+            print(f"Scanned {processed:,} rows; remaining targets: {remaining}/{total_targets}")
+
+        parts = line.split('\t')
+        if not header:
+            header = parts
+            continue
+        chrom = parts[0]
+        try:
+            pos = int(parts[1])
+        except (IndexError, ValueError):
+            continue
+        if pos in coords_by_chrom.get(chrom, set()):
+            filtered_rows.append(parts)
+            coords_by_chrom[chrom].discard(pos)
+            if not coords_by_chrom[chrom]:
+                coords_by_chrom.pop(chrom)
+            remaining = sum(len(v) for v in coords_by_chrom.values())
+            print(f"Found {chrom}:{pos}. Remaining targets: {remaining}")
+            if remaining == 0:
+                break
 
     return header, filtered_rows
 
@@ -409,6 +505,16 @@ def download_task(target, coords_by_chrom: Dict[str, set] | None = None):
             with requests.Session() as session:
                 info = _describe_remote(url, session)
                 compression_info = _sniff_compression(url, session, info)
+
+                coords_summary = "no coordinate filter"
+                if coords_by_chrom:
+                    remaining = sum(len(v) for v in coords_by_chrom.values())
+                    coords_summary = f"{remaining} target position(s) across {len(coords_by_chrom)} chromosome(s)"
+                print(
+                    f"Preparing download for {phenocode} ({phenostring}); {coords_summary}. "
+                    f"Range support: {info.get('accept_ranges')}, gzip: {compression_info.get('is_gzip')}, "
+                    f"bgzf: {compression_info.get('is_bgzf')}"
+                )
 
                 if info.get('status') == '404':
                     error_msg = f"404 Not Found at {url}"
@@ -614,8 +720,15 @@ def parse_requested_coords(args: argparse.Namespace) -> Dict[str, set]:
 def load_best_tagging_coords(path: Path = BEST_TAGGING_SNPS) -> Dict[str, set]:
     coords: Dict[str, set] = defaultdict(set)
     if not path.exists():
-        print(f"Best-tagging SNP list missing at {path}; no coordinate filter will be applied.")
-        return coords
+        print(f"Best-tagging SNP list missing at {path}; downloading latest copy...")
+        resp = requests.get(
+            "https://raw.githubusercontent.com/SauersML/ferromic/refs/heads/main/data/best_tagging_snps_qvalues.tsv",
+            timeout=60,
+        )
+        resp.raise_for_status()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(resp.content)
+        print(f"Saved best-tagging SNP list to {path}")
 
     with path.open() as handle:
         reader = csv.DictReader(handle, delimiter='\t')
