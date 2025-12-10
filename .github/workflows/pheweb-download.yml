@@ -18,6 +18,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Install dependencies
+        run: pip install pandas requests tqdm
       - name: Generate download plan
         run: |
           python stats/get_pheweb.py --plan --shards 20 --plan-output pheweb_plan.json
@@ -45,6 +47,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Install dependencies
+        run: pip install pandas requests tqdm
       - name: Write shard phenocodes
         run: |
           jq -r '.phenocodes[]?' <<< '${{ toJson(matrix.shard) }}' > phenocodes.txt
@@ -71,6 +75,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Install dependencies
+        run: pip install pandas requests tqdm
       - name: Download shard artifacts
         uses: actions/download-artifact@v4
         with:
