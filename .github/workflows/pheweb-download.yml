@@ -7,6 +7,10 @@ on:
       - "stats/get_pheweb.py"
       - ".github/workflows/pheweb-download.yml"
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   plan:
     name: Plan shards
