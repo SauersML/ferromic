@@ -3114,15 +3114,15 @@
           "type": "image"
         },
         {
-          "name": "pop_allele_frequency_plot.pdf",
-          "href": "figures/special/pop_allele_frequency_plot.pdf",
-          "preview": "figures/special/pop_allele_frequency_plot.pdf",
+          "name": "pop_dosage_plot.pdf",
+          "href": "figures/special/pop_dosage_plot.pdf",
+          "preview": "figures/special/pop_dosage_plot.pdf",
           "type": "pdf"
         },
         {
-          "name": "pop_allele_frequency_plot.png",
-          "href": "figures/special/pop_allele_frequency_plot.png",
-          "preview": "figures/special/pop_allele_frequency_plot.png",
+          "name": "pop_dosage_plot.png",
+          "href": "figures/special/pop_dosage_plot.png",
+          "preview": "figures/special/pop_dosage_plot.png",
           "type": "image"
         },
         {

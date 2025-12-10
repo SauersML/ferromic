@@ -138,6 +138,25 @@ def load_required_figures(config_paths: Iterable[Path]) -> tuple[set[Path], dict
     return required, per_config
 
 
+def resolve_figures_root(root: Path, required_dirs: set[Path]) -> Path:
+    """Return a figures root that contains the required subdirectories."""
+
+    if all((root / rel_dir).is_dir() for rel_dir in required_dirs):
+        return root
+
+    for candidate in root.rglob("*"):
+        if not candidate.is_dir():
+            continue
+        if all((candidate / rel_dir).is_dir() for rel_dir in required_dirs):
+            print(
+                "Figures root does not contain required directories; "
+                f"using nested directory {candidate} instead."
+            )
+            return candidate
+
+    return root
+
+
 def copy_figures(figures: dict[Path, Path], destination_root: Path) -> dict[Path, list[Path]]:
     destination_root = destination_root.resolve()
     shutil.rmtree(destination_root, ignore_errors=True)
@@ -190,9 +209,8 @@ def main() -> None:
     manifest_path = args.manifest_path.resolve()
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
 
-    figure_index = build_figure_index(
-        collect_figure_files(figures_root), figures_root
-    )
+    required_figures: set[Path] = set()
+    required_dirs: set[Path] = set()
 
     if args.required_figures_config:
         required_figures, _ = load_required_figures(args.required_figures_config)
@@ -202,6 +220,15 @@ def main() -> None:
             for path in required_figures
             if path.parent.as_posix() not in {".", ""}
         }
+
+        if required_dirs:
+            figures_root = resolve_figures_root(figures_root, required_dirs)
+
+    figure_index = build_figure_index(
+        collect_figure_files(figures_root), figures_root
+    )
+
+    if required_figures:
         missing_required_dirs = sorted(
             rel_dir.as_posix()
             for rel_dir in required_dirs
@@ -214,11 +241,10 @@ def main() -> None:
                 f"{missing_dir_list}"
             )
 
-        missing = sorted(
-            rel.as_posix() for rel in required_figures if rel not in figure_index
-        )
+        missing = {rel for rel in required_figures if rel not in figure_index}
+
         if missing:
-            missing_list = "\n".join(missing)
+            missing_list = "\n".join(sorted(rel.as_posix() for rel in missing))
             raise SystemExit(
                 "Required figure assets were missing from the figures root:\n"
                 f"{missing_list}"
