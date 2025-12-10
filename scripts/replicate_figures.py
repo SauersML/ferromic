@@ -176,7 +176,10 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         script=Path("stats/pop_dosage_plot.py"),
         outputs=(Path("special/pop_dosage_plot.pdf"),),
         dependencies=(),
-        note="Downloads the inversion population dosage summary table from GitHub if needed.",
+        note=(
+            "Downloads the inversion population dosage summary table from GitHub if needed "
+            "and writes to the basename 'special/pop_dosage_plot' expected by the CI checks."
+        ),
         group="Diversity",
     ),
     FigureTask(
