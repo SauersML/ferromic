@@ -54,3 +54,6 @@ Therefore, exact match on that.
 
 THEN, verify that REF	ALT MATCH the  ref	alt columns. Warn if not.
 Now, we have found the EXACT ROWS in aggregated_phenotype_results that match a single row in phewas_results.
+
+also, make a note of / save info of which phenotype is "Best_Match"
+
