@@ -403,6 +403,7 @@ def plot_scatter_with_ci(data: pd.DataFrame, filename: str) -> None:
 
         subset_xerr = xerr[:, subset.index]
         subset_yerr = yerr[:, subset.index]
+        subset_positions = pd.Index(subset.index)
 
         err_lines: Line2D | None = None
         for rec_value, rec_color in (
@@ -413,8 +414,9 @@ def plot_scatter_with_ci(data: pd.DataFrame, filename: str) -> None:
             if rec_points.empty:
                 continue
 
-            rec_xerr = subset_xerr[:, rec_points.index]
-            rec_yerr = subset_yerr[:, rec_points.index]
+            rec_positions = subset_positions.get_indexer(rec_points.index)
+            rec_xerr = subset_xerr[:, rec_positions]
+            rec_yerr = subset_yerr[:, rec_positions]
 
             (err_lines, _, _) = ax.errorbar(
                 rec_points["callset_af"],
