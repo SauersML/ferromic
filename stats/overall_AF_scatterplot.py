@@ -33,7 +33,8 @@ RECURRENT_EVENT_COLOR = "#d95f02"  # darker orange
 
 # Reduced transparency and larger markers to improve visibility.
 POINT_ALPHA = 0.9
-LOW_R2_ALPHA = 0.7
+# Make low-quality points 50% more transparent than before.
+LOW_R2_ALPHA = 0.55
 SCATTER_SIZE = 90
 ERRORBAR_MARKERSIZE = 8
 
