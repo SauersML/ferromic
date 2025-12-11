@@ -1491,7 +1491,13 @@ def build_workbook(output_path: Path) -> None:
             description=(
                 "A comprehensive catalog of the 93 balanced human chromosomal inversions analyzed in this study. "
                 "Inversion calls, coordinates, and recurrence classifications are derived from Porubsky et al. (2022) "
-                "using Strand-seq and long-read sequencing on the 1000 Genomes Project panel (GRCh38 coordinates)."
+                "using Strand-seq and long-read sequencing on the 1000 Genomes Project panel (GRCh38 coordinates). "
+                "Chromosome, Start, End, number recurrent events, Inversion ID, Size (kbp), Inversion allele frequency, "
+                "verdictRecurrence_hufsah, and verdictRecurrence_benson columns are sourced directly from Porubsky et al. "
+                "(2022). NA in the 0_single_1_recur_consensus column indicates there was no consensus between single-event "
+                "and recurrent classifications. NA in Hudson's FST, Direct haplotypes pi, and Inverted haplotypes pi "
+                "reflects that these metrics could not be calculated because the region lacked polymorphisms or had too few "
+                "haplotypes."
             ),
             column_defs=INVERSION_COLUMN_DEFS,
             loader=_load_inversion_catalog,
@@ -1516,7 +1522,8 @@ def build_workbook(output_path: Path) -> None:
             name="dN/dS (ω) results",
             description=(
                 "Results of the dN/dS (ω) analysis testing for genes with significantly different selective regimes between "
-                "direct and inverted orientations."
+                "direct and inverted orientations. Across all columns, NA indicates that the inversion–CDS pair was excluded, "
+                "for example due to an uninformative tree topology, insufficient haplotype counts, or PAML run failures."
             ),
             column_defs=PAML_COLUMN_DEFS,
             loader=_load_paml_results,
@@ -1528,7 +1535,9 @@ def build_workbook(output_path: Path) -> None:
             name="Imputation results",
             description=(
                 "Performance metrics for the machine learning models (Partial Least Squares regression) used to impute inversion "
-                "dosage from flanking SNP genotypes. Models were trained on the 82 phased haplotypes from the reference panel."
+                "dosage from flanking SNP genotypes. Models were trained on the 82 phased haplotypes from the reference panel. "
+                "For allele frequency columns, values with an imputation accuracy below r^2 0.5 were omitted, so NA marks "
+                "instances where the frequency was not reported."
             ),
             column_defs=IMPUTATION_COLUMN_DEFS,
             loader=_load_imputation_results,
@@ -1541,7 +1550,11 @@ def build_workbook(output_path: Path) -> None:
             description=(
                 "Phenome-wide association study (PheWAS) results linking imputed inversion dosages to electronic health record "
                 "(EHR) phenotypes in the NIH All of Us cohort (v8). Association tests were performed using logistic regression "
-                "adjusted for age, sex, 16 genetic principal components, and ancestry categories."
+                "adjusted for age, sex, 16 genetic principal components, and ancestry categories. For the main PheWAS analysis, "
+                "NA values denote models that failed to converge or produced unstable fits. Interaction tests were only run when "
+                "the main result met the FDR threshold, so NA in interaction columns indicates the follow-up test was not "
+                "performed. Ancestry-specific analyses were likewise conditioned on main FDR significance; NA in those columns "
+                "means the test was skipped or the ancestry stratum had insufficient cases."
             ),
             column_defs=PHEWAS_COLUMN_DEFS,
             loader=_load_phewas_results,
@@ -1568,7 +1581,8 @@ def build_workbook(output_path: Path) -> None:
                 "Top tagging SNP for each inversion locus, derived from the latest ancient DNA selection analysis of "
                 "West Eurasian genomes in the AGES database. Selection statistics (S and P_X) originate from that "
                 "ancient DNA summary table, allele frequencies are stratified by direct vs. inverted haplotypes, and "
-                "BH-adjusted p-values reflect Benjamini–Hochberg correction across inversions passing quality filters."
+                "BH-adjusted p-values reflect Benjamini–Hochberg correction across inversions passing quality filters. NA values "
+                "appear when a locus was excluded for a reason documented in the exclusion_reasons column."
             ),
             column_defs=BEST_TAGGING_COLUMN_DEFS,
             loader=_load_best_tagging_snps,
@@ -1581,7 +1595,8 @@ def build_workbook(output_path: Path) -> None:
             description=(
                 "Validation PheWAS for the 17q21 inversion locus using a tagging SNP (rs105255341) instead of imputed dosage. "
                 "This ensures that the pleiotropic effects observed (e.g., obesity vs. breast cancer protection) are robust to "
-                "the method of genotype determination."
+                "the method of genotype determination. NA values indicate models that failed to converge or produced unstable "
+                "fits."
             ),
             column_defs=TAG_PHEWAS_COLUMN_DEFS,
             loader=_load_phewas_tagging,
