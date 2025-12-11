@@ -38,7 +38,8 @@ def main():
         "130699#Source of report of E04 (Other nontoxic goitre)",
         "Union#E04#Other nontoxic goitre",
         "Union#E040#Nontoxic diffuse goitre",
-        "Union#E042#Nontoxic multinodular goitre"
+        "Union#E042#Nontoxic multinodular goitre",
+        "Union#Block E00-E07#E00-E07 Disorders of thyroid gland" 
     ]
     
     list_nevi = [
@@ -70,9 +71,7 @@ def main():
         "Union#D05#Carcinoma in situ of breast",
         "Union#D051#Intraductal carcinoma in situ",
         "Union#D059#Carcinoma in situ of breast unspecified",
-        "Union#Z853#Personal history of malignant neoplasm of breast",
-        # Added based on recent review for completeness on benign neoplasms
-        "Union#D24#Benign neoplasm of breast"
+        "Union#Z853#Personal history of malignant neoplasm of breast"
     ]
     
     list_myopia = [
@@ -169,6 +168,8 @@ def main():
     processed_rows = []
     max_matches_found = 0
     
+    print("\n--- PROCESSING SUMMARY ---")
+    
     for _, row in aou_df.iterrows():
         aou_pheno = row['Phenotype']
         inversion_str = str(row['Inversion']) # ensure string
@@ -220,9 +221,41 @@ def main():
         
         if len(matches_data) > max_matches_found:
             max_matches_found = len(matches_data)
-            
+        
         row_data['matches'] = matches_data
         processed_rows.append(row_data)
+
+        # ---------------------------------------------------------
+        # PRINT SUMMARY FOR THIS ROW
+        # ---------------------------------------------------------
+        print(f"Phenotype: {aou_pheno}")
+        print(f"  Inversion: {inversion_str}")
+        
+        if len(matches_data) == 0:
+            print("  -> Result: NO MATCH FOUND")
+        else:
+            # Extract lists for stats
+            p_vals = []
+            or_vals = []
+            for m in matches_data:
+                try: p_vals.append(float(m['p']))
+                except: pass
+                try: or_vals.append(float(m['or']))
+                except: pass
+            
+            if len(matches_data) == 1:
+                p_display = f"{p_vals[0]}" if p_vals else "N/A"
+                or_display = f"{or_vals[0]}" if or_vals else "N/A"
+                print(f"  -> Result: 1 match. P-value: {p_display} | OR: {or_display}")
+            else:
+                p_min = min(p_vals) if p_vals else "N/A"
+                p_max = max(p_vals) if p_vals else "N/A"
+                or_min = min(or_vals) if or_vals else "N/A"
+                or_max = max(or_vals) if or_vals else "N/A"
+                print(f"  -> Result: {len(matches_data)} matches.")
+                print(f"     P-value range: {p_min} to {p_max}")
+                print(f"     OR range:      {or_min} to {or_max}")
+        print("-" * 40)
         
     # ---------------------------------------------------------
     # 5. CONSTRUCT FINAL DATAFRAME
@@ -264,7 +297,7 @@ def main():
     
     output_filename = "combined_phenotypes_strict_.tsv"
     df_out.to_csv(output_filename, sep='\t', index=False)
-    print(f"Successfully created {output_filename}")
+    print(f"\nSuccessfully created {output_filename}")
 
 if __name__ == "__main__":
     main()
