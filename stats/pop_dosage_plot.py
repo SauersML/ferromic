@@ -330,7 +330,6 @@ def _plot(
             positions=positions,
             widths=offset_step * 0.8,
             showfliers=False,
-            showcaps=False,
             patch_artist=True,
             boxprops=dict(
                 facecolor=color_map.get(pop, "#333333"),
@@ -342,10 +341,12 @@ def _plot(
                 linewidth=1.6,
             ),
             whiskerprops=dict(
-                linewidth=0,
+                color="black",
+                linewidth=1.4,
             ),
             capprops=dict(
-                linewidth=0,
+                color="black",
+                linewidth=1.4,
             ),
         )
 
