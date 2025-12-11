@@ -26,9 +26,16 @@ CALLSET_POINT_COLOR = "#1f77b4"
 IMPUTED_POINT_COLOR = "#ff7f0e"
 # Used for inversions with low imputation performance.
 LOW_R2_COLOR = "#7f7f7f"
-# Slight transparency to reduce overplotting.
-POINT_ALPHA = 0.75
-LOW_R2_ALPHA = 0.3
+
+# Distinguish single-event vs recurrent inversions.
+SINGLE_EVENT_COLOR = "#1b9e77"  # darker green
+RECURRENT_EVENT_COLOR = "#d95f02"  # darker orange
+
+# Reduced transparency and larger markers to improve visibility.
+POINT_ALPHA = 0.9
+LOW_R2_ALPHA = 0.7
+SCATTER_SIZE = 90
+ERRORBAR_MARKERSIZE = 8
 
 plt.rcParams.update({
     "pdf.fonttype": 42,
@@ -71,16 +78,25 @@ def wilson_ci(successes: int, trials: int, z: float = 1.96) -> tuple[float, floa
 
 def load_inv_properties() -> pd.DataFrame:
     df = pd.read_csv(_ensure_exists(INV_PROPERTIES_PATH), sep="\t")
-    required_cols = ["OrigID", "Chromosome", "Start", "End", "0_single_1_recur_consensus"]
+    required_cols = [
+        "OrigID",
+        "Chromosome",
+        "Start",
+        "End",
+        "0_single_1_recur_consensus",
+    ]
     missing = [col for col in required_cols if col not in df.columns]
     if missing:
         raise KeyError(f"inv_properties.tsv missing columns: {missing}")
 
-    df["0_single_1_recur_consensus"] = pd.to_numeric(df["0_single_1_recur_consensus"], errors="coerce")
+    df["0_single_1_recur_consensus"] = pd.to_numeric(
+        df["0_single_1_recur_consensus"], errors="coerce"
+    )
     keep = df["0_single_1_recur_consensus"].isin([0, 1])
     df = df.loc[keep, required_cols].copy()
     df = df.drop_duplicates(subset=["OrigID"])
     df["coordinate"] = df.apply(lambda r: f"{r['Chromosome']}:{int(r['Start'])}-{int(r['End'])}", axis=1)
+    df.rename(columns={"0_single_1_recur_consensus": "recurrence_consensus"}, inplace=True)
     return df
 
 
@@ -204,39 +220,50 @@ def _clamp_to_unit(df: pd.DataFrame, cols: Iterable[str]) -> pd.DataFrame:
     return df
 
 
+def _recurrence_colors(recurrence: pd.Series) -> pd.Series:
+    return recurrence.map({0: SINGLE_EVENT_COLOR, 1: RECURRENT_EVENT_COLOR})
+
+
 def plot_scatter(data: pd.DataFrame, filename: str) -> None:
     fig, ax = plt.subplots(figsize=(6, 6))
     high_r2 = data.loc[data["unbiased_pearson_r2"] > 0.5]
     low_r2 = data.loc[data["unbiased_pearson_r2"] <= 0.5]
 
     def _plot_subset(
-        subset: pd.DataFrame, color: str, alpha: float, marker: str
+        subset: pd.DataFrame, alpha: float, marker: str
     ) -> tuple[float, Line2D | None]:
         if subset.empty:
             return float("nan"), None
 
+        colors = _recurrence_colors(subset["recurrence_consensus"])
         scatter = ax.scatter(
             subset["callset_af"],
             subset["aou_af"],
-            s=70,
-            color=color,
+            s=SCATTER_SIZE,
+            c=colors,
             alpha=alpha,
             marker=marker,
+            edgecolor="black",
+            linewidth=0.4,
         )
 
         if len(subset) >= 2:
-            slope, intercept = np.polyfit(subset["callset_af"], subset["aou_af"], 1)
-            x_vals = np.linspace(subset["callset_af"].min(), subset["callset_af"].max(), 100)
-            ax.plot(x_vals, slope * x_vals + intercept, color=color, linestyle="--")
+            slope, intercept = np.polyfit(
+                subset["callset_af"], subset["aou_af"], 1
+            )
+            x_vals = np.linspace(
+                subset["callset_af"].min(), subset["callset_af"].max(), 100
+            )
+            ax.plot(
+                x_vals, slope * x_vals + intercept, color="black", linestyle="--"
+            )
             r_value = np.corrcoef(subset["callset_af"], subset["aou_af"])[0, 1]
         else:
             r_value = float("nan")
         return r_value, scatter
 
-    r_high, scatter_high = _plot_subset(
-        high_r2, CALLSET_POINT_COLOR, POINT_ALPHA, "^"
-    )
-    r_low, scatter_low = _plot_subset(low_r2, LOW_R2_COLOR, LOW_R2_ALPHA, "o")
+    r_high, _ = _plot_subset(high_r2, POINT_ALPHA, "^")
+    r_low, _ = _plot_subset(low_r2, LOW_R2_ALPHA, "o")
 
     ax.annotate(
         (
@@ -267,22 +294,55 @@ def plot_scatter(data: pd.DataFrame, filename: str) -> None:
         bbox={"facecolor": "white", "alpha": 0.9, "edgecolor": "none"},
     )
 
-    legend_handles: list[Line2D] = []
-    legend_labels: list[str] = []
-    if scatter_high is not None:
-        legend_handles.append(scatter_high)
-        legend_labels.append(f"r² > 0.5 (N = {len(high_r2)})")
-    if scatter_low is not None:
-        legend_handles.append(scatter_low)
-        legend_labels.append(f"r² ≤ 0.5 (N = {len(low_r2)})")
-    if legend_handles:
-        ax.legend(
-            legend_handles,
-            legend_labels,
-            loc="lower right",
-            frameon=True,
-            framealpha=0.95,
-        )
+    recurrence_legend = [
+        Line2D(
+            [],
+            [],
+            marker="o",
+            color="white",
+            markerfacecolor=SINGLE_EVENT_COLOR,
+            markeredgecolor="black",
+            markersize=10,
+            linestyle="",
+            label="Single-event",
+        ),
+        Line2D(
+            [],
+            [],
+            marker="o",
+            color="white",
+            markerfacecolor=RECURRENT_EVENT_COLOR,
+            markeredgecolor="black",
+            markersize=10,
+            linestyle="",
+            label="Recurrent",
+        ),
+    ]
+
+    quality_legend = [
+        Line2D(
+            [], [], marker="^", color="black", linestyle="", markersize=9, label="r² > 0.5"
+        ),
+        Line2D(
+            [], [], marker="o", color="black", linestyle="", markersize=9, label="r² ≤ 0.5"
+        ),
+    ]
+
+    leg1 = ax.legend(
+        handles=recurrence_legend,
+        loc="lower right",
+        frameon=True,
+        framealpha=0.95,
+        title="Recurrence",
+    )
+    ax.add_artist(leg1)
+    ax.legend(
+        handles=quality_legend,
+        loc="lower left",
+        frameon=True,
+        framealpha=0.95,
+        title="Imputation",
+    )
 
     ax.set_xlabel("Porubsky et al. 2022 Callset Allele Frequency", fontsize=16)
     ax.set_ylabel("All of Us Cohort Imputed Allele Frequency", fontsize=16)
@@ -336,7 +396,7 @@ def plot_scatter_with_ci(data: pd.DataFrame, filename: str) -> None:
     low_r2 = data.loc[data["unbiased_pearson_r2"] <= 0.5]
 
     def _errorbar_subset(
-        subset: pd.DataFrame, color: str, alpha: float, marker: str
+        subset: pd.DataFrame, alpha: float, marker: str
     ) -> tuple[float, Line2D | None]:
         if subset.empty:
             return float("nan"), None
@@ -344,37 +404,51 @@ def plot_scatter_with_ci(data: pd.DataFrame, filename: str) -> None:
         subset_xerr = xerr[:, subset.index]
         subset_yerr = yerr[:, subset.index]
 
-        (err_lines, _, _) = ax.errorbar(
-            subset["callset_af"],
-            subset["aou_af"],
-            xerr=subset_xerr,
-            yerr=subset_yerr,
-            fmt=marker,
-            markersize=6,
-            ecolor="#4a4a4a",
-            elinewidth=1.0,
-            capsize=3,
-            color=color,
-            markerfacecolor=color,
-            markeredgecolor=color,
-            alpha=alpha,
-        )
+        err_lines: Line2D | None = None
+        for rec_value, rec_color in (
+            (0, SINGLE_EVENT_COLOR),
+            (1, RECURRENT_EVENT_COLOR),
+        ):
+            rec_points = subset.loc[subset["recurrence_consensus"] == rec_value]
+            if rec_points.empty:
+                continue
+
+            rec_xerr = subset_xerr[:, rec_points.index]
+            rec_yerr = subset_yerr[:, rec_points.index]
+
+            (err_lines, _, _) = ax.errorbar(
+                rec_points["callset_af"],
+                rec_points["aou_af"],
+                xerr=rec_xerr,
+                yerr=rec_yerr,
+                fmt=marker,
+                markersize=ERRORBAR_MARKERSIZE,
+                ecolor="#4a4a4a",
+                elinewidth=1.0,
+                capsize=3,
+                color=rec_color,
+                markerfacecolor=rec_color,
+                markeredgecolor="black",
+                alpha=alpha,
+            )
 
         if len(subset) >= 2:
             slope, intercept = np.polyfit(
                 subset["callset_af"], subset["aou_af"], 1
             )
-            x_vals = np.linspace(subset["callset_af"].min(), subset["callset_af"].max(), 100)
-            ax.plot(x_vals, slope * x_vals + intercept, color=color, linestyle="--")
+            x_vals = np.linspace(
+                subset["callset_af"].min(), subset["callset_af"].max(), 100
+            )
+            ax.plot(
+                x_vals, slope * x_vals + intercept, color="black", linestyle="--"
+            )
             r_value = np.corrcoef(subset["callset_af"], subset["aou_af"])[0, 1]
         else:
             r_value = float("nan")
         return r_value, err_lines
 
-    r_high, err_high = _errorbar_subset(
-        high_r2, CALLSET_POINT_COLOR, POINT_ALPHA, "^"
-    )
-    r_low, err_low = _errorbar_subset(low_r2, LOW_R2_COLOR, LOW_R2_ALPHA, "o")
+    r_high, err_high = _errorbar_subset(high_r2, POINT_ALPHA, "^")
+    r_low, err_low = _errorbar_subset(low_r2, LOW_R2_ALPHA, "o")
 
     ax.annotate(
         (
@@ -405,22 +479,55 @@ def plot_scatter_with_ci(data: pd.DataFrame, filename: str) -> None:
         bbox={"facecolor": "white", "alpha": 0.9, "edgecolor": "none"},
     )
 
-    legend_handles: list[Line2D] = []
-    legend_labels: list[str] = []
-    if err_high is not None:
-        legend_handles.append(err_high)
-        legend_labels.append(f"r² > 0.5 (N = {len(high_r2)})")
-    if err_low is not None:
-        legend_handles.append(err_low)
-        legend_labels.append(f"r² ≤ 0.5 (N = {len(low_r2)})")
-    if legend_handles:
-        ax.legend(
-            legend_handles,
-            legend_labels,
-            loc="lower right",
-            frameon=True,
-            framealpha=0.95,
-        )
+    recurrence_legend = [
+        Line2D(
+            [],
+            [],
+            marker="o",
+            color="white",
+            markerfacecolor=SINGLE_EVENT_COLOR,
+            markeredgecolor="black",
+            markersize=10,
+            linestyle="",
+            label="Single-event",
+        ),
+        Line2D(
+            [],
+            [],
+            marker="o",
+            color="white",
+            markerfacecolor=RECURRENT_EVENT_COLOR,
+            markeredgecolor="black",
+            markersize=10,
+            linestyle="",
+            label="Recurrent",
+        ),
+    ]
+
+    quality_legend = [
+        Line2D(
+            [], [], marker="^", color="black", linestyle="", markersize=9, label="r² > 0.5"
+        ),
+        Line2D(
+            [], [], marker="o", color="black", linestyle="", markersize=9, label="r² ≤ 0.5"
+        ),
+    ]
+
+    leg1 = ax.legend(
+        handles=recurrence_legend,
+        loc="lower right",
+        frameon=True,
+        framealpha=0.95,
+        title="Recurrence",
+    )
+    ax.add_artist(leg1)
+    ax.legend(
+        handles=quality_legend,
+        loc="lower left",
+        frameon=True,
+        framealpha=0.95,
+        title="Imputation",
+    )
 
     ax.set_xlabel("Porubsky et al. 2022 Callset Allele Frequency", fontsize=16)
     ax.set_ylabel("All of Us Cohort Imputed Allele Frequency", fontsize=16)
@@ -446,7 +553,7 @@ def main() -> None:
     imputation_df = load_imputation_results()
 
     merged = (
-        inv_props[["OrigID", "coordinate"]]
+        inv_props[["OrigID", "coordinate", "recurrence_consensus"]]
         .merge(callset_df, on="OrigID", how="inner")
         .merge(aou_df, on="OrigID", how="inner")
         .merge(imputation_df, on="OrigID", how="left")
