@@ -262,7 +262,7 @@ def main():
         
     df_out = pd.DataFrame(final_rows, columns=final_cols)
     
-    output_filename = "combined_phenotypes_strict_v3.tsv"
+    output_filename = "combined_phenotypes_strict_.tsv"
     df_out.to_csv(output_filename, sep='\t', index=False)
     print(f"Successfully created {output_filename}")
 
