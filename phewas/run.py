@@ -574,6 +574,12 @@ class MultiTenantGovernor(ResourceGovernor):
 
 # --- Configuration ---
 TARGET_INVERSIONS = {
+    "positive_score",
+    "negative_score",
+}
+
+"""
+TARGET_INVERSIONS = {
     "chr8-7301025-INV-5297356",
     "chr10-79542902-INV-674513",
     "chr12-46897663-INV-16289",
@@ -582,6 +588,7 @@ TARGET_INVERSIONS = {
     "chr6-141867315-INV-29159",
     "chr6-167181003-INV-209976",
 }
+"""
 
 """
 Low imputation:
