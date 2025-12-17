@@ -1,3 +1,11 @@
+# Inversion polymorphism paper
+- The imputation pipeline can be found in [/imputation]([url](https://github.com/SauersML/ferromic/tree/main/imputation)).
+- The PheWAS pipeline can be found in [/phewas]([url](https://github.com/SauersML/ferromic/tree/main/phewas)).
+- Assorted analysis and plotting scripts can be found within [/stats]([url](https://github.com/SauersML/ferromic/tree/main/stats)).
+- The pipeline to run the PAML analysis can be found within [/cds]([url](https://github.com/SauersML/ferromic/tree/main/cds))
+
+---
+
 # Ferromic
 
 [![PyPI](https://img.shields.io/pypi/v/ferromic)](https://pypi.org/project/ferromic/) [![Build Status](https://github.com/SauersML/ferromic/actions/workflows/CI.yml/badge.svg)](https://github.com/SauersML/ferromic/actions/workflows/CI.yml) [![License](https://img.shields.io/crates/l/ferromic)](LICENSE.md)
@@ -9,9 +17,8 @@ Ferromic is a Rust-accelerated population genetics toolkit built for haplotype-a
 - **Purpose built for haplotype-aware studies.** Separates per-haplotype diversity metrics, supports inversion-aware sample groupings, and ships with Hudson and Weir & Cockerham FST estimators.
 - **Designed for big cohorts.** Rayon-powered multithreading, streaming VCF readers, progress bars, and resumable temporary directories keep terabyte-scale runs responsive.
 - **Rich output surface.** Generates region summaries, per-base FASTA-style tracks, PCA tables, PHYLIP files, and optional Hudson TSV exports ready for downstream notebooks.
-- **First-class Python ergonomics.** A PyO3-powered module exposes the same core statistics to Python, NumPy, and pandas workflows without sacrificing performance.
+- **Python ergonomics.** A PyO3-powered module exposes the same core statistics to Python, NumPy, and pandas workflows without sacrificing performance.
 - **Memory-aware dense matrices.** Detects ploidy, compresses genotypes into dense representations, and caches population summaries to accelerate repeated scans.
-- **Operationally friendly.** Ships with helper scripts, resumable temporary workspaces, and informative logging so long-running analyses can be monitored and resumed with confidence.
 
 ## Quick start
 
