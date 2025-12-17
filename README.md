@@ -1,8 +1,8 @@
 # Inversion polymorphism paper
-- The imputation pipeline can be found in [/imputation]([url](https://github.com/SauersML/ferromic/tree/main/imputation)).
-- The PheWAS pipeline can be found in [/phewas]([url](https://github.com/SauersML/ferromic/tree/main/phewas)).
-- Assorted analysis and plotting scripts can be found within [/stats]([url](https://github.com/SauersML/ferromic/tree/main/stats)).
-- The pipeline to run the PAML analysis can be found within [/cds]([url](https://github.com/SauersML/ferromic/tree/main/cds))
+- The imputation pipeline can be found in [/imputation](https://github.com/SauersML/ferromic/tree/main/imputation).
+- The PheWAS pipeline can be found in [/phewas](https://github.com/SauersML/ferromic/tree/main/phewas).
+- Assorted analysis and plotting scripts can be found within [/stats](https://github.com/SauersML/ferromic/tree/main/stats).
+- The pipeline to run the PAML analysis can be found within [/cds](https://github.com/SauersML/ferromic/tree/main/cds)
 
 ---
 
