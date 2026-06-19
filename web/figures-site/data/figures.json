@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2025-12-17T18:45:31.070046+00:00",
+  "generatedAt": "2026-06-19T22:55:10.087850+00:00",
   "groups": [
     {
       "title": "Top-level figures",
@@ -312,6 +312,30 @@
           "type": "pdf"
         },
         {
+          "name": "divergence_da_by_type.pdf",
+          "href": "figures/data/divergence_da_by_type.pdf",
+          "preview": "figures/data/divergence_da_by_type.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "divergence_dxy_by_type.pdf",
+          "href": "figures/data/divergence_dxy_by_type.pdf",
+          "preview": "figures/data/divergence_dxy_by_type.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "divergence_middle_vs_flank.pdf",
+          "href": "figures/data/divergence_middle_vs_flank.pdf",
+          "preview": "figures/data/divergence_middle_vs_flank.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "four_fold_pi.pdf",
+          "href": "figures/data/four_fold_pi.pdf",
+          "preview": "figures/data/four_fold_pi.pdf",
+          "type": "pdf"
+        },
+        {
           "name": "inversion_r2_sorted.pdf",
           "href": "figures/data/inversion_r2_sorted.pdf",
           "preview": "figures/data/inversion_r2_sorted.pdf",
@@ -328,6 +352,12 @@
           "href": "figures/data/inversion_trajectories_combined.png",
           "preview": "figures/data/inversion_trajectories_combined.png",
           "type": "image"
+        },
+        {
+          "name": "recurrence_controls.pdf",
+          "href": "figures/data/recurrence_controls.pdf",
+          "preview": "figures/data/recurrence_controls.pdf",
+          "type": "pdf"
         }
       ]
     },
@@ -1594,18 +1624,6 @@
           "href": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_40kb/pi_mf_recurrence_violins_total_40kb.pdf",
           "preview": "figures/final_plots/pi_analysis_results_exact_mf_quadrants/total_40kb/pi_mf_recurrence_violins_total_40kb.pdf",
           "type": "pdf"
-        }
-      ]
-    },
-    {
-      "title": "final_plots/recurrent_events_analysis_separate_v2",
-      "slug": "final-plots-recurrent-events-analysis-separate-v2",
-      "items": [
-        {
-          "name": "pi_vs_recurrent_events_separate_lmm_plot.png",
-          "href": "figures/final_plots/recurrent_events_analysis_separate_v2/pi_vs_recurrent_events_separate_lmm_plot.png",
-          "preview": "figures/final_plots/recurrent_events_analysis_separate_v2/pi_vs_recurrent_events_separate_lmm_plot.png",
-          "type": "image"
         }
       ]
     },
@@ -3070,18 +3088,6 @@
           "href": "figures/pi_analysis_results_exact_mf_quadrants/total_40kb/pi_mf_recurrence_violins_total_40kb.pdf",
           "preview": "figures/pi_analysis_results_exact_mf_quadrants/total_40kb/pi_mf_recurrence_violins_total_40kb.pdf",
           "type": "pdf"
-        }
-      ]
-    },
-    {
-      "title": "recurrent_events_analysis_separate_v2",
-      "slug": "recurrent-events-analysis-separate-v2",
-      "items": [
-        {
-          "name": "pi_vs_recurrent_events_separate_lmm_plot.png",
-          "href": "figures/recurrent_events_analysis_separate_v2/pi_vs_recurrent_events_separate_lmm_plot.png",
-          "preview": "figures/recurrent_events_analysis_separate_v2/pi_vs_recurrent_events_separate_lmm_plot.png",
-          "type": "image"
         }
       ]
     },
