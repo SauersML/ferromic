@@ -74,7 +74,8 @@ def _resolve_input(name):
 
 
 PHY_DIR = os.environ.get("FOURFOLD_PHY_DIR")
-PHY_OUTPUTS_ZIP = _resolve_input("phy_outputs.zip")
+PHY_OUTPUTS_ZIP_NAME = "phy_outputs.zip"          # zip member / basename
+PHY_OUTPUTS_ZIP = _resolve_input(PHY_OUTPUTS_ZIP_NAME)  # resolved filesystem path
 LFS_OID = "03f9b4d8167a0f2b3e715c6c978eddb9b03340a4334aa9ec50c07a3a8b7abf7d"
 OUTPUT_CSV = _resolve_input("output.csv")
 INVINFO_TSV = _resolve_input("inv_properties.tsv")
@@ -139,9 +140,9 @@ def resolve_phy_dir():
     # of the per-group .phy.gz files). Handle both the wrapped and direct cases.
     with zipfile.ZipFile(src) as outer:
         names = outer.namelist()
-        if names == [PHY_OUTPUTS_ZIP] or PHY_OUTPUTS_ZIP in names:
-            inner_path = os.path.join(tmp, PHY_OUTPUTS_ZIP)
-            with outer.open(PHY_OUTPUTS_ZIP) as f_in, open(inner_path, "wb") as f_out:
+        if names == [PHY_OUTPUTS_ZIP_NAME] or PHY_OUTPUTS_ZIP_NAME in names:
+            inner_path = os.path.join(tmp, PHY_OUTPUTS_ZIP_NAME)
+            with outer.open(PHY_OUTPUTS_ZIP_NAME) as f_in, open(inner_path, "wb") as f_out:
                 shutil.copyfileobj(f_in, f_out)
             archive = inner_path
         else:
