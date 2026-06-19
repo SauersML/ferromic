@@ -61,15 +61,27 @@ warnings.filterwarnings("ignore")
 # Directory holding the per-CDS group0_*/group1_* .phy.gz alignments. If unset,
 # resolve_phy_dir() recovers them from data/phy_outputs.zip (or, when that file
 # has been pruned from the tree, from its git-LFS object) into a temp dir.
-PHY_DIR = os.environ.get("FOURFOLD_PHY_DIR")
-PHY_OUTPUTS_ZIP = "phy_outputs.zip"
-LFS_OID = "03f9b4d8167a0f2b3e715c6c978eddb9b03340a4334aa9ec50c07a3a8b7abf7d"
-OUTPUT_CSV = "output.csv"
-INVINFO_TSV = "inv_properties.tsv"
+_DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 
-OUT_TABLE = "four_fold_pi_by_inversion.tsv"
-OUT_TESTS = "four_fold_pi_tests.tsv"
-OUT_FIG = "four_fold_pi.pdf"
+
+def _resolve_input(name):
+    """Prefer a fresh copy in the CWD (CI working dir), else fall back to data/."""
+    for base in (os.getcwd(), _DATA_DIR):
+        p = os.path.join(base, name)
+        if os.path.exists(p):
+            return p
+    return name
+
+
+PHY_DIR = os.environ.get("FOURFOLD_PHY_DIR")
+PHY_OUTPUTS_ZIP = _resolve_input("phy_outputs.zip")
+LFS_OID = "03f9b4d8167a0f2b3e715c6c978eddb9b03340a4334aa9ec50c07a3a8b7abf7d"
+OUTPUT_CSV = _resolve_input("output.csv")
+INVINFO_TSV = _resolve_input("inv_properties.tsv")
+
+OUT_TABLE = os.path.join(_DATA_DIR, "four_fold_pi_by_inversion.tsv")
+OUT_TESTS = os.path.join(_DATA_DIR, "four_fold_pi_tests.tsv")
+OUT_FIG = os.path.join(_DATA_DIR, "four_fold_pi.pdf")
 
 VALID = set("ACGT")
 

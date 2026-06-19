@@ -57,9 +57,20 @@ import matplotlib.pyplot as plt
 # ------------------------- PATHS -------------------------
 HERE      = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR  = os.path.abspath(os.path.join(HERE, "..", "data"))
-OUTPUT_CSV   = os.path.join(DATA_DIR, "output.csv")
-INVINFO_TSV  = os.path.join(DATA_DIR, "inv_properties.tsv")
-PHYMETA_TSV  = os.path.join(DATA_DIR, "phy_metadata.tsv")
+
+
+def _resolve_input(name: str) -> str:
+    """Prefer a fresh copy in the CWD (CI working dir), else fall back to data/."""
+    for base in (os.getcwd(), DATA_DIR):
+        p = os.path.join(base, name)
+        if os.path.exists(p):
+            return p
+    return os.path.join(DATA_DIR, name)
+
+
+OUTPUT_CSV   = _resolve_input("output.csv")
+INVINFO_TSV  = _resolve_input("inv_properties.tsv")
+PHYMETA_TSV  = _resolve_input("phy_metadata.tsv")
 
 OUT_SUMMARY  = os.path.join(DATA_DIR, "recurrence_controls_summary.tsv")
 OUT_COVTAB   = os.path.join(DATA_DIR, "recurrence_controls_covariates.tsv")

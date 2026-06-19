@@ -44,8 +44,20 @@ logging.getLogger("fontTools").setLevel(logging.WARNING)
 logger = logging.getLogger("divergence_da_dxy_by_type")
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-OUTPUT_CSV = DATA_DIR / "output.csv"
-INV_FILE = DATA_DIR / "inv_properties.tsv"
+
+
+def _resolve_input(name: str) -> Path:
+    """Prefer a fresh copy in the CWD (the CI working dir, where run_analysis
+    stages freshly-generated pipeline outputs), else fall back to data/."""
+    for base in (Path.cwd(), DATA_DIR):
+        p = base / name
+        if p.exists():
+            return p
+    return DATA_DIR / name
+
+
+OUTPUT_CSV = _resolve_input("output.csv")
+INV_FILE = _resolve_input("inv_properties.tsv")
 
 DXY_COL = "hudson_dxy_hap_group_0v1"
 PI0_COL = "hudson_pi_hap_group_0"

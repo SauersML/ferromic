@@ -61,7 +61,18 @@ logging.getLogger("fontTools").setLevel(logging.WARNING)
 logger = logging.getLogger("divergence_edge_decay")
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-INV_FILE = DATA_DIR / "inv_properties.tsv"
+
+
+def _resolve_input(name: str) -> Path:
+    """Prefer a fresh copy in the CWD (CI working dir), else fall back to data/."""
+    for base in (Path.cwd(), DATA_DIR):
+        p = base / name
+        if p.exists():
+            return p
+    return DATA_DIR / name
+
+
+INV_FILE = _resolve_input("inv_properties.tsv")
 
 EPS_DENOM = 1e-12
 # Window geometry matched to stats/middle_vs_flank_fst.py (40 kb total).
@@ -111,7 +122,9 @@ def parse_values(lines: list[str]) -> np.ndarray:
 
 def load_per_site_components() -> dict[tuple[str, int, int], dict[str, np.ndarray]]:
     """Return {(chrom,start,end) -> {'num': da_array, 'den': dxy_array}}."""
-    candidates = [DATA_DIR / "per_site_fst_output.falsta", DATA_DIR / "per_site_fst_output.falsta.gz"]
+    candidates = [base / fn
+                  for base in (Path.cwd(), DATA_DIR)
+                  for fn in ("per_site_fst_output.falsta", "per_site_fst_output.falsta.gz")]
     path = next((p for p in candidates if p.exists()), None)
     if path is None:
         raise FileNotFoundError("Missing per_site_fst_output.falsta(.gz)")
