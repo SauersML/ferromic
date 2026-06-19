@@ -41,3 +41,9 @@ pipeline_run_*.log
 region_trees/
 tree_figures/
 annotated_tree_figures/
+
+# PRIVATE — Porubsky T2T inversion callset (unpublished, NEVER commit). See memory.
+invCallset_final_genotypes_connected.tsv
+*invCallset*
+data/private_t2t/
+*.t2t.tsv
