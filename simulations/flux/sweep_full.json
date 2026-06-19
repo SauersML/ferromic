@@ -1,0 +1,1323 @@
+[
+  {
+    "scenario": "single",
+    "depth": "young",
+    "rho": 0.0,
+    "m_flux": 0.0,
+    "reps": 60,
+    "mean_events": 1.1333333333333333,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.13333333333333333,
+    "events_hist": {
+      "1": 52,
+      "2": 8
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "young",
+    "rho": 0.0,
+    "m_flux": 1e-09,
+    "reps": 60,
+    "mean_events": 1.05,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.05,
+    "events_hist": {
+      "1": 57,
+      "2": 3
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "young",
+    "rho": 0.0,
+    "m_flux": 1e-08,
+    "reps": 60,
+    "mean_events": 1.0833333333333333,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.08333333333333333,
+    "events_hist": {
+      "1": 55,
+      "2": 5
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "young",
+    "rho": 0.0,
+    "m_flux": 1e-07,
+    "reps": 60,
+    "mean_events": 1.0833333333333333,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.08333333333333333,
+    "events_hist": {
+      "1": 55,
+      "2": 5
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "young",
+    "rho": 0.0,
+    "m_flux": 1e-06,
+    "reps": 60,
+    "mean_events": 1.05,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.05,
+    "events_hist": {
+      "1": 57,
+      "2": 3
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "young",
+    "rho": 1e-08,
+    "m_flux": 0.0,
+    "reps": 60,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.0,
+    "events_hist": {
+      "1": 60
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "young",
+    "rho": 1e-08,
+    "m_flux": 1e-09,
+    "reps": 60,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.0,
+    "events_hist": {
+      "1": 60
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "young",
+    "rho": 1e-08,
+    "m_flux": 1e-08,
+    "reps": 60,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.0,
+    "events_hist": {
+      "1": 60
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "young",
+    "rho": 1e-08,
+    "m_flux": 1e-07,
+    "reps": 60,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.0,
+    "events_hist": {
+      "1": 60
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "young",
+    "rho": 1e-08,
+    "m_flux": 1e-06,
+    "reps": 60,
+    "mean_events": 1.1166666666666667,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.08333333333333333,
+    "events_hist": {
+      "1": 55,
+      "2": 3,
+      "3": 2
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "young",
+    "rho": 1e-06,
+    "m_flux": 0.0,
+    "reps": 60,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.0,
+    "events_hist": {
+      "1": 60
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "young",
+    "rho": 1e-06,
+    "m_flux": 1e-09,
+    "reps": 60,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.0,
+    "events_hist": {
+      "1": 60
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "young",
+    "rho": 1e-06,
+    "m_flux": 1e-08,
+    "reps": 60,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.0,
+    "events_hist": {
+      "1": 60
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "young",
+    "rho": 1e-06,
+    "m_flux": 1e-07,
+    "reps": 60,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.0,
+    "events_hist": {
+      "1": 60
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "young",
+    "rho": 1e-06,
+    "m_flux": 1e-06,
+    "reps": 60,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.0,
+    "events_hist": {
+      "1": 60
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "recent",
+    "rho": 0.0,
+    "m_flux": 0.0,
+    "reps": 60,
+    "mean_events": 1.5833333333333333,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.48333333333333334,
+    "events_hist": {
+      "1": 31,
+      "2": 23,
+      "3": 6
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "recent",
+    "rho": 0.0,
+    "m_flux": 1e-09,
+    "reps": 60,
+    "mean_events": 1.5833333333333333,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.5333333333333333,
+    "events_hist": {
+      "1": 28,
+      "2": 29,
+      "3": 3
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "recent",
+    "rho": 0.0,
+    "m_flux": 1e-08,
+    "reps": 60,
+    "mean_events": 1.5833333333333333,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.5333333333333333,
+    "events_hist": {
+      "1": 28,
+      "2": 29,
+      "3": 3
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "recent",
+    "rho": 0.0,
+    "m_flux": 1e-07,
+    "reps": 60,
+    "mean_events": 1.5666666666666667,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.48333333333333334,
+    "events_hist": {
+      "1": 31,
+      "2": 24,
+      "3": 5
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "recent",
+    "rho": 0.0,
+    "m_flux": 1e-06,
+    "reps": 60,
+    "mean_events": 1.6,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.5333333333333333,
+    "events_hist": {
+      "1": 28,
+      "2": 28,
+      "3": 4
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "recent",
+    "rho": 1e-08,
+    "m_flux": 0.0,
+    "reps": 60,
+    "mean_events": 1.4166666666666667,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.35,
+    "events_hist": {
+      "1": 39,
+      "2": 17,
+      "3": 4
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "recent",
+    "rho": 1e-08,
+    "m_flux": 1e-09,
+    "reps": 60,
+    "mean_events": 1.3666666666666667,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.26666666666666666,
+    "events_hist": {
+      "1": 44,
+      "2": 11,
+      "3": 4,
+      "4": 1
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "recent",
+    "rho": 1e-08,
+    "m_flux": 1e-08,
+    "reps": 60,
+    "mean_events": 1.4333333333333333,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.3333333333333333,
+    "events_hist": {
+      "1": 40,
+      "2": 15,
+      "3": 4,
+      "4": 1
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "recent",
+    "rho": 1e-08,
+    "m_flux": 1e-07,
+    "reps": 60,
+    "mean_events": 1.3666666666666667,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.3,
+    "events_hist": {
+      "1": 42,
+      "2": 15,
+      "3": 2,
+      "4": 1
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "recent",
+    "rho": 1e-08,
+    "m_flux": 1e-06,
+    "reps": 60,
+    "mean_events": 1.3833333333333333,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.31666666666666665,
+    "events_hist": {
+      "1": 41,
+      "2": 15,
+      "3": 4
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "recent",
+    "rho": 1e-06,
+    "m_flux": 0.0,
+    "reps": 60,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.0,
+    "events_hist": {
+      "1": 60
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "recent",
+    "rho": 1e-06,
+    "m_flux": 1e-09,
+    "reps": 60,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.0,
+    "events_hist": {
+      "1": 60
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "recent",
+    "rho": 1e-06,
+    "m_flux": 1e-08,
+    "reps": 60,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.0,
+    "events_hist": {
+      "1": 60
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "recent",
+    "rho": 1e-06,
+    "m_flux": 1e-07,
+    "reps": 60,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.0,
+    "events_hist": {
+      "1": 60
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "recent",
+    "rho": 1e-06,
+    "m_flux": 1e-06,
+    "reps": 60,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.0,
+    "events_hist": {
+      "1": 60
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "old",
+    "rho": 0.0,
+    "m_flux": 0.0,
+    "reps": 60,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.0,
+    "events_hist": {
+      "1": 60
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "old",
+    "rho": 0.0,
+    "m_flux": 1e-09,
+    "reps": 60,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.0,
+    "events_hist": {
+      "1": 60
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "old",
+    "rho": 0.0,
+    "m_flux": 1e-08,
+    "reps": 60,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.0,
+    "events_hist": {
+      "1": 60
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "old",
+    "rho": 0.0,
+    "m_flux": 1e-07,
+    "reps": 60,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.0,
+    "events_hist": {
+      "1": 60
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "old",
+    "rho": 0.0,
+    "m_flux": 1e-06,
+    "reps": 60,
+    "mean_events": 1.0833333333333333,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.08333333333333333,
+    "events_hist": {
+      "1": 55,
+      "2": 5
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "old",
+    "rho": 1e-08,
+    "m_flux": 0.0,
+    "reps": 60,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.0,
+    "events_hist": {
+      "1": 60
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "old",
+    "rho": 1e-08,
+    "m_flux": 1e-09,
+    "reps": 60,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.0,
+    "events_hist": {
+      "1": 60
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "old",
+    "rho": 1e-08,
+    "m_flux": 1e-08,
+    "reps": 60,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.0,
+    "events_hist": {
+      "1": 60
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "old",
+    "rho": 1e-08,
+    "m_flux": 1e-07,
+    "reps": 60,
+    "mean_events": 1.0166666666666666,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.016666666666666666,
+    "events_hist": {
+      "1": 59,
+      "2": 1
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "old",
+    "rho": 1e-08,
+    "m_flux": 1e-06,
+    "reps": 60,
+    "mean_events": 1.0166666666666666,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.016666666666666666,
+    "events_hist": {
+      "1": 59,
+      "2": 1
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "old",
+    "rho": 1e-06,
+    "m_flux": 0.0,
+    "reps": 60,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.0,
+    "events_hist": {
+      "1": 60
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "old",
+    "rho": 1e-06,
+    "m_flux": 1e-09,
+    "reps": 60,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.0,
+    "events_hist": {
+      "1": 60
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "old",
+    "rho": 1e-06,
+    "m_flux": 1e-08,
+    "reps": 60,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.0,
+    "events_hist": {
+      "1": 60
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "old",
+    "rho": 1e-06,
+    "m_flux": 1e-07,
+    "reps": 60,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.0,
+    "events_hist": {
+      "1": 60
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "old",
+    "rho": 1e-06,
+    "m_flux": 1e-06,
+    "reps": 60,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.0,
+    "events_hist": {
+      "1": 60
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "young",
+    "rho": 0.0,
+    "m_flux": 0.0,
+    "reps": 60,
+    "mean_events": 2.066666666666667,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.7166666666666667,
+    "events_hist": {
+      "1": 17,
+      "2": 26,
+      "3": 14,
+      "4": 2,
+      "5": 1
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "young",
+    "rho": 0.0,
+    "m_flux": 1e-09,
+    "reps": 60,
+    "mean_events": 2.283333333333333,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.8666666666666667,
+    "events_hist": {
+      "1": 8,
+      "2": 30,
+      "3": 19,
+      "4": 3
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "young",
+    "rho": 0.0,
+    "m_flux": 1e-08,
+    "reps": 60,
+    "mean_events": 1.95,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.7166666666666667,
+    "events_hist": {
+      "1": 17,
+      "2": 32,
+      "3": 8,
+      "4": 3
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "young",
+    "rho": 0.0,
+    "m_flux": 1e-07,
+    "reps": 60,
+    "mean_events": 1.9833333333333334,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.6666666666666666,
+    "events_hist": {
+      "1": 20,
+      "2": 23,
+      "3": 15,
+      "4": 2
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "young",
+    "rho": 0.0,
+    "m_flux": 1e-06,
+    "reps": 60,
+    "mean_events": 2.2,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.7833333333333333,
+    "events_hist": {
+      "1": 13,
+      "2": 23,
+      "3": 23,
+      "4": 1
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "young",
+    "rho": 1e-08,
+    "m_flux": 0.0,
+    "reps": 60,
+    "mean_events": 2.1333333333333333,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.8333333333333334,
+    "events_hist": {
+      "1": 10,
+      "2": 36,
+      "3": 11,
+      "4": 2,
+      "5": 1
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "young",
+    "rho": 1e-08,
+    "m_flux": 1e-09,
+    "reps": 60,
+    "mean_events": 1.9833333333333334,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.7,
+    "events_hist": {
+      "1": 18,
+      "2": 29,
+      "3": 10,
+      "4": 2,
+      "5": 1
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "young",
+    "rho": 1e-08,
+    "m_flux": 1e-08,
+    "reps": 60,
+    "mean_events": 1.9,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.6833333333333333,
+    "events_hist": {
+      "1": 19,
+      "2": 29,
+      "3": 11,
+      "4": 1
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "young",
+    "rho": 1e-08,
+    "m_flux": 1e-07,
+    "reps": 60,
+    "mean_events": 1.9833333333333334,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.7833333333333333,
+    "events_hist": {
+      "1": 13,
+      "2": 36,
+      "3": 10,
+      "4": 1
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "young",
+    "rho": 1e-08,
+    "m_flux": 1e-06,
+    "reps": 60,
+    "mean_events": 1.9666666666666666,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.7333333333333333,
+    "events_hist": {
+      "1": 16,
+      "2": 31,
+      "3": 12,
+      "4": 1
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "young",
+    "rho": 1e-06,
+    "m_flux": 0.0,
+    "reps": 60,
+    "mean_events": 1.6833333333333333,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.6833333333333333,
+    "events_hist": {
+      "1": 19,
+      "2": 41
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "young",
+    "rho": 1e-06,
+    "m_flux": 1e-09,
+    "reps": 60,
+    "mean_events": 1.7166666666666666,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.7166666666666667,
+    "events_hist": {
+      "1": 17,
+      "2": 43
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "young",
+    "rho": 1e-06,
+    "m_flux": 1e-08,
+    "reps": 60,
+    "mean_events": 1.6,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.6,
+    "events_hist": {
+      "1": 24,
+      "2": 36
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "young",
+    "rho": 1e-06,
+    "m_flux": 1e-07,
+    "reps": 60,
+    "mean_events": 1.6666666666666667,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.6666666666666666,
+    "events_hist": {
+      "1": 20,
+      "2": 40
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "young",
+    "rho": 1e-06,
+    "m_flux": 1e-06,
+    "reps": 60,
+    "mean_events": 1.6833333333333333,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.6833333333333333,
+    "events_hist": {
+      "1": 19,
+      "2": 41
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "recent",
+    "rho": 0.0,
+    "m_flux": 0.0,
+    "reps": 60,
+    "mean_events": 2.966666666666667,
+    "median_events": 3.0,
+    "recurrent_call_rate": 0.75,
+    "events_hist": {
+      "1": 15,
+      "2": 7,
+      "3": 15,
+      "4": 12,
+      "5": 10,
+      "6": 1
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "recent",
+    "rho": 0.0,
+    "m_flux": 1e-09,
+    "reps": 60,
+    "mean_events": 3.5,
+    "median_events": 4.0,
+    "recurrent_call_rate": 0.9166666666666666,
+    "events_hist": {
+      "1": 5,
+      "2": 7,
+      "3": 16,
+      "4": 21,
+      "5": 9,
+      "7": 2
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "recent",
+    "rho": 0.0,
+    "m_flux": 1e-08,
+    "reps": 60,
+    "mean_events": 3.0,
+    "median_events": 3.0,
+    "recurrent_call_rate": 0.8666666666666667,
+    "events_hist": {
+      "1": 8,
+      "2": 14,
+      "3": 13,
+      "4": 20,
+      "5": 5
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "recent",
+    "rho": 0.0,
+    "m_flux": 1e-07,
+    "reps": 60,
+    "mean_events": 3.066666666666667,
+    "median_events": 3.0,
+    "recurrent_call_rate": 0.7833333333333333,
+    "events_hist": {
+      "1": 13,
+      "2": 7,
+      "3": 17,
+      "4": 14,
+      "5": 4,
+      "6": 5
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "recent",
+    "rho": 0.0,
+    "m_flux": 1e-06,
+    "reps": 60,
+    "mean_events": 3.033333333333333,
+    "median_events": 3.0,
+    "recurrent_call_rate": 0.85,
+    "events_hist": {
+      "1": 9,
+      "2": 7,
+      "3": 20,
+      "4": 21,
+      "5": 3
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "recent",
+    "rho": 1e-08,
+    "m_flux": 0.0,
+    "reps": 60,
+    "mean_events": 3.316666666666667,
+    "median_events": 3.0,
+    "recurrent_call_rate": 0.8333333333333334,
+    "events_hist": {
+      "1": 10,
+      "2": 9,
+      "3": 18,
+      "4": 8,
+      "5": 8,
+      "6": 4,
+      "7": 3
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "recent",
+    "rho": 1e-08,
+    "m_flux": 1e-09,
+    "reps": 60,
+    "mean_events": 3.1333333333333333,
+    "median_events": 3.0,
+    "recurrent_call_rate": 0.7833333333333333,
+    "events_hist": {
+      "1": 13,
+      "2": 9,
+      "3": 15,
+      "4": 10,
+      "5": 7,
+      "6": 5,
+      "7": 1
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "recent",
+    "rho": 1e-08,
+    "m_flux": 1e-08,
+    "reps": 60,
+    "mean_events": 2.9166666666666665,
+    "median_events": 3.0,
+    "recurrent_call_rate": 0.7666666666666667,
+    "events_hist": {
+      "1": 14,
+      "2": 13,
+      "3": 15,
+      "4": 5,
+      "5": 8,
+      "6": 5
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "recent",
+    "rho": 1e-08,
+    "m_flux": 1e-07,
+    "reps": 60,
+    "mean_events": 3.2,
+    "median_events": 3.5,
+    "recurrent_call_rate": 0.8,
+    "events_hist": {
+      "1": 12,
+      "2": 8,
+      "3": 10,
+      "4": 18,
+      "5": 10,
+      "6": 2
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "recent",
+    "rho": 1e-08,
+    "m_flux": 1e-06,
+    "reps": 60,
+    "mean_events": 3.466666666666667,
+    "median_events": 3.5,
+    "recurrent_call_rate": 0.8166666666666667,
+    "events_hist": {
+      "1": 11,
+      "2": 11,
+      "3": 8,
+      "4": 10,
+      "5": 11,
+      "6": 7,
+      "7": 2
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "recent",
+    "rho": 1e-06,
+    "m_flux": 0.0,
+    "reps": 60,
+    "mean_events": 1.7166666666666666,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.7166666666666667,
+    "events_hist": {
+      "1": 17,
+      "2": 43
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "recent",
+    "rho": 1e-06,
+    "m_flux": 1e-09,
+    "reps": 60,
+    "mean_events": 1.75,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.75,
+    "events_hist": {
+      "1": 15,
+      "2": 45
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "recent",
+    "rho": 1e-06,
+    "m_flux": 1e-08,
+    "reps": 60,
+    "mean_events": 1.7166666666666666,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.7166666666666667,
+    "events_hist": {
+      "1": 17,
+      "2": 43
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "recent",
+    "rho": 1e-06,
+    "m_flux": 1e-07,
+    "reps": 60,
+    "mean_events": 1.7166666666666666,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.7166666666666667,
+    "events_hist": {
+      "1": 17,
+      "2": 43
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "recent",
+    "rho": 1e-06,
+    "m_flux": 1e-06,
+    "reps": 60,
+    "mean_events": 1.8333333333333333,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.8166666666666667,
+    "events_hist": {
+      "1": 11,
+      "2": 48,
+      "3": 1
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "old",
+    "rho": 0.0,
+    "m_flux": 0.0,
+    "reps": 60,
+    "mean_events": 1.6666666666666667,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.6,
+    "events_hist": {
+      "1": 24,
+      "2": 32,
+      "3": 4
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "old",
+    "rho": 0.0,
+    "m_flux": 1e-09,
+    "reps": 60,
+    "mean_events": 1.8166666666666667,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.75,
+    "events_hist": {
+      "1": 15,
+      "2": 41,
+      "3": 4
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "old",
+    "rho": 0.0,
+    "m_flux": 1e-08,
+    "reps": 60,
+    "mean_events": 1.8833333333333333,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.8333333333333334,
+    "events_hist": {
+      "1": 10,
+      "2": 47,
+      "3": 3
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "old",
+    "rho": 0.0,
+    "m_flux": 1e-07,
+    "reps": 60,
+    "mean_events": 1.7833333333333334,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.7166666666666667,
+    "events_hist": {
+      "1": 17,
+      "2": 39,
+      "3": 4
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "old",
+    "rho": 0.0,
+    "m_flux": 1e-06,
+    "reps": 60,
+    "mean_events": 1.9,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.7333333333333333,
+    "events_hist": {
+      "1": 16,
+      "2": 36,
+      "3": 6,
+      "4": 2
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "old",
+    "rho": 1e-08,
+    "m_flux": 0.0,
+    "reps": 60,
+    "mean_events": 1.7833333333333334,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.7333333333333333,
+    "events_hist": {
+      "1": 16,
+      "2": 41,
+      "3": 3
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "old",
+    "rho": 1e-08,
+    "m_flux": 1e-09,
+    "reps": 60,
+    "mean_events": 1.7833333333333334,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.7833333333333333,
+    "events_hist": {
+      "1": 13,
+      "2": 47
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "old",
+    "rho": 1e-08,
+    "m_flux": 1e-08,
+    "reps": 60,
+    "mean_events": 1.7333333333333334,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.7333333333333333,
+    "events_hist": {
+      "1": 16,
+      "2": 44
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "old",
+    "rho": 1e-08,
+    "m_flux": 1e-07,
+    "reps": 60,
+    "mean_events": 1.6833333333333333,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.6833333333333333,
+    "events_hist": {
+      "1": 19,
+      "2": 41
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "old",
+    "rho": 1e-08,
+    "m_flux": 1e-06,
+    "reps": 60,
+    "mean_events": 1.7833333333333334,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.7333333333333333,
+    "events_hist": {
+      "1": 16,
+      "2": 41,
+      "3": 3
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "old",
+    "rho": 1e-06,
+    "m_flux": 0.0,
+    "reps": 60,
+    "mean_events": 1.65,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.65,
+    "events_hist": {
+      "1": 21,
+      "2": 39
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "old",
+    "rho": 1e-06,
+    "m_flux": 1e-09,
+    "reps": 60,
+    "mean_events": 1.6666666666666667,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.6666666666666666,
+    "events_hist": {
+      "1": 20,
+      "2": 40
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "old",
+    "rho": 1e-06,
+    "m_flux": 1e-08,
+    "reps": 60,
+    "mean_events": 1.6833333333333333,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.6833333333333333,
+    "events_hist": {
+      "1": 19,
+      "2": 41
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "old",
+    "rho": 1e-06,
+    "m_flux": 1e-07,
+    "reps": 60,
+    "mean_events": 1.7,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.7,
+    "events_hist": {
+      "1": 18,
+      "2": 42
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "old",
+    "rho": 1e-06,
+    "m_flux": 1e-06,
+    "reps": 60,
+    "mean_events": 1.6333333333333333,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.6333333333333333,
+    "events_hist": {
+      "1": 22,
+      "2": 38
+    }
+  }
+]
