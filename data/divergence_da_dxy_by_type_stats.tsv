@@ -1,0 +1,3 @@
+metric	n_recurrent	n_single_event	median_recurrent	median_single_event	mean_recurrent	mean_single_event	mannwhitney_u	p_two_sided
+dxy	32	28	0.0005	0.0005325	0.000606875	0.0006892857142857144	440.5	0.9173878965026091
+da	32	28	4.2749999999999996e-05	0.000129	9.275e-05	0.0003494285714285714	309.0	0.04014663782971136
