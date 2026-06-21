@@ -1,0 +1,89 @@
+name: Benchmark HsInv0284 imputation (6q24.1)
+
+# Reviewer 2, comment 3: benchmark our imputation of the 6q24.1 inversion
+# (chr6:141,866,310-141,898,728 / HsInv0284, Giner-Delgado et al. 2019) against
+# the experimental MLPA/iMLPA genotypes for the 1000 Genomes samples.
+#
+# Reproduces data/imputation_benchmark_HsInv0284{,_summary}.tsv from public data.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy pandas scipy scikit-learn joblib tqdm bed_reader requests
+
+      - name: Install bcftools and plink2
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y bcftools
+          bcftools --version | head -1
+          curl -sSL -o /tmp/plink2.zip \
+            "https://s3.amazonaws.com/plink2-assets/alpha6/plink2_linux_x86_64_20241114.zip"
+          unzip -o /tmp/plink2.zip -d /tmp/plink2
+          sudo install /tmp/plink2/plink2 /usr/local/bin/plink2
+          plink2 --version
+
+      - name: Download experimental truth (dbVar nstd169) and 1000G pedigree
+        run: |
+          set -euo pipefail
+          curl -sSL --retry 5 --retry-delay 10 \
+            -o truth_45inversion_genotypes_v4.8.vcf.gz \
+            "https://ftp.ncbi.nlm.nih.gov/pub/dbVar/data/Homo_sapiens/by_study/genotype/nstd169/45inversion_genotypes_v4.8.vcf.gz"
+          curl -sSL --retry 5 --retry-delay 10 \
+            -o g1k_3202_samples_ped_population.txt \
+            "http://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/20130606_g1k_3202_samples_ped_population.txt"
+          # sanity: HsInv0284 must be present
+          zcat truth_45inversion_genotypes_v4.8.vcf.gz | grep -qw HsInv0284
+          wc -l g1k_3202_samples_ped_population.txt
+
+      - name: Fetch 1000G chr6 region (model SNP window) and index
+        run: |
+          set -euo pipefail
+          # The model SNPs span GRCh38 chr6:141,816,377-141,948,713; pad generously.
+          REGION="chr6:141800000-141960000"
+          KGP="http://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/20220422_3202_phased_SNV_INDEL_SV/1kGP_high_coverage_Illumina.chr6.filtered.SNV_INDEL_SV_phased_panel.vcf.gz"
+          # Remote tabix slice (avoids downloading the whole-chromosome VCF).
+          bcftools view -r "$REGION" "$KGP" -Oz -o kgp_chr6_region.vcf.gz
+          bcftools index -t kgp_chr6_region.vcf.gz
+          echo "Variants in region: $(bcftools view -H kgp_chr6_region.vcf.gz | wc -l)"
+
+      - name: Run benchmark
+        run: |
+          set -euo pipefail
+          python3 imputation/benchmark_hsinv0284.py \
+            --truth-vcf truth_45inversion_genotypes_v4.8.vcf.gz \
+            --kgp-vcf kgp_chr6_region.vcf.gz \
+            --ped g1k_3202_samples_ped_population.txt \
+            --work-dir bench_work \
+            --out-tsv data/imputation_benchmark_HsInv0284.tsv \
+            --out-summary data/imputation_benchmark_HsInv0284_summary.tsv
+
+      - name: Show results
+        run: |
+          echo "=== summary ==="
+          cat data/imputation_benchmark_HsInv0284_summary.tsv
+          echo "=== per-sample (head) ==="
+          head -20 data/imputation_benchmark_HsInv0284.tsv
+
+      - name: Upload benchmark outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: hsinv0284-benchmark
+          path: |
+            data/imputation_benchmark_HsInv0284.tsv
+            data/imputation_benchmark_HsInv0284_summary.tsv
