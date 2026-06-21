@@ -1,0 +1,107 @@
+name: Chimp Ancestral Orientation
+
+# Reviewer 1 comment 4 / Reviewer 2 comment 7: polarize each inversion's
+# ancestral vs derived orientation with the chimp outgroup (UCSC hg38-vs-panTro6
+# net AXT) so direct/inverted pi and divergence asymmetries can be interpreted.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/ancestral_orientation.yml'
+      - 'stats/ancestral_orientation.py'
+
+jobs:
+  polarize:
+    runs-on: ubuntu-latest
+    env:
+      GIT_LFS_SKIP_SMUDGE: 1
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          lfs: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+
+      - name: Fetch region alignments (phy_outputs.zip) from latest run-vcf artefact
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python - <<'PY'
+          import io, os, zipfile
+          import requests
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+          session = requests.Session()
+          session.headers.update({
+              "Authorization": f"Bearer {token}",
+              "Accept": "application/vnd.github+json",
+          })
+
+          def api_get(url, **params):
+              r = session.get(url, params=params)
+              r.raise_for_status()
+              return r
+
+          runs = api_get(
+              f"https://api.github.com/repos/{repo}/actions/workflows/manual_run_vcf.yml/runs",
+              status="success", per_page=1,
+          ).json().get("workflow_runs", [])
+          if not runs:
+              raise SystemExit("No successful runs found for manual_run_vcf.yml")
+          run_id = runs[0]["id"]
+          print(f"Using manual_run_vcf.yml artefacts from run {run_id}")
+
+          artifacts = {
+              a["name"]: a
+              for a in api_get(
+                  f"https://api.github.com/repos/{repo}/actions/runs/{run_id}/artifacts",
+                  per_page=100,
+              ).json().get("artifacts", [])
+          }
+          if "run-vcf-phy-outputs" not in artifacts:
+              raise SystemExit("Missing required artefact: run-vcf-phy-outputs")
+
+          os.makedirs("data", exist_ok=True)
+          resp = session.get(artifacts["run-vcf-phy-outputs"]["archive_download_url"])
+          resp.raise_for_status()
+          with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
+              inner = next((m for m in zf.namelist() if m.endswith("phy_outputs.zip")), None)
+              if inner is None:
+                  raise SystemExit("phy_outputs.zip not found inside artefact")
+              with zf.open(inner) as src, open("data/phy_outputs.zip", "wb") as dst:
+                  dst.write(src.read())
+          print("Saved data/phy_outputs.zip")
+          PY
+
+      - name: Download UCSC hg38-vs-panTro6 net AXT
+        run: |
+          set -euo pipefail
+          curl -fSL --retry 3 -o hg38.panTro6.net.axt.gz \
+            "http://hgdownload.soe.ucsc.edu/goldenpath/hg38/vsPanTro6/hg38.panTro6.net.axt.gz"
+          ls -la hg38.panTro6.net.axt.gz
+
+      - name: Run ancestral-orientation polarization
+        run: |
+          python stats/ancestral_orientation.py --axt hg38.panTro6.net.axt.gz
+
+      - name: Show result table head
+        run: |
+          echo "Rows: $(($(wc -l < data/ancestral_orientation.tsv) - 1))"
+          head -20 data/ancestral_orientation.tsv
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ancestral-orientation
+          path: data/ancestral_orientation.tsv

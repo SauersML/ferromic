@@ -13,16 +13,6 @@ name: ScoreInvHap Concordance Benchmark
 
 on:
   workflow_dispatch:
-  # workflow_dispatch only works once the file lands on the default branch, so
-  # we also trigger on pushes to this feature branch to exercise the benchmark
-  # from the PR before merge.
-  push:
-    branches:
-      - benchmark-scoreinvhap-concordance
-    # Avoid an infinite loop: the job commits results under data/, so ignore
-    # pushes that only touch the result files.
-    paths-ignore:
-      - 'data/scoreinvhap_concordance.*'
 
 permissions:
   contents: write
