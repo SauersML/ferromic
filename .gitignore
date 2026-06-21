@@ -47,3 +47,9 @@ invCallset_final_genotypes_connected.tsv
 *invCallset*
 data/private_t2t/
 *.t2t.tsv
+
+# UCSC hg38-vs-panTro6 net AXT (~1.6 GB), fetched at runtime by
+# stats/ancestral_orientation.py and cds/axt_to_phy.py; never commit.
+hg38.panTro6.net.axt.gz
+hg38.PanTro6.net.axt
+hg38.panTro6.net.axt

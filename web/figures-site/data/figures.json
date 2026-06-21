@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-19T22:55:10.087850+00:00",
+  "generatedAt": "2026-06-21T23:21:57.397287+00:00",
   "groups": [
     {
       "title": "Top-level figures",
@@ -352,6 +352,12 @@
           "href": "figures/data/inversion_trajectories_combined.png",
           "preview": "figures/data/inversion_trajectories_combined.png",
           "type": "image"
+        },
+        {
+          "name": "pin_pis.pdf",
+          "href": "figures/data/pin_pis.pdf",
+          "preview": "figures/data/pin_pis.pdf",
+          "type": "pdf"
         },
         {
           "name": "recurrence_controls.pdf",

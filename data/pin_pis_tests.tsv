@@ -1,0 +1,16 @@
+metric	test	category	n	median_direct	median_inverted	statistic	p_value
+piN	paired Wilcoxon (inverted vs direct)	single	7	0.0002184824328314142	7.122507122507123e-05	1.0	0.0625
+piN	paired Wilcoxon (inverted vs direct)	recurrent	19	8.235657868847852e-05	7.380568974771874e-05	46.0	0.25529050519961505
+piN	Mann-Whitney U (delta: single vs recurrent)	single_vs_recurrent	26			49.5	0.3393473370965908
+piN	Mann-Whitney U (direct: single vs recurrent)	single_vs_recurrent	26	0.0002184824328314142		79.5	0.46725411829029473
+piN	Mann-Whitney U (inverted: single vs recurrent)	single_vs_recurrent	26		7.380568974771874e-05	60.0	0.7261791121824467
+piS	paired Wilcoxon (inverted vs direct)	single	7	0.000315473999684526	0.0	4.0	0.21875
+piS	paired Wilcoxon (inverted vs direct)	recurrent	19	0.0003809872920026727	0.0003558611538345547	27.0	0.34652171170610724
+piS	Mann-Whitney U (delta: single vs recurrent)	single_vs_recurrent	26			64.5	0.9298897479329218
+piS	Mann-Whitney U (direct: single vs recurrent)	single_vs_recurrent	26	0.000315473999684526		73.0	0.7231999332988023
+piS	Mann-Whitney U (inverted: single vs recurrent)	single_vs_recurrent	26		0.0003558611538345547	54.5	0.4694170707238233
+piN/piS	paired Wilcoxon (inverted vs direct)	single	2	0.20326707659068172	0.12845665194371964	0.0	0.5
+piN/piS	paired Wilcoxon (inverted vs direct)	recurrent	9	0.215755708436627	0.1366646670307795	20.0	0.8203125
+piN/piS	Mann-Whitney U (delta: single vs recurrent)	single_vs_recurrent	11			8.0	0.9090909090909092
+piN/piS	Mann-Whitney U (direct: single vs recurrent)	single_vs_recurrent	11	0.20326707659068172		8.0	0.9090909090909092
+piN/piS	Mann-Whitney U (inverted: single vs recurrent)	single_vs_recurrent	11		0.1366646670307795	8.0	0.9090909090909092
