@@ -1,0 +1,177 @@
+name: ScoreInvHap Concordance Benchmark
+
+# Reviewer 2, comment 3: benchmark our imputed inversion dosages against the
+# published tool scoreInvHap (Ruiz-Arenas et al., PLOS Genetics 2019) for the
+# 8p23.1 and 17q21.31 inversions in a large public cohort (1000 Genomes).
+#
+# Two methods are run on the SAME 1000 Genomes individuals:
+#   * scoreInvHap  -> uses its shipped 1000G-phase3 (GRCh37) reference objects,
+#                     so it is fed the GRCh37 phase-3 VCFs (its native build).
+#   * our PLS models (data/models) -> trained on GRCh38, so they are fed the
+#                     GRCh38 high-coverage phased VCFs (their native build).
+# We then intersect on the shared sample IDs and compute per-sample concordance.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install system tools (bcftools, tabix, plink2)
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y bcftools tabix
+          # plink2
+          wget -q https://s3.amazonaws.com/plink2-assets/alpha6/plink2_linux_x86_64_20240625.zip -O plink2.zip || \
+          wget -q https://s3.amazonaws.com/plink2-assets/plink2_linux_x86_64_latest.zip -O plink2.zip
+          unzip -o plink2.zip
+          sudo mv plink2 /usr/local/bin/
+          plink2 --version
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy pandas scipy scikit-learn joblib matplotlib bed_reader requests tqdm
+
+      # --------------------------------------------------------------------
+      # 1000 Genomes region subsets. We pull only the inversion ROIs via tabix
+      # from the remote bgzipped+indexed VCFs (no full-chromosome downloads).
+      # --------------------------------------------------------------------
+      - name: Subset GRCh38 high-coverage VCFs (for OUR models)
+        run: |
+          set -euo pipefail
+          B38=http://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/20220422_3202_phased_SNV_INDEL_SV
+          # GRCh38 ROIs covering each model's SNP span (with margin).
+          # 8p23.1 model SNPs span chr8:8.23-12.65 Mb ; 17q21.31 span chr17:45.57-46.28 Mb
+          tabix -h ${B38}/1kGP_high_coverage_Illumina.chr8.filtered.SNV_INDEL_SV_phased_panel.vcf.gz \
+            chr8:8000000-12800000 | bgzip > b38_chr8.vcf.gz
+          tabix -h ${B38}/1kGP_high_coverage_Illumina.chr17.filtered.SNV_INDEL_SV_phased_panel.vcf.gz \
+            chr17:45400000-46400000 | bgzip > b38_chr17.vcf.gz
+          for f in b38_chr8 b38_chr17; do
+            echo "== $f =="; bcftools index -t ${f}.vcf.gz
+            echo "variants: $(bcftools view -H ${f}.vcf.gz | wc -l) ; samples: $(bcftools query -l ${f}.vcf.gz | wc -l)"
+          done
+
+      - name: Subset GRCh37 phase-3 VCFs (for scoreInvHap)
+        run: |
+          set -euo pipefail
+          B37=http://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502
+          # GRCh37 ROIs (8p23.1 ~ chr8:8-12 Mb ; 17q21.31 ~ chr17:43.0-44.9 Mb).
+          tabix -h ${B37}/ALL.chr8.phase3_shapeit2_mvncall_integrated_v5b.20130502.genotypes.vcf.gz \
+            8:7000000-13000000 | bgzip > b37_chr8.vcf.gz
+          tabix -h ${B37}/ALL.chr17.phase3_shapeit2_mvncall_integrated_v5b.20130502.genotypes.vcf.gz \
+            17:42000000-45500000 | bgzip > b37_chr17.vcf.gz
+          for f in b37_chr8 b37_chr17; do
+            echo "== $f =="; bcftools index -t ${f}.vcf.gz
+            echo "variants: $(bcftools view -H ${f}.vcf.gz | wc -l) ; samples: $(bcftools query -l ${f}.vcf.gz | wc -l)"
+          done
+
+      # --------------------------------------------------------------------
+      # OUR imputation pipeline on GRCh38 data.
+      # --------------------------------------------------------------------
+      - name: Build PLINK bed for our models (GRCh38)
+        run: |
+          set -euo pipefail
+          # Merge the two ROI VCFs, normalise to biallelic, write PLINK1 bed.
+          bcftools concat -a b38_chr8.vcf.gz b38_chr17.vcf.gz -Oz -o b38_merged.vcf.gz
+          bcftools index -t b38_merged.vcf.gz
+          plink2 --vcf b38_merged.vcf.gz \
+            --max-alleles 2 --snps-only just-acgt \
+            --set-all-var-ids '@:#' \
+            --make-bed --out subset
+          wc -l subset.bim
+          head -3 subset.fam
+
+      - name: Prepare genotype matrices and run our inference
+        env:
+          PLINK_PREFIX: subset
+          OUTPUT_DIR: genotype_matrices
+          MODEL_SOURCE_DIR: data/models
+        run: |
+          set -euo pipefail
+          python imputation/prepare_data_for_infer.py
+          ls -la genotype_matrices | head
+          # Bring pls_patch onto the path so joblib can unpickle the models.
+          cp imputation/pls_patch.py .
+          python scoreinvhap_benchmark/infer_dosage_public.py \
+            chr8-7301025-INV-5297356 our_8p23.tsv
+          python scoreinvhap_benchmark/infer_dosage_public.py \
+            chr17-45585160-INV-706887 our_17q21.tsv
+
+      # --------------------------------------------------------------------
+      # scoreInvHap on GRCh37 data.
+      # --------------------------------------------------------------------
+      - name: Set up R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: 'release'
+
+      - name: Install scoreInvHap (Bioconductor)
+        run: |
+          set -euo pipefail
+          Rscript -e 'install.packages("BiocManager", repos="https://cloud.r-project.org")'
+          Rscript -e 'BiocManager::install(c("scoreInvHap","VariantAnnotation","GenomicRanges"), update=FALSE, ask=FALSE)'
+          Rscript -e 'library(scoreInvHap); cat("scoreInvHap OK\n")'
+
+      - name: Run scoreInvHap genotyping
+        run: |
+          set -euo pipefail
+          Rscript scoreinvhap_benchmark/run_scoreinvhap.R b37_chr8.vcf.gz  inv8p23.1   sih_8p23.tsv
+          Rscript scoreinvhap_benchmark/run_scoreinvhap.R b37_chr17.vcf.gz inv17q21.31 sih_17q21.tsv
+          head sih_8p23.tsv sih_17q21.tsv
+
+      # --------------------------------------------------------------------
+      # Concordance: join on shared sample IDs, compute r^2, emit TSV + PDF.
+      # --------------------------------------------------------------------
+      - name: Compute concordance
+        run: |
+          set -euo pipefail
+          mkdir -p data
+          python scoreinvhap_benchmark/compute_concordance.py \
+            --out-tsv data/scoreinvhap_concordance.tsv \
+            --out-pdf data/scoreinvhap_concordance.pdf \
+            --pair "8p23.1"   our_8p23.tsv  chr8-7301025-INV-5297356   sih_8p23.tsv \
+            --pair "17q21.31" our_17q21.tsv chr17-45585160-INV-706887  sih_17q21.tsv
+          echo "=== RESULT ==="
+          cat data/scoreinvhap_concordance.tsv
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scoreinvhap-concordance
+          path: |
+            data/scoreinvhap_concordance.tsv
+            data/scoreinvhap_concordance.pdf
+            our_8p23.tsv
+            our_17q21.tsv
+            sih_8p23.tsv
+            sih_17q21.tsv
+
+      - name: Commit results to branch
+        if: success()
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/scoreinvhap_concordance.tsv data/scoreinvhap_concordance.pdf
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Add scoreInvHap concordance benchmark outputs (Reviewer 2 #3)"
+            git push origin HEAD:${GITHUB_REF_NAME}
+          fi
