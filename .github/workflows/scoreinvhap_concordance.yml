@@ -114,7 +114,9 @@ jobs:
         run: |
           set -euo pipefail
           python imputation/prepare_data_for_infer.py
-          ls -la genotype_matrices | head
+          echo "Genotype matrices for our two targets:"
+          ls -la genotype_matrices/chr8-7301025-INV-5297356.genotypes.npy \
+                 genotype_matrices/chr17-45585160-INV-706887.genotypes.npy
           # Bring pls_patch onto the path so joblib can unpickle the models.
           cp imputation/pls_patch.py .
           python scoreinvhap_benchmark/infer_dosage_public.py \
