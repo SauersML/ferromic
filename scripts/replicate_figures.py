@@ -605,6 +605,28 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         required=True,
         group="Associations",
     ),
+    FigureTask(
+        name="Chimp ancestral-orientation polarization",
+        script=Path("stats/ancestral_orientation.py"),
+        outputs=("ancestral_orientation.tsv",),
+        # Region alignments are recovered from phy_outputs.zip / its git-LFS
+        # object; the chimp net AXT is fetched from UCSC if not supplied locally.
+        dependencies=("inv_properties.tsv", "output.csv"),
+        optional_dependencies=("phy_outputs.zip", "hg38.panTro6.net.axt.gz"),
+        python_dependencies=("requests",),
+        required=False,
+        note=(
+            "Reviewer 1 / Reviewer 2: polarizes each inversion's ancestral vs "
+            "derived orientation with the chimp outgroup (UCSC hg38-vs-panTro6 "
+            "net AXT strand over the interval) so direct/inverted pi and "
+            "divergence asymmetries can be interpreted; flags loci where the "
+            "less-frequent arrangement is NOT the derived one and where the "
+            "direct orientation is derived yet has lower pi (Fig 2A point). "
+            "Downloads the ~1.6 GB net AXT when not provided via --axt."
+        ),
+        long_running=True,
+        group="Diversity",
+    ),
 )
 
 # ---------------------------------------------------------------------------
