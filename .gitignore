@@ -53,3 +53,7 @@ data/private_t2t/
 hg38.panTro6.net.axt.gz
 hg38.PanTro6.net.axt
 hg38.panTro6.net.axt
+
+# Imputation models hosted on GitHub Release (imputation-models-v1), not in-tree
+data/models/*.model.joblib
+data/models/*.snps.json

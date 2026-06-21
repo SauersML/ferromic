@@ -25,11 +25,14 @@ MODEL_SOURCE_DIR = os.getenv(
 )
 
 # --- MODEL SOURCE CONFIGURATION ---
-# Set MODEL_SOURCE to "github" or "s3" to switch between remote sources
-MODEL_SOURCE = "github"
+# Set MODEL_SOURCE to "release", "github", or "s3" to switch between remote sources.
+# Default "release": models are hosted as GitHub Release assets (keeps the repo small);
+# a plain-text manifest lists every .model.joblib / .snps.json download URL.
+MODEL_SOURCE = "release"
 print(f"MODEL_SOURCE: {MODEL_SOURCE}")
 
 _MANIFEST_URLS = {
+    "release": "https://github.com/SauersML/ferromic/releases/download/imputation-models-v1/models.manifest.txt",
     "github": "https://api.github.com/repos/SauersML/ferromic/contents/data/models",
     "s3": "https://sharedspace.s3.msi.umn.edu/public_internet/final_imputation_models.manifest.txt",
 }
