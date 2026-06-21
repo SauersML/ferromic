@@ -204,6 +204,18 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         group="CDS",
     ),
     FigureTask(
+        name="piN/piS constraint (0-fold vs 4-fold diversity)",
+        script=Path("stats/pin_pis.py"),
+        outputs=(
+            Path("data/pin_pis_by_inversion.tsv"),
+            Path("data/pin_pis_tests.tsv"),
+        ),
+        dependencies=("output.csv", "inv_properties.tsv", "*.phy"),
+        note="Reviewer 1 (comment 4): piN (0-fold) vs piS (4-fold) diversity and piN/piS ratio per orientation, per Charlesworth 2024 (Genetics 226:iyad218).",
+        long_running=True,
+        group="CDS",
+    ),
+    FigureTask(
         name="Hudson FST violin plot",
         script=Path("stats/fst_violins.py"),
         outputs=(Path("hudson_fst.pdf"),),
