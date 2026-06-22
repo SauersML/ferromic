@@ -74,6 +74,13 @@ if (ov[[best]] > 0) {
   stop("No naming scheme overlaps the scoreInvHap reference; see the heads printed above.")
 }
 
+# Speed: scoreInvHap only ever scores its reference SNPs, so drop everything else first.
+# Genotyping the whole ROI (~150k SNVs x 2504 samples) was pathologically slow/heavy; keeping
+# only the ~13k reference SNPs makes the genotype extraction and similarity scoring ~10x cheaper.
+keep <- rownames(vcf) %in% ref_names
+cat(sprintf("Subsetting VCF to %d reference SNPs (of %d total).\n", sum(keep), length(keep)))
+vcf <- vcf[keep, ]
+
 # inv=<id> triggers internal loading of the bundled reference objects.
 res <- scoreInvHap(SNPlist = vcf, inv = inv_id)
 
