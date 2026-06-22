@@ -3950,6 +3950,19 @@ fn append_fst_falsta<P: AsRef<std::path::Path>>(
     }
 
     // Hudson per-site hap FST 0v1
+    //
+    // NOTE (audit BUG #11 — per-callable-base divergence): the component tracks
+    // below are initialised to "NA" for every base in the region and filled ONLY
+    // at the Hudson variant positions in `hudson_sites`. An "NA" in the resulting
+    // falsta is therefore AMBIGUOUS: it marks both an invariant callable base
+    // (true da/dxy = 0) and an uncallable base (no data). Consumers that need
+    // divergence PER CALLABLE BASE (rather than per variant site) must recover the
+    // callable mask separately — stats/divergence_edge_decay.py does this from the
+    // per-base filtered diversity tracks (per_site_diversity_output.falsta), where
+    // a base is callable in a group iff its filtered_pi value is non-NA. If this
+    // writer is ever extended to emit an explicit per-base callable flag (e.g. a
+    // "0" at invariant callable bases vs "NA" only at uncallable bases), update
+    // that downstream consumer to use it directly.
     if !hudson_sites.is_empty() {
         writeln!(
             w,

@@ -39,7 +39,9 @@ Outputs (written to ../data):
 """
 
 import os
+import re
 import sys
+import gzip
 import math
 import warnings
 from typing import Dict, List, Optional, Tuple
@@ -71,6 +73,7 @@ def _resolve_input(name: str) -> str:
 OUTPUT_CSV   = _resolve_input("output.csv")
 INVINFO_TSV  = _resolve_input("inv_properties.tsv")
 PHYMETA_TSV  = _resolve_input("phy_metadata.tsv")
+DIVERSITY_FALSTA = _resolve_input("per_site_diversity_output.falsta.gz")
 
 OUT_SUMMARY  = os.path.join(DATA_DIR, "recurrence_controls_summary.tsv")
 OUT_COVTAB   = os.path.join(DATA_DIR, "recurrence_controls_covariates.tsv")
@@ -107,6 +110,125 @@ def choose_floor(pi_all: np.ndarray) -> float:
     if pos.size == 0:
         raise ValueError("All pi values non-positive.")
     return max(float(np.quantile(pos, FLOOR_QUANTILE)) * 0.5, MIN_FLOOR)
+
+
+# ------------------------- POOLED SNP DENSITY (UNION) -------------------------
+# BUG #12: "pooled" SNP density previously summed the per-orientation segregating
+# counts (seg0 + seg1). A position segregating in BOTH orientations was therefore
+# counted twice. Because cross-orientation sharing co-varies with recurrence and
+# flux, that double-counting injects part of the very process being controlled
+# for into the background covariate. The correct pooled measure is the UNION of
+# unique segregating positions across the two orientations.
+#
+# output.csv only stores scalar per-orientation counts, so the union cannot be
+# recovered from it. We instead read the per-base filtered diversity tracks
+# (per_site_diversity_output.falsta), where a position is segregating in group g
+# iff its filtered_pi value is finite and > 0; counting filtered_pi>0 per group
+# reproduces output.csv's *_segregating_sites_filtered exactly. The union counts
+# distinct positions segregating in group 0 OR group 1.
+
+# filtered_pi_chr_<chrom>_start_<s>_end_<e>_group_<0|1>
+_RE_FILTERED_PI = re.compile(
+    r">filtered_pi_chr_?(?P<chrom>[\w.\-]+)_start_(?P<start>\d+)_end_(?P<end>\d+)_group_(?P<grp>[01])"
+)
+
+
+def union_segregating_from_tracks(g0, g1) -> int:
+    """Count positions segregating in group 0 OR group 1 (the pooled union).
+
+    g0/g1 are per-base filtered-pi arrays (np.nan = uncallable). A base is
+    segregating in a group iff its pi is finite and strictly positive. Bases need
+    not be callable in both groups: a position segregating in only one group
+    still counts once. Arrays must share length (same region grid)."""
+    g0 = np.asarray(g0, dtype=float)
+    g1 = np.asarray(g1, dtype=float)
+    if g0.size != g1.size:
+        raise ValueError("group0/group1 per-base tracks differ in length")
+    seg0 = np.isfinite(g0) & (g0 > 0.0)
+    seg1 = np.isfinite(g1) & (g1 > 0.0)
+    return int(np.count_nonzero(seg0 | seg1))
+
+
+def _parse_track(buf: List[str]) -> np.ndarray:
+    seq = "".join(s.strip() for s in buf if s.strip())
+    if not seq:
+        return np.array([], dtype=np.float64)
+    return np.fromstring(seq.replace("NA", "nan"), sep=",", dtype=np.float64)
+
+
+def load_union_segregating_map() -> Dict[Tuple[str, int, int], int]:
+    """Map (chr_std, start, end) -> union segregating-site count from the
+    per-base filtered diversity falsta. Returns {} if the file is absent."""
+    if not os.path.exists(DIVERSITY_FALSTA):
+        warnings.warn(
+            "per_site_diversity_output.falsta(.gz) not found; pooled SNP density "
+            "falls back to seg0+seg1 (which double-counts shared positions)."
+        )
+        return {}
+
+    groups: Dict[Tuple[str, int, int], Dict[int, np.ndarray]] = {}
+
+    def handle(header, buf):
+        if not header:
+            return
+        m = _RE_FILTERED_PI.search(header)
+        if not m:
+            return
+        key = (_standardize_chr(m.group("chrom")), int(m.group("start")), int(m.group("end")))
+        groups.setdefault(key, {})[int(m.group("grp"))] = _parse_track(buf)
+
+    opener = gzip.open if DIVERSITY_FALSTA.endswith(".gz") else open
+    with opener(DIVERSITY_FALSTA, "rt", encoding="utf-8", errors="ignore") as fh:
+        header = None
+        buf: List[str] = []
+        for raw in fh:
+            line = raw.strip()
+            if not line:
+                continue
+            if line.startswith(">"):
+                handle(header, buf)
+                header = line
+                buf = []
+            else:
+                buf.append(line)
+        handle(header, buf)
+
+    out: Dict[Tuple[str, int, int], int] = {}
+    for key, comp in groups.items():
+        g0 = comp.get(0)
+        g1 = comp.get(1)
+        if g0 is None and g1 is None:
+            continue
+        if g0 is None:
+            g0 = np.full_like(g1, np.nan)
+        if g1 is None:
+            g1 = np.full_like(g0, np.nan)
+        if g0.size != g1.size:
+            # Mismatched grids should not happen for paired tracks; skip safely.
+            continue
+        out[key] = union_segregating_from_tracks(g0, g1)
+    return out
+
+
+def _lookup_union(union_map: Dict[Tuple[str, int, int], int],
+                  chrom: str, start, end) -> float:
+    """Look up a locus's union segregating count, allowing the same +/-1bp
+    coordinate slack used for matching output.csv to inv_properties.tsv. Returns
+    NaN when no track matches (caller falls back to seg0+seg1)."""
+    try:
+        s = int(start); e = int(end)
+    except (TypeError, ValueError):
+        return np.nan
+    best_val = np.nan
+    best_prio = None
+    for ds in (0, -1, 1):
+        for de in (0, -1, 1):
+            v = union_map.get((chrom, s + ds, e + de))
+            if v is not None:
+                prio = abs(ds) + abs(de)
+                if best_prio is None or prio < best_prio:
+                    best_prio, best_val = prio, float(v)
+    return best_val
 
 
 # ------------------------- LOADING & MATCHING -------------------------
@@ -182,9 +304,34 @@ def load_loci() -> pd.DataFrame:
     best["inv_af"]     = pd.to_numeric(best["Inverted_AF"], errors="coerce")
     span_kbp           = (best["region_end"] - best["region_start"]).clip(lower=1) / 1000.0
     best["span_kbp"]   = span_kbp
-    seg_tot            = pd.to_numeric(best["seg0"], errors="coerce").fillna(0) + \
+
+    # Pooled segregating sites = UNION of positions segregating in either
+    # orientation (BUG #12). Summing seg0+seg1 double-counts positions that
+    # segregate in both groups; the union from the per-base diversity tracks
+    # avoids that. Fall back to the (double-counting) sum only when the per-base
+    # falsta is unavailable, with a clear warning.
+    union_map = load_union_segregating_map()
+    seg_sum            = pd.to_numeric(best["seg0"], errors="coerce").fillna(0) + \
                          pd.to_numeric(best["seg1"], errors="coerce").fillna(0)
-    best["snp_density"] = seg_tot / span_kbp   # segregating sites per kbp (both orientations)
+    if union_map:
+        seg_union = np.array([_lookup_union(union_map, c, s, e)
+                              for c, s, e in zip(best["chr_std"],
+                                                 best["region_start"],
+                                                 best["region_end"])], dtype=float)
+        # Where the per-base track is missing for a locus, fall back to the sum.
+        seg_pooled = pd.Series(np.where(np.isfinite(seg_union), seg_union,
+                                        seg_sum.to_numpy(float)), index=best.index)
+        n_union = int(np.isfinite(seg_union).sum())
+        n_dbl = int((np.isfinite(seg_union) & (seg_union < seg_sum.to_numpy(float))).sum())
+        print(f"Pooled SNP density: union counts used for {n_union}/{len(best)} loci "
+              f"(of which {n_dbl} had cross-orientation sharing corrected); "
+              f"{len(best) - n_union} fell back to seg0+seg1.")
+    else:
+        seg_pooled = seg_sum
+        print("Pooled SNP density: per-base diversity track unavailable; using "
+              "seg0+seg1 (double-counts shared positions).")
+    best["seg_pooled"]  = seg_pooled
+    best["snp_density"] = seg_pooled / span_kbp   # union segregating sites per kbp
 
     # divergence outcomes
     best["fst"]    = pd.to_numeric(best["fst"], errors="coerce")
@@ -474,8 +621,9 @@ def main():
     print(f"\nWrote summary: {OUT_SUMMARY}")
 
     covtab = loci[["region_id", "chr_std", "region_start", "region_end", "Recurrence",
-                   "recur", "size_kbp", "inv_af", "snp_density", "cds_density",
-                   "pi_direct", "pi_inverted", "fst", "dxy", "pi_avg", "da"]].copy()
+                   "recur", "size_kbp", "inv_af", "seg_pooled", "snp_density",
+                   "cds_density", "pi_direct", "pi_inverted", "fst", "dxy",
+                   "pi_avg", "da"]].copy()
     covtab.to_csv(OUT_COVTAB, sep="\t", index=False, float_format="%.6g")
     print(f"Wrote covariate table: {OUT_COVTAB}")
 

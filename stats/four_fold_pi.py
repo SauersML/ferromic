@@ -203,33 +203,56 @@ def site_pi(column):
 
 
 def fourfold_columns(seqs, L):
-    """Yield third-position column indices of fourfold-degenerate codons.
+    """Yield (third-position column index, eligible-haplotype mask) per codon.
 
-    A codon column set is included only when EVERY called haplotype carries a
-    fourfold-family codon at positions 1-2 (i.e. the prefix is one of the eight
-    fourfold families). This guarantees the third position is a synonymous site
-    for all sampled haplotypes. Columns containing gaps/N at positions 1-2 are
-    handled by ignoring non-ACGT haplotypes when checking the prefix; if any
-    called haplotype has a non-fourfold prefix the codon is skipped."""
+    A codon contributes a fourfold (synonymous) third-position site only for the
+    haplotypes whose first two bases ESTABLISH a fourfold-family codon (the
+    prefix is one of the eight fourfold families). A haplotype with a gap/N at
+    positions 1-2 has unknown codon degeneracy, so its third base cannot be
+    established as synonymous and must be excluded from the fourfold pi
+    calculation at that column (BUG #7: previously such haplotypes were ignored
+    when DECIDING the column was fourfold but their third base was still folded
+    into pi).
+
+    The codon column is yielded only when at least one haplotype establishes a
+    fourfold-family codon AND no called haplotype carries a non-fourfold prefix
+    (a non-fourfold called prefix means the third position is not a fourfold
+    site at all, so the whole column is dropped, matching prior behaviour).
+
+    `eligible` is a boolean list aligned to `seqs`: True for haplotypes whose
+    positions 1-2 are both A/C/G/T and form a fourfold prefix. Only those
+    haplotypes' third bases are used when computing pi at the yielded column."""
     for codon_start in range(0, L - 2, 3):
         ok = True
-        seen_called = False
-        for s in seqs:
+        eligible = [False] * len(seqs)
+        for idx, s in enumerate(seqs):
             p1, p2 = s[codon_start], s[codon_start + 1]
             if p1 in VALID and p2 in VALID:
-                seen_called = True
-                if (p1 + p2) not in FOURFOLD_PREFIXES:
+                if (p1 + p2) in FOURFOLD_PREFIXES:
+                    eligible[idx] = True
+                else:
                     ok = False
                     break
-        if ok and seen_called:
-            yield codon_start + 2
+        if ok and any(eligible):
+            yield codon_start + 2, eligible
 
 
 def locus_pi(seqs, columns):
-    """Mean per-site pi over the given columns (callable sites only)."""
+    """Mean per-site pi over the given columns (callable sites only).
+
+    `columns` is an iterable of either a bare column index (use every
+    haplotype) or a (column_index, eligible_mask) pair, where eligible_mask is a
+    boolean list aligned to `seqs` selecting the haplotypes whose third base is
+    establishably synonymous at that column. For fourfold columns the mask
+    excludes haplotypes whose codon degeneracy is unknown (BUG #7)."""
     vals = []
     for col in columns:
-        p = site_pi(s[col] for s in seqs)
+        if isinstance(col, tuple):
+            col_idx, eligible = col
+            bases = (s[col_idx] for s, keep in zip(seqs, eligible) if keep)
+        else:
+            bases = (s[col] for s in seqs)
+        p = site_pi(bases)
         if p is not None:
             vals.append(p)
     if not vals:
@@ -291,12 +314,19 @@ def collect_fourfold_pi(phy_dir):
         L = L0
         n_proc += 1
 
-        # Fourfold sites: a codon is a fourfold site only if BOTH haplotype
-        # groups agree it is fourfold (prefix is fourfold-degenerate for every
-        # called haplotype across both groups). This uses the combined sample to
-        # define the site set, then measures pi within each group at those sites.
+        # Fourfold sites: a codon is a fourfold site only if no called haplotype
+        # across BOTH groups carries a non-fourfold prefix (a non-fourfold called
+        # prefix means the third position is not a fourfold site). This uses the
+        # combined sample to define the site set, then measures pi within each
+        # group ONLY from the haplotypes whose first two bases establish a
+        # fourfold-family codon (per-haplotype eligibility mask; BUG #7). The
+        # combined mask is sliced back into its s0/s1 halves for the per-group pi.
         combined = s0 + s1
-        ff_cols = list(fourfold_columns(combined, L))
+        n0 = len(s0)
+        ff_cols_combined = list(fourfold_columns(combined, L))
+        # Split each (col, mask) into per-group (col, mask) pairs.
+        ff_cols0 = [(col, elig[:n0]) for col, elig in ff_cols_combined]
+        ff_cols1 = [(col, elig[n0:]) for col, elig in ff_cols_combined]
 
         a = acc[key]
         a["n_cds"] += 1
@@ -311,9 +341,9 @@ def collect_fourfold_pi(phy_dir):
             a["wc1_num"] += wc1 * wc1n
             a["wc1_den"] += wc1n
 
-        if ff_cols:
-            ff0, ff0n = locus_pi(s0, ff_cols)
-            ff1, ff1n = locus_pi(s1, ff_cols)
+        if ff_cols_combined:
+            ff0, ff0n = locus_pi(s0, ff_cols0)
+            ff1, ff1n = locus_pi(s1, ff_cols1)
             if ff0n or ff1n:
                 a["n_cds_ff"] += 1
             if ff0n:
