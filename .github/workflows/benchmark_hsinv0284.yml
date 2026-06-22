@@ -47,8 +47,11 @@ jobs:
           curl -sSL --retry 5 --retry-delay 10 \
             -o g1k_3202_samples_ped_population.txt \
             "http://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/20130606_g1k_3202_samples_ped_population.txt"
-          # sanity: HsInv0284 must be present
-          zcat truth_45inversion_genotypes_v4.8.vcf.gz | grep -qw HsInv0284
+          # sanity: HsInv0284 must be present. Use grep -c (reads the whole stream) rather
+          # than grep -q, which closes the pipe early and trips SIGPIPE under `set -o pipefail`.
+          if [ "$(zcat truth_45inversion_genotypes_v4.8.vcf.gz | grep -wc HsInv0284 || true)" -lt 1 ]; then
+            echo "::error::HsInv0284 not found in truth VCF"; exit 1
+          fi
           wc -l g1k_3202_samples_ped_population.txt
 
       - name: Fetch 1000G chr6 region (model SNP window) and index
