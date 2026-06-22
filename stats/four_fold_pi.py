@@ -203,14 +203,14 @@ def site_pi(column):
 
 
 def fourfold_columns(seqs, L):
-    """Yield third-position column indices of fourfold-degenerate codons.
+    """Yield the codon-start index of each fourfold-degenerate codon.
 
-    A codon column set is included only when EVERY called haplotype carries a
-    fourfold-family codon at positions 1-2 (i.e. the prefix is one of the eight
-    fourfold families). This guarantees the third position is a synonymous site
-    for all sampled haplotypes. Columns containing gaps/N at positions 1-2 are
-    handled by ignoring non-ACGT haplotypes when checking the prefix; if any
-    called haplotype has a non-fourfold prefix the codon is skipped."""
+    A codon is included only when every *called* haplotype (ACGT at positions 1-2) carries a
+    fourfold-family prefix; if any called haplotype has a non-fourfold prefix the codon is
+    skipped. Haplotypes with a gap/N at positions 1-2 are ignored *here* (their family is
+    unknown) -- and, crucially, they are also excluded from this codon's pi by
+    ``fourfold_locus_pi``, which re-checks each haplotype's own prefix before counting its
+    third base. Yields the codon start (the third position is ``codon_start + 2``)."""
     for codon_start in range(0, L - 2, 3):
         ok = True
         seen_called = False
@@ -222,7 +222,7 @@ def fourfold_columns(seqs, L):
                     ok = False
                     break
         if ok and seen_called:
-            yield codon_start + 2
+            yield codon_start
 
 
 def locus_pi(seqs, columns):
@@ -230,6 +230,30 @@ def locus_pi(seqs, columns):
     vals = []
     for col in columns:
         p = site_pi(s[col] for s in seqs)
+        if p is not None:
+            vals.append(p)
+    if not vals:
+        return np.nan, 0
+    return float(np.mean(vals)), len(vals)
+
+
+def fourfold_locus_pi(seqs, codon_starts):
+    """Mean per-site pi at fourfold third positions.
+
+    Each haplotype contributes its third base at a codon ONLY when its own first two bases
+    establish a fourfold-degenerate family. Haplotypes with a gap/N (or any non-fourfold
+    prefix) at positions 1-2 are excluded from that codon's pi, because their third base
+    cannot be assumed synonymous. This fixes the prior behaviour where such a haplotype was
+    ignored when classifying the column as fourfold yet still counted in pi (e.g.
+    ['GCA','NNG'] wrongly yielded pi = 1.0 at the third position)."""
+    vals = []
+    for cs in codon_starts:
+        col = cs + 2
+        bases = [
+            s[col] for s in seqs
+            if s[cs] in VALID and s[cs + 1] in VALID and (s[cs] + s[cs + 1]) in FOURFOLD_PREFIXES
+        ]
+        p = site_pi(bases)
         if p is not None:
             vals.append(p)
     if not vals:
@@ -312,8 +336,8 @@ def collect_fourfold_pi(phy_dir):
             a["wc1_den"] += wc1n
 
         if ff_cols:
-            ff0, ff0n = locus_pi(s0, ff_cols)
-            ff1, ff1n = locus_pi(s1, ff_cols)
+            ff0, ff0n = fourfold_locus_pi(s0, ff_cols)
+            ff1, ff1n = fourfold_locus_pi(s1, ff_cols)
             if ff0n or ff1n:
                 a["n_cds_ff"] += 1
             if ff0n:
