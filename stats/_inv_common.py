@@ -27,6 +27,14 @@ INV_INFO_PATH = "inv_properties.tsv"
 POLARITY_PATH = "inversion_polarity.tsv"
 
 
+def _clean_str(value) -> str:
+    """NaN-safe string coercion: blanks/NaN -> "" (avoids `nan.strip()` since NaN
+    is truthy, so `(value or "")` does not guard against it)."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return ""
+    return str(value).strip()
+
+
 def _to_int(value) -> int | None:
     """Convert inv_info start/end values to integers (returns None on failure)."""
     if value is None or (isinstance(value, float) and pd.isna(value)):
@@ -57,11 +65,11 @@ def load_inv_region_map(inv_info_path: str = INV_INFO_PATH) -> Dict[str, str]:
 
     mapping: Dict[str, str] = {}
     for _, row in info_df.iterrows():
-        orig = (row.get("OrigID") or "").strip()
+        orig = _clean_str(row.get("OrigID"))
         if not orig:
             continue
 
-        chrom = (row.get("Chromosome") or "").strip()
+        chrom = _clean_str(row.get("Chromosome"))
         if not chrom:
             continue
         chrom_fmt = chrom if chrom.lower().startswith("chr") else f"chr{chrom}"
@@ -165,11 +173,11 @@ def load_polarity(polarity_path: str = POLARITY_PATH) -> Dict[tuple, dict]:
         if chrom is None or s is None or e is None:
             continue
         rec = {
-            "flip": str(row.get("flip_ref_polarity", "0")).strip() in ("1", "True", "true"),
-            "ancestral_orientation": (row.get("ancestral_orientation") or "").strip(),
-            "derived_orientation": (row.get("derived_orientation") or "").strip(),
-            "confidence": (row.get("confidence") or "").strip(),
-            "orig_id": (row.get("orig_id") or "").strip(),
+            "flip": _clean_str(row.get("flip_ref_polarity")) in ("1", "True", "true"),
+            "ancestral_orientation": _clean_str(row.get("ancestral_orientation")),
+            "derived_orientation": _clean_str(row.get("derived_orientation")),
+            "confidence": _clean_str(row.get("confidence")),
+            "orig_id": _clean_str(row.get("orig_id")),
             "chrom": chrom, "start": s, "end": e,
         }
         out[(chrom, s, e)] = rec

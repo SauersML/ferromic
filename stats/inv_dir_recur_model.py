@@ -141,6 +141,9 @@ def load_and_match(output_csv: str, invinfo_tsv: str) -> pd.DataFrame:
     print(f"DEBUG: Found {len(expected_ids)} target inversions in inv_info (Consensus 0/1).")
 
     # 3. Prepare Output Data (Expand ±1 bp)
+    # output.csv is chimp-polarized on disk: 0_* == ANCESTRAL/direct, 1_* ==
+    # DERIVED/inverted. So pi_inverted is the derived-orientation diversity and
+    # logFC = log(pi_inverted/pi_direct) = log(derived/ancestral).
     df_small = df[["chr_std", "region_start", "region_end", "0_pi_filtered", "1_pi_filtered"]].rename(
         columns={"0_pi_filtered": "pi_direct", "1_pi_filtered": "pi_inverted"}
     ).copy()
