@@ -124,6 +124,9 @@ jobs:
           PLINK_PREFIX: subset
           OUTPUT_DIR: genotype_matrices
           MODEL_SOURCE_DIR: data/models
+          # Make the cp'd pls_patch.py importable when joblib unpickles the models
+          # (infer_dosage_public.py is run by path, so cwd is not on sys.path).
+          PYTHONPATH: ${{ github.workspace }}
         run: |
           set -euo pipefail
           python imputation/prepare_data_for_infer.py
