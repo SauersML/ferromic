@@ -33,16 +33,24 @@ FLUX = [0.0, 1e-9, 1e-8, 1e-7, 1e-6]
 def run_cell(scenario, depth, rho, m_flux, reps, m_within, base_seed):
     times = TIME_DEPTHS[depth]
     events = np.empty(reps, dtype=int)
+    endpoint = np.zeros(reps, dtype=bool)
     for r in range(reps):
-        G, lab = fs.simulate(scenario, 0.1, 240, rho, m_within, m_flux,
-                             times, seed=base_seed + r)
+        G, lab, meta = fs.simulate(scenario, 0.1, 240, rho, m_within, m_flux,
+                                   times, seed=base_seed + r)
         events[r] = fs.classify(G, lab)
+        fI = meta.get("fI")
+        # endpoint = recurrence not genealogically observable (one inverted origin unsampled)
+        endpoint[r] = (scenario == "recurrent" and fI is not None and (fI == 0.0 or fI == 1.0))
     call_recurrent = (events >= 2)
+    interior = ~endpoint
+    cond = float(call_recurrent[interior].mean()) if interior.any() else float("nan")
     return dict(
         scenario=scenario, depth=depth, rho=rho, m_flux=m_flux, reps=reps,
         mean_events=float(events.mean()),
         median_events=float(np.median(events)),
         recurrent_call_rate=float(call_recurrent.mean()),
+        recurrent_call_rate_conditional=cond,
+        n_endpoint=int(endpoint.sum()),
         events_hist={int(k): int(v) for k, v in
                      zip(*np.unique(events, return_counts=True))},
     )
@@ -77,7 +85,7 @@ def main():
                     results.append(res)
                     done += 1
                     el = time.time() - t0
-                    metric = ("FPR" if sc == "single" else "power")
+                    metric = ("FPR" if sc == "single" else "detect")
                     print(f"[{done}/{total}] {sc:9s} {depth:6s} rho={rho:.0e} "
                           f"m={m:.0e}  {metric}={res['recurrent_call_rate']:.2f} "
                           f"mean_ev={res['mean_events']:.2f}  "

@@ -16,8 +16,12 @@ FLUX = [0.0, 1e-9, 1e-8, 1e-7, 1e-6]
 def _one(arg):
     scenario, depth, rho, m_flux, m_within, seed = arg
     times = TIME_DEPTHS[depth]
-    G, lab = fs.simulate(scenario, 0.1, 240, rho, m_within, m_flux, times, seed)
-    return fs.classify(G, lab)
+    G, lab, meta = fs.simulate(scenario, 0.1, 240, rho, m_within, m_flux, times, seed)
+    ev = fs.classify(G, lab)
+    fI = meta.get("fI")
+    # endpoint = recurrence not genealogically observable (one inverted origin unsampled)
+    endpoint = (scenario == "recurrent" and fI is not None and (fI == 0.0 or fI == 1.0))
+    return ev, endpoint
 
 
 def main():
@@ -50,19 +54,26 @@ def main():
     for ci, (sc, depth, rho, m, base_seed) in enumerate(cells):
         jobs = [(sc, depth, rho, m, args.m_within, base_seed + r)
                 for r in range(args.reps)]
-        events = np.array(pool.map(_one, jobs))
+        out = pool.map(_one, jobs)
+        events = np.array([o[0] for o in out])
+        endpoint = np.array([o[1] for o in out], dtype=bool)
         call = (events >= 2)
+        interior = ~endpoint
+        cond = float(call[interior].mean()) if interior.any() else float("nan")
         res = dict(scenario=sc, depth=depth, rho=rho, m_flux=m, reps=args.reps,
                    mean_events=float(events.mean()),
                    median_events=float(np.median(events)),
                    recurrent_call_rate=float(call.mean()),
+                   recurrent_call_rate_conditional=cond,
+                   n_endpoint=int(endpoint.sum()),
                    events_hist={int(k): int(v) for k, v in
                                 zip(*np.unique(events, return_counts=True))})
         results.append(res)
         el = time.time() - t0
-        metric = "FPR" if sc == "single" else "power"
+        metric = "FPR" if sc == "single" else "detect"
+        cond_str = "" if sc == "single" else f" cond={res['recurrent_call_rate_conditional']:.2f}"
         print(f"[{ci+1}/{len(cells)}] {sc:9s} {depth:6s} rho={rho:.0e} "
-              f"m={m:.0e}  {metric}={res['recurrent_call_rate']:.2f} "
+              f"m={m:.0e}  {metric}={res['recurrent_call_rate']:.2f}{cond_str} "
               f"mean_ev={res['mean_events']:.2f}  ({el:.0f}s)", flush=True)
         with open(args.out, "w") as fh:
             json.dump(results, fh, indent=2)
