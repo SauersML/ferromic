@@ -818,7 +818,7 @@ Keep in mind that 0 or 1 in the config is about which haplotype group (e.g., ref
 Hence the files named group_0_<transcript>_chr_<...>.phy gather all haplotypes labeled as group 0, with lines like “SampleA_L” or “SampleB_R” (whichever sides matched group 0). Meanwhile, group_1_<transcript>_chr_<...>.phy holds group 1 haplotypes, labeled “SampleA_R,” “SampleB_L,” and so on, depending on each sample’s config. If your config uses 1 to mean “inversion,” then group_1_... will contain inverted haplotypes, while group_0_... contains non-inverted.
 
 NOTE on polarization (chimp cutover): the group_0/group_1 labels and the
-output.csv 0_*/1_* columns produced here are in the RAW hg38-reference encoding
+output.csv 0_ / 1_ columns produced here are in the RAW hg38-reference encoding
 (0 = reference orientation, 1 = the inversion call from the config). The
 project-wide convention "inverted == DERIVED w.r.t. chimp" is applied DOWNSTREAM
 from data/inversion_polarity.tsv: small tables (output.csv, etc.) are re-keyed by
