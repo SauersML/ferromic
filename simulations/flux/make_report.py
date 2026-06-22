@@ -24,20 +24,25 @@ def load(paths):
 
 
 def write_csv(rows, path):
+    # recurrent_call_rate is the unconditional detection rate (all reps); the
+    # *_conditional column excludes recurrent reps where one inverted origin was
+    # unsampled (fI in {0,1}), i.e. recurrence was not genealogically observable;
+    # n_endpoint is how many such reps were excluded.
     cols = ["scenario", "depth", "rho", "m_flux", "reps",
-            "recurrent_call_rate", "mean_events", "median_events"]
+            "recurrent_call_rate", "recurrent_call_rate_conditional", "n_endpoint",
+            "mean_events", "median_events"]
     with open(path, "w") as fh:
         fh.write(",".join(cols) + "\n")
         for r in sorted(rows, key=lambda x: (x["scenario"], x["depth"],
                                              x["rho"], x["m_flux"])):
-            fh.write(",".join(str(r[c]) for c in cols) + "\n")
+            fh.write(",".join(str(r.get(c, "")) for c in cols) + "\n")
 
 
 def write_md(rows, path):
     with open(path, "w") as fh:
         for sc in ("single", "recurrent"):
             metric = "FPR (recurrent-call rate)" if sc == "single" else \
-                     "Power (recurrent-call rate)"
+                     "Recurrent detection rate (unconditional)"
             fh.write(f"\n### {sc.upper()} scenario — {metric}\n\n")
             depths = sorted({r["depth"] for r in rows if r["scenario"] == sc})
             rhos = sorted({r["rho"] for r in rows if r["scenario"] == sc})
@@ -65,7 +70,7 @@ def plot(rows, path):
     xlabels = ["0", "1e-9", "1e-8", "1e-7", "1e-6"]
     for ax, sc, title, ylab in [
         (axes[0], "single", "Single-event: false-positive rate", "FPR"),
-        (axes[1], "recurrent", "Recurrent: power", "Power"),
+        (axes[1], "recurrent", "Recurrent: detection rate", "Recurrent detection rate"),
     ]:
         depths = sorted({r["depth"] for r in rows if r["scenario"] == sc})
         rhos = sorted({r["rho"] for r in rows if r["scenario"] == sc})

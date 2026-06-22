@@ -51,8 +51,13 @@ def _times_gen(t01_23_y, t0_1_y, t2_3_y):
     return (t01_23_y / GEN_TIME, t0_1_y / GEN_TIME, t2_3_y / GEN_TIME)
 
 
-def demography_recurrent(t01_23_y, t0_1_y, t2_3_y, m_within, m_flux, rng):
-    """Repo's 3-event recurrent topology + between-orientation flux."""
+def demography_recurrent(t01_23_y, t0_1_y, t2_3_y, m_within, m_flux, fI, fD):
+    """Repo's 3-event recurrent topology + between-orientation flux.
+
+    fI / fD are the admixture proportions of the two independently-derived inverted
+    (resp. direct) ancestral demes. They are drawn by the caller (simulate) so the
+    sweep can record them and report detection conditional on recurrence being
+    genealogically observable (both inverted origins contributing, i.e. 0 < fI < 1)."""
     T01_23, T0_1, T2_3 = _times_gen(t01_23_y, t0_1_y, t2_3_y)
     de = msprime.Demography()
     de.add_population(name="P_I", initial_size=0.1 * N_A)
@@ -75,8 +80,6 @@ def demography_recurrent(t01_23_y, t0_1_y, t2_3_y, m_within, m_flux, rng):
                 de.set_symmetric_migration_rate([i, d], m_flux)
         de.set_symmetric_migration_rate(["P_I", "P_D"], m_flux)
 
-    fI = rng.integers(0, 11) / 10
-    fD = rng.integers(0, 11) / 10
     de.add_admixture(time=1e-5, derived="P_I", ancestral=["P1_I", "P2_I"],
                      proportions=[fI, 1 - fI])
     de.add_admixture(time=1e-5, derived="P_D", ancestral=["P0_D", "P3_D"],
@@ -118,11 +121,17 @@ def simulate(scenario, inv_freq, sample_hap, rho, m_within, m_flux,
 
     if scenario == "single":
         de = demography_single(times["t_inv"], m_within, m_flux)
+        meta = {"fI": None, "fD": None}
         samples = [msprime.SampleSet(n_inv_ind, population="P_I", ploidy=2),
                    msprime.SampleSet(n_dir_ind, population="P_D", ploidy=2)]
     else:
+        # Draw the admixture proportions here (same order/sequence as before, so seeds
+        # remain reproducible) and expose them in meta for the conditional metric.
+        fI = rng.integers(0, 11) / 10
+        fD = rng.integers(0, 11) / 10
         de = demography_recurrent(times["t01_23"], times["t0_1"], times["t2_3"],
-                                  m_within, m_flux, rng)
+                                  m_within, m_flux, fI, fD)
+        meta = {"fI": float(fI), "fD": float(fD)}
         samples = [msprime.SampleSet(n_inv_ind, population="P_I", ploidy=2),
                    msprime.SampleSet(n_dir_ind, population="P_D", ploidy=2)]
 
@@ -133,7 +142,7 @@ def simulate(scenario, inv_freq, sample_hap, rho, m_within, m_flux,
     G = mts.genotype_matrix().T  # haplotypes x sites (0/1)
     n_hap_inv = 2 * n_inv_ind
     labels = np.array([1] * n_hap_inv + [0] * (G.shape[0] - n_hap_inv))
-    return G, labels
+    return G, labels, meta
 
 
 # ---------------------------------------------------------------------------
@@ -208,14 +217,28 @@ def fitch_score(root, children, leafset, label_of):
 
 
 def classify(G, labels):
-    """Return inferred #events (parsimony score). >=2 => recurrent call."""
+    """Return inferred #events (parsimony score). >=2 => recurrent call.
+
+    Deterministic and order-invariant: the result is a pure function of the
+    {(haplotype, orientation)} multiset. neighbor_joining resolves equal-criterion
+    ties by list position, and the sims always emit inverted haplotypes first, so
+    without canonicalization the call could depend on sample order. We reorder rows
+    into a canonical order -- lexicographic by genotype, then by orientation label --
+    before building the tree, so permuting the input rows cannot change the call.
+    (For identical genotypes the orientation tiebreak only sets the order within a
+    zero-distance cherry, which does not affect the parsimony score.)
+    """
     n = G.shape[0]
     if G.shape[1] == 0:
         # no segregating sites: tree unresolved -> single change at best
         return 1
-    D = hamming_matrix(G)
+    labels = np.asarray(labels)
+    order = sorted(range(n), key=lambda i: (tuple(int(x) for x in G[i]), int(labels[i])))
+    Gc = G[order]
+    lab = [int(labels[i]) for i in order]
+    D = hamming_matrix(Gc)
     root, children, leafset = neighbor_joining(D)
-    label_of = {i: int(labels[i]) for i in range(n)}
+    label_of = {i: lab[i] for i in range(n)}
     return fitch_score(root, children, leafset, label_of)
 
 
@@ -223,5 +246,5 @@ if __name__ == "__main__":
     # quick smoke test
     times = dict(t01_23=250000, t0_1=100000, t2_3=50000, t_inv=100000)
     for sc in ("single", "recurrent"):
-        G, lab = simulate(sc, 0.1, 240, 1e-8, 1e-8, 0.0, times, seed=1)
-        print(sc, "sites=", G.shape[1], "events=", classify(G, lab))
+        G, lab, meta = simulate(sc, 0.1, 240, 1e-8, 1e-8, 0.0, times, seed=1)
+        print(sc, "sites=", G.shape[1], "events=", classify(G, lab), "fI=", meta["fI"])

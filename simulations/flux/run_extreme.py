@@ -18,7 +18,7 @@ FLUX = [1e-6, 3e-6, 1e-5, 3e-5, 1e-4]
 
 def _one(arg):
     sc, depth, rho, m, mw, seed = arg
-    G, lab = fs.simulate(sc, 0.1, 240, rho, mw, m, TIME_DEPTHS[depth], seed)
+    G, lab, _ = fs.simulate(sc, 0.1, 240, rho, mw, m, TIME_DEPTHS[depth], seed)
     return fs.classify(G, lab)
 
 
