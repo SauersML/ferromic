@@ -177,8 +177,28 @@ PAML_CACHE_DIR = os.environ.get("PAML_CACHE_DIR", "paml_cache")
 IQTREE_TIMEOUT = int(os.environ.get("IQTREE_TIMEOUT", "7200"))
 PAML_TIMEOUT   = int(os.environ.get("PAML_TIMEOUT", "20880"))
 
-RUN_BRANCH_MODEL_TEST = False
-RUN_CLADE_MODEL_TEST = True
+# --- Which selection test is run (see also cds/PAML_METHODS_NOTE.md) ---
+#
+# ACTIVE ANALYSIS: Clade Model C (CmC), orientation-partitioned.
+#   codeml settings model=3, NSsites=2, ncatG=3 (set in analyze_single_gene
+#   below). H1 partitions branches into TWO foreground clades by inversion
+#   orientation -- EVERY pure direct branch is labelled #1 and EVERY pure
+#   inverted branch is labelled #2 (see create_paml_tree_files). H0 collapses
+#   both orientations into a single foreground class (#1). The H1-vs-H0 LRT
+#   (df=1) therefore asks: does the divergent site class have a DIFFERENT dN/dS
+#   between the pooled direct and pooled inverted clades? It is NOT a
+#   single-branch / branch-site test on the one branch that leads into the
+#   inverted haplotype, and it is NOT in itself a test for positive selection
+#   (omega>1) on any individual branch. The committed data/GRAND_PAML_RESULTS.tsv
+#   holds CmC parameters (winner_p0/p1/p2, winner_omega0,
+#   winner_omega2_direct, winner_omega2_inverted, cmc_*).
+#
+# The classic branch model (model=2, NSsites=0) two-ratio test is DISABLED by
+# default and gated behind RUN_BRANCH_MODEL_TEST. It is kept only as an
+# explicitly opt-in capability; no committed result was produced with it. Do
+# not describe the committed results as a branch-model / branch-site test.
+RUN_BRANCH_MODEL_TEST = False   # opt-in only; produces bm_* columns; NOT the committed analysis
+RUN_CLADE_MODEL_TEST = True     # the active analysis (Clade Model C)
 PROCEED_ON_TERMINAL_ONLY = False
 
 # --- Tournament seeds for PAML restarts ---
@@ -594,7 +614,33 @@ def _validate_internal_branch_labels(paml_tree_str: str, tree_obj: Tree, expecte
             f"Internal branch label validation failed for mark '{mark}'. Expected {expected_counts[mark]}, found {actual_counts[mark]}. Tree string: {paml_tree_str}"
 
 def create_paml_tree_files(tree_path, work_dir, gene_name):
-    logging.info(f"[{gene_name}] Labeling internal branches conservatively...")
+    """Write the H1 and H0 codeml tree files for the Clade Model C test.
+
+    This builds the labelled trees for the ACTIVE, orientation-partitioned
+    Clade Model C analysis (see RUN_CLADE_MODEL_TEST and PAML_METHODS_NOTE.md),
+    NOT a single-branch test on the branch leading into the inverted haplotype.
+
+    Leaves are assigned to a group by the first character of their name
+    ('0' = direct, '1' = inverted, anything else = outgroup). An internal node
+    inherits a group only when ALL of its descendant leaves share that group;
+    mixed nodes are labelled "both" and left unlabelled (background).
+
+    H1 (alternative): EVERY pure direct branch is marked #1 and EVERY pure
+        inverted branch is marked #2 -- two foreground clades partitioned by
+        inversion orientation. This is the standard CmC three-partition setup
+        (background = mixed/outgroup branches, plus the two orientation clades).
+    H0 (null): both pure direct and pure inverted branches collapse to a single
+        foreground class #1, so the two orientations are forced to share one
+        divergent-class omega.
+
+    The H1-vs-H0 LRT (df=1) tests whether the divergent site class has a
+    different dN/dS between the pooled direct and pooled inverted clades.
+
+    Returns (h1_tree_path, h0_tree_path, analysis_is_informative, tree, reason).
+    "Informative" requires at least one pure internal branch in EACH orientation
+    so the two foreground partitions are distinguishable on internal branches.
+    """
+    logging.info(f"[{gene_name}] Labeling direct/inverted clades for Clade Model C...")
     t = Tree(tree_path, format=1)
 
     direct_leaves = 0
@@ -637,6 +683,9 @@ def create_paml_tree_files(tree_path, work_dir, gene_name):
         logging.warning(f"[{gene_name}] Topology is uninformative for internal branch analysis.")
         reason = "No pure internal branches found for both direct and inverted groups."
 
+    # H1 (CmC alternative): two foreground partitions by orientation.
+    # Mark EVERY pure direct branch #1 and EVERY pure inverted branch #2.
+    # This is a pooled-clade contrast, not a single inversion-leading branch.
     t_h1 = t.copy()
     for node in t_h1.traverse():
         status = getattr(node, "group_status", "both")
@@ -657,6 +706,8 @@ def create_paml_tree_files(tree_path, work_dir, gene_name):
     with open(h1_tree_path, 'w') as f:
         f.write("1\n" + h1_paml_str + "\n")
 
+    # H0 (CmC null): collapse both orientations into ONE foreground class #1,
+    # forcing direct and inverted clades to share a single divergent-class omega.
     t_h0 = t.copy()
     for node in t_h0.traverse():
         status = getattr(node, "group_status", "both")
@@ -1343,7 +1394,20 @@ def analyze_single_gene(gene_info, region_tree_path, region_label, paml_bin, cac
                         make_figures=True,
                         annotated_figure_dir=ANNOTATED_FIGURE_DIR,
                         target_clade_model=None):
-    """Run codeml for a gene using the provided region tree."""
+    """Run codeml for a gene under the orientation-partitioned Clade Model C test.
+
+    By default (run_clade_model=True, run_branch_model=False) this runs the
+    ACTIVE analysis: Clade Model C (model=3, NSsites=2, ncatG=3) contrasting the
+    pooled direct clade against the pooled inverted clade (H1) versus a single
+    pooled foreground (H0); the reported statistic is the H1-vs-H0 LRT
+    (cmc_p_value, df=1). It is NOT a single-branch dN/dS test on the branch
+    leading into the inverted haplotype, and omega>1 in any site class is not by
+    itself evidence of positive selection. See cds/PAML_METHODS_NOTE.md.
+
+    Setting run_branch_model=True additionally runs the disabled-by-default
+    branch-model two-ratio test (model=2, NSsites=0); it is opt-in only and
+    produced none of the committed results.
+    """
     gene_name = gene_info['label']
     normalized_target = (target_clade_model or "both").lower()
     final_result = {
@@ -1492,6 +1556,12 @@ def analyze_single_gene(gene_info, region_tree_path, region_label, paml_bin, cac
             logging.info(f"[{gene_name}|{region_label}] Cached attempt {out_name} to {target_dir}")
             return payload
 
+        # ---- DISABLED branch model two-ratio test (model=2, NSsites=0) ----
+        # OPT-IN ONLY via run_branch_model / RUN_BRANCH_MODEL_TEST. This block
+        # is NOT executed in the committed configuration and produced NONE of
+        # the committed results. It is retained as a documented capability;
+        # bm_* columns it would emit are absent from data/GRAND_PAML_RESULTS.tsv.
+        # The active test is Clade Model C, in the run_clade_model block below.
         bm_result = {}
         if run_branch_model:
             pair_key_bm, pair_key_dict_bm = _hash_key_pair(h0_bm_key, h1_bm_key, "branch_model", 1, exe_fp)
@@ -1534,6 +1604,11 @@ def analyze_single_gene(gene_info, region_tree_path, region_label, paml_bin, cac
             logging.info(f"[{gene_name}|{region_label}] Skipping branch-model test as per configuration.")
             bm_result = {"bm_p_value": np.nan, "bm_lrt_stat": np.nan}
 
+        # ---- ACTIVE analysis: Clade Model C (model=3, NSsites=2, ncatG=3) ----
+        # Orientation-partitioned: H1 contrasts pooled direct (#1) vs pooled
+        # inverted (#2) clades against a shared background; H0 pools both
+        # orientations into one foreground class. The H1-vs-H0 LRT (df=1) is the
+        # reported cmc_p_value. Emits the committed cmc_*/winner_* columns.
         cmc_result = {}
         if run_clade_model:
             target = normalized_target

@@ -33,6 +33,11 @@ except ImportError:
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
+# Column order for the merged output. The cmc_* columns hold the ACTIVE
+# Clade Model C result (orientation-partitioned direct vs inverted; see
+# cds/PAML_METHODS_NOTE.md). The bm_* (branch-model two-ratio) columns are an
+# opt-in-only capability that is disabled in the committed run, so they are
+# all-NaN in data/GRAND_PAML_RESULTS.tsv; they are retained for schema stability.
 ORDERED_COLUMNS = [
     'region', 'gene', 'status',
     'bm_p_value', 'bm_q_value', 'bm_lrt_stat',
