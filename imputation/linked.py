@@ -9,7 +9,6 @@ os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
 import pandas as pd
 import numpy as np
-from cyvcf2 import VCF
 from collections import Counter
 import warnings
 import time
@@ -31,9 +30,15 @@ from scipy.stats import wilcoxon, pearsonr
 import traceback
 import requests
 
-url = "https://raw.githubusercontent.com/SauersML/ferromic/refs/heads/main/data/passed_snvs.txt"
-with open("passed_snvs.txt", "wb") as f:
-    f.write(requests.get(url).content)
+PASSED_SNVS_URL = "https://raw.githubusercontent.com/SauersML/ferromic/refs/heads/main/data/passed_snvs.txt"
+
+
+def fetch_passed_snvs(url: str = PASSED_SNVS_URL, dest: str = "passed_snvs.txt") -> str:
+    """Download the SNP whitelist to ``dest``. Called from __main__ (not at import),
+    so importing this module for testing/reuse does not require network access."""
+    with open(dest, "wb") as f:
+        f.write(requests.get(url).content)
+    return dest
 
 # TARGET="$HOME/.pytargets/sklearn171" && python3 -m pip install --upgrade --no-cache-dir --ignore-installed   --target "$TARGET" "scikit-learn>=1.6,<2" && PYTHONPATH="$TARGET:$PYTHONPATH" python3 -c 'import sklearn,sys; print(sklearn.__version__, "->", sklearn.__file__)' && PYTHONPATH="$TARGET:$PYTHONPATH" python3 /home/hsiehph/sauer354/di/ferromic/linked.py
 
@@ -41,6 +46,13 @@ with open("passed_snvs.txt", "wb") as f:
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 rng = np.random.default_rng(seed=42)
+
+
+def _get_vcf_cls():
+    """Lazily import cyvcf2.VCF so the module can be imported (e.g. for tests/reuse of
+    its pure modeling functions) on systems without cyvcf2 installed."""
+    from cyvcf2 import VCF
+    return VCF
 
 # chr8-7301025-INV-5297356, chr9-102565835-INV-4446, chr9-30951702-INV-5595
 
@@ -144,29 +156,105 @@ def create_synthetic_data(X_hap1: np.ndarray, X_hap2: np.ndarray, raw_gts: pd.Se
                     y_synth.append(class_label)
                     parent_map.append(parents)
     else:  # Augmentation Mode
+        # NOTE (BUG #5): we now retain BOTH parent indices for every synthetic row,
+        # exactly as in Rescue Mode. Callers use these to keep a synthetic sample in
+        # the same cross-validation group as its real parents, preventing inner-CV
+        # leakage (a synthetic descendant landing in a different fold than its parent).
         n_unique_0, n_unique_1 = len(unique_hap_pool_0), len(unique_hap_pool_1)
         if n_unique_1 >= 2:
             for i, j in itertools.combinations_with_replacement(range(n_unique_1), 2):
-                h1, _ = unique_hap_pool_1[i]; h2, _ = unique_hap_pool_1[j]
+                h1, p1 = unique_hap_pool_1[i]; h2, p2 = unique_hap_pool_1[j]
                 new_diploid = h1 + h2
                 if tuple(new_diploid) not in existing_genomes_set:
-                    X_synth.append(new_diploid); y_synth.append(2)
+                    X_synth.append(new_diploid); y_synth.append(2); parent_map.append([p1, p2])
         if n_unique_0 >= 2:
             for i, j in itertools.combinations_with_replacement(range(n_unique_0), 2):
-                h1, _ = unique_hap_pool_0[i]; h2, _ = unique_hap_pool_0[j]
+                h1, p1 = unique_hap_pool_0[i]; h2, p2 = unique_hap_pool_0[j]
                 new_diploid = h1 + h2
                 if tuple(new_diploid) not in existing_genomes_set:
-                    X_synth.append(new_diploid); y_synth.append(0)
+                    X_synth.append(new_diploid); y_synth.append(0); parent_map.append([p1, p2])
         if n_unique_0 >= 1 and n_unique_1 >= 1:
             for i, j in itertools.product(range(n_unique_0), range(n_unique_1)):
-                h0, _ = unique_hap_pool_0[i]; h1, _ = unique_hap_pool_1[j]
+                h0, p0 = unique_hap_pool_0[i]; h1, p1 = unique_hap_pool_1[j]
                 new_diploid = h0 + h1
                 if tuple(new_diploid) not in existing_genomes_set:
-                    X_synth.append(new_diploid); y_synth.append(1)
+                    X_synth.append(new_diploid); y_synth.append(1); parent_map.append([p0, p1])
 
     if not X_synth:
         return None, None, None
     return np.array(X_synth), np.array(y_synth), parent_map
+
+def build_family_groups(real_indices: np.ndarray,
+                        synth_parent_map: list) -> np.ndarray:
+    """
+    Build connected-component "family" group labels for a training set composed of
+    REAL samples followed by SYNTHETIC samples (BUG #5).
+
+    A synthetic sample is genetically derived from two real parents, so it must never
+    be split from those parents across CV folds. We union the two parents of every
+    synthetic sample (and the synthetic sample itself) into one connected component;
+    two real samples that both parent a shared descendant therefore also end up in the
+    same component. The returned labels are suitable as the `groups` argument to a
+    grouped cross-validator so no parent and its descendant land in different folds.
+
+    Args:
+        real_indices: 1-D array of the original sample indices for the REAL rows, in
+            the same row order they appear at the top of the training matrix.
+        synth_parent_map: list (len == n_synth) where each entry is [parent_a, parent_b],
+            the original sample indices of the two parents, ordered to match the
+            SYNTHETIC rows that follow the real rows in the training matrix.
+
+    Returns:
+        groups: int array of length (len(real_indices) + len(synth_parent_map)) giving
+            a contiguous group label per training row.
+    """
+    real_indices = np.asarray(real_indices)
+    n_real = len(real_indices)
+    synth_parent_map = synth_parent_map or []
+    n_synth = len(synth_parent_map)
+
+    # Union-Find over original sample indices (parents are referenced by original idx).
+    parent: dict = {}
+
+    def find(x):
+        parent.setdefault(x, x)
+        root = x
+        while parent[root] != root:
+            root = parent[root]
+        # Path compression
+        while parent[x] != root:
+            parent[x], x = root, parent[x]
+        return root
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    # Seed every real sample as its own node.
+    for idx in real_indices:
+        find(int(idx))
+
+    # Union each synthetic sample's two parents (links real samples that share a child).
+    for pa, pb in synth_parent_map:
+        union(int(pa), int(pb))
+
+    # Map each connected-component root to a contiguous label.
+    root_to_label: dict = {}
+
+    def label_for_root(root):
+        if root not in root_to_label:
+            root_to_label[root] = len(root_to_label)
+        return root_to_label[root]
+
+    groups = np.empty(n_real + n_synth, dtype=np.int64)
+    for row, idx in enumerate(real_indices):
+        groups[row] = label_for_root(find(int(idx)))
+    for s, (pa, _pb) in enumerate(synth_parent_map):
+        # Parents are already unioned, so either parent's root identifies the family.
+        groups[n_real + s] = label_for_root(find(int(pa)))
+    return groups
+
 
 def extract_haplotype_data_for_locus(inversion_job: dict, allowed_snps_dict: dict):
     inversion_id = inversion_job.get('orig_ID', 'Unknown_ID')
@@ -179,6 +267,7 @@ def extract_haplotype_data_for_locus(inversion_job: dict, allowed_snps_dict: dic
             logging.error(f"[{inversion_id}] FAILED: {reason}")
             return {'status': 'FAILED', 'id': inversion_id, 'reason': reason}
 
+        VCF = _get_vcf_cls()
         vcf_reader = VCF(vcf_path, lazy=True)
         vcf_samples = vcf_reader.samples
         tsv_samples = [col for col in inversion_job.keys() if col.startswith(('HG', 'NA'))]
@@ -207,6 +296,7 @@ def extract_haplotype_data_for_locus(inversion_job: dict, allowed_snps_dict: dic
         gt_df = pd.DataFrame.from_dict(gt_data, orient='index')
         flank_size = 50000
         region_str = f"{chrom}:{max(0, start - flank_size)}-{end + flank_size}"
+        VCF = _get_vcf_cls()
         vcf_subset = VCF(vcf_path, samples=list(gt_df.index))
 
         h1_data, h2_data, snp_meta, processed_pos = [], [], [], set()
@@ -397,19 +487,25 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int, output_
             # Per-fold RESCUE (top-up any class in train to at least 2)
             class_counts_train = Counter(y_full[train_real_idx])
             needed_counts = {c: max(0, 2 - class_counts_train.get(c, 0)) for c in [0, 1, 2]}
-            X_rescue, y_rescue, _ = (None, None, None)
+            X_rescue, y_rescue, parents_rescue = (None, None, None)
             if any(v > 0 for v in needed_counts.values()):
-                X_rescue, y_rescue, _ = _build_fold_synth(target_counts=needed_counts)
+                X_rescue, y_rescue, parents_rescue = _build_fold_synth(target_counts=needed_counts)
 
             # Per-fold AUGMENTATION (novel combos from train parents)
-            X_aug, y_aug, _ = _build_fold_synth(target_counts=None)
+            X_aug, y_aug, parents_aug = _build_fold_synth(target_counts=None)
 
-            # Assemble TRAIN/TEST sets (no synth in TEST)
+            # Assemble TRAIN/TEST sets (no synth in TEST).
+            # Rows are ordered: [real..., rescue-synth..., aug-synth...]; we accumulate the
+            # parent map (BUG #5) in the same order so synthetic rows stay grouped with
+            # their real parents during inner CV.
             X_train = X_full[train_real_idx]; y_train = y_full[train_real_idx]
+            synth_parent_map = []
             if X_rescue is not None:
                 X_train = np.vstack([X_train, X_rescue]); y_train = np.concatenate([y_train, y_rescue])
+                synth_parent_map.extend(parents_rescue or [])
             if X_aug is not None:
                 X_train = np.vstack([X_train, X_aug]);    y_train = np.concatenate([y_train, y_aug])
+                synth_parent_map.extend(parents_aug or [])
 
             X_test = X_full[test_idx]; y_test = y_full[test_idx]
 
@@ -418,6 +514,11 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int, output_
                 logging.info(f"[{inversion_id}] EVAL fold {fold_idx}/{n_outer_splits}: skipped (train lacks >=2 classes).")
                 continue
 
+            # Family groups over the pre-bootstrap TRAIN rows (real + synthetic). A synthetic
+            # row shares a group with its real parents so no parent/descendant split occurs
+            # across inner-CV folds (BUG #5 fix; replaces the old per-row bootstrap-index group).
+            family_groups = build_family_groups(train_real_idx, synth_parent_map)
+
             # Balanced bootstrap on TRAIN
             sample_weights = compute_sample_weight("balanced", y=y_train)
             resampled_indices = rng.choice(
@@ -425,7 +526,8 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int, output_
                 p=sample_weights / np.sum(sample_weights)
             )
             X_train_resampled = X_train[resampled_indices]; y_train_resampled = y_train[resampled_indices]
-            resampled_groups = resampled_indices
+            # Propagate the family group of each resampled row (NOT the bootstrap row index).
+            resampled_groups = family_groups[resampled_indices]
             train_min_class_count = min(Counter(y_train_resampled).values())
             if train_min_class_count < 2:
                 logging.info(f"[{inversion_id}] EVAL fold {fold_idx}/{n_outer_splits}: skipped (post-resample class <2).")
@@ -502,7 +604,7 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int, output_
 
         # -------------------- FINAL MODEL (global) --------------------
         # Augment the final training set as well (allow lowconf parents unconditionally)
-        X_final_aug, y_final_aug, _ = create_synthetic_data(
+        X_final_aug, y_final_aug, parents_final_aug = create_synthetic_data(
             X_hap1, X_hap2, preloaded_data['raw_gts'],
             np.arange(num_real_samples),
             np.ones_like(confidence_mask, dtype=bool),  # allow both high+low as parents
@@ -510,9 +612,15 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int, output_
         )
         X_final_train_full = X_full
         y_final_train_full = y_full
+        final_synth_parent_map = []
         if X_final_aug is not None:
             X_final_train_full = np.vstack([X_full, X_final_aug])
             y_final_train_full = np.concatenate([y_full, y_final_aug])
+            final_synth_parent_map = parents_final_aug or []
+
+        # Family groups over the pre-bootstrap final training rows (all real samples +
+        # synthetic, each synthetic grouped with its real parents) (BUG #5 fix).
+        final_family_groups = build_family_groups(np.arange(num_real_samples), final_synth_parent_map)
 
         # Balanced bootstrap for final training
         final_sample_weights = compute_sample_weight("balanced", y=y_final_train_full)
@@ -521,7 +629,7 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int, output_
             p=final_sample_weights / np.sum(final_sample_weights)
         )
         X_final_train, y_final_train = X_final_train_full[final_resampled_indices], y_final_train_full[final_resampled_indices]
-        final_groups = final_resampled_indices
+        final_groups = final_family_groups[final_resampled_indices]
 
         final_min_class_count = min(Counter(y_final_train).values())
         if final_min_class_count < 2:
@@ -639,6 +747,7 @@ def check_snp_availability_for_locus(job: dict, allowed_snps_dict: dict):
             return {'status': 'VCF_NOT_FOUND', 'id': inversion_id, 'reason': f"VCF file not found: {vcf_path}"}
         flank_size = 50000
         region_str = f"{chrom}:{max(0, start - flank_size)}-{end + flank_size}"
+        VCF = _get_vcf_cls()
         vcf_reader = VCF(vcf_path, lazy=True)
         for var in vcf_reader(region_str):
             normalized_chrom = var.CHROM.replace('chr', '')
@@ -658,7 +767,7 @@ if __name__ == '__main__':
 
     output_dir = "final_imputation_models"
     ground_truth_file = "../variants_freeze4inv_sv_inv_hg38_processed_arbigent_filtered_manualDotplot_filtered_PAVgenAdded_withInvCategs_syncWithWH.fixedPH.simpleINV.mod.tsv"
-    snp_whitelist_file = "passed_snvs.txt"
+    snp_whitelist_file = fetch_passed_snvs()
 
     os.makedirs(output_dir, exist_ok=True)
     if not os.path.exists(ground_truth_file):
