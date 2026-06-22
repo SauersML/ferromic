@@ -1004,11 +1004,26 @@ def _pipeline_once(pipeline_config: Optional[dict[str, object]] = None):
                 )
             )
 
-            anc_cat_global = pd.Categorical(
-                anc_series.reindex(shared_covariates_df.index)
+            # Build ancestry dummies on a Series that carries the participant IDs, so the
+            # resulting one-hot frame is indexed by person_id (NOT a RangeIndex). Wrapping a
+            # bare pd.Categorical in get_dummies would drop the index and produce a 0..N-1
+            # RangeIndex; the later reindex-by-person_id (see :1250, :1752) would then match
+            # nothing and silently zero every ANC_* fixed effect. This mirrors the correct
+            # pattern at models.py:4611-4613.
+            anc_series_global = anc_series.reindex(shared_covariates_df.index)
+            anc_series_global.index = anc_series_global.index.astype(str)
+            anc_cat_global = pd.Categorical(anc_series_global)
+            A_global = pd.get_dummies(
+                pd.Series(anc_cat_global, index=anc_series_global.index),
+                prefix='ANC', drop_first=True, dtype=np.float32,
             )
-            A_global = pd.get_dummies(anc_cat_global, prefix='ANC', drop_first=True, dtype=np.float32)
-            A_global.index = A_global.index.astype(str)
+            # The dummy frame must be aligned to the shared covariate participants by ID.
+            expected_index = shared_covariates_df.index.astype(str)
+            if not A_global.index.equals(expected_index):
+                raise RuntimeError(
+                    "Ancestry dummy frame index does not match shared covariate participant IDs; "
+                    "refusing to proceed because ANC_* fixed effects would be silently zeroed."
+                )
             A_cols = list(A_global.columns)
         print(f"\n--- Shared Setup Time: {t_setup.duration:.2f}s ---")
 
@@ -1247,7 +1262,20 @@ def _pipeline_once(pipeline_config: Optional[dict[str, object]] = None):
                 covariate_cols = [target_inversion] + ["sex"] + pc_cols + ["AGE_c", "AGE_c_sq"]
                 core_df_subset = core_df[covariate_cols].astype(np.float32, copy=False)
                 core_df_subset["const"] = np.float32(1.0)
-                A_slice = shared_data['A_global'].reindex(core_df_subset.index).fillna(0.0).astype(np.float32)
+                # A_global is indexed by person_id and covers every shared-covariate participant.
+                # core_df is a (covariates JOIN dosages) subset of those participants, so reindex
+                # must align fully. A missing row here would mean a person whose ancestry dummies
+                # got dropped -- we must NOT silently fillna(0.0) (that zeroes the ANC_* effects);
+                # fail loudly instead.
+                A_slice = shared_data['A_global'].reindex(core_df_subset.index)
+                if A_slice.isna().any().any():
+                    n_missing = int(A_slice.isna().any(axis=1).sum())
+                    raise RuntimeError(
+                        f"{n_missing} participant(s) in the per-inversion covariate frame have no "
+                        "ancestry dummy rows; ANC_* fixed effects would be silently zeroed. "
+                        "Aborting to avoid a detached-covariate regression."
+                    )
+                A_slice = A_slice.astype(np.float32)
                 core_df_with_const = pd.concat([core_df_subset, A_slice], axis=1, copy=False).astype(np.float32, copy=False)
                 print(
                     f"{log_prefix} [Stage 2/{stage_total}] Covariate matrix ready with "
@@ -1749,7 +1777,17 @@ def _pipeline_once(pipeline_config: Optional[dict[str, object]] = None):
                 covariate_cols = [target_inversion] + ["sex"] + pc_cols + ["AGE_c", "AGE_c_sq"]
                 core_df_subset = core_df[covariate_cols].astype(np.float32, copy=False)
                 core_df_subset["const"] = np.float32(1.0)
-                A_slice = A_global.reindex(core_df_subset.index).fillna(0.0).astype(np.float32)
+                # See the matching reindex above: A_global covers every shared participant, so a
+                # missing row here signals detached covariates -- fail loudly rather than zeroing.
+                A_slice = A_global.reindex(core_df_subset.index)
+                if A_slice.isna().any().any():
+                    n_missing = int(A_slice.isna().any(axis=1).sum())
+                    raise RuntimeError(
+                        f"{n_missing} participant(s) in the per-inversion covariate frame have no "
+                        "ancestry dummy rows; ANC_* fixed effects would be silently zeroed. "
+                        "Aborting to avoid a detached-covariate regression."
+                    )
+                A_slice = A_slice.astype(np.float32)
                 core_df_with_const = pd.concat([core_df_subset, A_slice], axis=1, copy=False).astype(np.float32, copy=False)
                 core_index = pd.Index(core_df_with_const.index.astype(str), name="person_id")
                 global_notnull_mask = np.isfinite(core_df_with_const.to_numpy()).all(axis=1)
@@ -1873,9 +1911,15 @@ def _pipeline_once(pipeline_config: Optional[dict[str, object]] = None):
                 out_df["Sig_Global"] = out_df["Sig_Global"].fillna(False).map(lambda x: "✓" if bool(x) else "")
                 print(out_df.to_string(index=False))
 
-    except Exception as e:
+    except Exception:
         print("\nSCRIPT HALTED DUE TO A CRITICAL ERROR:", flush=True)
         traceback.print_exc()
+        # Re-raise so the worker process exits with a nonzero status. Swallowing the
+        # exception here would let the child exit 0, and the supervisor would treat a
+        # fatal pipeline failure as a successful run (see supervisor_main: code == 0
+        # breaks the restart loop). The atomic master-TSV write above guarantees we
+        # never publish a partial results file on the way out.
+        raise
 
     finally:
         script_duration = time.time() - script_start_time

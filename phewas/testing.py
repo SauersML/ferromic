@@ -141,26 +141,71 @@ def consolidate_and_select(df, inversions, cache_root, alpha=0.05,
                     })
         if rows:
             lrt_df = pd.DataFrame(rows)
-            df = df.merge(lrt_df, on=["Phenotype", "Inversion"], how="left")
+            # The base ``df`` already carries the canonical per-test p-value columns
+            # (P_Value / P_Source / P_Method), produced for EVERY Stage-1 test --
+            # including non-LRT engines such as score_boot_mle. ``lrt_df`` repeats those
+            # same column names but is only populated for tests that have an LRT cache
+            # entry. Merging on the full lrt_df therefore collides those columns into
+            # P_Value_x / P_Value_y (etc.) and leaves ``df`` with no plain "P_Value",
+            # which silently drops every non-LRT test out of the global BH-FDR.
+            #
+            # Only the genuinely LRT-specific column (P_LRT_Overall) needs to come from
+            # lrt_df; everything else stays on the base canonical columns.
+            df = df.merge(
+                lrt_df[["Phenotype", "Inversion", "P_LRT_Overall"]],
+                on=["Phenotype", "Inversion"],
+                how="left",
+            )
         else:
             df["P_LRT_Overall"] = np.nan
-        if "P_Value" not in df.columns:
-            df["P_Value"] = np.nan
-        if "P_Source" not in df.columns:
-            df["P_Source"] = None
-        if "P_Method" not in df.columns:
-            df["P_Method"] = None
+
+        # Resolve any pre-existing merge-suffix collision (e.g. from upstream consolidation
+        # that already produced P_Value_x / P_Value_y) into a single canonical column,
+        # preferring the "_x" (base) side and falling back to "_y".
+        for canonical in ("P_Value", "P_Source", "P_Method"):
+            parts = [df[name] for name in (canonical, canonical + "_x", canonical + "_y")
+                     if name in df.columns]
+            if parts:
+                resolved = parts[0]
+                for extra in parts[1:]:
+                    resolved = resolved.where(resolved.notna(), extra)
+                df[canonical] = resolved
+                for dropped in (canonical + "_x", canonical + "_y"):
+                    if dropped in df.columns:
+                        df.drop(columns=dropped, inplace=True)
+            else:
+                df[canonical] = np.nan if canonical == "P_Value" else None
+
+        if "P_LRT_Overall" not in df.columns:
+            df["P_LRT_Overall"] = np.nan
         if "P_Overall_Valid" in df.columns:
             df["P_Overall_Valid"] = df["P_Overall_Valid"].fillna(False).astype(bool)
         else:
             df["P_Overall_Valid"] = False
-        p_merge = df["P_LRT_Overall"].where(df["P_LRT_Overall"].notna(), df["P_Value"])
-        p_merge_numeric = pd.to_numeric(p_merge, errors="coerce")
-        mask = p_merge_numeric.notna() & df["P_Overall_Valid"]
+
+        # Canonical p-value for FDR: the per-test P_Value (covers all engines), with
+        # P_LRT_Overall as a fallback only where P_Value is missing. This guarantees that
+        # valid score/bootstrap tests -- not just LRT tests -- enter the BH correction.
+        canonical_p = pd.to_numeric(df["P_Value"], errors="coerce")
+        lrt_p = pd.to_numeric(df["P_LRT_Overall"], errors="coerce")
+        canonical_p = canonical_p.where(canonical_p.notna(), lrt_p)
+
+        valid = df["P_Overall_Valid"].astype(bool)
+        mask = canonical_p.notna() & valid
         df["Q_GLOBAL"] = np.nan
         if int(mask.sum()) > 0:
-            _, q, _, _ = multipletests(p_merge_numeric.loc[mask], alpha=alpha, method="fdr_bh")
+            _, q, _, _ = multipletests(canonical_p.loc[mask], alpha=alpha, method="fdr_bh")
             df.loc[mask, "Q_GLOBAL"] = q
+
+        # Every valid row with a finite canonical p-value MUST receive a q-value; a gap
+        # here means a test silently fell out of the global FDR (the bug this guards).
+        missing_q = (canonical_p.notna() & valid & df["Q_GLOBAL"].isna())
+        if bool(missing_q.any()):
+            raise RuntimeError(
+                f"{int(missing_q.sum())} valid finite-p test(s) received no Q_GLOBAL; "
+                "global BH-FDR is incomplete."
+            )
+
         df["Sig_Global"] = df["Q_GLOBAL"] < alpha
         df = _attach_ci_display(df)
         return df, {}

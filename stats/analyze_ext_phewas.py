@@ -1,3 +1,12 @@
+"""Design specification for the external-PheWAS cross-reference analysis.
+
+This module currently holds only the written specification (below) for matching
+rows of ``phewas_results`` against ``aggregated_phenotype_results`` via the
+phenotype and tagging-SNP mapping tables. It is intentionally kept as a module
+docstring so the file is importable / compilable; the implementation is TODO.
+
+----------------------------------------------------------------------------
+
 Download https://raw.githubusercontent.com/SauersML/ferromic/refs/heads/main/data/aggregated_phenotype_results.tsv
 
 Format:
@@ -56,4 +65,5 @@ THEN, verify that REF	ALT MATCH the  ref	alt columns. Warn if not.
 Now, we have found the EXACT ROWS in aggregated_phenotype_results that match a single row in phewas_results.
 
 also, make a note of / save info of which phenotype is "Best_Match"
+"""
 
