@@ -61,10 +61,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if git lfs pull; then
-            echo "LFS pull successful"
+          if git lfs pull && [ -f data/phy_outputs.zip ]; then
+            echo "LFS pull successful; data/phy_outputs.zip present"
           else
-            echo "LFS pull failed. Falling back to artifact download."
+            echo "data/phy_outputs.zip not available via LFS (it was moved out of the tree). Falling back to artifact download."
 
             set -euo pipefail
             MANUAL_WORKFLOW_FILE="manual_run_vcf.yml"
