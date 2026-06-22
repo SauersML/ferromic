@@ -47,6 +47,28 @@ vcf <- readVcf(vcf_path, genome = "hg19")
 cat(sprintf("VCF variants read: %d ; samples: %d\n",
             length(rowRanges(vcf)), ncol(vcf)))
 
+# scoreInvHap matches SNPs to its reference BY NAME. 1000G phase-3 rows are named by rsID,
+# but the reference may use chr:position; the rsID dbSNP builds can differ -> "no common
+# SNPs". Auto-detect which naming overlaps the reference and rename the VCF accordingly.
+data(SNPsR2, package = "scoreInvHap")
+ref_names <- names(SNPsR2[[inv_id]])
+rr        <- rowRanges(vcf)
+orig      <- rownames(vcf)
+pos_names      <- paste(as.character(seqnames(rr)), start(rr), sep = ":")
+pos_names_chr  <- paste0("chr", pos_names)
+cands <- list(rsID = orig, `chr:pos` = pos_names, `chrN:pos` = pos_names_chr)
+cat("Reference SNPs:", length(ref_names), "| head:", paste(head(ref_names), collapse = ","), "\n")
+ov <- sapply(cands, function(nm) length(intersect(nm, ref_names)))
+cat("VCF name overlap with reference -> ",
+    paste(sprintf("%s=%d", names(ov), ov), collapse = "  "), "\n")
+best <- names(which.max(ov))
+if (ov[[best]] > 0 && best != "rsID") {
+  rownames(vcf) <- cands[[best]]
+  cat(sprintf("Renamed VCF SNPs to '%s' (%d common with reference).\n", best, ov[[best]]))
+} else {
+  cat(sprintf("Using original rsID names (%d common with reference).\n", ov[["rsID"]]))
+}
+
 # inv=<id> triggers internal loading of the bundled reference objects.
 res <- scoreInvHap(SNPlist = vcf, inv = inv_id)
 
