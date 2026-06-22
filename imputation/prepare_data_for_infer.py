@@ -26,6 +26,17 @@ OUTPUT_DIR   = os.getenv("OUTPUT_DIR", "genotype_matrices")
 BLOCK_SNPS   = int(os.getenv("BLOCK_SNPS", "4096"))   # SNP columns to read per block
 NUM_THREADS  = os.getenv("NUM_THREADS", "auto")      # "auto" or integer string
 
+# --- COVERAGE GUARD (BUG #3) ---
+# A model whose predictor SNPs are (almost) all unresolved against the target BED
+# produces an all-missing genotype matrix. Downstream (infer_dosage.py) those missing
+# entries get mean-filled, and with no real coverage the mean is undefined -> filled
+# with 0, so the model predicts from an all-zero vector and can emit impossible
+# dosages (values far outside [0, 2]). Fail closed: skip any model that does not
+# resolve at least MIN_RESOLVED_SNPS distinct predictor SNPs AND at least
+# MIN_RESOLVED_FRACTION of its predictor columns.
+MIN_RESOLVED_SNPS = int(os.getenv("MIN_RESOLVED_SNPS", "1"))
+MIN_RESOLVED_FRACTION = float(os.getenv("MIN_RESOLVED_FRACTION", "0.5"))
+
 _DEFAULT_MODEL_SOURCE = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "data", "models")
 )
@@ -289,12 +300,25 @@ def load_models_and_build_router_from_manifest(manifest_url: str,
                 print(f"[WARN ambiguous] {name}: {len(matches)} matches for effect '{eff}' at '{id_str}', dropping variant")
                 chosen.append((None, False))
 
+        # --- COVERAGE GUARD (BUG #3): fail closed on (near-)zero predictor coverage ---
+        n_resolved = sum(1 for (v_idx, _flip) in chosen if v_idx is not None)
+        resolved_fraction = (n_resolved / ncols) if ncols > 0 else 0.0
+        if n_resolved < MIN_RESOLVED_SNPS or resolved_fraction < MIN_RESOLVED_FRACTION:
+            print(
+                f"[SKIP] {name}: insufficient resolved predictor SNPs "
+                f"({n_resolved}/{ncols} resolved, fraction={resolved_fraction:.2f}; "
+                f"need >= {MIN_RESOLVED_SNPS} and >= {MIN_RESOLVED_FRACTION:.2f}). "
+                f"All-missing predictors would yield impossible dosages; skipping model."
+            )
+            skipped += 1
+            continue
+
         models.append(ModelSpec(name=name, ncols=ncols, col_ids=col_ids, col_effects=col_eff))
         selected_per_model.append(chosen)
 
     usable_models = len(models)
     if skipped:
-        print(f"[INFO] skipped {skipped} model files (fetch/schema/JSON problems)")
+        print(f"[INFO] skipped {skipped} model files (fetch/schema/JSON/coverage problems)")
     print(f"Usable models: {usable_models}")
     print(f"Total requested columns (across usable models): {total_cols:,}")
 

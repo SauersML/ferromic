@@ -4,7 +4,8 @@ from dataclasses import dataclass
 
 import numpy as np
 from tqdm import tqdm
-from google.cloud import storage  # hard crash if missing
+# google.cloud.storage is imported lazily inside RangeFetcher so that this module can
+# be imported (e.g. for unit tests of the pure TSV-writing logic) without the GCS SDK.
 
 # ------------------------------ HARD-CODED PATHS ------------------------------
 
@@ -23,6 +24,13 @@ TARGETS: List[Tuple[int, str]] = [
     (45996523, "G"),
     (45974480, "G"),
 ]
+
+# Canonical inversion identifier for the chr17q21 (17q21.31) inversion.
+# The tag SNPs above span only a small (~29 kb) window inside this inversion, so the
+# min/max of the tag-SNP positions must NOT be used as the inversion coordinate. We
+# always emit this canonical ID in the inversion column and record the tag-SNP span /
+# method in separate metadata columns.
+CANONICAL_INVERSION_ID = "chr17-45585160-INV-706887"
 
 # Single-output hard-call matrix
 OUT_TSV = "imputed_inversion_hardcalls.tsv"
@@ -65,6 +73,7 @@ def gsutil_cat_lines(gs_uri: str) -> Iterable[str]:
 class RangeFetcher:
     """Persistent HTTP range fetcher using google-cloud-storage (Requester Pays)."""
     def __init__(self):
+        from google.cloud import storage  # imported here; required only for GCS fetches
         self.project = require_project()
         self.client = storage.Client(project=self.project)
 
@@ -268,32 +277,41 @@ def write_single_inversion_hardcalls_tsv(
     out_path: str = OUT_TSV,
 ) -> None:
     """
-    Write a TSV with one hard-call column:
-        SampleID <TAB> chr17-<start>-INV-<length>-HARD
+    Write a TSV with one hard-call column keyed by the CANONICAL inversion ID:
+        SampleID <TAB> chr17-45585160-INV-706887 <TAB> Tag_SNP_Span <TAB> Tag_SNP_Method
     Values: 0, 1, 2, or blank for no-call.
+
+    The tag SNPs span only a small window inside the inversion, so the inversion
+    column is always the canonical ID. The tag-SNP positions and the calling method
+    are recorded in separate metadata columns (constant across rows) so the provenance
+    is preserved without overloading the inversion coordinate.
     """
     if not iids:
         raise RuntimeError("No samples found (empty IID list).")
 
     if not selected_bps:
         print("[WARN] No usable tag SNPs found; writing header and blank entries.")
-        start_bp = min(bp for bp, _ in TARGETS)
-        end_bp   = max(bp for bp, _ in TARGETS)
+        span_bps = sorted(bp for bp, _ in TARGETS)
     else:
-        start_bp = min(selected_bps)
-        end_bp   = max(selected_bps)
+        span_bps = sorted(selected_bps)
 
-    inv_id = f"{chr_label}-{start_bp}-INV-{end_bp - start_bp}-HARD"
-    print(f"[WRITE] Building '{out_path}' (N={len(iids)}), column='{inv_id}' "
-          f"from {len(selected_bps)} tag(s): {selected_bps}")
+    inv_id = CANONICAL_INVERSION_ID
+    # Metadata describing the tag-SNP basis for these hard calls (kept out of the
+    # inversion-ID column). e.g. "chr17:45974480-46003698" plus the tag positions used.
+    tag_span = f"{chr_label}:{span_bps[0]}-{span_bps[-1]}"
+    tag_method = f"unanimity_hardcall;tags={','.join(str(bp) for bp in span_bps)}"
+    print(f"[WRITE] Building '{out_path}' (N={len(iids)}), inversion column='{inv_id}' "
+          f"from {len(selected_bps)} tag(s): {selected_bps} (span {tag_span})")
 
     with open(out_path, "w") as fo, tqdm(total=len(iids), desc="Write TSV", unit="sample") as bar:
-        fo.write(f"SampleID\t{inv_id}\n")
+        fo.write(f"SampleID\t{inv_id}\tTag_SNP_Span\tTag_SNP_Method\n")
         for iid, v in zip(iids, calls):
-            fo.write(f"{iid}\t{'' if np.isnan(v) else str(int(v))}\n")
+            val = '' if np.isnan(v) else str(int(v))
+            fo.write(f"{iid}\t{val}\t{tag_span}\t{tag_method}\n")
             bar.update(1)
 
-    print(f"[DONE] Wrote {out_path} with unanimity-only hard calls '{inv_id}'.")
+    print(f"[DONE] Wrote {out_path} with unanimity-only hard calls for canonical "
+          f"inversion '{inv_id}' (tag span {tag_span}).")
 
 # ------------------------------ MAIN ------------------------------------------
 
