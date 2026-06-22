@@ -1004,11 +1004,19 @@ def _pipeline_once(pipeline_config: Optional[dict[str, object]] = None):
                 )
             )
 
-            anc_cat_global = pd.Categorical(
-                anc_series.reindex(shared_covariates_df.index)
+            # Build ancestry dummies on a Series so the participant-id index is preserved.
+            # The previous pd.Categorical(...) dropped the index, so get_dummies produced a
+            # RangeIndex that was coerced to "0","1",...; the per-inversion reindex-by-
+            # participant-id then matched nothing and silently filled every ANC_* fixed
+            # effect with 0 -- i.e. ancestry was absent from the global model.
+            anc_series_idx = anc_series.reindex(shared_covariates_df.index)
+            A_global = pd.get_dummies(
+                anc_series_idx, prefix='ANC', drop_first=True, dtype=np.float32
             )
-            A_global = pd.get_dummies(anc_cat_global, prefix='ANC', drop_first=True, dtype=np.float32)
-            A_global.index = A_global.index.astype(str)
+            A_global.index = shared_covariates_df.index.astype(str)
+            assert len(A_global.index) == len(shared_covariates_df.index) and \
+                not A_global.index.duplicated().any(), \
+                "ancestry dummies must be aligned 1:1 to participant ids"
             A_cols = list(A_global.columns)
         print(f"\n--- Shared Setup Time: {t_setup.duration:.2f}s ---")
 
@@ -1876,6 +1884,10 @@ def _pipeline_once(pipeline_config: Optional[dict[str, object]] = None):
     except Exception as e:
         print("\nSCRIPT HALTED DUE TO A CRITICAL ERROR:", flush=True)
         traceback.print_exc()
+        # Re-raise so the worker process exits non-zero. The supervisor treats exit code 0
+        # as success and stops; swallowing the exception here let a crashed/partial run be
+        # accepted as complete.
+        raise
 
     finally:
         script_duration = time.time() - script_start_time
