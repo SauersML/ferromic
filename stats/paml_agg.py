@@ -34,6 +34,10 @@ BLACKLIST_COLUMNS = {
 }
 
 # Mapping of {New_Column_Name: Replacement_Suffix}
+# These winner_* columns hold the ACTIVE Clade Model C result
+# (orientation-partitioned direct vs inverted; see cds/PAML_METHODS_NOTE.md):
+# winner_omega2_direct / winner_omega2_inverted are the divergent site-class
+# dN/dS in the pooled direct / pooled inverted clades, not a single-branch test.
 # This maps the metric name found in the column headers to the final output name.
 # Based on pipeline_lib.py, raw columns look like: "h1_s1_def_cmc_p0"
 # We find the winner via "h1_s1_def_lnl" and swap "_lnl" for the suffixes below.
