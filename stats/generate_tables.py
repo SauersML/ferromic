@@ -1440,6 +1440,9 @@ def build_workbook(output_path: Path) -> None:
 
         finalized = df.copy()
         finalized.replace(to_replace=r"^\s*$", value=pd.NA, regex=True, inplace=True)
+        # Modern pandas raises (instead of silently upcasting) when filling a numeric column
+        # with a non-numeric sentinel, so cast to object first; then every column accepts "NA".
+        finalized = finalized.astype(object)
         finalized.fillna("NA", inplace=True)
         return finalized
 
