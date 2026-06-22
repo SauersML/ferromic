@@ -54,6 +54,10 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+import sys as _sys
+_sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _inv_common import is_flipped  # chimp polarization: group0/1 -> ancestral/derived
+
 warnings.filterwarnings("ignore")
 
 # ------------------------- FILE PATHS -------------------------
@@ -312,6 +316,12 @@ def collect_fourfold_pi(phy_dir):
         s1, L1 = read_phy(g1)
         if not s0 or not s1 or L0 != L1 or L0 % 3 != 0:
             continue
+        # Chimp polarization: group0 is the hg38-reference arrangement. Where the
+        # reference orientation is itself DERIVED (flip bit set), swap so that the
+        # "direct" set always holds the ANCESTRAL haplotypes and "inverted" the
+        # DERIVED ones (inverted == derived w.r.t. chimp).
+        if is_flipped(key[0], key[1], key[2]):
+            s0, s1 = s1, s0
         L = L0
         n_proc += 1
 
@@ -390,8 +400,14 @@ def attach_whole_locus_pi(df):
             & ((out["region_end"] - r["region_end"]).abs() <= 1)
         ]
         if len(cand):
-            pi_dir.append(pd.to_numeric(cand["0_pi_filtered"], errors="coerce").iloc[0])
-            pi_inv.append(pd.to_numeric(cand["1_pi_filtered"], errors="coerce").iloc[0])
+            v0 = pd.to_numeric(cand["0_pi_filtered"], errors="coerce").iloc[0]
+            v1 = pd.to_numeric(cand["1_pi_filtered"], errors="coerce").iloc[0]
+            # output.csv here is RAW (hg38-reference encoding); polarize to
+            # ancestral(direct)/derived(inverted) so it matches the fourfold cols.
+            if is_flipped(r["chr"], r["region_start"], r["region_end"]):
+                v0, v1 = v1, v0
+            pi_dir.append(v0)
+            pi_inv.append(v1)
         else:
             pi_dir.append(np.nan)
             pi_inv.append(np.nan)
