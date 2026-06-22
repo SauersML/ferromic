@@ -841,7 +841,6 @@ CDS	0	Single-event	1	Inverted	group1_MALL_ENSG00000144063.4_ENST00000272462.3_ch
 CDS	0	Single-event	1	Inverted	group1_MAL_ENSG00000172005.11_ENST00000309988.9_chr2_cds_start95025793_cds_end95053452_inv_start87987171_inv_end111255403.phy	N_LT_2	Fewer than 2 sequences
 CDS	0	Single-event	1	Inverted	group1_MAP4K4_ENSG00000071054.17_ENST00000324219.9_chr2_cds_start101698081_cds_end101891246_inv_start87987171_inv_end111255403.phy	N_LT_2	Fewer than 2 sequences
 CDS	0	Single-event	1	Inverted	group1_MARF1_ENSG00000166783.22_ENST00000396368.8_chr16_cds_start15596696_cds_end15639233_inv_start15384482_inv_end16276146.phy	N_LT_2	Fewer than 2 sequences
-CDS	0	Single-event	1	Inverted	group1_MFSD9_ENSG00000135953.11_ENST00000258436.10_chr2_cds_start102718423_cds_end102736810_inv_start87987171_inv_end111255403.phy	N_LT_2	Fewer than 2 sequences
 CDS	0	Single-event	1	Inverted	group1_MGAT4A_ENSG00000071073.13_ENST00000393487.6_chr2_cds_start98625569_cds_end98726332_inv_start87987171_inv_end111255403.phy	N_LT_2	Fewer than 2 sequences
 CDS	0	Single-event	1	Inverted	group1_MKRN3_ENSG00000179455.10_ENST00000314520.6_chr15_cds_start23565783_cds_end23567303_inv_start23345459_inv_end28389868.phy	N_LT_2	Fewer than 2 sequences
 CDS	0	Single-event	1	Inverted	group1_MITD1_ENSG00000158411.11_ENST00000289359.6_chr2_cds_start99169378_cds_end99180981_inv_start87987171_inv_end111255403.phy	N_LT_2	Fewer than 2 sequences
@@ -954,6 +953,7 @@ REGION	0	Single-event	1	Inverted	inversion_group1_3_start75454477_end75455715.ph
 REGION	0	Single-event	1	Inverted	inversion_group1_5_start112179911_end112236600.phy	N_LT_2	Fewer than 2 sequences
 REGION	0	Single-event	1	Inverted	inversion_group1_5_start124425560_end124546657.phy	N_LT_2	Fewer than 2 sequences
 REGION	0	Single-event	1	Inverted	inversion_group1_5_start177946129_end178003952.phy	N_LT_2	Fewer than 2 sequences
+REGION	0	Single-event	1	Inverted	inversion_group1_2_start87987171_end111255403.phy	N_LT_2	Fewer than 2 sequences
 REGION	0	Single-event	1	Inverted	inversion_group1_7_start33990735_end34010143.phy	N_LT_2	Fewer than 2 sequences
 REGION	0	Single-event	1	Inverted	inversion_group1_7_start57835188_end58119653.phy	N_LT_2	Fewer than 2 sequences
 REGION	0	Single-event	1	Inverted	inversion_group1_7_start97445822_end97459601.phy	N_LT_2	Fewer than 2 sequences
