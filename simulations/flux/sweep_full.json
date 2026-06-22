@@ -1,340 +1,35 @@
 [
   {
     "scenario": "single",
-    "depth": "young",
-    "rho": 0.0,
-    "m_flux": 0.0,
-    "reps": 60,
-    "mean_events": 1.1333333333333333,
-    "median_events": 1.0,
-    "recurrent_call_rate": 0.13333333333333333,
-    "events_hist": {
-      "1": 52,
-      "2": 8
-    }
-  },
-  {
-    "scenario": "single",
-    "depth": "young",
-    "rho": 0.0,
-    "m_flux": 1e-09,
-    "reps": 60,
-    "mean_events": 1.05,
-    "median_events": 1.0,
-    "recurrent_call_rate": 0.05,
-    "events_hist": {
-      "1": 57,
-      "2": 3
-    }
-  },
-  {
-    "scenario": "single",
-    "depth": "young",
-    "rho": 0.0,
-    "m_flux": 1e-08,
-    "reps": 60,
-    "mean_events": 1.0833333333333333,
-    "median_events": 1.0,
-    "recurrent_call_rate": 0.08333333333333333,
-    "events_hist": {
-      "1": 55,
-      "2": 5
-    }
-  },
-  {
-    "scenario": "single",
-    "depth": "young",
-    "rho": 0.0,
-    "m_flux": 1e-07,
-    "reps": 60,
-    "mean_events": 1.0833333333333333,
-    "median_events": 1.0,
-    "recurrent_call_rate": 0.08333333333333333,
-    "events_hist": {
-      "1": 55,
-      "2": 5
-    }
-  },
-  {
-    "scenario": "single",
-    "depth": "young",
-    "rho": 0.0,
-    "m_flux": 1e-06,
-    "reps": 60,
-    "mean_events": 1.05,
-    "median_events": 1.0,
-    "recurrent_call_rate": 0.05,
-    "events_hist": {
-      "1": 57,
-      "2": 3
-    }
-  },
-  {
-    "scenario": "single",
-    "depth": "young",
-    "rho": 1e-08,
-    "m_flux": 0.0,
-    "reps": 60,
-    "mean_events": 1.0,
-    "median_events": 1.0,
-    "recurrent_call_rate": 0.0,
-    "events_hist": {
-      "1": 60
-    }
-  },
-  {
-    "scenario": "single",
-    "depth": "young",
-    "rho": 1e-08,
-    "m_flux": 1e-09,
-    "reps": 60,
-    "mean_events": 1.0,
-    "median_events": 1.0,
-    "recurrent_call_rate": 0.0,
-    "events_hist": {
-      "1": 60
-    }
-  },
-  {
-    "scenario": "single",
-    "depth": "young",
-    "rho": 1e-08,
-    "m_flux": 1e-08,
-    "reps": 60,
-    "mean_events": 1.0,
-    "median_events": 1.0,
-    "recurrent_call_rate": 0.0,
-    "events_hist": {
-      "1": 60
-    }
-  },
-  {
-    "scenario": "single",
-    "depth": "young",
-    "rho": 1e-08,
-    "m_flux": 1e-07,
-    "reps": 60,
-    "mean_events": 1.0,
-    "median_events": 1.0,
-    "recurrent_call_rate": 0.0,
-    "events_hist": {
-      "1": 60
-    }
-  },
-  {
-    "scenario": "single",
-    "depth": "young",
-    "rho": 1e-08,
-    "m_flux": 1e-06,
-    "reps": 60,
-    "mean_events": 1.1166666666666667,
-    "median_events": 1.0,
-    "recurrent_call_rate": 0.08333333333333333,
-    "events_hist": {
-      "1": 55,
-      "2": 3,
-      "3": 2
-    }
-  },
-  {
-    "scenario": "single",
-    "depth": "young",
-    "rho": 1e-06,
-    "m_flux": 0.0,
-    "reps": 60,
-    "mean_events": 1.0,
-    "median_events": 1.0,
-    "recurrent_call_rate": 0.0,
-    "events_hist": {
-      "1": 60
-    }
-  },
-  {
-    "scenario": "single",
-    "depth": "young",
-    "rho": 1e-06,
-    "m_flux": 1e-09,
-    "reps": 60,
-    "mean_events": 1.0,
-    "median_events": 1.0,
-    "recurrent_call_rate": 0.0,
-    "events_hist": {
-      "1": 60
-    }
-  },
-  {
-    "scenario": "single",
-    "depth": "young",
-    "rho": 1e-06,
-    "m_flux": 1e-08,
-    "reps": 60,
-    "mean_events": 1.0,
-    "median_events": 1.0,
-    "recurrent_call_rate": 0.0,
-    "events_hist": {
-      "1": 60
-    }
-  },
-  {
-    "scenario": "single",
-    "depth": "young",
-    "rho": 1e-06,
-    "m_flux": 1e-07,
-    "reps": 60,
-    "mean_events": 1.0,
-    "median_events": 1.0,
-    "recurrent_call_rate": 0.0,
-    "events_hist": {
-      "1": 60
-    }
-  },
-  {
-    "scenario": "single",
-    "depth": "young",
-    "rho": 1e-06,
-    "m_flux": 1e-06,
-    "reps": 60,
-    "mean_events": 1.0,
-    "median_events": 1.0,
-    "recurrent_call_rate": 0.0,
-    "events_hist": {
-      "1": 60
-    }
-  },
-  {
-    "scenario": "single",
     "depth": "recent",
     "rho": 0.0,
     "m_flux": 0.0,
-    "reps": 60,
-    "mean_events": 1.5833333333333333,
-    "median_events": 1.0,
-    "recurrent_call_rate": 0.48333333333333334,
-    "events_hist": {
-      "1": 31,
-      "2": 23,
-      "3": 6
-    }
-  },
-  {
-    "scenario": "single",
-    "depth": "recent",
-    "rho": 0.0,
-    "m_flux": 1e-09,
-    "reps": 60,
-    "mean_events": 1.5833333333333333,
-    "median_events": 2.0,
-    "recurrent_call_rate": 0.5333333333333333,
-    "events_hist": {
-      "1": 28,
-      "2": 29,
-      "3": 3
-    }
-  },
-  {
-    "scenario": "single",
-    "depth": "recent",
-    "rho": 0.0,
-    "m_flux": 1e-08,
-    "reps": 60,
-    "mean_events": 1.5833333333333333,
-    "median_events": 2.0,
-    "recurrent_call_rate": 0.5333333333333333,
-    "events_hist": {
-      "1": 28,
-      "2": 29,
-      "3": 3
-    }
-  },
-  {
-    "scenario": "single",
-    "depth": "recent",
-    "rho": 0.0,
-    "m_flux": 1e-07,
-    "reps": 60,
-    "mean_events": 1.5666666666666667,
-    "median_events": 1.0,
-    "recurrent_call_rate": 0.48333333333333334,
-    "events_hist": {
-      "1": 31,
-      "2": 24,
-      "3": 5
-    }
-  },
-  {
-    "scenario": "single",
-    "depth": "recent",
-    "rho": 0.0,
-    "m_flux": 1e-06,
     "reps": 60,
     "mean_events": 1.6,
     "median_events": 2.0,
-    "recurrent_call_rate": 0.5333333333333333,
+    "recurrent_call_rate": 0.55,
+    "recurrent_call_rate_conditional": 0.55,
+    "n_endpoint": 0,
     "events_hist": {
-      "1": 28,
-      "2": 28,
-      "3": 4
+      "1": 27,
+      "2": 30,
+      "3": 3
     }
   },
   {
     "scenario": "single",
     "depth": "recent",
-    "rho": 1e-08,
-    "m_flux": 0.0,
-    "reps": 60,
-    "mean_events": 1.4166666666666667,
-    "median_events": 1.0,
-    "recurrent_call_rate": 0.35,
-    "events_hist": {
-      "1": 39,
-      "2": 17,
-      "3": 4
-    }
-  },
-  {
-    "scenario": "single",
-    "depth": "recent",
-    "rho": 1e-08,
+    "rho": 0.0,
     "m_flux": 1e-09,
     "reps": 60,
-    "mean_events": 1.3666666666666667,
+    "mean_events": 1.55,
     "median_events": 1.0,
-    "recurrent_call_rate": 0.26666666666666666,
+    "recurrent_call_rate": 0.48333333333333334,
+    "recurrent_call_rate_conditional": 0.48333333333333334,
+    "n_endpoint": 0,
     "events_hist": {
-      "1": 44,
-      "2": 11,
-      "3": 4,
-      "4": 1
-    }
-  },
-  {
-    "scenario": "single",
-    "depth": "recent",
-    "rho": 1e-08,
-    "m_flux": 1e-08,
-    "reps": 60,
-    "mean_events": 1.4333333333333333,
-    "median_events": 1.0,
-    "recurrent_call_rate": 0.3333333333333333,
-    "events_hist": {
-      "1": 40,
-      "2": 15,
-      "3": 4,
-      "4": 1
-    }
-  },
-  {
-    "scenario": "single",
-    "depth": "recent",
-    "rho": 1e-08,
-    "m_flux": 1e-07,
-    "reps": 60,
-    "mean_events": 1.3666666666666667,
-    "median_events": 1.0,
-    "recurrent_call_rate": 0.3,
-    "events_hist": {
-      "1": 42,
-      "2": 15,
+      "1": 31,
+      "2": 26,
       "3": 2,
       "4": 1
     }
@@ -342,27 +37,154 @@
   {
     "scenario": "single",
     "depth": "recent",
-    "rho": 1e-08,
-    "m_flux": 1e-06,
+    "rho": 0.0,
+    "m_flux": 1e-08,
     "reps": 60,
-    "mean_events": 1.3833333333333333,
+    "mean_events": 1.5,
     "median_events": 1.0,
-    "recurrent_call_rate": 0.31666666666666665,
+    "recurrent_call_rate": 0.43333333333333335,
+    "recurrent_call_rate_conditional": 0.43333333333333335,
+    "n_endpoint": 0,
     "events_hist": {
-      "1": 41,
-      "2": 15,
+      "1": 34,
+      "2": 22,
       "3": 4
     }
   },
   {
     "scenario": "single",
     "depth": "recent",
+    "rho": 0.0,
+    "m_flux": 1e-07,
+    "reps": 60,
+    "mean_events": 1.45,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.43333333333333335,
+    "recurrent_call_rate_conditional": 0.43333333333333335,
+    "n_endpoint": 0,
+    "events_hist": {
+      "1": 34,
+      "2": 25,
+      "3": 1
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "recent",
+    "rho": 0.0,
+    "m_flux": 1e-06,
+    "reps": 60,
+    "mean_events": 1.4833333333333334,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.43333333333333335,
+    "recurrent_call_rate_conditional": 0.43333333333333335,
+    "n_endpoint": 0,
+    "events_hist": {
+      "1": 34,
+      "2": 23,
+      "3": 3
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "recent",
+    "rho": 1e-08,
+    "m_flux": 0.0,
+    "reps": 60,
+    "mean_events": 1.3333333333333333,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.26666666666666666,
+    "recurrent_call_rate_conditional": 0.26666666666666666,
+    "n_endpoint": 0,
+    "events_hist": {
+      "1": 44,
+      "2": 12,
+      "3": 4
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "recent",
+    "rho": 1e-08,
+    "m_flux": 1e-09,
+    "reps": 60,
+    "mean_events": 1.4166666666666667,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.31666666666666665,
+    "recurrent_call_rate_conditional": 0.31666666666666665,
+    "n_endpoint": 0,
+    "events_hist": {
+      "1": 41,
+      "2": 13,
+      "3": 6
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "recent",
+    "rho": 1e-08,
+    "m_flux": 1e-08,
+    "reps": 60,
+    "mean_events": 1.35,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.25,
+    "recurrent_call_rate_conditional": 0.25,
+    "n_endpoint": 0,
+    "events_hist": {
+      "1": 45,
+      "2": 11,
+      "3": 2,
+      "4": 2
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "recent",
+    "rho": 1e-08,
+    "m_flux": 1e-07,
+    "reps": 60,
+    "mean_events": 1.4,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.3,
+    "recurrent_call_rate_conditional": 0.3,
+    "n_endpoint": 0,
+    "events_hist": {
+      "1": 42,
+      "2": 13,
+      "3": 4,
+      "4": 1
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "recent",
+    "rho": 1e-08,
+    "m_flux": 1e-06,
+    "reps": 60,
+    "mean_events": 1.6333333333333333,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.4166666666666667,
+    "recurrent_call_rate_conditional": 0.4166666666666667,
+    "n_endpoint": 0,
+    "events_hist": {
+      "1": 35,
+      "2": 16,
+      "3": 6,
+      "4": 2,
+      "5": 1
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "recent",
     "rho": 1e-06,
     "m_flux": 0.0,
     "reps": 60,
     "mean_events": 1.0,
     "median_events": 1.0,
     "recurrent_call_rate": 0.0,
+    "recurrent_call_rate_conditional": 0.0,
+    "n_endpoint": 0,
     "events_hist": {
       "1": 60
     }
@@ -376,6 +198,8 @@
     "mean_events": 1.0,
     "median_events": 1.0,
     "recurrent_call_rate": 0.0,
+    "recurrent_call_rate_conditional": 0.0,
+    "n_endpoint": 0,
     "events_hist": {
       "1": 60
     }
@@ -389,6 +213,8 @@
     "mean_events": 1.0,
     "median_events": 1.0,
     "recurrent_call_rate": 0.0,
+    "recurrent_call_rate_conditional": 0.0,
+    "n_endpoint": 0,
     "events_hist": {
       "1": 60
     }
@@ -402,6 +228,8 @@
     "mean_events": 1.0,
     "median_events": 1.0,
     "recurrent_call_rate": 0.0,
+    "recurrent_call_rate_conditional": 0.0,
+    "n_endpoint": 0,
     "events_hist": {
       "1": 60
     }
@@ -415,6 +243,242 @@
     "mean_events": 1.0,
     "median_events": 1.0,
     "recurrent_call_rate": 0.0,
+    "recurrent_call_rate_conditional": 0.0,
+    "n_endpoint": 0,
+    "events_hist": {
+      "1": 60
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "young",
+    "rho": 0.0,
+    "m_flux": 0.0,
+    "reps": 60,
+    "mean_events": 1.1166666666666667,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.11666666666666667,
+    "recurrent_call_rate_conditional": 0.11666666666666667,
+    "n_endpoint": 0,
+    "events_hist": {
+      "1": 53,
+      "2": 7
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "young",
+    "rho": 0.0,
+    "m_flux": 1e-09,
+    "reps": 60,
+    "mean_events": 1.0833333333333333,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.08333333333333333,
+    "recurrent_call_rate_conditional": 0.08333333333333333,
+    "n_endpoint": 0,
+    "events_hist": {
+      "1": 55,
+      "2": 5
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "young",
+    "rho": 0.0,
+    "m_flux": 1e-08,
+    "reps": 60,
+    "mean_events": 1.1,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.1,
+    "recurrent_call_rate_conditional": 0.1,
+    "n_endpoint": 0,
+    "events_hist": {
+      "1": 54,
+      "2": 6
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "young",
+    "rho": 0.0,
+    "m_flux": 1e-07,
+    "reps": 60,
+    "mean_events": 1.15,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.15,
+    "recurrent_call_rate_conditional": 0.15,
+    "n_endpoint": 0,
+    "events_hist": {
+      "1": 51,
+      "2": 9
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "young",
+    "rho": 0.0,
+    "m_flux": 1e-06,
+    "reps": 60,
+    "mean_events": 1.2166666666666666,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.18333333333333332,
+    "recurrent_call_rate_conditional": 0.18333333333333332,
+    "n_endpoint": 0,
+    "events_hist": {
+      "1": 49,
+      "2": 9,
+      "3": 2
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "young",
+    "rho": 1e-08,
+    "m_flux": 0.0,
+    "reps": 60,
+    "mean_events": 1.0333333333333334,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.03333333333333333,
+    "recurrent_call_rate_conditional": 0.03333333333333333,
+    "n_endpoint": 0,
+    "events_hist": {
+      "1": 58,
+      "2": 2
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "young",
+    "rho": 1e-08,
+    "m_flux": 1e-09,
+    "reps": 60,
+    "mean_events": 1.0166666666666666,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.016666666666666666,
+    "recurrent_call_rate_conditional": 0.016666666666666666,
+    "n_endpoint": 0,
+    "events_hist": {
+      "1": 59,
+      "2": 1
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "young",
+    "rho": 1e-08,
+    "m_flux": 1e-08,
+    "reps": 60,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.0,
+    "recurrent_call_rate_conditional": 0.0,
+    "n_endpoint": 0,
+    "events_hist": {
+      "1": 60
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "young",
+    "rho": 1e-08,
+    "m_flux": 1e-07,
+    "reps": 60,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.0,
+    "recurrent_call_rate_conditional": 0.0,
+    "n_endpoint": 0,
+    "events_hist": {
+      "1": 60
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "young",
+    "rho": 1e-08,
+    "m_flux": 1e-06,
+    "reps": 60,
+    "mean_events": 1.1,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.1,
+    "recurrent_call_rate_conditional": 0.1,
+    "n_endpoint": 0,
+    "events_hist": {
+      "1": 54,
+      "2": 6
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "young",
+    "rho": 1e-06,
+    "m_flux": 0.0,
+    "reps": 60,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.0,
+    "recurrent_call_rate_conditional": 0.0,
+    "n_endpoint": 0,
+    "events_hist": {
+      "1": 60
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "young",
+    "rho": 1e-06,
+    "m_flux": 1e-09,
+    "reps": 60,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.0,
+    "recurrent_call_rate_conditional": 0.0,
+    "n_endpoint": 0,
+    "events_hist": {
+      "1": 60
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "young",
+    "rho": 1e-06,
+    "m_flux": 1e-08,
+    "reps": 60,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.0,
+    "recurrent_call_rate_conditional": 0.0,
+    "n_endpoint": 0,
+    "events_hist": {
+      "1": 60
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "young",
+    "rho": 1e-06,
+    "m_flux": 1e-07,
+    "reps": 60,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.0,
+    "recurrent_call_rate_conditional": 0.0,
+    "n_endpoint": 0,
+    "events_hist": {
+      "1": 60
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "young",
+    "rho": 1e-06,
+    "m_flux": 1e-06,
+    "reps": 60,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "recurrent_call_rate": 0.0,
+    "recurrent_call_rate_conditional": 0.0,
+    "n_endpoint": 0,
     "events_hist": {
       "1": 60
     }
@@ -428,6 +492,8 @@
     "mean_events": 1.0,
     "median_events": 1.0,
     "recurrent_call_rate": 0.0,
+    "recurrent_call_rate_conditional": 0.0,
+    "n_endpoint": 0,
     "events_hist": {
       "1": 60
     }
@@ -441,6 +507,8 @@
     "mean_events": 1.0,
     "median_events": 1.0,
     "recurrent_call_rate": 0.0,
+    "recurrent_call_rate_conditional": 0.0,
+    "n_endpoint": 0,
     "events_hist": {
       "1": 60
     }
@@ -454,6 +522,8 @@
     "mean_events": 1.0,
     "median_events": 1.0,
     "recurrent_call_rate": 0.0,
+    "recurrent_call_rate_conditional": 0.0,
+    "n_endpoint": 0,
     "events_hist": {
       "1": 60
     }
@@ -467,6 +537,8 @@
     "mean_events": 1.0,
     "median_events": 1.0,
     "recurrent_call_rate": 0.0,
+    "recurrent_call_rate_conditional": 0.0,
+    "n_endpoint": 0,
     "events_hist": {
       "1": 60
     }
@@ -480,6 +552,8 @@
     "mean_events": 1.0833333333333333,
     "median_events": 1.0,
     "recurrent_call_rate": 0.08333333333333333,
+    "recurrent_call_rate_conditional": 0.08333333333333333,
+    "n_endpoint": 0,
     "events_hist": {
       "1": 55,
       "2": 5
@@ -494,6 +568,8 @@
     "mean_events": 1.0,
     "median_events": 1.0,
     "recurrent_call_rate": 0.0,
+    "recurrent_call_rate_conditional": 0.0,
+    "n_endpoint": 0,
     "events_hist": {
       "1": 60
     }
@@ -507,6 +583,8 @@
     "mean_events": 1.0,
     "median_events": 1.0,
     "recurrent_call_rate": 0.0,
+    "recurrent_call_rate_conditional": 0.0,
+    "n_endpoint": 0,
     "events_hist": {
       "1": 60
     }
@@ -520,6 +598,8 @@
     "mean_events": 1.0,
     "median_events": 1.0,
     "recurrent_call_rate": 0.0,
+    "recurrent_call_rate_conditional": 0.0,
+    "n_endpoint": 0,
     "events_hist": {
       "1": 60
     }
@@ -533,6 +613,8 @@
     "mean_events": 1.0166666666666666,
     "median_events": 1.0,
     "recurrent_call_rate": 0.016666666666666666,
+    "recurrent_call_rate_conditional": 0.016666666666666666,
+    "n_endpoint": 0,
     "events_hist": {
       "1": 59,
       "2": 1
@@ -547,6 +629,8 @@
     "mean_events": 1.0166666666666666,
     "median_events": 1.0,
     "recurrent_call_rate": 0.016666666666666666,
+    "recurrent_call_rate_conditional": 0.016666666666666666,
+    "n_endpoint": 0,
     "events_hist": {
       "1": 59,
       "2": 1
@@ -561,6 +645,8 @@
     "mean_events": 1.0,
     "median_events": 1.0,
     "recurrent_call_rate": 0.0,
+    "recurrent_call_rate_conditional": 0.0,
+    "n_endpoint": 0,
     "events_hist": {
       "1": 60
     }
@@ -574,6 +660,8 @@
     "mean_events": 1.0,
     "median_events": 1.0,
     "recurrent_call_rate": 0.0,
+    "recurrent_call_rate_conditional": 0.0,
+    "n_endpoint": 0,
     "events_hist": {
       "1": 60
     }
@@ -587,6 +675,8 @@
     "mean_events": 1.0,
     "median_events": 1.0,
     "recurrent_call_rate": 0.0,
+    "recurrent_call_rate_conditional": 0.0,
+    "n_endpoint": 0,
     "events_hist": {
       "1": 60
     }
@@ -600,6 +690,8 @@
     "mean_events": 1.0,
     "median_events": 1.0,
     "recurrent_call_rate": 0.0,
+    "recurrent_call_rate_conditional": 0.0,
+    "n_endpoint": 0,
     "events_hist": {
       "1": 60
     }
@@ -613,259 +705,29 @@
     "mean_events": 1.0,
     "median_events": 1.0,
     "recurrent_call_rate": 0.0,
+    "recurrent_call_rate_conditional": 0.0,
+    "n_endpoint": 0,
     "events_hist": {
       "1": 60
     }
   },
   {
     "scenario": "recurrent",
-    "depth": "young",
+    "depth": "recent",
     "rho": 0.0,
     "m_flux": 0.0,
     "reps": 60,
-    "mean_events": 2.066666666666667,
-    "median_events": 2.0,
-    "recurrent_call_rate": 0.7166666666666667,
-    "events_hist": {
-      "1": 17,
-      "2": 26,
-      "3": 14,
-      "4": 2,
-      "5": 1
-    }
-  },
-  {
-    "scenario": "recurrent",
-    "depth": "young",
-    "rho": 0.0,
-    "m_flux": 1e-09,
-    "reps": 60,
-    "mean_events": 2.283333333333333,
-    "median_events": 2.0,
-    "recurrent_call_rate": 0.8666666666666667,
-    "events_hist": {
-      "1": 8,
-      "2": 30,
-      "3": 19,
-      "4": 3
-    }
-  },
-  {
-    "scenario": "recurrent",
-    "depth": "young",
-    "rho": 0.0,
-    "m_flux": 1e-08,
-    "reps": 60,
-    "mean_events": 1.95,
-    "median_events": 2.0,
-    "recurrent_call_rate": 0.7166666666666667,
-    "events_hist": {
-      "1": 17,
-      "2": 32,
-      "3": 8,
-      "4": 3
-    }
-  },
-  {
-    "scenario": "recurrent",
-    "depth": "young",
-    "rho": 0.0,
-    "m_flux": 1e-07,
-    "reps": 60,
-    "mean_events": 1.9833333333333334,
-    "median_events": 2.0,
-    "recurrent_call_rate": 0.6666666666666666,
-    "events_hist": {
-      "1": 20,
-      "2": 23,
-      "3": 15,
-      "4": 2
-    }
-  },
-  {
-    "scenario": "recurrent",
-    "depth": "young",
-    "rho": 0.0,
-    "m_flux": 1e-06,
-    "reps": 60,
-    "mean_events": 2.2,
-    "median_events": 2.0,
-    "recurrent_call_rate": 0.7833333333333333,
-    "events_hist": {
-      "1": 13,
-      "2": 23,
-      "3": 23,
-      "4": 1
-    }
-  },
-  {
-    "scenario": "recurrent",
-    "depth": "young",
-    "rho": 1e-08,
-    "m_flux": 0.0,
-    "reps": 60,
-    "mean_events": 2.1333333333333333,
-    "median_events": 2.0,
+    "mean_events": 2.8666666666666667,
+    "median_events": 3.0,
     "recurrent_call_rate": 0.8333333333333334,
+    "recurrent_call_rate_conditional": 0.875,
+    "n_endpoint": 12,
     "events_hist": {
       "1": 10,
-      "2": 36,
-      "3": 11,
-      "4": 2,
-      "5": 1
-    }
-  },
-  {
-    "scenario": "recurrent",
-    "depth": "young",
-    "rho": 1e-08,
-    "m_flux": 1e-09,
-    "reps": 60,
-    "mean_events": 1.9833333333333334,
-    "median_events": 2.0,
-    "recurrent_call_rate": 0.7,
-    "events_hist": {
-      "1": 18,
-      "2": 29,
-      "3": 10,
-      "4": 2,
-      "5": 1
-    }
-  },
-  {
-    "scenario": "recurrent",
-    "depth": "young",
-    "rho": 1e-08,
-    "m_flux": 1e-08,
-    "reps": 60,
-    "mean_events": 1.9,
-    "median_events": 2.0,
-    "recurrent_call_rate": 0.6833333333333333,
-    "events_hist": {
-      "1": 19,
-      "2": 29,
-      "3": 11,
-      "4": 1
-    }
-  },
-  {
-    "scenario": "recurrent",
-    "depth": "young",
-    "rho": 1e-08,
-    "m_flux": 1e-07,
-    "reps": 60,
-    "mean_events": 1.9833333333333334,
-    "median_events": 2.0,
-    "recurrent_call_rate": 0.7833333333333333,
-    "events_hist": {
-      "1": 13,
-      "2": 36,
-      "3": 10,
-      "4": 1
-    }
-  },
-  {
-    "scenario": "recurrent",
-    "depth": "young",
-    "rho": 1e-08,
-    "m_flux": 1e-06,
-    "reps": 60,
-    "mean_events": 1.9666666666666666,
-    "median_events": 2.0,
-    "recurrent_call_rate": 0.7333333333333333,
-    "events_hist": {
-      "1": 16,
-      "2": 31,
-      "3": 12,
-      "4": 1
-    }
-  },
-  {
-    "scenario": "recurrent",
-    "depth": "young",
-    "rho": 1e-06,
-    "m_flux": 0.0,
-    "reps": 60,
-    "mean_events": 1.6833333333333333,
-    "median_events": 2.0,
-    "recurrent_call_rate": 0.6833333333333333,
-    "events_hist": {
-      "1": 19,
-      "2": 41
-    }
-  },
-  {
-    "scenario": "recurrent",
-    "depth": "young",
-    "rho": 1e-06,
-    "m_flux": 1e-09,
-    "reps": 60,
-    "mean_events": 1.7166666666666666,
-    "median_events": 2.0,
-    "recurrent_call_rate": 0.7166666666666667,
-    "events_hist": {
-      "1": 17,
-      "2": 43
-    }
-  },
-  {
-    "scenario": "recurrent",
-    "depth": "young",
-    "rho": 1e-06,
-    "m_flux": 1e-08,
-    "reps": 60,
-    "mean_events": 1.6,
-    "median_events": 2.0,
-    "recurrent_call_rate": 0.6,
-    "events_hist": {
-      "1": 24,
-      "2": 36
-    }
-  },
-  {
-    "scenario": "recurrent",
-    "depth": "young",
-    "rho": 1e-06,
-    "m_flux": 1e-07,
-    "reps": 60,
-    "mean_events": 1.6666666666666667,
-    "median_events": 2.0,
-    "recurrent_call_rate": 0.6666666666666666,
-    "events_hist": {
-      "1": 20,
-      "2": 40
-    }
-  },
-  {
-    "scenario": "recurrent",
-    "depth": "young",
-    "rho": 1e-06,
-    "m_flux": 1e-06,
-    "reps": 60,
-    "mean_events": 1.6833333333333333,
-    "median_events": 2.0,
-    "recurrent_call_rate": 0.6833333333333333,
-    "events_hist": {
-      "1": 19,
-      "2": 41
-    }
-  },
-  {
-    "scenario": "recurrent",
-    "depth": "recent",
-    "rho": 0.0,
-    "m_flux": 0.0,
-    "reps": 60,
-    "mean_events": 2.966666666666667,
-    "median_events": 3.0,
-    "recurrent_call_rate": 0.75,
-    "events_hist": {
-      "1": 15,
-      "2": 7,
-      "3": 15,
+      "2": 14,
+      "3": 17,
       "4": 12,
-      "5": 10,
-      "6": 1
+      "5": 7
     }
   },
   {
@@ -874,87 +736,98 @@
     "rho": 0.0,
     "m_flux": 1e-09,
     "reps": 60,
-    "mean_events": 3.5,
-    "median_events": 4.0,
+    "mean_events": 3.2333333333333334,
+    "median_events": 3.0,
     "recurrent_call_rate": 0.9166666666666666,
+    "recurrent_call_rate_conditional": 0.9591836734693877,
+    "n_endpoint": 11,
     "events_hist": {
       "1": 5,
-      "2": 7,
-      "3": 16,
-      "4": 21,
-      "5": 9,
+      "2": 8,
+      "3": 23,
+      "4": 16,
+      "5": 8
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "recent",
+    "rho": 0.0,
+    "m_flux": 1e-08,
+    "reps": 60,
+    "mean_events": 2.783333333333333,
+    "median_events": 3.0,
+    "recurrent_call_rate": 0.75,
+    "recurrent_call_rate_conditional": 0.8085106382978723,
+    "n_endpoint": 13,
+    "events_hist": {
+      "1": 15,
+      "2": 13,
+      "3": 12,
+      "4": 13,
+      "5": 4,
+      "6": 3
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "recent",
+    "rho": 0.0,
+    "m_flux": 1e-07,
+    "reps": 60,
+    "mean_events": 3.1,
+    "median_events": 3.0,
+    "recurrent_call_rate": 0.8,
+    "recurrent_call_rate_conditional": 0.8666666666666667,
+    "n_endpoint": 15,
+    "events_hist": {
+      "1": 12,
+      "2": 4,
+      "3": 24,
+      "4": 10,
+      "5": 6,
+      "6": 4
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "recent",
+    "rho": 0.0,
+    "m_flux": 1e-06,
+    "reps": 60,
+    "mean_events": 3.2,
+    "median_events": 3.0,
+    "recurrent_call_rate": 0.85,
+    "recurrent_call_rate_conditional": 0.9183673469387755,
+    "n_endpoint": 11,
+    "events_hist": {
+      "1": 9,
+      "2": 9,
+      "3": 18,
+      "4": 14,
+      "5": 7,
+      "6": 1,
       "7": 2
     }
   },
   {
     "scenario": "recurrent",
     "depth": "recent",
-    "rho": 0.0,
-    "m_flux": 1e-08,
-    "reps": 60,
-    "mean_events": 3.0,
-    "median_events": 3.0,
-    "recurrent_call_rate": 0.8666666666666667,
-    "events_hist": {
-      "1": 8,
-      "2": 14,
-      "3": 13,
-      "4": 20,
-      "5": 5
-    }
-  },
-  {
-    "scenario": "recurrent",
-    "depth": "recent",
-    "rho": 0.0,
-    "m_flux": 1e-07,
-    "reps": 60,
-    "mean_events": 3.066666666666667,
-    "median_events": 3.0,
-    "recurrent_call_rate": 0.7833333333333333,
-    "events_hist": {
-      "1": 13,
-      "2": 7,
-      "3": 17,
-      "4": 14,
-      "5": 4,
-      "6": 5
-    }
-  },
-  {
-    "scenario": "recurrent",
-    "depth": "recent",
-    "rho": 0.0,
-    "m_flux": 1e-06,
-    "reps": 60,
-    "mean_events": 3.033333333333333,
-    "median_events": 3.0,
-    "recurrent_call_rate": 0.85,
-    "events_hist": {
-      "1": 9,
-      "2": 7,
-      "3": 20,
-      "4": 21,
-      "5": 3
-    }
-  },
-  {
-    "scenario": "recurrent",
-    "depth": "recent",
     "rho": 1e-08,
     "m_flux": 0.0,
     "reps": 60,
-    "mean_events": 3.316666666666667,
+    "mean_events": 3.283333333333333,
     "median_events": 3.0,
-    "recurrent_call_rate": 0.8333333333333334,
+    "recurrent_call_rate": 0.8833333333333333,
+    "recurrent_call_rate_conditional": 0.9411764705882353,
+    "n_endpoint": 9,
     "events_hist": {
-      "1": 10,
-      "2": 9,
-      "3": 18,
-      "4": 8,
-      "5": 8,
-      "6": 4,
-      "7": 3
+      "1": 7,
+      "2": 12,
+      "3": 14,
+      "4": 14,
+      "5": 10,
+      "6": 3
     }
   },
   {
@@ -963,16 +836,18 @@
     "rho": 1e-08,
     "m_flux": 1e-09,
     "reps": 60,
-    "mean_events": 3.1333333333333333,
+    "mean_events": 3.1166666666666667,
     "median_events": 3.0,
-    "recurrent_call_rate": 0.7833333333333333,
+    "recurrent_call_rate": 0.8,
+    "recurrent_call_rate_conditional": 0.88,
+    "n_endpoint": 10,
     "events_hist": {
-      "1": 13,
-      "2": 9,
-      "3": 15,
-      "4": 10,
-      "5": 7,
-      "6": 5,
+      "1": 12,
+      "2": 8,
+      "3": 17,
+      "4": 11,
+      "5": 9,
+      "6": 2,
       "7": 1
     }
   },
@@ -982,16 +857,20 @@
     "rho": 1e-08,
     "m_flux": 1e-08,
     "reps": 60,
-    "mean_events": 2.9166666666666665,
+    "mean_events": 3.216666666666667,
     "median_events": 3.0,
-    "recurrent_call_rate": 0.7666666666666667,
+    "recurrent_call_rate": 0.8,
+    "recurrent_call_rate_conditional": 0.8913043478260869,
+    "n_endpoint": 14,
     "events_hist": {
-      "1": 14,
-      "2": 13,
-      "3": 15,
-      "4": 5,
-      "5": 8,
-      "6": 5
+      "1": 12,
+      "2": 14,
+      "3": 8,
+      "4": 10,
+      "5": 10,
+      "6": 4,
+      "7": 1,
+      "8": 1
     }
   },
   {
@@ -1000,16 +879,19 @@
     "rho": 1e-08,
     "m_flux": 1e-07,
     "reps": 60,
-    "mean_events": 3.2,
-    "median_events": 3.5,
-    "recurrent_call_rate": 0.8,
+    "mean_events": 3.1166666666666667,
+    "median_events": 3.0,
+    "recurrent_call_rate": 0.8833333333333333,
+    "recurrent_call_rate_conditional": 0.9038461538461539,
+    "n_endpoint": 8,
     "events_hist": {
-      "1": 12,
-      "2": 8,
-      "3": 10,
-      "4": 18,
-      "5": 10,
-      "6": 2
+      "1": 7,
+      "2": 12,
+      "3": 21,
+      "4": 10,
+      "5": 8,
+      "6": 1,
+      "7": 1
     }
   },
   {
@@ -1018,17 +900,18 @@
     "rho": 1e-08,
     "m_flux": 1e-06,
     "reps": 60,
-    "mean_events": 3.466666666666667,
-    "median_events": 3.5,
-    "recurrent_call_rate": 0.8166666666666667,
+    "mean_events": 3.15,
+    "median_events": 3.0,
+    "recurrent_call_rate": 0.85,
+    "recurrent_call_rate_conditional": 0.8979591836734694,
+    "n_endpoint": 11,
     "events_hist": {
-      "1": 11,
-      "2": 11,
-      "3": 8,
-      "4": 10,
-      "5": 11,
-      "6": 7,
-      "7": 2
+      "1": 9,
+      "2": 15,
+      "3": 9,
+      "4": 15,
+      "5": 9,
+      "6": 3
     }
   },
   {
@@ -1037,12 +920,14 @@
     "rho": 1e-06,
     "m_flux": 0.0,
     "reps": 60,
-    "mean_events": 1.7166666666666666,
+    "mean_events": 1.7,
     "median_events": 2.0,
-    "recurrent_call_rate": 0.7166666666666667,
+    "recurrent_call_rate": 0.7,
+    "recurrent_call_rate_conditional": 0.875,
+    "n_endpoint": 12,
     "events_hist": {
-      "1": 17,
-      "2": 43
+      "1": 18,
+      "2": 42
     }
   },
   {
@@ -1051,12 +936,14 @@
     "rho": 1e-06,
     "m_flux": 1e-09,
     "reps": 60,
-    "mean_events": 1.75,
+    "mean_events": 1.7333333333333334,
     "median_events": 2.0,
-    "recurrent_call_rate": 0.75,
+    "recurrent_call_rate": 0.7333333333333333,
+    "recurrent_call_rate_conditional": 0.88,
+    "n_endpoint": 10,
     "events_hist": {
-      "1": 15,
-      "2": 45
+      "1": 16,
+      "2": 44
     }
   },
   {
@@ -1065,12 +952,14 @@
     "rho": 1e-06,
     "m_flux": 1e-08,
     "reps": 60,
-    "mean_events": 1.7166666666666666,
+    "mean_events": 1.6333333333333333,
     "median_events": 2.0,
-    "recurrent_call_rate": 0.7166666666666667,
+    "recurrent_call_rate": 0.6333333333333333,
+    "recurrent_call_rate_conditional": 0.8636363636363636,
+    "n_endpoint": 16,
     "events_hist": {
-      "1": 17,
-      "2": 43
+      "1": 22,
+      "2": 38
     }
   },
   {
@@ -1079,12 +968,14 @@
     "rho": 1e-06,
     "m_flux": 1e-07,
     "reps": 60,
-    "mean_events": 1.7166666666666666,
+    "mean_events": 1.6833333333333333,
     "median_events": 2.0,
-    "recurrent_call_rate": 0.7166666666666667,
+    "recurrent_call_rate": 0.6833333333333333,
+    "recurrent_call_rate_conditional": 0.8913043478260869,
+    "n_endpoint": 14,
     "events_hist": {
-      "1": 17,
-      "2": 43
+      "1": 19,
+      "2": 41
     }
   },
   {
@@ -1093,13 +984,278 @@
     "rho": 1e-06,
     "m_flux": 1e-06,
     "reps": 60,
-    "mean_events": 1.8333333333333333,
+    "mean_events": 1.7,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.7,
+    "recurrent_call_rate_conditional": 0.8936170212765957,
+    "n_endpoint": 13,
+    "events_hist": {
+      "1": 18,
+      "2": 42
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "young",
+    "rho": 0.0,
+    "m_flux": 0.0,
+    "reps": 60,
+    "mean_events": 2.0833333333333335,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.75,
+    "recurrent_call_rate_conditional": 0.84,
+    "n_endpoint": 10,
+    "events_hist": {
+      "1": 15,
+      "2": 27,
+      "3": 16,
+      "4": 2
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "young",
+    "rho": 0.0,
+    "m_flux": 1e-09,
+    "reps": 60,
+    "mean_events": 2.3333333333333335,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.9,
+    "recurrent_call_rate_conditional": 0.9259259259259259,
+    "n_endpoint": 6,
+    "events_hist": {
+      "1": 6,
+      "2": 31,
+      "3": 20,
+      "4": 3
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "young",
+    "rho": 0.0,
+    "m_flux": 1e-08,
+    "reps": 60,
+    "mean_events": 2.033333333333333,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.7333333333333333,
+    "recurrent_call_rate_conditional": 0.9130434782608695,
+    "n_endpoint": 14,
+    "events_hist": {
+      "1": 16,
+      "2": 27,
+      "3": 16,
+      "4": 1
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "young",
+    "rho": 0.0,
+    "m_flux": 1e-07,
+    "reps": 60,
+    "mean_events": 2.1666666666666665,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.7,
+    "recurrent_call_rate_conditional": 0.8478260869565217,
+    "n_endpoint": 14,
+    "events_hist": {
+      "1": 18,
+      "2": 19,
+      "3": 19,
+      "4": 3,
+      "5": 1
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "young",
+    "rho": 0.0,
+    "m_flux": 1e-06,
+    "reps": 60,
+    "mean_events": 2.183333333333333,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.8,
+    "recurrent_call_rate_conditional": 0.9,
+    "n_endpoint": 10,
+    "events_hist": {
+      "1": 12,
+      "2": 28,
+      "3": 17,
+      "4": 3
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "young",
+    "rho": 1e-08,
+    "m_flux": 0.0,
+    "reps": 60,
+    "mean_events": 2.15,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.8,
+    "recurrent_call_rate_conditional": 0.9375,
+    "n_endpoint": 12,
+    "events_hist": {
+      "1": 12,
+      "2": 32,
+      "3": 13,
+      "4": 1,
+      "5": 2
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "young",
+    "rho": 1e-08,
+    "m_flux": 1e-09,
+    "reps": 60,
+    "mean_events": 1.8833333333333333,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.7333333333333333,
+    "recurrent_call_rate_conditional": 0.8235294117647058,
+    "n_endpoint": 9,
+    "events_hist": {
+      "1": 16,
+      "2": 35,
+      "3": 9
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "young",
+    "rho": 1e-08,
+    "m_flux": 1e-08,
+    "reps": 60,
+    "mean_events": 1.9666666666666666,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.7333333333333333,
+    "recurrent_call_rate_conditional": 0.8571428571428571,
+    "n_endpoint": 11,
+    "events_hist": {
+      "1": 16,
+      "2": 33,
+      "3": 9,
+      "4": 1,
+      "5": 1
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "young",
+    "rho": 1e-08,
+    "m_flux": 1e-07,
+    "reps": 60,
+    "mean_events": 1.9833333333333334,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.75,
+    "recurrent_call_rate_conditional": 0.8775510204081632,
+    "n_endpoint": 11,
+    "events_hist": {
+      "1": 15,
+      "2": 34,
+      "3": 8,
+      "4": 3
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "young",
+    "rho": 1e-08,
+    "m_flux": 1e-06,
+    "reps": 60,
+    "mean_events": 2.25,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.7666666666666667,
+    "recurrent_call_rate_conditional": 0.8775510204081632,
+    "n_endpoint": 11,
+    "events_hist": {
+      "1": 14,
+      "2": 28,
+      "3": 11,
+      "4": 4,
+      "5": 2,
+      "6": 1
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "young",
+    "rho": 1e-06,
+    "m_flux": 0.0,
+    "reps": 60,
+    "mean_events": 1.6833333333333333,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.6833333333333333,
+    "recurrent_call_rate_conditional": 0.8541666666666666,
+    "n_endpoint": 12,
+    "events_hist": {
+      "1": 19,
+      "2": 41
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "young",
+    "rho": 1e-06,
+    "m_flux": 1e-09,
+    "reps": 60,
+    "mean_events": 1.7333333333333334,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.7333333333333333,
+    "recurrent_call_rate_conditional": 0.8461538461538461,
+    "n_endpoint": 8,
+    "events_hist": {
+      "1": 16,
+      "2": 44
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "young",
+    "rho": 1e-06,
+    "m_flux": 1e-08,
+    "reps": 60,
+    "mean_events": 1.7166666666666666,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.7166666666666667,
+    "recurrent_call_rate_conditional": 0.8958333333333334,
+    "n_endpoint": 12,
+    "events_hist": {
+      "1": 17,
+      "2": 43
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "young",
+    "rho": 1e-06,
+    "m_flux": 1e-07,
+    "reps": 60,
+    "mean_events": 1.7,
+    "median_events": 2.0,
+    "recurrent_call_rate": 0.7,
+    "recurrent_call_rate_conditional": 0.9130434782608695,
+    "n_endpoint": 14,
+    "events_hist": {
+      "1": 18,
+      "2": 42
+    }
+  },
+  {
+    "scenario": "recurrent",
+    "depth": "young",
+    "rho": 1e-06,
+    "m_flux": 1e-06,
+    "reps": 60,
+    "mean_events": 1.8166666666666667,
     "median_events": 2.0,
     "recurrent_call_rate": 0.8166666666666667,
+    "recurrent_call_rate_conditional": 0.9074074074074074,
+    "n_endpoint": 6,
     "events_hist": {
       "1": 11,
-      "2": 48,
-      "3": 1
+      "2": 49
     }
   },
   {
@@ -1111,6 +1267,8 @@
     "mean_events": 1.6666666666666667,
     "median_events": 2.0,
     "recurrent_call_rate": 0.6,
+    "recurrent_call_rate_conditional": 0.8,
+    "n_endpoint": 15,
     "events_hist": {
       "1": 24,
       "2": 32,
@@ -1126,6 +1284,8 @@
     "mean_events": 1.8166666666666667,
     "median_events": 2.0,
     "recurrent_call_rate": 0.75,
+    "recurrent_call_rate_conditional": 0.9,
+    "n_endpoint": 10,
     "events_hist": {
       "1": 15,
       "2": 41,
@@ -1141,6 +1301,8 @@
     "mean_events": 1.8833333333333333,
     "median_events": 2.0,
     "recurrent_call_rate": 0.8333333333333334,
+    "recurrent_call_rate_conditional": 0.9615384615384616,
+    "n_endpoint": 8,
     "events_hist": {
       "1": 10,
       "2": 47,
@@ -1156,6 +1318,8 @@
     "mean_events": 1.7833333333333334,
     "median_events": 2.0,
     "recurrent_call_rate": 0.7166666666666667,
+    "recurrent_call_rate_conditional": 0.8571428571428571,
+    "n_endpoint": 11,
     "events_hist": {
       "1": 17,
       "2": 39,
@@ -1168,14 +1332,16 @@
     "rho": 0.0,
     "m_flux": 1e-06,
     "reps": 60,
-    "mean_events": 1.9,
+    "mean_events": 1.8833333333333333,
     "median_events": 2.0,
     "recurrent_call_rate": 0.7333333333333333,
+    "recurrent_call_rate_conditional": 0.9565217391304348,
+    "n_endpoint": 14,
     "events_hist": {
       "1": 16,
       "2": 36,
-      "3": 6,
-      "4": 2
+      "3": 7,
+      "4": 1
     }
   },
   {
@@ -1187,6 +1353,8 @@
     "mean_events": 1.7833333333333334,
     "median_events": 2.0,
     "recurrent_call_rate": 0.7333333333333333,
+    "recurrent_call_rate_conditional": 0.9166666666666666,
+    "n_endpoint": 12,
     "events_hist": {
       "1": 16,
       "2": 41,
@@ -1202,6 +1370,8 @@
     "mean_events": 1.7833333333333334,
     "median_events": 2.0,
     "recurrent_call_rate": 0.7833333333333333,
+    "recurrent_call_rate_conditional": 0.9215686274509803,
+    "n_endpoint": 9,
     "events_hist": {
       "1": 13,
       "2": 47
@@ -1216,6 +1386,8 @@
     "mean_events": 1.7333333333333334,
     "median_events": 2.0,
     "recurrent_call_rate": 0.7333333333333333,
+    "recurrent_call_rate_conditional": 0.8627450980392157,
+    "n_endpoint": 9,
     "events_hist": {
       "1": 16,
       "2": 44
@@ -1230,6 +1402,8 @@
     "mean_events": 1.6833333333333333,
     "median_events": 2.0,
     "recurrent_call_rate": 0.6833333333333333,
+    "recurrent_call_rate_conditional": 0.82,
+    "n_endpoint": 10,
     "events_hist": {
       "1": 19,
       "2": 41
@@ -1244,6 +1418,8 @@
     "mean_events": 1.7833333333333334,
     "median_events": 2.0,
     "recurrent_call_rate": 0.7333333333333333,
+    "recurrent_call_rate_conditional": 0.8627450980392157,
+    "n_endpoint": 9,
     "events_hist": {
       "1": 16,
       "2": 41,
@@ -1259,6 +1435,8 @@
     "mean_events": 1.65,
     "median_events": 2.0,
     "recurrent_call_rate": 0.65,
+    "recurrent_call_rate_conditional": 0.75,
+    "n_endpoint": 8,
     "events_hist": {
       "1": 21,
       "2": 39
@@ -1273,6 +1451,8 @@
     "mean_events": 1.6666666666666667,
     "median_events": 2.0,
     "recurrent_call_rate": 0.6666666666666666,
+    "recurrent_call_rate_conditional": 0.8695652173913043,
+    "n_endpoint": 14,
     "events_hist": {
       "1": 20,
       "2": 40
@@ -1287,6 +1467,8 @@
     "mean_events": 1.6833333333333333,
     "median_events": 2.0,
     "recurrent_call_rate": 0.6833333333333333,
+    "recurrent_call_rate_conditional": 0.82,
+    "n_endpoint": 10,
     "events_hist": {
       "1": 19,
       "2": 41
@@ -1301,6 +1483,8 @@
     "mean_events": 1.7,
     "median_events": 2.0,
     "recurrent_call_rate": 0.7,
+    "recurrent_call_rate_conditional": 0.9130434782608695,
+    "n_endpoint": 14,
     "events_hist": {
       "1": 18,
       "2": 42
@@ -1315,6 +1499,8 @@
     "mean_events": 1.6333333333333333,
     "median_events": 2.0,
     "recurrent_call_rate": 0.6333333333333333,
+    "recurrent_call_rate_conditional": 0.76,
+    "n_endpoint": 10,
     "events_hist": {
       "1": 22,
       "2": 38
