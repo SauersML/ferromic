@@ -57,3 +57,9 @@ hg38.panTro6.net.axt
 # Imputation models hosted on GitHub Release (imputation-models-v1), not in-tree
 data/models/*.model.joblib
 data/models/*.snps.json
+
+# UCSC great-ape CHAIN alignments (fetched at runtime by stats/polarize_orientation.py; never commit)
+hg38.*.all.chain.gz
+hg38.*.net.axt.gz
+hg38.*.synNet.maf.gz
+data/_polarity_evidence.json
