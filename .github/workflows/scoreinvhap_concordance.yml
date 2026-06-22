@@ -97,6 +97,30 @@ jobs:
             echo "variants: $(bcftools view -H ${f}.vcf.gz | wc -l) ; samples: $(bcftools query -l ${f}.vcf.gz | wc -l)"
           done
 
+      - name: Annotate rsIDs from dbSNP b37 (scoreInvHap matches by rsID)
+        run: |
+          set -euo pipefail
+          # The 1000G phase-3 genotypes VCF has '.' in the ID column, but scoreInvHap matches
+          # SNPs to its reference by rsID. Annotate the ID column by position from dbSNP b37
+          # (chromosomes named 8/17, GRCh37), so readVcf row names become rsIDs that overlap
+          # names(SNPsR2[[inv]]).
+          DBSNP="https://storage.googleapis.com/gcp-public-data--broad-references/hg19/v0/dbsnp_138.b37.vcf.gz"
+          annotate() {
+            local invcf="$1" region="$2"
+            tabix -h "$DBSNP" "$region" | bgzip > dbsnp_roi.vcf.gz
+            tabix -p vcf dbsnp_roi.vcf.gz
+            bcftools annotate -a dbsnp_roi.vcf.gz -c ID "$invcf" -Oz -o annotated.vcf.gz
+            mv annotated.vcf.gz "$invcf"
+            bcftools index -f -t "$invcf"
+            local n total
+            total=$(bcftools view -H "$invcf" | wc -l)
+            n=$(bcftools view -H "$invcf" | awk '$3!="."' | wc -l)
+            echo "$invcf: $n / $total variants now have rsIDs"
+            rm -f dbsnp_roi.vcf.gz dbsnp_roi.vcf.gz.tbi
+          }
+          annotate b37_chr8.vcf.gz  8:7000000-13000000
+          annotate b37_chr17.vcf.gz 17:42000000-45500000
+
       # --------------------------------------------------------------------
       # OUR imputation pipeline on GRCh38 data.
       # --------------------------------------------------------------------
