@@ -297,9 +297,16 @@ def migrate_file(spec, dry):
     keycols = [v for k, v in key.items() if k in ("chrom", "start", "end", "col", "orig")]
     n_match = n_flip = n_unmatched = 0
     examples = []
+    out_rows = [header]
     for r in rows[1:]:
+        # Drop genuinely empty rows (e.g. a trailing blank line) instead of
+        # padding them into an all-blank row, which downstream readers parse as a
+        # spurious NaN record.
+        if not any(str(x).strip() for x in r):
+            continue
         if len(r) < len(header):
             r += [""] * (len(header) - len(r))
+        out_rows.append(r)
         rowd = {h: r[col[h]] for h in header}
         chrom, start, end, orig = parse_coords(rowd, key)
         rec = _POL.record(chrom, start, end, orig)
@@ -335,7 +342,7 @@ def migrate_file(spec, dry):
     if not dry:
         with open(path, "w", newline="") as fh:
             w = csv.writer(fh, delimiter=spec["sep"])
-            w.writerows(rows)
+            w.writerows(out_rows)
     return {"path": spec["path"], "matched": n_match, "flipped": n_flip,
             "unmatched": n_unmatched, "examples": examples}
 
