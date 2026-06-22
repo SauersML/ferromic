@@ -179,10 +179,16 @@ jobs:
         with:
           r-version: 'release'
 
+      - name: Cache R packages (Bioconductor build is ~8 min)
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.R_LIBS_USER }}
+          key: rlibs-scoreinvhap-${{ runner.os }}-bioc-v1
+
       - name: Install scoreInvHap (Bioconductor)
         run: |
           set -euo pipefail
-          Rscript -e 'install.packages("BiocManager", repos="https://cloud.r-project.org")'
+          Rscript -e 'if (!requireNamespace("BiocManager", quietly=TRUE)) install.packages("BiocManager", repos="https://cloud.r-project.org")'
           Rscript -e 'BiocManager::install(c("scoreInvHap","VariantAnnotation","GenomicRanges"), update=FALSE, ask=FALSE)'
           Rscript -e 'library(scoreInvHap); cat("scoreInvHap OK\n")'
 
