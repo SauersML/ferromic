@@ -22,7 +22,8 @@ Fixed params (manuscript Methods / repo):
   Ne (N_a) = 6000, mu = 1.25e-8, generation_time = 25 y, locus = 200 kbp.
 Demographic deme sizes follow the repo (P_D = N_a, P_I = 0.1 N_a, etc.).
 """
-import sys, math, argparse
+import sys, math, argparse, hashlib
+from collections import Counter
 import numpy as np
 import msprime
 
@@ -75,8 +76,13 @@ def demography_recurrent(t01_23_y, t0_1_y, t2_3_y, m_within, m_flux, rng):
                 de.set_symmetric_migration_rate([i, d], m_flux)
         de.set_symmetric_migration_rate(["P_I", "P_D"], m_flux)
 
-    fI = rng.integers(0, 11) / 10
-    fD = rng.integers(0, 11) / 10
+    # Interior mixtures only: at fI in {0.0, 1.0} one independently-derived inverted origin
+    # contributes no sampled lineage, so the replicate is effectively single-origin yet
+    # would still be labelled "recurrent" and counted as detectable. Sampling 0.1..0.9
+    # guarantees both inverted origins (P1_I, P2_I) are represented, so the reported
+    # recurrent-detection rate is conditional on recurrence actually being observable.
+    fI = rng.integers(1, 10) / 10
+    fD = rng.integers(1, 10) / 10
     de.add_admixture(time=1e-5, derived="P_I", ancestral=["P1_I", "P2_I"],
                      proportions=[fI, 1 - fI])
     de.add_admixture(time=1e-5, derived="P_D", ancestral=["P0_D", "P3_D"],
@@ -207,16 +213,39 @@ def fitch_score(root, children, leafset, label_of):
     return score[0]
 
 
-def classify(G, labels):
-    """Return inferred #events (parsimony score). >=2 => recurrent call."""
+def classify(G, labels, n_resolutions=11):
+    """Return inferred #events (parsimony score). >=2 => recurrent call.
+
+    Permutation-invariant. neighbor_joining breaks equal-Q ties by first pair encountered,
+    and callers pass inverted samples first, so the raw parsimony score was correlated with
+    orientation order -- merely permuting rows (and their labels) could flip a single-event
+    locus to recurrent. We remove that artifact by (1) reordering rows into a canonical,
+    label-independent order, and (2) taking the majority parsimony score over several random
+    tie resolutions, seeded canonically from the data so the result is deterministic yet
+    independent of the order in which samples were supplied.
+    """
     n = G.shape[0]
     if G.shape[1] == 0:
         # no segregating sites: tree unresolved -> single change at best
         return 1
-    D = hamming_matrix(G)
-    root, children, leafset = neighbor_joining(D)
-    label_of = {i: int(labels[i]) for i in range(n)}
-    return fitch_score(root, children, leafset, label_of)
+    # (1) canonical, input-order-independent arrangement of the rows
+    canon = np.lexsort(np.vstack([labels, G.T]))
+    Gc = G[canon]
+    lab_c = np.asarray(labels)[canon]
+    D = hamming_matrix(Gc)
+    seed = int(hashlib.sha1(np.sort(D, axis=None).tobytes()).hexdigest()[:8], 16)
+    rng = np.random.default_rng(seed)
+    scores = []
+    for _ in range(max(1, n_resolutions)):
+        perm = rng.permutation(n)
+        Dp = D[np.ix_(perm, perm)]
+        root, children, leafset = neighbor_joining(Dp)
+        label_of = {i: int(lab_c[perm[i]]) for i in range(n)}
+        scores.append(fitch_score(root, children, leafset, label_of))
+    # majority vote (ties broken toward the smaller score = more conservative recurrence call)
+    counts = Counter(scores)
+    top = max(counts.values())
+    return min(s for s, c in counts.items() if c == top)
 
 
 if __name__ == "__main__":
