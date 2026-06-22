@@ -400,14 +400,12 @@ def attach_whole_locus_pi(df):
             & ((out["region_end"] - r["region_end"]).abs() <= 1)
         ]
         if len(cand):
-            v0 = pd.to_numeric(cand["0_pi_filtered"], errors="coerce").iloc[0]
-            v1 = pd.to_numeric(cand["1_pi_filtered"], errors="coerce").iloc[0]
-            # output.csv here is RAW (hg38-reference encoding); polarize to
-            # ancestral(direct)/derived(inverted) so it matches the fourfold cols.
-            if is_flipped(r["chr"], r["region_start"], r["region_end"]):
-                v0, v1 = v1, v0
-            pi_dir.append(v0)
-            pi_inv.append(v1)
+            # output.csv is stored chimp-POLARIZED on disk (0_*=ancestral/direct,
+            # 1_*=derived/inverted), so its columns are read directly -- no swap.
+            # (The phy-derived fourfold/wholeCDS columns ARE swapped via is_flipped
+            # because phy files remain in the raw hg38 group encoding.)
+            pi_dir.append(pd.to_numeric(cand["0_pi_filtered"], errors="coerce").iloc[0])
+            pi_inv.append(pd.to_numeric(cand["1_pi_filtered"], errors="coerce").iloc[0])
         else:
             pi_dir.append(np.nan)
             pi_inv.append(np.nan)
