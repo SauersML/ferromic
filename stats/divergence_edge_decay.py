@@ -14,18 +14,46 @@ as numerator/denominator components. By construction in the Rust pipeline
     denominator_i = D_xy,i                              = absolute divergence dxy per site
 
 so the existing per-site files already contain per-site da and dxy directly; no
-new data are introduced. We summarise each window as a mean over informative
-sites (sum of the component over sites with a finite, positive dxy denominator).
+new data are introduced.
+
+PER-CALLABLE-BASE vs SNP-CONDITIONED (audit BUG #11)
+----------------------------------------------------
+The Rust per-site writer initialises every base in the region to NA and fills
+ONLY variant positions (src/process.rs::append_fst_falsta iterates the Hudson
+variant sites). Invariant callable bases are therefore indistinguishable from
+uncallable bases in the FST falsta alone: both are NA. Averaging da/dxy over the
+sites with a finite, positive dxy denominator (the previous behaviour) yields
+divergence among VARIANT sites — a SNP-density-sensitive quantity — not
+divergence per callable base. Reviewer 1 asked for divergence corrected for
+diversity, i.e. per callable base, where invariant callable bases contribute 0.
+
+We recover the callable mask from the per-base diversity tracks
+(data/per_site_diversity_output.falsta(.gz)): a base is callable in group g iff
+its filtered_pi value is finite (NA = uncallable). For the between-group da/dxy a
+base is callable iff BOTH groups are callable there. At a callable base:
+  - if the FST track has a finite value (a variant) we use it;
+  - if the FST track is NA but the base is callable, it is an invariant callable
+    base and contributes da = dxy = 0.
+The PER-BASE window statistic is then sum(component over callable bases) /
+(number of callable bases). This is the primary metric reported here.
+
+For transparency we also report the previous SNP-conditioned statistic (mean over
+variant sites with positive dxy), explicitly suffixed `_snpcond`, so the two can
+be compared. When the diversity track is unavailable for a locus we cannot build
+the callable mask and fall back to the SNP-conditioned statistic for that locus
+(flagged in the `callable_basis` column).
 
 Two complementary tests, mirroring the FST analyses:
 
 1. Folded edge decay (cf. fst_edge_decay.py): two-sided Spearman correlation of
-   per-site value vs distance from the nearest breakpoint, folded across the two
+   per-base value vs distance from the nearest breakpoint, folded across the two
    flanks, per inversion; BH-FDR across inversions; reported by recurrence class.
-2. Middle vs flank (cf. middle_vs_flank_fst.py): per inversion, mean da and dxy
-   in the flank windows vs the middle window (40 kb total: 10 kb each flank,
-   20 kb middle); paired Wilcoxon across inversions and Mann-Whitney U of the
-   flank-minus-middle difference between recurrent and single-event inversions.
+   Per-base means within each 2 kb bin set non-variant callable bases to 0.
+2. Middle vs flank (cf. middle_vs_flank_fst.py): per inversion, per-base mean da
+   and dxy in the flank windows vs the middle window (40 kb total: 10 kb each
+   flank, 20 kb middle); paired Wilcoxon across inversions and Mann-Whitney U of
+   the flank-minus-middle difference between recurrent and single-event
+   inversions.
 
 Outputs (under data/):
     divergence_edge_decay_spearman.tsv
@@ -170,15 +198,94 @@ def load_per_site_components() -> dict[tuple[str, int, int], dict[str, np.ndarra
     return out
 
 
-def _window_mean(values: np.ndarray, valid: np.ndarray) -> float:
-    """Mean of per-site value over informative sites (finite dxy denominator)."""
+# filtered_pi_chr_<chrom>_start_<s>_end_<e>_group_<0|1>
+RE_FILTERED_PI = re.compile(
+    r">filtered_pi_chr_?(?P<chrom>[\w.\-]+)_start_(?P<start>\d+)_end_(?P<end>\d+)_group_(?P<grp>[01])",
+    re.IGNORECASE,
+)
+
+
+def load_callable_masks() -> dict[tuple[str, int, int], np.ndarray]:
+    """Return {(chrom,start,end) -> per-base callable mask} for da/dxy.
+
+    A base is callable for the between-group divergence iff BOTH orientation
+    groups are callable there. The per-base filtered diversity track is NA at
+    uncallable bases and finite (0 or >0) at callable bases, so callable = both
+    groups finite. Returns {} if the diversity falsta is absent (callers then
+    fall back to the SNP-conditioned statistic)."""
+    candidates = [base / fn
+                  for base in (Path.cwd(), DATA_DIR)
+                  for fn in ("per_site_diversity_output.falsta",
+                             "per_site_diversity_output.falsta.gz")]
+    path = next((p for p in candidates if p.exists()), None)
+    if path is None:
+        logger.warning("per_site_diversity_output.falsta(.gz) not found; da/dxy "
+                       "will use the SNP-conditioned statistic (no callable mask).")
+        return {}
+
+    groups: dict[tuple[str, int, int], dict[int, np.ndarray]] = {}
+
+    def handle(header, lines):
+        if not header:
+            return
+        m = RE_FILTERED_PI.search(header)
+        if not m:
+            return
+        key = (normalize_chrom(m.group("chrom")), int(m.group("start")), int(m.group("end")))
+        groups.setdefault(key, {})[int(m.group("grp"))] = parse_values(lines)
+
+    opener = gzip.open if path.suffix == ".gz" else open
+    with opener(path, "rt", encoding="utf-8", errors="ignore") as fh:
+        header = None
+        lines: list[str] = []
+        for raw in fh:
+            line = raw.strip()
+            if not line:
+                continue
+            if line.startswith(">"):
+                handle(header, lines)
+                header = line
+                lines = []
+            else:
+                lines.append(line)
+        handle(header, lines)
+
+    masks: dict[tuple[str, int, int], np.ndarray] = {}
+    for key, comp in groups.items():
+        g0 = comp.get(0)
+        g1 = comp.get(1)
+        if g0 is None or g1 is None or g0.size != g1.size or g0.size == 0:
+            continue
+        masks[key] = np.isfinite(g0) & np.isfinite(g1)
+    return masks
+
+
+def _window_mean_snpcond(values: np.ndarray, valid: np.ndarray) -> float:
+    """SNP-CONDITIONED mean: average of the per-site component over informative
+    (variant) sites only — the sites with a finite, positive dxy denominator.
+    This is SNP-density-sensitive (audit BUG #11) and is retained for comparison,
+    not as the primary metric."""
     m = valid & np.isfinite(values)
     if not m.any():
         return np.nan
     return float(np.mean(values[m]))
 
 
-def middle_vs_flank(components, recmap) -> pd.DataFrame:
+def _window_mean_per_base(values: np.ndarray, callable_mask: np.ndarray) -> float:
+    """PER-CALLABLE-BASE mean (the metric Reviewer 1 requested; audit BUG #11).
+
+    Divergence is summed over every callable base and divided by the number of
+    callable bases. Callable bases where the FST track is NA are invariant
+    callable bases and contribute 0 (no between-group difference); uncallable
+    bases (mask False) are excluded from both numerator and denominator."""
+    if callable_mask is None or not callable_mask.any():
+        return np.nan
+    vals = np.where(np.isfinite(values), values, 0.0)
+    n_callable = int(np.count_nonzero(callable_mask))
+    return float(np.sum(vals[callable_mask]) / n_callable)
+
+
+def middle_vs_flank(components, recmap, callable_masks=None) -> pd.DataFrame:
     rows = []
     for key, comp in components.items():
         if key not in recmap:
@@ -188,8 +295,17 @@ def middle_vs_flank(components, recmap) -> pd.DataFrame:
         L = da.size
         if L < TOTAL_WINDOW:
             continue
-        # informative = finite, positive dxy denominator (matches ratio-of-sums logic)
+        # SNP-conditioned informative sites: finite, positive dxy denominator.
         valid = np.isfinite(dxy) & (dxy > EPS_DENOM)
+
+        # Per-base callable mask (audit BUG #11). When absent for this locus we
+        # fall back to the SNP-conditioned statistic and flag the basis.
+        cmask = callable_masks.get(key) if callable_masks else None
+        if cmask is not None and cmask.size == L:
+            basis = "per_base"
+        else:
+            cmask = None
+            basis = "snp_conditioned_fallback"
 
         start_mid = (L - MIDDLE_SIZE) // 2
         end_mid = start_mid + MIDDLE_SIZE
@@ -199,24 +315,46 @@ def middle_vs_flank(components, recmap) -> pd.DataFrame:
         flank_idx = np.concatenate([np.arange(FLANK_SIZE), np.arange(L - FLANK_SIZE, L)])
         mid_idx = np.arange(start_mid, end_mid)
 
+        def per_base(arr, idx):
+            if cmask is None:
+                return _window_mean_snpcond(arr[idx], valid[idx])
+            return _window_mean_per_base(arr[idx], cmask[idx])
+
         flag, label = recmap[key]
         rows.append({
             "chrom": key[0], "start": key[1], "end": key[2],
             "recurrence_flag": flag, "recurrence_label": label,
-            "da_flank": _window_mean(da[flank_idx], valid[flank_idx]),
-            "da_middle": _window_mean(da[mid_idx], valid[mid_idx]),
-            "dxy_flank": _window_mean(dxy[flank_idx], valid[flank_idx]),
-            "dxy_middle": _window_mean(dxy[mid_idx], valid[mid_idx]),
+            "callable_basis": basis,
+            # Primary metric: divergence per callable base (invariant callable
+            # bases contribute 0).
+            "da_flank": per_base(da, flank_idx),
+            "da_middle": per_base(da, mid_idx),
+            "dxy_flank": per_base(dxy, flank_idx),
+            "dxy_middle": per_base(dxy, mid_idx),
+            # SNP-conditioned comparison (mean over variant sites only).
+            "da_flank_snpcond": _window_mean_snpcond(da[flank_idx], valid[flank_idx]),
+            "da_middle_snpcond": _window_mean_snpcond(da[mid_idx], valid[mid_idx]),
+            "dxy_flank_snpcond": _window_mean_snpcond(dxy[flank_idx], valid[flank_idx]),
+            "dxy_middle_snpcond": _window_mean_snpcond(dxy[mid_idx], valid[mid_idx]),
         })
     df = pd.DataFrame(rows)
     if not df.empty:
         df["da_flank_minus_middle"] = df["da_flank"] - df["da_middle"]
         df["dxy_flank_minus_middle"] = df["dxy_flank"] - df["dxy_middle"]
+        df["da_flank_minus_middle_snpcond"] = df["da_flank_snpcond"] - df["da_middle_snpcond"]
+        df["dxy_flank_minus_middle_snpcond"] = df["dxy_flank_snpcond"] - df["dxy_middle_snpcond"]
     return df
 
 
-def folded_spearman(values: np.ndarray, valid: np.ndarray) -> tuple[float | None, float | None, int]:
-    """Two-sided Spearman of per-site value vs distance from nearest edge (folded)."""
+def folded_spearman(values: np.ndarray, valid: np.ndarray,
+                    callable_mask: np.ndarray | None = None) -> tuple[float | None, float | None, int]:
+    """Two-sided Spearman of per-base value vs distance from nearest edge (folded).
+
+    When `callable_mask` is given the bin means are PER CALLABLE BASE (audit
+    BUG #11): callable bases keep their value, callable-but-NA bases (invariant)
+    are set to 0, and uncallable bases are excluded (set NaN so nanmean over the
+    bin divides by the callable count). When it is None the previous
+    SNP-conditioned behaviour is used: only `valid` (variant) sites contribute."""
     length = values.size
     if length <= MAX_DECAY_SPAN:
         return None, None, 0
@@ -226,7 +364,11 @@ def folded_spearman(values: np.ndarray, valid: np.ndarray) -> tuple[float | None
         return None, None, 0
 
     vals = values.copy()
-    vals[~valid] = np.nan
+    if callable_mask is not None and callable_mask.size == length:
+        # Per callable base: invariant callable bases -> 0, uncallable -> NaN.
+        vals = np.where(callable_mask, np.where(np.isfinite(vals), vals, 0.0), np.nan)
+    else:
+        vals[~valid] = np.nan
     left = vals[:usable]
     right = vals[-usable:][::-1]
     try:
@@ -250,20 +392,26 @@ def folded_spearman(values: np.ndarray, valid: np.ndarray) -> tuple[float | None
     return rho, p, bins_used
 
 
-def edge_decay_spearman(components, recmap) -> pd.DataFrame:
+def edge_decay_spearman(components, recmap, callable_masks=None) -> pd.DataFrame:
     rows = []
     for key, comp in components.items():
         if key not in recmap:
             continue
         da = comp["num"]
         dxy = comp["den"]
+        cmask = callable_masks.get(key) if callable_masks else None
+        if cmask is not None and cmask.size != da.size:
+            cmask = None
+        basis = "per_base" if cmask is not None else "snp_conditioned_fallback"
         flag, label = recmap[key]
         rec = {"chrom": key[0], "start": key[1], "end": key[2],
-               "recurrence_flag": flag, "recurrence_label": label}
+               "recurrence_flag": flag, "recurrence_label": label,
+               "callable_basis": basis}
         for metric, arr in [("da", da), ("dxy", dxy)]:
-            # Fold over all sites where the metric is defined (finite), matching the
-            # FST edge-decay treatment of the summary track (no extra masking).
-            rho, p, bins_used = folded_spearman(arr, np.isfinite(arr))
+            # Per callable base when the mask is available (invariant callable
+            # bases contribute 0), else the SNP-conditioned fallback over finite
+            # (variant) sites only (audit BUG #11).
+            rho, p, bins_used = folded_spearman(arr, np.isfinite(arr), cmask)
             rec[f"{metric}_rho"] = rho
             rec[f"{metric}_p"] = p
             rec[f"{metric}_bins_used"] = bins_used
@@ -352,14 +500,19 @@ def make_plot(mf: pd.DataFrame, out_path: Path) -> None:
 def main() -> None:
     recmap = load_recurrence_map()
     components = load_per_site_components()
-    logger.info("Loaded per-site da/dxy for %d loci; %d classified by recurrence",
-                len(components), sum(1 for k in components if k in recmap))
+    callable_masks = load_callable_masks()
+    n_masked = sum(1 for k in components if k in callable_masks)
+    logger.info("Loaded per-site da/dxy for %d loci; %d classified by recurrence; "
+                "callable mask available for %d loci (per-base metric)",
+                len(components), sum(1 for k in components if k in recmap), n_masked)
 
-    mf = middle_vs_flank(components, recmap)
+    mf = middle_vs_flank(components, recmap, callable_masks)
     mf.to_csv(DATA_DIR / "divergence_middle_vs_flank.tsv", sep="\t", index=False, na_rep="NA")
-    logger.info("Middle-vs-flank: %d inversions (rec=%d, single=%d)",
+    n_perbase = int((mf.get("callable_basis") == "per_base").sum()) if not mf.empty else 0
+    logger.info("Middle-vs-flank: %d inversions (rec=%d, single=%d); %d per-base, %d snp-cond fallback",
                 len(mf), int((mf.recurrence_label == "Recurrent").sum()),
-                int((mf.recurrence_label == "Single-event").sum()))
+                int((mf.recurrence_label == "Single-event").sum()),
+                n_perbase, len(mf) - n_perbase)
 
     tests = paired_and_group_tests(mf)
     tests.to_csv(DATA_DIR / "divergence_middle_vs_flank_stats.tsv", sep="\t", index=False)
@@ -368,7 +521,7 @@ def main() -> None:
                     r.metric, r.group, r.n, r.median_flank, r.median_middle,
                     r.median_flank_minus_middle, r.wilcoxon_stat, r.wilcoxon_p)
 
-    decay = edge_decay_spearman(components, recmap)
+    decay = edge_decay_spearman(components, recmap, callable_masks)
     decay.to_csv(DATA_DIR / "divergence_edge_decay_spearman.tsv", sep="\t", index=False, na_rep="NA")
     for metric in ["da", "dxy"]:
         d = decay.dropna(subset=[f"{metric}_rho"])
