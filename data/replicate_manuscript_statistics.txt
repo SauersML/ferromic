@@ -206,13 +206,13 @@ Orientation × recurrence linear models (replicated strict logic):
     Interaction (difference between those two): fold-change = 4.149 (95% CI 1.589–10.836), p = 3.666e-03.
   [Model C] Δ-logπ ~ 1 + Recurrent + z-scored covariates from inv_properties.tsv (Number_recurrent_events ln1p, Size_.kbp. ln, Inverted_AF, Formation_rate_per_generation ln). HC3 SEs; rows require complete covariates with missingness dummies excluded.
     Covariates included in fit: Covariate: Number_recurrent_events (ln1p, z), Covariate: Size_.kbp. (ln, z), Covariate: Inverted_AF (z), Covariate: Formation_rate_per_generation (ln, z)
-    Single-event: Inverted vs Direct (adjusted): fold-change = 0.355 (95% CI 0.210–0.598), p = 1.011e-04.
-    Recurrent: Inverted vs Direct (adjusted): fold-change = 0.353 (95% CI 0.166–0.753), p = 7.071e-03.
-    Interaction (difference between those two): fold-change = 0.996 (95% CI 0.403–2.464), p = 0.993.
-    Covariate: Number_recurrent_events (ln1p, z): fold-change = 0.479 (95% CI 0.203–1.127), p = 0.092.
-    Covariate: Size_.kbp. (ln, z): fold-change = 1.303 (95% CI 0.870–1.952), p = 0.200.
-    Covariate: Inverted_AF (z): fold-change = 1.758 (95% CI 1.031–2.996), p = 0.038.
-    Covariate: Formation_rate_per_generation (ln, z): fold-change = 3.618 (95% CI 1.145–11.429), p = 0.028.
+    Single-event: Inverted vs Direct (adjusted): fold-change = 0.388 (95% CI 0.210–0.717), p = 2.487e-03.
+    Recurrent: Inverted vs Direct (adjusted): fold-change = 0.370 (95% CI 0.154–0.890), p = 0.026.
+    Interaction (difference between those two): fold-change = 0.952 (95% CI 0.314–2.889), p = 0.931.
+    Covariate: Number_recurrent_events (ln1p, z): fold-change = 0.693 (95% CI 0.279–1.719), p = 0.428.
+    Covariate: Size_.kbp. (ln, z): fold-change = 1.061 (95% CI 0.700–1.608), p = 0.781.
+    Covariate: Inverted_AF (z): fold-change = 1.027 (95% CI 0.575–1.835), p = 0.927.
+    Covariate: Formation_rate_per_generation (ln, z): fold-change = 3.410 (95% CI 0.975–11.921), p = 0.055.
   [Permutation] Model A interaction (n=10000):
     Observed Δ(mean log-ratio) = 1.4230, p = 1.9998e-04.
 
