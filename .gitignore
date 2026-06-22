@@ -63,3 +63,6 @@ hg38.*.all.chain.gz
 hg38.*.net.axt.gz
 hg38.*.synNet.maf.gz
 data/_polarity_evidence.json
+
+# ephemeral chimp-polarization migration marker (per-workspace, not committed)
+data/.polarity_applied
