@@ -54,19 +54,24 @@ data(SNPsR2, package = "scoreInvHap")
 ref_names <- names(SNPsR2[[inv_id]])
 rr        <- rowRanges(vcf)
 orig      <- rownames(vcf)
-pos_names      <- paste(as.character(seqnames(rr)), start(rr), sep = ":")
-pos_names_chr  <- paste0("chr", pos_names)
-cands <- list(rsID = orig, `chr:pos` = pos_names, `chrN:pos` = pos_names_chr)
+idfield   <- names(rr)
+pos_names     <- paste(as.character(seqnames(rr)), start(rr), sep = ":")
+pos_names_chr <- paste0("chr", pos_names)
 cat("Reference SNPs:", length(ref_names), "| head:", paste(head(ref_names), collapse = ","), "\n")
+cat("rownames(vcf) head:", paste(head(orig), collapse = ","), "\n")
+cat("ID-field head:", paste(head(idfield), collapse = ","), "\n")
+cat("chr:pos head:", paste(head(pos_names), collapse = ","), "\n")
+cands <- list(rownames = orig, idfield = idfield,
+              `chr:pos` = pos_names, `chrN:pos` = pos_names_chr)
 ov <- sapply(cands, function(nm) length(intersect(nm, ref_names)))
-cat("VCF name overlap with reference -> ",
+cat("Overlap with reference -> ",
     paste(sprintf("%s=%d", names(ov), ov), collapse = "  "), "\n")
 best <- names(which.max(ov))
-if (ov[[best]] > 0 && best != "rsID") {
+if (ov[[best]] > 0) {
   rownames(vcf) <- cands[[best]]
-  cat(sprintf("Renamed VCF SNPs to '%s' (%d common with reference).\n", best, ov[[best]]))
+  cat(sprintf("Using '%s' SNP names (%d common with reference).\n", best, ov[[best]]))
 } else {
-  cat(sprintf("Using original rsID names (%d common with reference).\n", ov[["rsID"]]))
+  stop("No naming scheme overlaps the scoreInvHap reference; see the heads printed above.")
 }
 
 # inv=<id> triggers internal loading of the bundled reference objects.
