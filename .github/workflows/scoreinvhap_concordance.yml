@@ -85,10 +85,13 @@ jobs:
           set -euo pipefail
           B37=http://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502
           # GRCh37 ROIs (8p23.1 ~ chr8:8-12 Mb ; 17q21.31 ~ chr17:43.0-44.9 Mb).
+          # scoreInvHap only uses biallelic SNVs ("non-single nucleotide variations are set to
+          # NA"), so keep only those: this drops indels/SVs/multiallelics and avoids the OOM
+          # from loading ~219k mixed records x 2504 samples into VariantAnnotation/R.
           tabix -h ${B37}/ALL.chr8.phase3_shapeit2_mvncall_integrated_v5b.20130502.genotypes.vcf.gz \
-            8:7000000-13000000 | bgzip > b37_chr8.vcf.gz
+            8:7000000-13000000 | bcftools view -v snps -m2 -M2 -Oz -o b37_chr8.vcf.gz
           tabix -h ${B37}/ALL.chr17.phase3_shapeit2_mvncall_integrated_v5b.20130502.genotypes.vcf.gz \
-            17:42000000-45500000 | bgzip > b37_chr17.vcf.gz
+            17:42000000-45500000 | bcftools view -v snps -m2 -M2 -Oz -o b37_chr17.vcf.gz
           for f in b37_chr8 b37_chr17; do
             echo "== $f =="; bcftools index -t ${f}.vcf.gz
             echo "variants: $(bcftools view -H ${f}.vcf.gz | wc -l) ; samples: $(bcftools query -l ${f}.vcf.gz | wc -l)"
