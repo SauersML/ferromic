@@ -141,26 +141,48 @@ def consolidate_and_select(df, inversions, cache_root, alpha=0.05,
                     })
         if rows:
             lrt_df = pd.DataFrame(rows)
-            df = df.merge(lrt_df, on=["Phenotype", "Inversion"], how="left")
+            # Keep df's canonical per-test columns (P_Value, P_Source, ...) intact and bring the
+            # LRT record's overlapping columns in under an explicit "_lrt" suffix. The previous
+            # default-suffix merge produced P_Value_x/P_Value_y, after which the lookup below
+            # silently rebuilt an all-NaN "P_Value" and dropped every valid score/bootstrap test
+            # from the global BH correction (202 of 1096 valid tests in the committed table).
+            df = df.merge(
+                lrt_df, on=["Phenotype", "Inversion"], how="left", suffixes=("", "_lrt")
+            )
         else:
             df["P_LRT_Overall"] = np.nan
         if "P_Value" not in df.columns:
             df["P_Value"] = np.nan
         if "P_Source" not in df.columns:
-            df["P_Source"] = None
+            df["P_Source"] = df.get("P_Source_lrt")
         if "P_Method" not in df.columns:
-            df["P_Method"] = None
-        if "P_Overall_Valid" in df.columns:
-            df["P_Overall_Valid"] = df["P_Overall_Valid"].fillna(False).astype(bool)
-        else:
-            df["P_Overall_Valid"] = False
+            df["P_Method"] = df.get("P_Method_lrt")
+        # A test is eligible for global correction if it produced a usable p-value. Coalesce the
+        # per-test validity flags: df's own P_Valid (score/bootstrap/MLE tests) OR the LRT
+        # record's P_Overall_Valid. Never let the LRT-only flag invalidate a finite p-value.
+        overall_valid = (
+            df["P_Overall_Valid"].fillna(False).astype(bool)
+            if "P_Overall_Valid" in df.columns
+            else pd.Series(False, index=df.index)
+        )
+        own_valid = (
+            df["P_Valid"].fillna(False).astype(bool)
+            if "P_Valid" in df.columns
+            else pd.Series(False, index=df.index)
+        )
+        df["P_Overall_Valid"] = overall_valid
+        # Canonical p-value: prefer the overall LRT p-value, else the per-test p-value.
         p_merge = df["P_LRT_Overall"].where(df["P_LRT_Overall"].notna(), df["P_Value"])
         p_merge_numeric = pd.to_numeric(p_merge, errors="coerce")
-        mask = p_merge_numeric.notna() & df["P_Overall_Valid"]
+        mask = p_merge_numeric.notna() & (overall_valid | own_valid)
         df["Q_GLOBAL"] = np.nan
         if int(mask.sum()) > 0:
             _, q, _, _ = multipletests(p_merge_numeric.loc[mask], alpha=alpha, method="fdr_bh")
             df.loc[mask, "Q_GLOBAL"] = q
+        # Reliability guard: every eligible test with a finite canonical p-value must get a q.
+        _missing_q = int((mask & df["Q_GLOBAL"].isna()).sum())
+        if _missing_q:
+            raise AssertionError(f"{_missing_q} valid tests received no global q-value")
         df["Sig_Global"] = df["Q_GLOBAL"] < alpha
         df = _attach_ci_display(df)
         return df, {}
