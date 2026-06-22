@@ -106,6 +106,19 @@ jobs:
           wc -l subset.bim
           head -3 subset.fam
 
+      - name: Fetch imputation models from release
+        run: |
+          set -euo pipefail
+          # Trained models live on the imputation-models-v1 Release, not in-tree.
+          mkdir -p data/models
+          REL="https://github.com/SauersML/ferromic/releases/download/imputation-models-v1"
+          for m in chr8-7301025-INV-5297356 chr17-45585160-INV-706887; do
+            for ext in model.joblib snps.json; do
+              curl -sSL --retry 5 --retry-delay 5 -o "data/models/$m.$ext" "$REL/$m.$ext"
+            done
+          done
+          ls -la data/models/
+
       - name: Prepare genotype matrices and run our inference
         env:
           PLINK_PREFIX: subset
