@@ -1142,7 +1142,12 @@ def _pipeline_once(pipeline_config: Optional[dict[str, object]] = None):
         category_summary_lock = threading.Lock()
         skipped_low_variance_inversions: set[str] = set()
         skipped_low_variance_lock = threading.Lock()
-        
+
+        # Records inversions whose worker thread raised, so the orchestrator can fail the run
+        # instead of silently treating a crashed/partial run as complete (audit #3).
+        inversion_failures = {}
+        inversion_failures_lock = threading.Lock()
+
         def run_single_inversion(target_inversion: str, baseline_rss_gb: float, shared_data: dict):
             inv_safe_name = models.safe_basename(target_inversion)
             log_prefix = f"[INV {inv_safe_name}]"
@@ -1550,6 +1555,8 @@ def _pipeline_once(pipeline_config: Optional[dict[str, object]] = None):
             except Exception as e:
                 print(f"{log_prefix} [FAIL] Failed with error: {e}", flush=True)
                 traceback.print_exc()
+                with inversion_failures_lock:
+                    inversion_failures[target_inversion] = repr(e)
 
         shared_data_for_threads = {
             "covariates": shared_covariates_df,
@@ -1619,6 +1626,14 @@ def _pipeline_once(pipeline_config: Optional[dict[str, object]] = None):
             time.sleep(1.0)
 
         print("\n--- All inversions processed. ---")
+        if inversion_failures:
+            failed = ", ".join(sorted(inversion_failures))
+            print(f"[Orchestrator] {len(inversion_failures)} inversion(s) FAILED: {failed}", flush=True)
+            # Fail the run so a crashed/partial pipeline is not published as a complete result.
+            # Propagates to the top-level handler, which re-raises -> non-zero worker exit (audit #3/#10).
+            raise RuntimeError(
+                f"PheWAS run incomplete: {len(inversion_failures)} inversion(s) failed: {inversion_failures}"
+            )
 
         if category_summary_frames:
             combined_category_summary = pd.concat(category_summary_frames, ignore_index=True)

@@ -24,6 +24,12 @@ TARGETS: List[Tuple[int, str]] = [
     (45974480, "G"),
 ]
 
+# Canonical 17q21.31 inversion identifier (matches phewas/run.py). The hard-call feature
+# MUST be named with this, not the span of the tag SNPs: the old name was built from
+# min/max tag-SNP positions, yielding the spurious 'chr17-45974480-INV-29218' coordinate
+# (Reviewer 2 comment 11 / audit #5). The tag-SNP span/method are recorded as provenance.
+CANONICAL_INV_ID = "chr17-45585160-INV-706887"
+
 # Single-output hard-call matrix
 OUT_TSV = "imputed_inversion_hardcalls.tsv"
 
@@ -268,9 +274,9 @@ def write_single_inversion_hardcalls_tsv(
     out_path: str = OUT_TSV,
 ) -> None:
     """
-    Write a TSV with one hard-call column:
-        SampleID <TAB> chr17-<start>-INV-<length>-HARD
-    Values: 0, 1, 2, or blank for no-call.
+    Write a TSV with one hard-call column named with the CANONICAL inversion id:
+        SampleID <TAB> chr17-45585160-INV-706887-HARD
+    Values: 0, 1, 2, or blank for no-call. The tag-SNP span is logged as provenance only.
     """
     if not iids:
         raise RuntimeError("No samples found (empty IID list).")
@@ -283,9 +289,12 @@ def write_single_inversion_hardcalls_tsv(
         start_bp = min(selected_bps)
         end_bp   = max(selected_bps)
 
-    inv_id = f"{chr_label}-{start_bp}-INV-{end_bp - start_bp}-HARD"
+    # Feature name = canonical inversion id (NOT the tag-SNP span). Tag span/method below
+    # are provenance only.
+    inv_id = f"{CANONICAL_INV_ID}-HARD"
+    tag_span = f"{chr_label}:{start_bp}-{end_bp}"
     print(f"[WRITE] Building '{out_path}' (N={len(iids)}), column='{inv_id}' "
-          f"from {len(selected_bps)} tag(s): {selected_bps}")
+          f"(tag-SNP hard call; {len(selected_bps)} tag(s)={selected_bps}; span={tag_span})")
 
     with open(out_path, "w") as fo, tqdm(total=len(iids), desc="Write TSV", unit="sample") as bar:
         fo.write(f"SampleID\t{inv_id}\n")
