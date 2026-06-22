@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-22T18:24:29.193471+00:00",
+  "generatedAt": "2026-06-22T18:27:54.577567+00:00",
   "groups": [
     {
       "title": "Top-level figures",
@@ -28,6 +28,12 @@
           "href": "figures/PGS_control_volcano.png",
           "preview": "figures/PGS_control_volcano.png",
           "type": "image"
+        },
+        {
+          "name": "cds_conservation_calibration.pdf",
+          "href": "figures/cds_conservation_calibration.pdf",
+          "preview": "figures/cds_conservation_calibration.pdf",
+          "type": "pdf"
         },
         {
           "name": "cds_conservation_volcano.pdf",
@@ -382,6 +388,12 @@
           "href": "figures/final_plots/PGS_control_volcano.png",
           "preview": "figures/final_plots/PGS_control_volcano.png",
           "type": "image"
+        },
+        {
+          "name": "cds_conservation_calibration.pdf",
+          "href": "figures/final_plots/cds_conservation_calibration.pdf",
+          "preview": "figures/final_plots/cds_conservation_calibration.pdf",
+          "type": "pdf"
         },
         {
           "name": "cds_conservation_volcano.pdf",
