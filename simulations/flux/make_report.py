@@ -107,6 +107,5 @@ if __name__ == "__main__":
     paths = sys.argv[1:] or glob.glob("sweep_*.json")
     rows = load(paths)
     write_csv(rows, "flux_results.csv")
-    write_md(rows, "flux_results_tables.md")
     plot(rows, "flux_fpr_power.png")
     print("rows:", len(rows))
