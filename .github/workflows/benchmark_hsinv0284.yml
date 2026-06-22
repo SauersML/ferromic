@@ -62,6 +62,19 @@ jobs:
           bcftools index -t kgp_chr6_region.vcf.gz
           echo "Variants in region: $(bcftools view -H kgp_chr6_region.vcf.gz | wc -l)"
 
+      - name: Fetch imputation model for 6q24.1 from release
+        run: |
+          set -euo pipefail
+          # The trained models live on the imputation-models-v1 Release, not in-tree.
+          mkdir -p data/models
+          REL="https://github.com/SauersML/ferromic/releases/download/imputation-models-v1"
+          for ext in model.joblib snps.json; do
+            curl -sSL --retry 5 --retry-delay 5 \
+              -o "data/models/chr6-141867315-INV-29159.$ext" \
+              "$REL/chr6-141867315-INV-29159.$ext"
+          done
+          ls -la data/models/
+
       - name: Run benchmark
         run: |
           set -euo pipefail
