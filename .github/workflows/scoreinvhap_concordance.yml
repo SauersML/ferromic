@@ -247,10 +247,16 @@ jobs:
           set -euo pipefail
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/scoreinvhap_concordance.tsv data/scoreinvhap_concordance.pdf
+          # Only the TSV is tracked (the PDF is gitignored like other figures).
+          git add data/scoreinvhap_concordance.tsv
           if git diff --staged --quiet; then
             echo "No changes to commit."
           else
             git commit -m "Add scoreInvHap concordance benchmark outputs (Reviewer 2 #3)"
-            git push origin HEAD:${GITHUB_REF_NAME}
+            # Rebase + retry so a concurrent push to main doesn't fail this on non-FF.
+            for a in 1 2 3 4; do
+              git pull --rebase --autostash origin "${GITHUB_REF_NAME}" || true
+              if git push origin "HEAD:${GITHUB_REF_NAME}"; then echo "pushed"; break; fi
+              echo "push non-FF, retry $a"; sleep 3
+            done
           fi
