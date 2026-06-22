@@ -31,36 +31,38 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -euo pipefail
-
+          # Never hard-fail on a missing/expired cross-workflow artifact: the canonical
+          # data/best_tagging_snps_qvalues.tsv is committed in the repo (present from
+          # checkout). Try to REFRESH it from the latest successful batch run, but fall back
+          # to the committed copy. Only error if neither exists.
+          set -uo pipefail
           mkdir -p data
 
           echo "Locating latest successful batch_best_tagging_snps.yml run ..."
-          RUN_ID=$(gh run list --workflow batch_best_tagging_snps.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId')
+          RUN_ID=$(gh run list --workflow batch_best_tagging_snps.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null || true)
 
-          if [[ -z "$RUN_ID" ]]; then
-            echo "::error::No successful batch_best_tagging_snps.yml run found. Cannot download tagging SNPs artifact."
-            exit 1
-          fi
-
-          echo "Downloading best-tagging-snps-results artifact from run $RUN_ID ..."
-          gh run download "$RUN_ID" -n best-tagging-snps-results --dir data/best-tagging-snps-results
-
-          CANDIDATE=""
-          if [[ -f "data/best-tagging-snps-results/best_tagging_snps_qvalues.tsv" ]]; then
-            CANDIDATE="data/best-tagging-snps-results/best_tagging_snps_qvalues.tsv"
-          elif [[ -f "data/best-tagging-snps-results/data/best_tagging_snps_qvalues.tsv" ]]; then
-            CANDIDATE="data/best-tagging-snps-results/data/best_tagging_snps_qvalues.tsv"
-          fi
-
-          if [[ -n "$CANDIDATE" ]]; then
-            mv "$CANDIDATE" data/best_tagging_snps_qvalues.tsv
-            echo "✓ best_tagging_snps_qvalues.tsv downloaded to data/."
+          if [[ -n "${RUN_ID:-}" ]] && gh run download "$RUN_ID" -n best-tagging-snps-results --dir data/best-tagging-snps-results 2>/dev/null; then
+            CANDIDATE=""
+            if [[ -f "data/best-tagging-snps-results/best_tagging_snps_qvalues.tsv" ]]; then
+              CANDIDATE="data/best-tagging-snps-results/best_tagging_snps_qvalues.tsv"
+            elif [[ -f "data/best-tagging-snps-results/data/best_tagging_snps_qvalues.tsv" ]]; then
+              CANDIDATE="data/best-tagging-snps-results/data/best_tagging_snps_qvalues.tsv"
+            fi
+            if [[ -n "$CANDIDATE" ]]; then
+              mv "$CANDIDATE" data/best_tagging_snps_qvalues.tsv
+              echo "✓ Refreshed best_tagging_snps_qvalues.tsv from run $RUN_ID."
+            else
+              echo "::warning::Artifact downloaded but file not found in expected locations; using committed copy."
+            fi
           else
-            echo "::error::Artifact downloaded but best_tagging_snps_qvalues.tsv was not found in expected locations."
-            find data/best-tagging-snps-results -maxdepth 3 -type f -print
+            echo "::warning::No fresh best-tagging-snps-results artifact (missing/expired run); using committed data/best_tagging_snps_qvalues.tsv."
+          fi
+
+          if [[ ! -f data/best_tagging_snps_qvalues.tsv ]]; then
+            echo "::error::No best_tagging_snps_qvalues.tsv available (neither a fresh artifact nor a committed copy)."
             exit 1
           fi
+          echo "Using best_tagging_snps_qvalues.tsv ($(wc -l < data/best_tagging_snps_qvalues.tsv) lines)."
 
       - name: Generate supplementary tables workbook
         run: |
