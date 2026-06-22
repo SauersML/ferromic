@@ -140,6 +140,27 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         group="CDS",
     ),
     FigureTask(
+        name="CDS conservation GLM calibration",
+        script=Path("stats/cds_conservation_calibration.py"),
+        outputs=(
+            "cds_conservation_calibration.tsv",
+            "cds_conservation_calibration.pdf",
+        ),
+        dependencies=("cds_identical_proportions.tsv", "pairs_CDS__*.tsv"),
+        python_dependencies=("statsmodels",),
+        note=(
+            "Reviewer 2 #1: permutation/label-shuffling calibration of the CDS "
+            "conservation GLM. Shuffles the Direct/Inverted orientation label "
+            "within each matched (inversion, CDS, recurrence) stratum and refits "
+            "the SAME binomial GLM to build the empirical null, then checks "
+            "whether the parametric Wald p-values are calibrated against that "
+            "null (they are mildly anti-conservative with only ~26 inversion "
+            "clusters, so the permutation p-value is the reported value) and "
+            "estimates detection power via a known injected logit shift."
+        ),
+        group="CDS",
+    ),
+    FigureTask(
         name="Per-gene CDS conservation tests",
         script=Path("stats/per_gene_cds_differences_jackknife.py"),
         outputs=("gene_inversion_direct_inverted.tsv",),
