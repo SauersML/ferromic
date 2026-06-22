@@ -195,8 +195,18 @@ jobs:
       - name: Run scoreInvHap genotyping
         run: |
           set -euo pipefail
-          Rscript scoreinvhap_benchmark/run_scoreinvhap.R b37_chr8.vcf.gz  inv8p23.1   sih_8p23.tsv
-          Rscript scoreinvhap_benchmark/run_scoreinvhap.R b37_chr17.vcf.gz inv17q21.31 sih_17q21.tsv
+          # Pre-subset each (rsID-annotated) VCF to ONLY scoreInvHap's reference SNPs, so the
+          # heavy readVcf loads ~13k variants instead of the whole ~150k-SNV region -- that
+          # full-region load (x2504 samples) was the real bottleneck, not the scoring.
+          Rscript -e 'suppressMessages(library(scoreInvHap)); data(SNPsR2);
+            writeLines(unique(names(SNPsR2[["inv8_001"]])),  "ref_inv8.txt");
+            writeLines(unique(names(SNPsR2[["inv17_007"]])), "ref_inv17.txt")'
+          bcftools view -i 'ID=@ref_inv8.txt'  b37_chr8.vcf.gz  -Oz -o b37_chr8.sub.vcf.gz
+          bcftools view -i 'ID=@ref_inv17.txt' b37_chr17.vcf.gz -Oz -o b37_chr17.sub.vcf.gz
+          echo "subset chr8:  $(bcftools view -H b37_chr8.sub.vcf.gz | wc -l) variants (of ref $(wc -l < ref_inv8.txt))"
+          echo "subset chr17: $(bcftools view -H b37_chr17.sub.vcf.gz | wc -l) variants (of ref $(wc -l < ref_inv17.txt))"
+          Rscript scoreinvhap_benchmark/run_scoreinvhap.R b37_chr8.sub.vcf.gz  inv8p23.1   sih_8p23.tsv
+          Rscript scoreinvhap_benchmark/run_scoreinvhap.R b37_chr17.sub.vcf.gz inv17q21.31 sih_17q21.tsv
           head sih_8p23.tsv sih_17q21.tsv
 
       # --------------------------------------------------------------------
