@@ -1,0 +1,3 @@
+inversion	model_id	n_samples	pearson_r	r2	spearman_rho	hardcall_concordance	our_inv_allele_freq	sih_inv_allele_freq
+8p23.1	chr8-7301025-INV-5297356	500	0.8703	0.7575	0.8719	0.758	0.5034	0.414
+17q21.31	chr17-45585160-INV-706887	500	0.9718	0.9443	0.7704	0.976	0.1656	0.138
