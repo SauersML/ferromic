@@ -44,7 +44,11 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y bcftools tabix
+          # bcftools/tabix/plink2 plus the -dev headers Bioconductor source packages need
+          # (Rhtslib/Rsamtools/VariantAnnotation: libcurl, zlib, bz2, lzma; XML: libxml2; openssl).
+          sudo apt-get install -y bcftools tabix \
+            libcurl4-openssl-dev libxml2-dev libssl-dev \
+            zlib1g-dev libbz2-dev liblzma-dev
           # plink2
           wget -q https://s3.amazonaws.com/plink2-assets/alpha6/plink2_linux_x86_64_20240625.zip -O plink2.zip || \
           wget -q https://s3.amazonaws.com/plink2-assets/plink2_linux_x86_64_latest.zip -O plink2.zip
