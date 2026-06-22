@@ -65,6 +65,10 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+import sys as _sys
+_sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _inv_common import is_flipped  # chimp polarization: group0/1 -> ancestral/derived
+
 warnings.filterwarnings("ignore")
 
 # ------------------------- FILE PATHS -------------------------
@@ -337,6 +341,10 @@ def collect_pin_pis(phy_dir):
         s1, L1 = read_phy(g1)
         if not s0 or not s1 or L0 != L1 or L0 % 3 != 0:
             continue
+        # Chimp polarization: swap so "direct" (0) holds the ANCESTRAL arrangement
+        # and "inverted" (1) the DERIVED one (inverted == derived w.r.t. chimp).
+        if is_flipped(key[0], key[1], key[2]):
+            s0, s1 = s1, s0
         L = L0
         n_proc += 1
 
