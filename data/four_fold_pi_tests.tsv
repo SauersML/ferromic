@@ -1,16 +1,16 @@
 metric	test	category	n	median_direct	median_inverted	statistic	p_value
-fourfold	paired Wilcoxon (inverted vs direct, log1p)	single	7	0.00026728744200863163	0.0	9.0	0.84375
-fourfold	paired Wilcoxon (inverted vs direct, log1p)	recurrent	19	0.0004904997934737712	0.0	29.0	0.43276758066778476
-fourfold	Mann-Whitney U (delta: single vs recurrent)	single_vs_recurrent	26			75.5	0.6180798994569927
-fourfold	Mann-Whitney U (direct: single vs recurrent)	single_vs_recurrent	26	0.00026728744200863163		63.0	0.8594355700153029
-fourfold	Mann-Whitney U (inverted: single vs recurrent)	single_vs_recurrent	26		0.0	63.0	0.8503120350991697
-wholeCDS	paired Wilcoxon (inverted vs direct, log1p)	single	7	0.00018958587550757316	0.00031776294884016526	9.0	0.84375
-wholeCDS	paired Wilcoxon (inverted vs direct, log1p)	recurrent	19	0.00026539278131634835	0.00017820547090795694	66.0	0.9176315934670087
-wholeCDS	Mann-Whitney U (delta: single vs recurrent)	single_vs_recurrent	26			60.5	0.7501169137201418
-wholeCDS	Mann-Whitney U (direct: single vs recurrent)	single_vs_recurrent	26	0.00018958587550757316		63.5	0.8844023235967865
-wholeCDS	Mann-Whitney U (inverted: single vs recurrent)	single_vs_recurrent	26		0.00017820547090795694	58.5	0.6640720486479237
-wholeLocus	paired Wilcoxon (inverted vs direct, log1p)	single	7	0.000469	0.000242	6.0	0.21875
-wholeLocus	paired Wilcoxon (inverted vs direct, log1p)	recurrent	19	0.000453	0.000512	86.0	0.7380905151367188
-wholeLocus	Mann-Whitney U (delta: single vs recurrent)	single_vs_recurrent	26			46.0	0.2542110063849194
-wholeLocus	Mann-Whitney U (direct: single vs recurrent)	single_vs_recurrent	26	0.000469		57.0	0.6108452417148068
-wholeLocus	Mann-Whitney U (inverted: single vs recurrent)	single_vs_recurrent	26		0.000512	43.0	0.18824566737610213
+fourfold	paired Wilcoxon (inverted vs direct, log1p)	single	7	0.0	0.0003154739996845	4.0	0.21875
+fourfold	paired Wilcoxon (inverted vs direct, log1p)	recurrent	19	0.0004904997934737	0.0	22.0	0.1823383541807685
+fourfold	Mann-Whitney U (delta: single vs recurrent)	single_vs_recurrent	26			94.5	0.10673759654326757
+fourfold	Mann-Whitney U (direct: single vs recurrent)	single_vs_recurrent	26	0.0		49.5	0.31529349019251807
+fourfold	Mann-Whitney U (inverted: single vs recurrent)	single_vs_recurrent	26		0.0	79.0	0.4706968260386655
+wholeCDS	paired Wilcoxon (inverted vs direct, log1p)	single	7	6.629541235746487e-05	0.0003945098154368	3.0	0.15625
+wholeCDS	paired Wilcoxon (inverted vs direct, log1p)	recurrent	19	0.0002291515501725	0.0002653927813163	62.0	0.7563688628810696
+wholeCDS	Mann-Whitney U (delta: single vs recurrent)	single_vs_recurrent	26			86.5	0.2588240909340468
+wholeCDS	Mann-Whitney U (direct: single vs recurrent)	single_vs_recurrent	26	6.629541235746487e-05		57.0	0.6016328427151839
+wholeCDS	Mann-Whitney U (inverted: single vs recurrent)	single_vs_recurrent	26		0.0002653927813163	70.0	0.861851357339761
+wholeLocus	paired Wilcoxon (inverted vs direct, log1p)	single	7	0.000129	0.000535	1.0	0.03125
+wholeLocus	paired Wilcoxon (inverted vs direct, log1p)	recurrent	19	0.000476	0.000442	52.0	0.08742904663085938
+wholeLocus	Mann-Whitney U (delta: single vs recurrent)	single_vs_recurrent	26			120.0	0.0009972636059592582
+wholeLocus	Mann-Whitney U (direct: single vs recurrent)	single_vs_recurrent	26	0.000129		30.0	0.035165703861356035
+wholeLocus	Mann-Whitney U (inverted: single vs recurrent)	single_vs_recurrent	26		0.000442	74.0	0.6924992398905441

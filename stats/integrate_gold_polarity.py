@@ -37,8 +37,45 @@ def load(p, key="inv_id"):
     return {r[key]: r for r in csv.DictReader(open(p), delimiter="\t")}
 
 
+def _states(rec, col="apes"):
+    """Parse an 'apes' string like 'PPY:HET;SSY:HOM' -> {species: state}."""
+    return dict(p.split(":", 1) for p in (rec or {}).get(col, "").split(";") if ":" in p)
+
+
+# Deep outgroups that root the human ancestral state, per gold source.
+DEEP_T2T = {"PPY", "PAB", "SSY"}          # Pongo + Symphalangus (2025 T2T apes)
+DEEP_SS = {"orangutan"}                    # Strand-seq deepest ape
+
+
+def clean_deep_t2t(t2t):
+    """A deep ape is HOM-inverted, >=2 species HOM, <=1 HET -> unambiguous ancestral
+    inverted even if the per-species count was too sparse for the high/moderate gate."""
+    st = _states(t2t)
+    return (any(st.get(s) == "HOM" for s in DEEP_T2T)
+            and sum(v == "HOM" for v in st.values()) >= 2
+            and sum(v == "HET" for v in st.values()) <= 1)
+
+
+def clean_deep_ss(ss):
+    """Orangutan (deepest Strand-seq ape) HOM-inverted, >=2 species HOM, zero HET."""
+    st = _states(ss)
+    return (any(st.get(s) == "HOM" for s in DEEP_SS)
+            and sum(v == "HOM" for v in st.values()) >= 2
+            and sum(v == "HET" for v in st.values()) == 0)
+
+
 def tier_for(t2t, ss):
-    """Return (tier, flip_override_or_None, conf_override_or_None)."""
+    """Return (tier, flip_override_or_None, conf_override_or_None).
+
+    Precedence: gold_t2t_apes > gold_deepOG > gold_strandseq(high/mod) >
+    recurrent_* > gold_*(clean-deep) > synteny.
+    The clean-deep tiers rescue loci whose deep-outgroup assembly signal is unambiguous
+    (a deep ape HOM-inverted with no toggling) even though the per-species count was
+    too sparse for the primary high/moderate gate -- assembly evidence beats chain
+    synteny, which is only ~39% concordant with the deep-gold direction on these loci.
+    They rank BELOW the recurrent flags: a locus that toggles in the apes is honestly
+    recurrent and must not be overridden by a sparse clean-deep rescue.
+    """
     tconf = (t2t or {}).get("confidence", "")
     sconf = (ss or {}).get("confidence", "")
     ssrc = (ss or {}).get("source", "")
@@ -52,7 +89,25 @@ def tier_for(t2t, ss):
         return "recurrent_strandseq", None, None
     if tconf == "recurrent":
         return "recurrent_t2t_apes", None, None
+    if t2t and clean_deep_t2t(t2t):
+        return "gold_t2t_apes", t2t.get("t2t_flip"), "moderate"
+    if ss and clean_deep_ss(ss):
+        return "gold_strandseq", ss.get("strandseq_flip"), "moderate"
     return "synteny", None, None
+
+
+def resolution_status(tier, has_ortho):
+    """Honest top-level quality bucket for every locus (quarantine, per review):
+      resolved   gold assembly/Strand-seq evidence -> trustworthy polarity
+      recurrent  toggles between orientations -> polarity is locus-state-dependent
+      provisional  chain-synteny only (deep-gold says synteny is ~39% right) -> low trust
+      unresolved   no ape orthology at all -> not polarizable by any outgroup method
+    """
+    if tier.startswith("gold"):
+        return "resolved"
+    if tier.startswith("recurrent"):
+        return "recurrent"
+    return "provisional" if has_ortho else "unresolved"
 
 
 def main():
@@ -72,15 +127,20 @@ def main():
             "orient_gorilla", "orient_orangutan", "orient_macaque", "evidence",
             "inv_af_ref", "derived_af", "minor_is_derived", "strandseq_flip",
             "strandseq_confidence", "strandseq_source", "evidence_tier",
-            "t2t_ape_flip", "t2t_ape_confidence"]
+            "t2t_ape_flip", "t2t_ape_confidence", "resolution_status"]
 
     from collections import Counter
     tiers = Counter()
+    statuses = Counter()
     for r in rows:
         iid = r["inv_id"]
         t, s = t2t.get(iid), ss.get(iid)
         tier, flip_ov, conf_ov = tier_for(t, s)
         tiers[tier] += 1
+        has_ortho = any(r.get(f"orient_{o}") in ("collinear", "inverted")
+                        for o in ("chimp", "gorilla", "orangutan", "macaque"))
+        r["resolution_status"] = resolution_status(tier, has_ortho)
+        statuses[r["resolution_status"]] += 1
         # gold provenance columns (always reflect the underlying gold tables)
         r["strandseq_flip"] = s.get("strandseq_flip", "") if s else ""
         r["strandseq_confidence"] = s.get("confidence", "") if s else ""
@@ -110,6 +170,7 @@ def main():
         w.writeheader(); w.writerows(rows)
     print(f"wrote {args.out} ({len(rows)} loci)")
     print("evidence_tier:", dict(tiers))
+    print("resolution_status:", dict(statuses))
     print("flip=1:", sum(r["flip_ref_polarity"] == "1" for r in rows))
 
 
