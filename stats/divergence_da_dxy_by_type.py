@@ -62,6 +62,10 @@ INV_FILE = _resolve_input("inv_properties.tsv")
 DXY_COL = "hudson_dxy_hap_group_0v1"
 PI0_COL = "hudson_pi_hap_group_0"
 PI1_COL = "hudson_pi_hap_group_1"
+# Single source of truth for within-group average pi: the Rust pipeline already
+# emits Hudson's (sample-size-weighted) pi_avg. Use it rather than re-deriving the
+# simple mean 0.5*(pi0+pi1), so da here matches recurrence_architecture_controls.py.
+PI_AVG_COL = "hudson_pi_avg_hap_group_0v1"
 
 # Match the paper's category palette (Single-event / Recurrent).
 COLOR_SINGLE = "#1f3b78"
@@ -167,12 +171,18 @@ def main() -> None:
 
     df = pd.read_csv(OUTPUT_CSV, usecols=lambda c: c in
                      {"chr", "region_start", "region_end", DXY_COL, PI0_COL, PI1_COL,
-                      "hudson_fst_hap_group_0v1"})
+                      PI_AVG_COL, "hudson_fst_hap_group_0v1"})
     df = assign_recurrence(df, recmap)
 
     df["dxy"] = pd.to_numeric(df[DXY_COL], errors="coerce")
-    df["da"] = df["dxy"] - 0.5 * (pd.to_numeric(df[PI0_COL], errors="coerce")
-                                  + pd.to_numeric(df[PI1_COL], errors="coerce"))
+    # Prefer the pipeline's pi_avg (single source of truth); fall back to the simple
+    # mean only if the column is absent from an older output.csv.
+    if PI_AVG_COL in df.columns:
+        pi_avg = pd.to_numeric(df[PI_AVG_COL], errors="coerce")
+    else:
+        pi_avg = 0.5 * (pd.to_numeric(df[PI0_COL], errors="coerce")
+                        + pd.to_numeric(df[PI1_COL], errors="coerce"))
+    df["da"] = df["dxy"] - pi_avg
 
     classified = df[df["category"].notna()].copy()
 
