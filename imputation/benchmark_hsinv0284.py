@@ -209,7 +209,10 @@ def predict_dosage(
     if miss.any():
         means = compute_ancestry_means(X, anc, len(SUPERPOP_CODES))
         X[miss] = means[anc][miss]
-    return np.ravel(clf.predict(X.astype(np.float32)))
+    pred = np.ravel(clf.predict(X.astype(np.float32)))
+    # Constrain to the valid dosage range [0, 2], exactly as infer_dosage.py does. The model
+    # can extrapolate slightly outside it; impossible dosages must never be reported.
+    return np.clip(pred, 0.0, 2.0)
 
 
 # --------------------------------------------------------------------------- #
