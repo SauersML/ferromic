@@ -606,7 +606,10 @@ Low imputation:
 6. **chr7-54220528-INV-101153**
 """
 
-# chr17-45974480-INV-29218 is arbitrary number for tagging SNP 17q21
+# NOTE: 'chr17-45974480-INV-29218' was an old tag-SNP-span pseudo-coordinate and is NOT a
+# real inversion id. The 17q21.31 inversion is tracked under its canonical id
+# 'chr17-45585160-INV-706887' (present in TARGET_INVERSIONS above); do not reintroduce the
+# tag-span id as a feature name.
 
 PHENOTYPE_DEFINITIONS_URL = "https://github.com/SauersML/ferromic/raw/refs/heads/main/data/significant_heritability_diseases.tsv"
 MASTER_RESULTS_CSV = f"phewas_results_{datetime.now().strftime('%Y%m%d%H%M%S')}.tsv"
