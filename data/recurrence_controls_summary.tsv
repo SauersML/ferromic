@@ -1,7 +1,7 @@
 outcome	control	effect	ci_lo	ci_hi	p	n	n_recur	n_single	scale
-Delta-log pi interaction (ratio)	unadjusted	3.02437	1.46022	6.26402	0.00289098	62	32	30	ratio
-Delta-log pi interaction (ratio)	covariate-adjusted	2.68212	1.04055	6.91343	0.0411237	62	32	30	ratio
-Delta-log pi interaction (ratio)	matched (length+AF)	2.00942	0.830731	4.68067	0.147285	36	18	18	ratio
+Delta-log pi interaction (ratio)	unadjusted	1.08659	0.466865	2.52894	0.847212	62	32	30	ratio
+Delta-log pi interaction (ratio)	covariate-adjusted	0.486419	0.221631	1.06756	0.072336	62	32	30	ratio
+Delta-log pi interaction (ratio)	matched (length+AF)	0.391121	0.178058	0.821432	0.0360964	36	18	18	ratio
 Hudson FST (Recurrent - Single)	unadjusted	-0.198223	-0.320971	-0.0754737	0.00155013	59	32	27	difference
 Hudson FST (Recurrent - Single)	covariate-adjusted	-0.225188	-0.385733	-0.0646428	0.00597436	59	32	27	difference
 Hudson FST (Recurrent - Single)	matched (length+AF)	-0.197842	-0.349169	-0.0646269	0.0131987	32	16	16	difference
