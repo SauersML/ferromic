@@ -25,7 +25,8 @@ from collections import defaultdict
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from polarize_v2_experiment import call_relative, DEPTH, OUTGROUPS  # noqa: E402
+from polarize_v2_experiment import (  # noqa: E402
+    call_relative, DEPTH, OUTGROUPS, build_intervals, dominant_by_interval, load_catalog)
 
 REPO = os.path.dirname(HERE)
 DATA = os.path.join(REPO, "data")
@@ -62,6 +63,24 @@ def literature_override(chrom, start, end):
 def load_raw(tag, margin, flank):
     p = os.path.join(DATA, f"_polarity_raw_{tag}_m{margin}_f{flank}.json")
     return json.load(open(p)) if os.path.exists(p) else {}
+
+
+def scan_chain_dir(aln_dir, margin, flank, trim_frac=0.10, trim_max=20000):
+    """Self-contained scan: parse the chain files in aln_dir and return
+    {outgroup -> {locus_key -> {interior/lflank/rflank: {chain_id:[strand,bp]}}}}.
+    Used so CI can produce the table directly from downloaded chains (no cache)."""
+    cat = load_catalog()
+    intervals = build_intervals(cat, margin, flank, trim_frac, trim_max)
+    raw = {}
+    for og in OUTGROUPS:
+        path = os.path.join(aln_dir, og["chain"])
+        if not os.path.exists(path):
+            continue
+        dom = dominant_by_interval(path, intervals)
+        d = raw.setdefault(og["name"], {})
+        for (key, tagn), chains in dom.items():
+            d.setdefault(key, {})[tagn] = chains
+    return raw
 
 
 def per_outgroup_call(rbest, allch, og, key):
@@ -121,13 +140,19 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--margin", type=int, default=10000)
     ap.add_argument("--flank", type=int, default=100000)
+    ap.add_argument("--aln-rbest", help="dir of reciprocal-best chains (scan directly)")
+    ap.add_argument("--aln-all", help="dir of all-chains (scan directly, fallback coverage)")
     ap.add_argument("--out", default=os.path.join(DATA, "inversion_polarity_v2.tsv"))
     args = ap.parse_args()
 
-    rbest = load_raw("aln_rbest", args.margin, args.flank)
-    allch = load_raw("aln", args.margin, args.flank)
+    if args.aln_rbest or args.aln_all:
+        rbest = scan_chain_dir(args.aln_rbest, args.margin, args.flank) if args.aln_rbest else {}
+        allch = scan_chain_dir(args.aln_all, args.margin, args.flank) if args.aln_all else {}
+    else:
+        rbest = load_raw("aln_rbest", args.margin, args.flank)
+        allch = load_raw("aln", args.margin, args.flank)
     if not rbest and not allch:
-        sys.exit("No raw caches found; run the scan first.")
+        sys.exit("No chains: pass --aln-rbest/--aln-all or provide cached raw scans.")
 
     # metadata (coords, orig_id, recurrence, sources, inv_af_ref) from existing table
     meta = {r["inv_id"]: r for r in csv.DictReader(
