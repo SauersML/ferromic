@@ -250,7 +250,11 @@ SPECS = [
         ],
     },
     {
-        "path": "best_tagging_snps_qvalues.tsv", "sep": "\t",
+        # Produced by find_tagging_snps.py, which is itself is_flipped-aware (it
+        # swaps group0/group1 at read time), so the committed table is ALREADY
+        # polarized. Do NOT swap/negate here or flipped loci would be double-flipped
+        # back to raw. Kept for column documentation / verification only.
+        "path": "best_tagging_snps_qvalues.tsv", "sep": "\t", "regenerated": True,
         "key": {"type": "region_str", "col": "region"},
         "swap": [("REF_freq_direct", "REF_freq_inverted"),
                  ("ALT_freq_direct", "ALT_freq_inverted")],
@@ -274,9 +278,25 @@ def sha(path):
     return h.hexdigest()
 
 
+# A biallelic genotype call: two alleles in {0,1} joined by '|' (phased) or '/'
+# (unphased), optionally followed by a suffix such as '_lowconf'. This deliberately
+# excludes ArbiGent multi-allelic / copy-number codes ('0021', '2100' — no separator
+# at position 1) and text codes ('noreads', 'idup_hom').
+_BIALLELIC_GT_RE = re.compile(r"[01][|/][01]")
+
+
 def swap_genotype_alleles(cell):
-    """Swap 0<->1 in a phased genotype cell like '1|0' or '0|1_lowconf'."""
+    """Swap 0<->1 in a *biallelic* genotype cell ('1|0'->'0|1', '0/0'->'1/1',
+    '0|1_lowconf'->'1|0_lowconf').
+
+    Only the leading 'A<sep>B' allele pair is swapped; any suffix is preserved.
+    Non-biallelic cells are returned UNCHANGED: ArbiGent multi-allelic / copy-number
+    codes ('0021', '2100', ...) and text codes ('noreads', 'idup_hom', ...) are not
+    0/1 orientation calls, and the old blind ``i < 3`` character swap corrupted them
+    (e.g. '0021' -> '1121')."""
     s = str(cell)
+    if not _BIALLELIC_GT_RE.match(s):
+        return s
     out = []
     for i, ch in enumerate(s):
         if i < 3 and ch == "0":
