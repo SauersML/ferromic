@@ -28,11 +28,27 @@ Produced by `stats/polarize_orientation.py` (multi-outgroup, **no-drop**):
    root by **phylogenetically weighted parsimony** across outgroups. Congruent
    outgroups → high/moderate confidence; discordant outgroups (a positive
    recurrence / ILS signal, e.g. 17q21.31, 8p23.1) are **flagged**, not dropped.
-   Loci with no usable ape orthology get `confidence=assumed` (reference assumed
-   ancestral) — the only fallback, and it is labelled as such.
 
-Key column: **`flip_ref_polarity`** — `1` when the hg38 reference orientation is
-itself the derived one, so the raw `0/1` encoding must be swapped.
+2. **Gold-standard overlay** (`stats/integrate_gold_polarity.py`): chain synteny is
+   only ~39% concordant with the deep-outgroup direction, so paralog-immune
+   assembly/Strand-seq evidence is layered on top by fixed precedence —
+   2025 Complete Ape Genomes T2T (`data/apes2025_t2t_polarity.tsv`,
+   `stats/polarize_apes2025_t2t.py`), Porubsky 2020 Strand-seq + deep-outgroup
+   (`data/strandseq_polarity.tsv`, `stats/polarize_strandseq.py`). The overlay is
+   **idempotent**, and CI (`ancestral_orientation.yml`) runs it right after the v2
+   caller so regeneration reproduces — never reverts — the gold source of truth.
+
+Key columns:
+- **`flip_ref_polarity`** — `1` when the hg38 reference orientation is itself the
+  derived one, so the raw `0/1` encoding must be swapped.
+- **`evidence_tier`** — `gold_t2t_apes` > `gold_deepOG` > `gold_strandseq` >
+  `recurrent_{t2t_apes,strandseq}` > `synteny`.
+- **`resolution_status`** — honest trust bucket for EVERY locus (quarantine, never a
+  silent reference-ancestral fallback): `resolved` (gold assembly/Strand-seq),
+  `recurrent` (toggles between orientations), `provisional` (chain-synteny only — low
+  trust), `unresolved` (no ape orthology — not polarizable by any outgroup method).
+  Only `resolved` + `recurrent` carry trustworthy polarity; `provisional`/`unresolved`
+  flips are best-effort estimates and should be treated as such downstream.
 
 ## Where the flip is applied
 
