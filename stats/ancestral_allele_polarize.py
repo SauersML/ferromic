@@ -5,7 +5,7 @@ For each SNP in tight LD with the inversion, the orientation linked to the ANCES
 import csv, os, re, subprocess, sys, math
 WD="/projects/standard/hsiehph/sauer354/di/polarize"
 VD="/projects/standard/hsiehph/sauer354/di/vcfs"
-FLANK=20000; MIN_TAG_R=0.6; MIN_SAMPLES=12
+FLANK=100000; MIN_TAG_R=0.6; MIN_SAMPLES=12
 
 def vcf_path(ch): return f"{VD}/{ch}.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz"
 
