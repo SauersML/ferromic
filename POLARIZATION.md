@@ -50,6 +50,27 @@ Key columns:
   Only `resolved` + `recurrent` carry trustworthy polarity; `provisional`/`unresolved`
   flips are best-effort estimates and should be treated as such downstream.
 
+## The remaining gap (`provisional` + `unresolved`) — what has been exhausted
+
+The 212 non-gold loci (38 of the 93-locus consensus set) have been checked against every
+tractable orthogonal source, none of which resolves them:
+
+- **2025 Complete Ape Genomes T2T (6 species, SYRI/PAV)** — no overlapping ape inversion
+  call at these loci, by either reciprocal (>0.3) **or containment** (smaller feature ≥50%
+  covered, deep-ape HOM) overlap. Containment re-check added **0** loci.
+- **Strand-seq (Porubsky 2020, n=1,069)** — no clean deep-outgroup signal.
+- **Yunis & Prakash cytogenetic inversions (supp. table)** — only Mb-scale *species-fixed*
+  pericentric inversions; not applicable to these (mostly <100 kb) human polymorphisms.
+- **Chain synteny (v2)** — paralog-confounded; only ~39% concordant with the deep-gold
+  direction, so it is reported as `provisional`, never trusted as gold.
+
+These loci are mostly small/young human-specific inversions and SD-rich regions where no
+ape assembly carries a resolvable orthologous inversion. The only remaining rigorous method
+is **direct breakpoint-flanking unique-anchor alignment to the six ape T2T assemblies**
+(assembly-resolved breakpoints), which requires the assemblies + an aligner on compute
+(MSI `acn116`); it is not runnable in the CI/local environment. Until then these stay
+honestly quarantined rather than assigned fabricated confidence.
+
 ## Where the flip is applied
 
 The Rust pipeline (`src/`) and the per-CDS `.phy` files remain in the **raw
