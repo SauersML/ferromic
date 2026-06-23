@@ -21,6 +21,7 @@ on:
       - 'stats/integrate_gold_polarity.py'
       - 'data/apes2025_t2t_polarity.tsv'
       - 'data/strandseq_polarity.tsv'
+      - 'data/ancestral_allele_polarity.tsv'
 
 permissions:
   contents: write

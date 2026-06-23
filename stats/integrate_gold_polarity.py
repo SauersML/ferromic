@@ -102,8 +102,10 @@ def tier_for(t2t, ss, aa=None):
         return "gold_t2t_apes", t2t.get("t2t_flip"), "moderate"
     if ss and clean_deep_ss(ss):
         return "gold_strandseq", ss.get("strandseq_flip"), "moderate"
-    if aa and aa.get("confidence") in ("high", "moderate") and aa.get("aa_flip") in ("0", "1"):
-        return "gold_ancestral_allele", aa.get("aa_flip"), aa.get("confidence")
+    if aa and aa.get("confidence") == "high" and aa.get("aa_flip") in ("0", "1"):
+        # high-conf only: 88% vs published gold (gold-equivalent). AA-moderate is just
+        # ~69% on a small sample, so it is NOT promoted to gold -- quality over coverage.
+        return "gold_ancestral_allele", aa.get("aa_flip"), "high"
     return "synteny", None, None
 
 
