@@ -52,6 +52,13 @@ PLINK_PREFIX = "subset"
 OUTPUT_FILE = "imputed_inversion_dosages.tsv"
 TEMP_RESULT_DIR = "temp_dosages" 
 MISSING_VALUE_CODE = -127
+DOSAGE_MIN = 0.0         # Imputed dosages must lie within the biologically valid range [0, 2].
+DOSAGE_MAX = 2.0
+# A model is only run when at least one predictor SNP carries genotype coverage. A SNP column
+# counts as "covered" when its non-missing call rate is >= MIN_SNP_CALL_RATE. Without this guard
+# an all-missing matrix is mean-filled (undefined column means collapse to 0), and the model
+# predicts from an all-zero vector, emitting impossible dosages (e.g. negative or >2).
+MIN_SNP_CALL_RATE = 0.01
 BATCH_SIZE = 10000       # Process 10k samples at a time
 FULL_LOAD_THRESHOLD = 250 * 1024 * 1024  # If matrix < 250MB, load fully into RAM for speed
 
@@ -227,7 +234,30 @@ def load_ancestry_map(sample_ids: List[str]) -> Tuple[np.ndarray, Dict[str, int]
         
     return np.array(aligned_codes, dtype=np.int8), mapping
 
-def compute_ancestry_means(X: np.ndarray, 
+def assess_coverage(X: np.ndarray, min_snp_call_rate: float = MIN_SNP_CALL_RATE):
+    """Per-column genotype coverage for a predictor matrix.
+
+    Returns ``(covered_mask, n_covered, overall_call_rate)``:
+      * ``covered_mask``      - bool array, one entry per SNP column, ``True`` when that
+                                column's non-missing call rate is >= ``min_snp_call_rate``.
+      * ``n_covered``         - number of covered columns.
+      * ``overall_call_rate`` - fraction of non-missing entries over the whole matrix.
+
+    A model with ``n_covered == 0`` has no usable predictor and must fail closed rather
+    than predicting from an all-zero (mean-filled) vector.
+    """
+    n_samples, n_snps = X.shape
+    if n_samples == 0 or n_snps == 0:
+        return np.zeros(n_snps, dtype=bool), 0, 0.0
+    present = (X != MISSING_VALUE_CODE)
+    col_call_rate = present.sum(axis=0) / float(n_samples)
+    covered_mask = col_call_rate >= min_snp_call_rate
+    n_covered = int(covered_mask.sum())
+    overall = float(present.sum()) / float(present.size)
+    return covered_mask, n_covered, overall
+
+
+def compute_ancestry_means(X: np.ndarray,
                           ancestry_indices: np.ndarray, 
                           n_codes: int) -> np.ndarray:
     """
@@ -402,6 +432,20 @@ def _process_model_batched(args):
         if n_samples != expected_count:
             return {"model": model_name, "status": "error", "error": f"Sample mismatch: {n_samples} vs {expected_count}"}
 
+        # --- COVERAGE GUARD (fail closed on zero coverage) ---
+        covered_mask, n_covered, overall_cov = assess_coverage(X_full)
+        if n_covered == 0:
+            print(
+                f"[SKIP] {model_name}: zero predictor coverage "
+                f"(n_snps={n_snps}, overall_call_rate={overall_cov:.4f}); not imputing.",
+                flush=True,
+            )
+            return {
+                "model": model_name,
+                "status": "skipped_low_coverage",
+                "error": f"zero predictor coverage (n_snps={n_snps}, overall_call_rate={overall_cov:.4f})",
+            }
+
         # --- DIAGNOSTICS STEP ---
         snp_ids = load_snp_metadata(model_name)
         log_snp_diagnostics(X_full, ancestry_indices, model_name, snp_ids, inv_anc_map)
@@ -411,27 +455,39 @@ def _process_model_batched(args):
         
         # --- STEP 2: Batched Inference ---
         batch_predictions = []
-        
+        n_clamped = 0
+
         for i in range(0, n_samples, BATCH_SIZE):
             end = min(i + BATCH_SIZE, n_samples)
-            
+
             X_batch = X_full[i:end].astype(np.float32, copy=True)
             batch_anc = ancestry_indices[i:end]
-            
+
             missing_mask = (X_batch == MISSING_VALUE_CODE)
-            
+
             if np.any(missing_mask):
                 fill_values = ancestry_means[batch_anc]
                 X_batch[missing_mask] = fill_values[missing_mask]
-            
-            preds = clf.predict(X_batch)
-            batch_predictions.append(preds.astype(np.float32))
-            
-            del X_batch, missing_mask, preds
-        
+
+            preds = clf.predict(X_batch).astype(np.float32).reshape(-1)
+            # Constrain to the valid dosage range [0, 2]; a model can extrapolate outside it
+            # (especially near zero coverage), and impossible dosages must never be emitted.
+            clamped = np.clip(preds, DOSAGE_MIN, DOSAGE_MAX)
+            n_clamped += int(np.count_nonzero(clamped != preds))
+            batch_predictions.append(clamped)
+
+            del X_batch, missing_mask, preds, clamped
+
         full_result = np.concatenate(batch_predictions)
         np.save(out_file, full_result)
-        
+        res["n_clamped"] = n_clamped
+        if n_clamped:
+            print(
+                f"[CLAMP] {model_name}: clamped {n_clamped} out-of-range prediction(s) into "
+                f"[{DOSAGE_MIN}, {DOSAGE_MAX}].",
+                flush=True,
+            )
+
         del clf, X_full, full_result
         gc.collect()
         

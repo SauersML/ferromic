@@ -151,6 +151,24 @@ def consolidate_and_select(df, inversions, cache_root, alpha=0.05,
             )
         else:
             df["P_LRT_Overall"] = np.nan
+        # Robustness for already-collided input: if the primary table was produced by an
+        # earlier default-suffix merge it carries P_Value_x/P_Value_y (and P_Source_x/_y)
+        # with no canonical column. Reconstruct the canonical column by coalescing the pair
+        # (prefer the left/_x value) rather than fabricating an all-NaN column, which would
+        # drop every valid score/bootstrap test from the global BH correction.
+        def _coalesce_collided(frame, base):
+            x, y = f"{base}_x", f"{base}_y"
+            if base not in frame.columns and (x in frame.columns or y in frame.columns):
+                left = frame[x] if x in frame.columns else pd.Series(np.nan, index=frame.index)
+                right = frame[y] if y in frame.columns else pd.Series(np.nan, index=frame.index)
+                frame[base] = left.where(left.notna(), right)
+            # Drop the collided pair so downstream code never reads a stale suffixed column.
+            frame.drop(columns=[c for c in (x, y) if c in frame.columns], inplace=True)
+
+        _coalesce_collided(df, "P_Value")
+        _coalesce_collided(df, "P_Source")
+        _coalesce_collided(df, "P_Method")
+        _coalesce_collided(df, "P_Valid")
         if "P_Value" not in df.columns:
             df["P_Value"] = np.nan
         if "P_Source" not in df.columns:

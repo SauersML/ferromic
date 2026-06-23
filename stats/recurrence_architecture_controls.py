@@ -102,6 +102,27 @@ def _zscore(s: pd.Series) -> pd.Series:
     return pd.Series((x - mu) / sd, index=s.index)
 
 
+def union_segregating_from_tracks(g0, g1) -> int:
+    """Count positions segregating in *either* orientation, as a UNION (no double count).
+
+    ``g0``/``g1`` are per-position tracks for the two orientations: ``np.nan`` marks an
+    uncallable base and a finite value ``> 0`` marks a segregating base (e.g. per-site pi).
+    A position segregating in BOTH orientations contributes once, not twice -- the previous
+    pooled ``seg0 + seg1`` double-counted shared positions, inflating the SNP-density
+    covariate with exactly the cross-orientation sharing that co-varies with recurrence.
+
+    Returns the number of positions where either orientation is callable and segregating.
+    Raises ValueError if the two tracks have different lengths.
+    """
+    a = np.asarray(g0, dtype=float)
+    b = np.asarray(g1, dtype=float)
+    if a.shape != b.shape:
+        raise ValueError(f"track length mismatch: {a.shape} vs {b.shape}")
+    seg0 = np.isfinite(a) & (a > 0.0)
+    seg1 = np.isfinite(b) & (b > 0.0)
+    return int(np.count_nonzero(seg0 | seg1))
+
+
 def choose_floor(pi_all: np.ndarray) -> float:
     pos = pi_all[np.isfinite(pi_all) & (pi_all > 0)]
     if pos.size == 0:
@@ -182,9 +203,14 @@ def load_loci() -> pd.DataFrame:
     best["inv_af"]     = pd.to_numeric(best["Inverted_AF"], errors="coerce")
     span_kbp           = (best["region_end"] - best["region_start"]).clip(lower=1) / 1000.0
     best["span_kbp"]   = span_kbp
+    # NOTE: output.csv exposes only the per-orientation aggregate counts seg0/seg1, NOT the
+    # per-position pi tracks, so the true union of segregating positions cannot be recovered
+    # here (a position segregating in both orientations is counted once per orientation).
+    # When per-position tracks are available, use union_segregating_from_tracks() instead of
+    # this sum to avoid double-counting cross-orientation shared sites.
     seg_tot            = pd.to_numeric(best["seg0"], errors="coerce").fillna(0) + \
                          pd.to_numeric(best["seg1"], errors="coerce").fillna(0)
-    best["snp_density"] = seg_tot / span_kbp   # segregating sites per kbp (both orientations)
+    best["snp_density"] = seg_tot / span_kbp   # per-orientation segregating sites per kbp (pooled)
 
     # divergence outcomes
     best["fst"]    = pd.to_numeric(best["fst"], errors="coerce")

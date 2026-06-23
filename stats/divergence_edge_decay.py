@@ -170,12 +170,43 @@ def load_per_site_components() -> dict[tuple[str, int, int], dict[str, np.ndarra
     return out
 
 
-def _window_mean(values: np.ndarray, valid: np.ndarray) -> float:
-    """Mean of per-site value over informative sites (finite dxy denominator)."""
+def _window_mean_snpcond(values: np.ndarray, valid: np.ndarray) -> float:
+    """SNP-conditioned mean: average of per-site value over informative (variant) sites only.
+
+    This is the *per-segregating-site* estimand. It answers "given a variable site, how
+    divergent is it" and is intentionally blind to how many callable bases separate variants.
+    """
     m = valid & np.isfinite(values)
     if not m.any():
         return np.nan
     return float(np.mean(values[m]))
+
+
+def _window_mean_per_base(values: np.ndarray, callable_mask) -> float:
+    """Per-callable-base mean divergence (standard d_xy / d_a style normalization).
+
+    Invariant callable bases contribute 0 to the numerator and 1 to the denominator;
+    uncallable bases (outside ``callable_mask``) contribute to neither. Averaging over
+    *variant sites only* (``_window_mean_snpcond``) inflates divergence by roughly the
+    inverse SNP density, which is the bug this function corrects.
+
+    Returns NaN when there are no callable bases (or ``callable_mask`` is None).
+    """
+    if callable_mask is None:
+        return np.nan
+    cm = np.asarray(callable_mask, dtype=bool)
+    n_callable = int(cm.sum())
+    if n_callable == 0:
+        return np.nan
+    vals = np.asarray(values, dtype=float)
+    contributing = cm & np.isfinite(vals)
+    total = float(np.sum(vals[contributing]))
+    return total / n_callable
+
+
+# Backwards-compatible alias: existing callers expect the SNP-conditioned behaviour.
+def _window_mean(values: np.ndarray, valid: np.ndarray) -> float:
+    return _window_mean_snpcond(values, valid)
 
 
 def middle_vs_flank(components, recmap) -> pd.DataFrame:
@@ -190,6 +221,9 @@ def middle_vs_flank(components, recmap) -> pd.DataFrame:
             continue
         # informative = finite, positive dxy denominator (matches ratio-of-sums logic)
         valid = np.isfinite(dxy) & (dxy > EPS_DENOM)
+        # callable = finite dxy denominator (invariant callable bases have dxy == 0 but are
+        # still real zero-divergence bases for the per-callable-base estimand).
+        callable_mask = np.isfinite(dxy)
 
         start_mid = (L - MIDDLE_SIZE) // 2
         end_mid = start_mid + MIDDLE_SIZE
@@ -203,20 +237,35 @@ def middle_vs_flank(components, recmap) -> pd.DataFrame:
         rows.append({
             "chrom": key[0], "start": key[1], "end": key[2],
             "recurrence_flag": flag, "recurrence_label": label,
-            "da_flank": _window_mean(da[flank_idx], valid[flank_idx]),
-            "da_middle": _window_mean(da[mid_idx], valid[mid_idx]),
-            "dxy_flank": _window_mean(dxy[flank_idx], valid[flank_idx]),
-            "dxy_middle": _window_mean(dxy[mid_idx], valid[mid_idx]),
+            # SNP-conditioned (per variant site) summaries.
+            "da_flank": _window_mean_snpcond(da[flank_idx], valid[flank_idx]),
+            "da_middle": _window_mean_snpcond(da[mid_idx], valid[mid_idx]),
+            "dxy_flank": _window_mean_snpcond(dxy[flank_idx], valid[flank_idx]),
+            "dxy_middle": _window_mean_snpcond(dxy[mid_idx], valid[mid_idx]),
+            # Per-callable-base summaries (standard d_xy / d_a normalization).
+            "da_flank_per_base": _window_mean_per_base(da[flank_idx], callable_mask[flank_idx]),
+            "da_middle_per_base": _window_mean_per_base(da[mid_idx], callable_mask[mid_idx]),
+            "dxy_flank_per_base": _window_mean_per_base(dxy[flank_idx], callable_mask[flank_idx]),
+            "dxy_middle_per_base": _window_mean_per_base(dxy[mid_idx], callable_mask[mid_idx]),
         })
     df = pd.DataFrame(rows)
     if not df.empty:
         df["da_flank_minus_middle"] = df["da_flank"] - df["da_middle"]
         df["dxy_flank_minus_middle"] = df["dxy_flank"] - df["dxy_middle"]
+        df["da_flank_minus_middle_per_base"] = df["da_flank_per_base"] - df["da_middle_per_base"]
+        df["dxy_flank_minus_middle_per_base"] = df["dxy_flank_per_base"] - df["dxy_middle_per_base"]
     return df
 
 
-def folded_spearman(values: np.ndarray, valid: np.ndarray) -> tuple[float | None, float | None, int]:
-    """Two-sided Spearman of per-site value vs distance from nearest edge (folded)."""
+def folded_spearman(values: np.ndarray, valid: np.ndarray, callable_mask=None) -> tuple[float | None, float | None, int]:
+    """Two-sided Spearman of per-site value vs distance from nearest edge (folded).
+
+    When ``callable_mask`` is None the per-bin reduction is SNP-conditioned (mean over
+    variant values in the bin). When ``callable_mask`` is provided the per-bin reduction is
+    per callable base: sum of values over callable+finite positions divided by the number of
+    callable bases in the bin, so a decaying variant *density* on a fully-callable region is
+    detected (the SNP-conditioned view misses it).
+    """
     length = values.size
     if length <= MAX_DECAY_SPAN:
         return None, None, 0
@@ -225,17 +274,30 @@ def folded_spearman(values: np.ndarray, valid: np.ndarray) -> tuple[float | None
     if usable < 2 * BIN_SIZE:
         return None, None, 0
 
-    vals = values.copy()
-    vals[~valid] = np.nan
-    left = vals[:usable]
-    right = vals[-usable:][::-1]
+    vals = np.asarray(values, dtype=float).copy()
     try:
         with np.errstate(invalid="ignore"):
             import warnings
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", category=RuntimeWarning)
-                left_bins = np.nanmean(left.reshape(-1, BIN_SIZE), axis=1)
-                right_bins = np.nanmean(right.reshape(-1, BIN_SIZE), axis=1)
+                if callable_mask is None:
+                    vals[~valid] = np.nan
+                    left = vals[:usable]
+                    right = vals[-usable:][::-1]
+                    left_bins = np.nanmean(left.reshape(-1, BIN_SIZE), axis=1)
+                    right_bins = np.nanmean(right.reshape(-1, BIN_SIZE), axis=1)
+                else:
+                    cm = np.asarray(callable_mask, dtype=bool)
+                    num = np.where(cm & np.isfinite(vals), vals, 0.0)
+                    den = cm.astype(float)
+
+                    def _per_base_bins(num_arr, den_arr):
+                        ns = num_arr.reshape(-1, BIN_SIZE).sum(axis=1)
+                        ds = den_arr.reshape(-1, BIN_SIZE).sum(axis=1)
+                        return np.where(ds > 0, ns / ds, np.nan)
+
+                    left_bins = _per_base_bins(num[:usable], den[:usable])
+                    right_bins = _per_base_bins(num[-usable:][::-1], den[-usable:][::-1])
                 folded = np.nanmean(np.vstack([left_bins, right_bins]), axis=0)
     except ValueError:
         return None, None, 0
@@ -260,23 +322,31 @@ def edge_decay_spearman(components, recmap) -> pd.DataFrame:
         flag, label = recmap[key]
         rec = {"chrom": key[0], "start": key[1], "end": key[2],
                "recurrence_flag": flag, "recurrence_label": label}
+        # callable = finite dxy denominator; invariant callable bases contribute 0 per base.
+        callable_mask = np.isfinite(dxy)
         for metric, arr in [("da", da), ("dxy", dxy)]:
-            # Fold over all sites where the metric is defined (finite), matching the
-            # FST edge-decay treatment of the summary track (no extra masking).
+            # SNP-conditioned: fold over all sites where the metric is defined (finite),
+            # matching the FST edge-decay treatment of the summary track (no extra masking).
             rho, p, bins_used = folded_spearman(arr, np.isfinite(arr))
             rec[f"{metric}_rho"] = rho
             rec[f"{metric}_p"] = p
             rec[f"{metric}_bins_used"] = bins_used
+            # Per-callable-base: detects decay in variant density over callable bases.
+            rho_pb, p_pb, bins_pb = folded_spearman(arr, np.isfinite(arr), callable_mask)
+            rec[f"{metric}_rho_per_base"] = rho_pb
+            rec[f"{metric}_p_per_base"] = p_pb
+            rec[f"{metric}_bins_used_per_base"] = bins_pb
         rows.append(rec)
     df = pd.DataFrame(rows)
     for metric in ["da", "dxy"]:
-        col = f"{metric}_p"
-        if col in df:
-            mask = df[col].notna()
-            df[f"{metric}_q"] = np.nan
-            if mask.any():
-                _, q, _, _ = multipletests(df.loc[mask, col].to_numpy(), method="fdr_bh")
-                df.loc[mask, f"{metric}_q"] = q
+        for suffix in ("", "_per_base"):
+            col = f"{metric}_p{suffix}"
+            if col in df:
+                mask = df[col].notna()
+                df[f"{metric}_q{suffix}"] = np.nan
+                if mask.any():
+                    _, q, _, _ = multipletests(df.loc[mask, col].to_numpy(), method="fdr_bh")
+                    df.loc[mask, f"{metric}_q{suffix}"] = q
     return df
 
 

@@ -31,9 +31,16 @@ from scipy.stats import wilcoxon, pearsonr
 import traceback
 import requests
 
-url = "https://raw.githubusercontent.com/SauersML/ferromic/refs/heads/main/data/passed_snvs.txt"
-with open("passed_snvs.txt", "wb") as f:
-    f.write(requests.get(url).content)
+PASSED_SNVS_URL = "https://raw.githubusercontent.com/SauersML/ferromic/refs/heads/main/data/passed_snvs.txt"
+PASSED_SNVS_PATH = "passed_snvs.txt"
+
+
+def fetch_passed_snvs(url: str = PASSED_SNVS_URL, dest: str = PASSED_SNVS_PATH) -> str:
+    """Download the passed-SNV whitelist. Called from main() -- NOT at import time, so that
+    merely importing this module performs no network I/O and never overwrites a local file."""
+    with open(dest, "wb") as f:
+        f.write(requests.get(url).content)
+    return dest
 
 # TARGET="$HOME/.pytargets/sklearn171" && python3 -m pip install --upgrade --no-cache-dir --ignore-installed   --target "$TARGET" "scikit-learn>=1.6,<2" && PYTHONPATH="$TARGET:$PYTHONPATH" python3 -c 'import sklearn,sys; print(sklearn.__version__, "->", sklearn.__file__)' && PYTHONPATH="$TARGET:$PYTHONPATH" python3 /home/hsiehph/sauer354/di/ferromic/linked.py
 
@@ -145,28 +152,80 @@ def create_synthetic_data(X_hap1: np.ndarray, X_hap2: np.ndarray, raw_gts: pd.Se
                     parent_map.append(parents)
     else:  # Augmentation Mode
         n_unique_0, n_unique_1 = len(unique_hap_pool_0), len(unique_hap_pool_1)
+        # Record BOTH parent indices for every synthetic row (was discarded before): the
+        # parent map is what lets build_family_groups keep a synthetic descendant in the
+        # same CV fold as its real parents and avoid model-selection leakage.
         if n_unique_1 >= 2:
             for i, j in itertools.combinations_with_replacement(range(n_unique_1), 2):
-                h1, _ = unique_hap_pool_1[i]; h2, _ = unique_hap_pool_1[j]
+                h1, p1 = unique_hap_pool_1[i]; h2, p2 = unique_hap_pool_1[j]
                 new_diploid = h1 + h2
                 if tuple(new_diploid) not in existing_genomes_set:
-                    X_synth.append(new_diploid); y_synth.append(2)
+                    X_synth.append(new_diploid); y_synth.append(2); parent_map.append([p1, p2])
         if n_unique_0 >= 2:
             for i, j in itertools.combinations_with_replacement(range(n_unique_0), 2):
-                h1, _ = unique_hap_pool_0[i]; h2, _ = unique_hap_pool_0[j]
+                h1, p1 = unique_hap_pool_0[i]; h2, p2 = unique_hap_pool_0[j]
                 new_diploid = h1 + h2
                 if tuple(new_diploid) not in existing_genomes_set:
-                    X_synth.append(new_diploid); y_synth.append(0)
+                    X_synth.append(new_diploid); y_synth.append(0); parent_map.append([p1, p2])
         if n_unique_0 >= 1 and n_unique_1 >= 1:
             for i, j in itertools.product(range(n_unique_0), range(n_unique_1)):
-                h0, _ = unique_hap_pool_0[i]; h1, _ = unique_hap_pool_1[j]
+                h0, p0 = unique_hap_pool_0[i]; h1, p1 = unique_hap_pool_1[j]
                 new_diploid = h0 + h1
                 if tuple(new_diploid) not in existing_genomes_set:
-                    X_synth.append(new_diploid); y_synth.append(1)
+                    X_synth.append(new_diploid); y_synth.append(1); parent_map.append([p0, p1])
 
     if not X_synth:
         return None, None, None
     return np.array(X_synth), np.array(y_synth), parent_map
+
+
+def build_family_groups(real_indices, parent_map):
+    """Group labels that keep each synthetic row in the same CV fold as its real parents.
+
+    A synthetic genotype is built from two real parent haplotypes. If a synthetic
+    descendant and one of its parents land in different inner-CV folds, hyperparameter
+    selection leaks. We assign group labels via a union-find over the real sample indices:
+    any two real samples that share a synthetic child are merged into one family, and each
+    synthetic row inherits that family's label.
+
+    Args:
+        real_indices: 1-D array of the real sample indices, in row order, that head the
+            training matrix (these rows come first).
+        parent_map: list of ``[parent_a, parent_b]`` real-sample-index pairs, one per
+            synthetic row, in the row order the synthetic rows are appended after the reals.
+
+    Returns:
+        np.ndarray of length ``len(real_indices) + len(parent_map)`` with an integer family
+        label per row: first the real rows (in ``real_indices`` order), then the synthetic
+        rows (in ``parent_map`` order).
+    """
+    real_indices = np.asarray(real_indices)
+    uf = {int(v): int(v) for v in real_indices.tolist()}
+
+    def find(x):
+        x = int(x)
+        if x not in uf:
+            uf[x] = x
+        root = x
+        while uf[root] != root:
+            root = uf[root]
+        while uf[x] != root:  # path compression
+            uf[x], x = root, uf[x]
+        return root
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            uf[ra] = rb
+
+    for pair in parent_map:
+        ps = [int(p) for p in pair]
+        for p in ps[1:]:
+            union(ps[0], p)
+
+    real_groups = [find(v) for v in real_indices.tolist()]
+    synth_groups = [find(int(pair[0])) for pair in parent_map]
+    return np.array(real_groups + synth_groups)
 
 def extract_haplotype_data_for_locus(inversion_job: dict, allowed_snps_dict: dict):
     inversion_id = inversion_job.get('orig_ID', 'Unknown_ID')
@@ -397,19 +456,30 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int, output_
             # Per-fold RESCUE (top-up any class in train to at least 2)
             class_counts_train = Counter(y_full[train_real_idx])
             needed_counts = {c: max(0, 2 - class_counts_train.get(c, 0)) for c in [0, 1, 2]}
-            X_rescue, y_rescue, _ = (None, None, None)
+            X_rescue, y_rescue, rescue_parents = (None, None, [])
             if any(v > 0 for v in needed_counts.values()):
-                X_rescue, y_rescue, _ = _build_fold_synth(target_counts=needed_counts)
+                X_rescue, y_rescue, rescue_parents = _build_fold_synth(target_counts=needed_counts)
+                rescue_parents = rescue_parents or []
 
             # Per-fold AUGMENTATION (novel combos from train parents)
-            X_aug, y_aug, _ = _build_fold_synth(target_counts=None)
+            X_aug, y_aug, aug_parents = _build_fold_synth(target_counts=None)
+            aug_parents = aug_parents or []
 
-            # Assemble TRAIN/TEST sets (no synth in TEST)
+            # Assemble TRAIN/TEST sets (no synth in TEST). Track the synthetic parent map in
+            # the SAME row order as the stack (reals, then rescue, then augmentation) so the
+            # family-group labels line up with X_train.
             X_train = X_full[train_real_idx]; y_train = y_full[train_real_idx]
+            synth_parent_map = []
             if X_rescue is not None:
                 X_train = np.vstack([X_train, X_rescue]); y_train = np.concatenate([y_train, y_rescue])
+                synth_parent_map.extend(rescue_parents)
             if X_aug is not None:
                 X_train = np.vstack([X_train, X_aug]);    y_train = np.concatenate([y_train, y_aug])
+                synth_parent_map.extend(aug_parents)
+
+            # Family labels keep each synthetic descendant in the same inner fold as its real
+            # parents (prevents model-selection leakage).
+            train_groups = build_family_groups(train_real_idx, synth_parent_map)
 
             X_test = X_full[test_idx]; y_test = y_full[test_idx]
 
@@ -425,7 +495,9 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int, output_
                 p=sample_weights / np.sum(sample_weights)
             )
             X_train_resampled = X_train[resampled_indices]; y_train_resampled = y_train[resampled_indices]
-            resampled_groups = resampled_indices
+            # Carry family labels through the bootstrap so grouped inner-CV never splits a
+            # synthetic descendant from its real parents.
+            resampled_groups = train_groups[resampled_indices]
             train_min_class_count = min(Counter(y_train_resampled).values())
             if train_min_class_count < 2:
                 logging.info(f"[{inversion_id}] EVAL fold {fold_idx}/{n_outer_splits}: skipped (post-resample class <2).")
@@ -502,17 +574,22 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int, output_
 
         # -------------------- FINAL MODEL (global) --------------------
         # Augment the final training set as well (allow lowconf parents unconditionally)
-        X_final_aug, y_final_aug, _ = create_synthetic_data(
+        X_final_aug, y_final_aug, final_aug_parents = create_synthetic_data(
             X_hap1, X_hap2, preloaded_data['raw_gts'],
             np.arange(num_real_samples),
             np.ones_like(confidence_mask, dtype=bool),  # allow both high+low as parents
             X_full, target_counts=None
         )
+        final_aug_parents = final_aug_parents or []
         X_final_train_full = X_full
         y_final_train_full = y_full
         if X_final_aug is not None:
             X_final_train_full = np.vstack([X_full, X_final_aug])
             y_final_train_full = np.concatenate([y_full, y_final_aug])
+        else:
+            final_aug_parents = []
+        # Family labels for the final training matrix (reals first, then augmentation rows).
+        final_groups_full = build_family_groups(np.arange(num_real_samples), final_aug_parents)
 
         # Balanced bootstrap for final training
         final_sample_weights = compute_sample_weight("balanced", y=y_final_train_full)
@@ -521,7 +598,7 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int, output_
             p=final_sample_weights / np.sum(final_sample_weights)
         )
         X_final_train, y_final_train = X_final_train_full[final_resampled_indices], y_final_train_full[final_resampled_indices]
-        final_groups = final_resampled_indices
+        final_groups = final_groups_full[final_resampled_indices]
 
         final_min_class_count = min(Counter(y_final_train).values())
         if final_min_class_count < 2:
@@ -658,7 +735,7 @@ if __name__ == '__main__':
 
     output_dir = "final_imputation_models"
     ground_truth_file = "../variants_freeze4inv_sv_inv_hg38_processed_arbigent_filtered_manualDotplot_filtered_PAVgenAdded_withInvCategs_syncWithWH.fixedPH.simpleINV.mod.tsv"
-    snp_whitelist_file = "passed_snvs.txt"
+    snp_whitelist_file = fetch_passed_snvs()
 
     os.makedirs(output_dir, exist_ok=True)
     if not os.path.exists(ground_truth_file):
