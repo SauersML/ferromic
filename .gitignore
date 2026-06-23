@@ -69,3 +69,7 @@ data/.polarity_applied
 
 # Large LFS artifact staged locally for pipeline runs; never commit (1.3GB)
 data/phy_outputs.zip
+
+# Polarization v2 local intermediates (regenerated from UCSC chains; do not commit)
+data/_polarity_raw_*.json
+data/_polarity_v2.json
