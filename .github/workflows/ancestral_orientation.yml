@@ -87,7 +87,18 @@ jobs:
           if ! git diff --quiet -- data/inversion_polarity.tsv; then
             git add data/inversion_polarity.tsv
             git commit -m "Refresh inversion_polarity.tsv (multi-outgroup polarization)"
-            git push
+            # Rebase + retry so a concurrent figure-manifest/CDS bot commit landing on
+            # main does not fail this push with a non-fast-forward error (the failure
+            # mode that previously left this workflow red).
+            for attempt in 1 2 3; do
+              git pull --rebase --autostash origin "${GITHUB_REF_NAME:-main}" || true
+              if git push; then
+                echo "Pushed on attempt $attempt"
+                break
+              fi
+              echo "Push attempt $attempt failed; retrying after pull..."
+              sleep 5
+            done
           else
             echo "inversion_polarity.tsv unchanged."
           fi
