@@ -65,11 +65,23 @@ tractable orthogonal source, none of which resolves them:
   direction, so it is reported as `provisional`, never trusted as gold.
 
 These loci are mostly small/young human-specific inversions and SD-rich regions where no
-ape assembly carries a resolvable orthologous inversion. The only remaining rigorous method
-is **direct breakpoint-flanking unique-anchor alignment to the six ape T2T assemblies**
-(assembly-resolved breakpoints), which requires the assemblies + an aligner on compute
-(MSI `acn116`); it is not runnable in the CI/local environment. Until then these stay
-honestly quarantined rather than assigned fabricated confidence.
+ape assembly carries a resolvable orthologous inversion.
+
+- **UCSC 16-way diploid Cactus chains** (all 12 ape haplotypes, hg38-referenced;
+  `stats/polarize_cactus_apes.py`) were downloaded and run — they cover 336/399 loci, but
+  agree with the Strand-seq gold standard only **~50%** even for high-confidence unanimous
+  calls. Precomputed chains get forced onto one paralog copy across inversion junctions in
+  SDs (they call 8p23.1 wrong), so they are **not integrated**. This is why the published
+  consortium SYRI/PAV calls (synteny-block-aware, 88% vs Strand-seq) are the reliable
+  assembly tier and raw chains are not.
+
+The only remaining rigorous method is **raw local realignment of breakpoint-flanking
+windows** (`minimap2 -x asm20 --secondary=yes -N 50`, keeping secondary alignments so SD
+paralogs are not collapsed) against the ape assembly FASTAs — which needs the ~32 GB
+assemblies + an aligner on real compute (MSI `acn116`, or a per-assembly CI job). On this
+network MSI is unreachable (UMN VPN gateways blocked at :443; GCP relay billing closed) and
+local disk is insufficient, so it is deferred. Until then these loci stay honestly
+quarantined rather than assigned fabricated confidence.
 
 ## Where the flip is applied
 
