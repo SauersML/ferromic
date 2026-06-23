@@ -57,6 +57,11 @@ import matplotlib.pyplot as plt
 import sys as _sys
 _sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _inv_common import is_flipped  # chimp polarization: group0/1 -> ancestral/derived
+# Single source of truth for codon-aware diversity (shared with pin_pis.py).
+from _codon_diversity import (
+    VALID, FOURFOLD_PREFIXES, read_phy, site_pi, locus_pi,
+    fourfold_codon_starts as fourfold_columns, class_aware_locus_pi,
+)
 
 warnings.filterwarnings("ignore")
 
@@ -88,12 +93,8 @@ OUT_TABLE = os.path.join(_DATA_DIR, "four_fold_pi_by_inversion.tsv")
 OUT_TESTS = os.path.join(_DATA_DIR, "four_fold_pi_tests.tsv")
 OUT_FIG = os.path.join(_DATA_DIR, "four_fold_pi.pdf")
 
-VALID = set("ACGT")
-
-# Eight fourfold-degenerate codon families: the first two positions fully
-# determine the amino acid regardless of the third position. The third position
-# is therefore a fourfold-degenerate (synonymous) site.
-FOURFOLD_PREFIXES = {"CT", "GT", "TC", "CC", "AC", "GC", "CG", "GG"}
+# VALID and FOURFOLD_PREFIXES are imported from _codon_diversity (single source of
+# truth) so four_fold_pi and pin_pis cannot drift apart.
 
 # ------------------------- PHYLIP I/O ------------------------
 
@@ -161,113 +162,20 @@ def resolve_phy_dir():
     return tmp, tmp
 
 
-def read_phy(path):
-    """Return list of (uppercased) sequences from a PHYLIP .phy.gz alignment.
-
-    Mirrors the sequence extraction in cds/axt_to_phy.py: a header line of two
-    integers, then one sequence per line with the sequence as the final
-    whitespace-delimited token (names may contain '_L'/'_R')."""
-    seqs = []
-    with gzip.open(path, "rt") as fh:
-        first = fh.readline().split()
-        if len(first) != 2:
-            return [], 0
-        try:
-            exp_len = int(first[1])
-        except ValueError:
-            return [], 0
-        for line in fh:
-            if not line.strip():
-                continue
-            m = re.search(r"([ACGTNacgtn-]+)\s*$", line)
-            if m:
-                seqs.append(m.group(1).upper())
-    if not seqs:
-        return [], exp_len
-    L = len(seqs[0])
-    if any(len(s) != L for s in seqs) or L != exp_len:
-        return [], exp_len
-    return seqs, L
-
-
-# ------------------------- PI ESTIMATOR ----------------------
-
-
-def site_pi(column):
-    """Per-site pi with the Rust pipeline estimator (src/stats.rs).
-
-    column: iterable of single-character bases for one alignment column.
-    Returns None for uncallable sites (< 2 called A/C/G/T haplotypes)."""
-    counts = Counter(b for b in column if b in VALID)
-    n = sum(counts.values())
-    if n < 2:
-        return None
-    sum_sq = sum(c * c for c in counts.values())
-    return n / (n - 1.0) * (1.0 - sum_sq / (n * n))
-
-
-def fourfold_columns(seqs, L):
-    """Yield the codon-start index of each fourfold-degenerate codon.
-
-    A codon is included only when every *called* haplotype (ACGT at positions 1-2) carries a
-    fourfold-family prefix; if any called haplotype has a non-fourfold prefix the codon is
-    skipped. Haplotypes with a gap/N at positions 1-2 are ignored *here* (their family is
-    unknown) -- and, crucially, they are also excluded from this codon's pi by
-    ``fourfold_locus_pi``, which re-checks each haplotype's own prefix before counting its
-    third base. Yields the codon start (the third position is ``codon_start + 2``)."""
-    for codon_start in range(0, L - 2, 3):
-        ok = True
-        seen_called = False
-        for s in seqs:
-            p1, p2 = s[codon_start], s[codon_start + 1]
-            if p1 in VALID and p2 in VALID:
-                seen_called = True
-                if (p1 + p2) not in FOURFOLD_PREFIXES:
-                    ok = False
-                    break
-        if ok and seen_called:
-            yield codon_start
-
-
-def locus_pi(seqs, columns):
-    """Mean per-site pi over the given columns (callable sites only)."""
-    vals = []
-    for col in columns:
-        p = site_pi(s[col] for s in seqs)
-        if p is not None:
-            vals.append(p)
-    if not vals:
-        return np.nan, 0
-    return float(np.mean(vals)), len(vals)
+# read_phy, site_pi, locus_pi, fourfold_columns (= fourfold_codon_starts) are
+# imported from _codon_diversity. fourfold_locus_pi is the codon-aware 4-fold third-
+# position estimator, expressed via the shared class_aware_locus_pi so pin_pis uses
+# the identical rule (a haplotype contributes its third base only when its own first
+# two codon positions establish a 4-fold family; N/gap there excludes it).
 
 
 def fourfold_locus_pi(seqs, codon_starts):
-    """Mean per-site pi at fourfold third positions.
-
-    Each haplotype contributes its third base at a codon ONLY when its own first two bases
-    establish a fourfold-degenerate family. Haplotypes with a gap/N (or any non-fourfold
-    prefix) at positions 1-2 are excluded from that codon's pi, because their third base
-    cannot be assumed synonymous. This fixes the prior behaviour where such a haplotype was
-    ignored when classifying the column as fourfold yet still counted in pi (e.g.
-    ['GCA','NNG'] wrongly yielded pi = 1.0 at the third position)."""
-    vals = []
-    for cs in codon_starts:
-        col = cs + 2
-        bases = [
-            s[col] for s in seqs
-            if s[cs] in VALID and s[cs + 1] in VALID and (s[cs] + s[cs + 1]) in FOURFOLD_PREFIXES
-        ]
-        p = site_pi(bases)
-        if p is not None:
-            vals.append(p)
-    if not vals:
-        return np.nan, 0
-    return float(np.mean(vals)), len(vals)
+    """Mean per-site pi at fourfold third positions (codon-aware; see module note)."""
+    return class_aware_locus_pi(seqs, [(cs, 2, "4") for cs in codon_starts])
 
 
 def whole_cds_pi(seqs, L):
-    cols = range(L)
-    return locus_pi(seqs, cols)
+    return locus_pi(seqs, range(L))
 
 
 # ------------------------- DATA LOADING ----------------------
