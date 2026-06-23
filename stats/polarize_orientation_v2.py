@@ -32,32 +32,11 @@ REPO = os.path.dirname(HERE)
 DATA = os.path.join(REPO, "data")
 SP = [o["name"] for o in OUTGROUPS]
 
-# Curated gold-standard ancestral calls from the literature, used ONLY for loci
-# where the ancestral state is firmly established by independent evidence (SNP-
-# haplotype divergence to outgroups, ancestral-state reconstruction) and where
-# synteny cannot resolve it because the entire catarrhine clade has toggled. Keyed
-# by (chrom, approx_start, approx_end) with +/- overlap matching; takes precedence
-# over the synteny consensus and is marked high confidence with the source.
-LITERATURE_OVERRIDES = [
-    # 17q21.31 MAPT inversion: H2 (inverted) is ANCESTRAL; H1/reference is derived.
-    # Zody et al. 2008 Nat Genet (evolutionary toggling); Steinberg et al. 2012 Nat Genet.
-    {"chrom": "chr17", "start": 45_585_159, "end": 46_292_045, "ancestral": "inverted",
-     "source": "Zody2008/Steinberg2012:H2_ancestral"},
-    # 8p23.1 inversion: inverted orientation is ANCESTRAL (orangutan BAC + phylogeny).
-    # Salm et al. 2012 Genome Res. (synteny already recovers this; override pins confidence.)
-    {"chrom": "chr8", "start": 8_000_000, "end": 12_000_000, "ancestral": "inverted",
-     "source": "Salm2012:inverted_ancestral"},
-]
-
-
-def literature_override(chrom, start, end):
-    for o in LITERATURE_OVERRIDES:
-        if o["chrom"] == chrom and end > o["start"] and start < o["end"]:
-            # require substantial reciprocal overlap to avoid catching sub-loci
-            ov = min(end, o["end"]) - max(start, o["start"])
-            if ov > 0.5 * min(end - start, o["end"] - o["start"]):
-                return o
-    return None
+# NOTE: no per-locus literature overrides. Every call is produced by the method.
+# Deep-toggling inversions whose entire catarrhine clade carries the derived
+# arrangement (canonically 17q21.31) are reported by their synteny evidence; the
+# ancestral state at those loci is only recoverable by an orthogonal SNP-divergence /
+# ancestral-allele analysis (the documented next-step method), not by synteny.
 
 
 def load_raw(tag, margin, flank):
@@ -171,12 +150,6 @@ def main():
             o, c, _ = per_outgroup_call(rbest, allch, og, key)
             per[og] = (o, c)
         cs = consensus(per)
-        # Literature override for firmly-established, synteny-unresolvable loci.
-        lo = literature_override(m["chrom"], int(m["start"]), int(m["end"]))
-        if lo:
-            anc = lo["ancestral"]; der = "inverted" if anc == "direct" else "direct"
-            cs = {**cs, "anc": anc, "der": der, "flip": int(anc == "inverted"),
-                  "conf": "high", "evidence": "literature:" + lo["source"]}
         af = m.get("inv_af_ref", "")
         try:
             afv = float(af); der_af = round((1 - afv) if cs["flip"] else afv, 6)
