@@ -190,12 +190,19 @@ def call_relative(interior, lflank, rflank):
     rf_strand = max(rflank.items(), key=lambda kv: kv[1][1])[1][0] if rflank else None
     flank_agree = (lf_strand is not None and lf_strand == rf_strand)
 
-    # Decision: backbone bridges -> collinear; backbone broken + reverse fill -> inverted.
-    if bb_int >= MIN_BP:                      # spanning chain continues through interior
+    # Decision: collinear if the backbone syntenic chain CONTINUES through the interior
+    # (it bridges the inversion), inverted only if the backbone is wholly absent from
+    # the interior AND a reverse-strand chain fills it. Biasing to collinear unless the
+    # backbone clearly breaks is correct here: inversions are rare and reverse-strand
+    # chains within an SD-flanked interior are usually inverted-repeat paralogs, not the
+    # true inverted ortholog. An objective ratio sweep (opp > K*same) confirmed this:
+    # both cross-outgroup agreement and derived-is-minor are maximized by this rule and
+    # degrade monotonically as inversions are called more aggressively.
+    if bb_int >= MIN_BP:                      # backbone chain continues through interior
         orient = "collinear"; margin = same / (same + opp_bp) if (same + opp_bp) else 1.0
-    elif opp_bp >= MIN_BP and opp_bp > same:  # backbone broke, reverse chain fills it
+    elif opp_bp >= MIN_BP and opp_bp > same:  # backbone broke; reverse chain fills it
         orient = "inverted"; margin = opp_bp / (same + opp_bp) if (same + opp_bp) else 1.0
-    elif same >= MIN_BP:                      # sibling same-strand chain continues
+    elif same >= MIN_BP:                      # a sibling same-strand chain continues
         orient = "collinear"; margin = same / (same + opp_bp) if (same + opp_bp) else 1.0
     else:
         return None, "weak_interior", {"backbone": bb_strand, "spanning": spanning}
