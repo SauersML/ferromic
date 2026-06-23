@@ -68,6 +68,13 @@ import matplotlib.pyplot as plt
 import sys as _sys
 _sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _inv_common import is_flipped  # chimp polarization: group0/1 -> ancestral/derived
+# Single source of truth for codon-aware diversity (shared with four_fold_pi.py):
+# the genetic code, degeneracy classification, PHYLIP reader, per-site pi estimator,
+# and the codon-aware per-site pi that excludes haplotypes of unknown codon family.
+from _codon_diversity import (
+    VALID, read_phy, site_pi, locus_pi,
+    classify_zero_four as degenerate_columns, class_aware_locus_pi,
+)
 
 warnings.filterwarnings("ignore")
 
@@ -96,52 +103,9 @@ OUT_TABLE = os.path.join(_DATA_DIR, "pin_pis_by_inversion.tsv")
 OUT_TESTS = os.path.join(_DATA_DIR, "pin_pis_tests.tsv")
 OUT_FIG = os.path.join(_DATA_DIR, "pin_pis.pdf")
 
-VALID = set("ACGT")
-
-# ------------------------- GENETIC CODE / DEGENERACY ----------
-
-# Standard genetic code (NCBI translation table 1).
-BASES = "TCAG"
-_AA = (
-    "FFLLSSSSYY**CC*W"
-    "LLLLPPPPHHQQRRRR"
-    "IIIMTTTTNNKKSSRR"
-    "VVVVAAAADDEEGGGG"
-)
-CODON_TABLE = {
-    a + b + c: _AA[i]
-    for i, (a, b, c) in enumerate(itertools.product(BASES, repeat=3))
-}
-
-
-def _degeneracy(codon, pos):
-    """N-fold degeneracy of `pos` (0,1,2) in `codon` under the standard code.
-
-    Counts how many of the four nucleotides at `pos` yield the same amino acid
-    as `codon` (the codon itself counts). Returns 1 for an undefined codon (stop
-    or non-ACGT), so such codons contribute to neither the 0-fold nor 4-fold
-    set."""
-    aa = CODON_TABLE.get(codon)
-    if aa is None or aa == "*":
-        return None
-    n_same = 0
-    for b in BASES:
-        alt = codon[:pos] + b + codon[pos + 1:]
-        if CODON_TABLE.get(alt) == aa:
-            n_same += 1
-    return n_same
-
-
-# Precompute, for every sense codon and position, whether it is 0-fold or 4-fold.
-ZEROFOLD = {}   # (codon, pos) -> True/False
-FOURFOLD = {}
-for _cod in CODON_TABLE:
-    if CODON_TABLE[_cod] == "*":
-        continue
-    for _p in range(3):
-        d = _degeneracy(_cod, _p)
-        ZEROFOLD[(_cod, _p)] = (d == 1)
-        FOURFOLD[(_cod, _p)] = (d == 4)
+# The genetic code, degeneracy tables (ZEROFOLD/FOURFOLD), VALID, the PHYLIP reader
+# and the per-site pi estimator now live in _codon_diversity (imported above), so
+# pin_pis and four_fold_pi share one implementation.
 
 # ------------------------- PHYLIP I/O ------------------------
 
@@ -205,96 +169,11 @@ def resolve_phy_dir():
     return tmp, tmp
 
 
-def read_phy(path):
-    """Return list of (uppercased) sequences from a PHYLIP .phy.gz alignment.
-
-    Mirrors the sequence extraction in cds/axt_to_phy.py and four_fold_pi.py."""
-    seqs = []
-    with gzip.open(path, "rt") as fh:
-        first = fh.readline().split()
-        if len(first) != 2:
-            return [], 0
-        try:
-            exp_len = int(first[1])
-        except ValueError:
-            return [], 0
-        for line in fh:
-            if not line.strip():
-                continue
-            m = re.search(r"([ACGTNacgtn-]+)\s*$", line)
-            if m:
-                seqs.append(m.group(1).upper())
-    if not seqs:
-        return [], exp_len
-    L = len(seqs[0])
-    if any(len(s) != L for s in seqs) or L != exp_len:
-        return [], exp_len
-    return seqs, L
-
-
-# ------------------------- PI ESTIMATOR ----------------------
-
-
-def site_pi(column):
-    """Per-site pi with the Rust pipeline estimator (src/stats.rs).
-
-    Returns None for uncallable sites (< 2 called A/C/G/T haplotypes)."""
-    counts = Counter(b for b in column if b in VALID)
-    n = sum(counts.values())
-    if n < 2:
-        return None
-    sum_sq = sum(c * c for c in counts.values())
-    return n / (n - 1.0) * (1.0 - sum_sq / (n * n))
-
-
-def degenerate_columns(seqs, L):
-    """Classify each codon position as 0-fold / 4-fold across the sample.
-
-    Yields (column_index, "0" | "4"). A position is reported as 0-fold only when
-    every called haplotype carries a codon for which that position is 0-fold
-    under the standard code (likewise 4-fold). Codons with gaps/N or stops in a
-    haplotype are ignored for that haplotype; if any called haplotype disagrees
-    with the class the position is skipped. Codons must be fully called (ACGT) at
-    all three positions to vote, so the classification is well defined."""
-    for codon_start in range(0, L - 2, 3):
-        for pos in range(3):
-            col = codon_start + pos
-            is_zero = True
-            is_four = True
-            seen = False
-            for s in seqs:
-                codon = s[codon_start:codon_start + 3]
-                if any(b not in VALID for b in codon):
-                    continue
-                key = (codon, pos)
-                if key not in ZEROFOLD:   # stop codon
-                    is_zero = is_four = False
-                    break
-                seen = True
-                if not ZEROFOLD[key]:
-                    is_zero = False
-                if not FOURFOLD[key]:
-                    is_four = False
-                if not is_zero and not is_four:
-                    break
-            if not seen:
-                continue
-            if is_zero:
-                yield col, "0"
-            elif is_four:
-                yield col, "4"
-
-
-def locus_pi(seqs, columns):
-    """Mean per-site pi over the given columns (callable sites only)."""
-    vals = []
-    for col in columns:
-        p = site_pi(s[col] for s in seqs)
-        if p is not None:
-            vals.append(p)
-    if not vals:
-        return np.nan, 0
-    return float(np.mean(vals)), len(vals)
+# read_phy, site_pi, locus_pi and degenerate_columns (= classify_zero_four) are
+# imported from _codon_diversity. The per-orientation piN/piS below uses the shared
+# codon-aware class_aware_locus_pi, so a haplotype contributes its base at a 0-fold /
+# 4-fold site only when its OWN codon establishes that class (N/gap in the codon
+# excludes it) -- the same rule four_fold_pi uses.
 
 
 # ------------------------- DATA LOADING ----------------------
@@ -352,17 +231,20 @@ def collect_pin_pis(phy_dir):
         # classification is consistent across orientations, then measure pi
         # within each orientation at those sites.
         combined = s0 + s1
-        zero_cols, four_cols = [], []
+        # Reconstruct each classified column's (codon_start, pos, class) so the
+        # codon-aware estimator can re-check each haplotype's own codon family.
+        zero_sites, four_sites = [], []
         for col, cls in degenerate_columns(combined, L):
-            (zero_cols if cls == "0" else four_cols).append(col)
+            site = (col - col % 3, col % 3, cls)
+            (zero_sites if cls == "0" else four_sites).append(site)
 
         a = acc[key]
         a["n_cds"] += 1
         used = False
 
-        if zero_cols:
-            n0, n0n = locus_pi(s0, zero_cols)
-            n1, n1n = locus_pi(s1, zero_cols)
+        if zero_sites:
+            n0, n0n = class_aware_locus_pi(s0, zero_sites)
+            n1, n1n = class_aware_locus_pi(s1, zero_sites)
             if n0n:
                 a["piN0_num"] += n0 * n0n
                 a["piN0_den"] += n0n
@@ -371,9 +253,9 @@ def collect_pin_pis(phy_dir):
                 a["piN1_num"] += n1 * n1n
                 a["piN1_den"] += n1n
                 used = True
-        if four_cols:
-            s0v, s0n = locus_pi(s0, four_cols)
-            s1v, s1n = locus_pi(s1, four_cols)
+        if four_sites:
+            s0v, s0n = class_aware_locus_pi(s0, four_sites)
+            s1v, s1n = class_aware_locus_pi(s1, four_sites)
             if s0n:
                 a["piS0_num"] += s0v * s0n
                 a["piS0_den"] += s0n
