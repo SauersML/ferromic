@@ -1,0 +1,15 @@
+chrom	start	end	classification	consistent
+chr5	176301976	177620792	Rev Or; Dir Ma, Mo	False
+chr8	8242542	12003310	Rev Or, Ma, Mo	True
+chr15	22784508	23074396	Rev Or, Ma, Mo	True
+chr15	24578603	28181259	Rev Or, Ma, Mo	True
+chr15	84596421	85155765	Rev Or, Ma; Dir Mo	False
+chr16	21932236	22419483	Dir Or, Ma, Mo	True
+chr16	28811314	29035178	Rev Or, Ma, Mo	True
+chr16	29641178	30188531	Rev Or, Ma, Mo	True
+chr17	16813673	20562526	Dir Or, Ma	False
+chr17	30838856	31888868	Rev Or; Dir Ma, Mo	False
+chr17	36460073	37846263	Rev Or, Ma, Mo	True
+chr17	45627800	46106851	Rev Or; Dir Ma, Mo	False
+chr22	19035500	20301633	Rev Or, Ma, Mo	True
+chr22	21562828	23306924	Rev Or, Ma	False
