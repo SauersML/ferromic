@@ -16,7 +16,8 @@ on:
   pull_request:
     paths:
       - '.github/workflows/ancestral_orientation.yml'
-      - 'stats/polarize_orientation.py'
+      - 'stats/polarize_orientation_v2.py'
+      - 'stats/polarize_v2_experiment.py'
 
 permissions:
   contents: write
@@ -47,25 +48,26 @@ jobs:
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android || true
           df -h /
 
-      - name: Download UCSC outgroup net AXT + chain alignments
+      - name: Download UCSC outgroup chains (reciprocal-best + all)
         run: |
           set -euo pipefail
-          base="http://hgdownload.soe.ucsc.edu/goldenpath/hg38"
+          base="https://hgdownload.soe.ucsc.edu/goldenpath/hg38"
+          mkdir -p aln_rbest aln_all
           dl() { curl -fSL --retry 3 -o "$2" "$1"; ls -la "$2"; }
-          dl "$base/vsPanTro6/hg38.panTro6.net.axt.gz"   hg38.panTro6.net.axt.gz
-          dl "$base/vsPanTro6/hg38.panTro6.all.chain.gz" hg38.panTro6.all.chain.gz
-          dl "$base/vsGorGor6/hg38.gorGor6.net.axt.gz"   hg38.gorGor6.net.axt.gz
-          dl "$base/vsGorGor6/hg38.gorGor6.all.chain.gz" hg38.gorGor6.all.chain.gz
-          dl "$base/vsPonAbe3/hg38.ponAbe3.net.axt.gz"   hg38.ponAbe3.net.axt.gz
-          dl "$base/vsPonAbe3/hg38.ponAbe3.all.chain.gz" hg38.ponAbe3.all.chain.gz
-          dl "$base/vsRheMac10/hg38.rheMac10.net.axt.gz" hg38.rheMac10.net.axt.gz
-          dl "$base/vsRheMac10/hg38.rheMac10.all.chain.gz" hg38.rheMac10.all.chain.gz
+          # reciprocal-best (paralog/SD-filtered) primary + all-chains fallback.
+          # Named hg38.<sp>.all.chain.gz in each dir so the v2 caller resolves them.
+          declare -A LC=( [PanTro6]=panTro6 [GorGor6]=gorGor6 [PonAbe3]=ponAbe3 [RheMac10]=rheMac10 )
+          for SP in PanTro6 GorGor6 PonAbe3 RheMac10; do
+            lc="${LC[$SP]}"
+            dl "$base/vs$SP/reciprocalBest/hg38.$lc.rbest.chain.gz" "aln_rbest/hg38.$lc.all.chain.gz"
+            dl "$base/vs$SP/hg38.$lc.all.chain.gz"                  "aln_all/hg38.$lc.all.chain.gz"
+          done
 
-      - name: Collect alignment evidence (stream nets + chains)
-        run: python stats/polarize_orientation.py collect
-
-      - name: Decide ancestral/derived orientation (multi-outgroup parsimony)
-        run: python stats/polarize_orientation.py decide
+      - name: Compute ancestral/derived orientation (flank-relative v2)
+        run: |
+          python stats/polarize_orientation_v2.py \
+            --aln-rbest aln_rbest --aln-all aln_all \
+            --out data/inversion_polarity.tsv
 
       - name: Show result table head
         run: |
