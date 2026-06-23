@@ -802,9 +802,10 @@ def _calc_pi_structure_metrics() -> PiStructureMetrics:
             key = (group_id, recur_flag)
             if key in acc_spearman_mean:
                 acc_spearman_mean[key].append(window_means)
-                # Use per-bin means for both statistics to mirror the manuscript logic
-                # (median of per-bin means across inversions).
-                acc_spearman_median[key].append(window_means)
+                # Per-bin medians for the median-binned decay statistic. (Previously
+                # this appended window_means, making the "median within 2kb bins"
+                # report identical to the mean-binned one.)
+                acc_spearman_median[key].append(window_medians)
 
     current_header: str | None = None
     sequence_lines: list[str] = []
