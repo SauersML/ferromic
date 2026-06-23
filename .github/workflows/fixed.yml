@@ -112,6 +112,18 @@ jobs:
 
           ls -l data/gene_inversion_fixed_differences.tsv data/fixed_diff_summary.tsv
 
+      - name: Polarize fixed-difference tables (inverted == derived w.r.t. chimp)
+        run: |
+          set -euo pipefail
+          # stats/fixed.py counts fixed differences per phy group0/group1 (raw
+          # hg38-reference orientation) and does NOT swap by is_flipped. Re-key the
+          # n_direct/n_inverted and direct_allele/inverted_allele columns to the
+          # chimp-polarized convention (direct = ANCESTRAL, inverted = DERIVED) with
+          # data/inversion_polarity.tsv, so these committed tables match the rest of
+          # the dataset instead of reverting it to reference coding.
+          python3 scripts/apply_polarity.py --apply --only \
+            fixed_diff_summary.tsv gene_inversion_fixed_differences.tsv
+
       - name: Commit and push fixed differences outputs
         env:
           PUSH_TOKEN: ${{ secrets.WRITE_TOKEN }}

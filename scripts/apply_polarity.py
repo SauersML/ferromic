@@ -235,6 +235,21 @@ SPECS = [
         "negate": ["Δ proportion identical (inverted − direct)"],
     },
     {
+        # Clade Model C omega2 is the only branch-class-specific quantity; site-class
+        # proportions and omega0 are shared, and the H1-vs-H0 LRT/p/q are label-
+        # symmetric. So polarizing only requires swapping the direct/inverted omega2
+        # estimates (winner + each per-seed run) for flipped loci.
+        "path": "GRAND_PAML_RESULTS.tsv", "sep": "\t",
+        "key": {"type": "region_str", "col": "region"},
+        "swap": [
+            ("winner_omega2_direct", "winner_omega2_inverted"),
+            ("h1_s1_def_cmc_omega2_direct_run_2", "h1_s1_def_cmc_omega2_inverted_run_2"),
+            ("h1_s2_pur_cmc_omega2_direct_run_2", "h1_s2_pur_cmc_omega2_inverted_run_2"),
+            ("h1_s3_pos_cmc_omega2_direct_run_2", "h1_s3_pos_cmc_omega2_inverted_run_2"),
+            ("h1_s4_mix_cmc_omega2_direct_run_2", "h1_s4_mix_cmc_omega2_inverted_run_2"),
+        ],
+    },
+    {
         "path": "best_tagging_snps_qvalues.tsv", "sep": "\t",
         "key": {"type": "region_str", "col": "region"},
         "swap": [("REF_freq_direct", "REF_freq_inverted"),
@@ -247,7 +262,6 @@ SPECS = [
 REGENERATE = [
     ("four_fold_pi_tests.tsv", "stats/four_fold_pi.py"),
     ("pin_pis_tests.tsv", "stats/pin_pis.py (or producing script)"),
-    ("GRAND_PAML_RESULTS.tsv", "cds PAML pipeline + finalize_results.py"),
     ("ancestral_orientation.tsv", "superseded by inversion_polarity.tsv"),
 ]
 
@@ -357,7 +371,16 @@ def main():
                          "touching already-polarized committed tables. Skips the global "
                          "marker check (the named files are assumed RAW).")
     ap.add_argument("--list-regenerate", action="store_true")
+    ap.add_argument("--data-dir", metavar="DIR",
+                    help="override the directory the named tables live in (default: "
+                         "repo data/). Use to polarize a freshly-produced RAW artifact "
+                         "staged outside data/ (e.g. analysis_downloads/public_internet/"
+                         "output.csv before figure generation).")
     args = ap.parse_args()
+
+    if args.data_dir:
+        global DATA
+        DATA = os.path.abspath(args.data_dir)
 
     if args.list_regenerate:
         print("Tables to REGENERATE (pool loci; not swap-migratable):")

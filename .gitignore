@@ -66,3 +66,6 @@ data/_polarity_evidence.json
 
 # ephemeral chimp-polarization migration marker (per-workspace, not committed)
 data/.polarity_applied
+
+# Large LFS artifact staged locally for pipeline runs; never commit (1.3GB)
+data/phy_outputs.zip
