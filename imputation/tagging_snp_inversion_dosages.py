@@ -4,7 +4,13 @@ from dataclasses import dataclass
 
 import numpy as np
 from tqdm import tqdm
-from google.cloud import storage  # hard crash if missing
+
+# google-cloud-storage is only needed for the live GCS range-fetch (main()). Import it
+# lazily so the module can be imported (and unit-tested) without the dependency installed.
+try:
+    from google.cloud import storage
+except ImportError:  # pragma: no cover - exercised only where the dep is absent
+    storage = None
 
 # ------------------------------ HARD-CODED PATHS ------------------------------
 
@@ -71,6 +77,10 @@ def gsutil_cat_lines(gs_uri: str) -> Iterable[str]:
 class RangeFetcher:
     """Persistent HTTP range fetcher using google-cloud-storage (Requester Pays)."""
     def __init__(self):
+        if storage is None:
+            raise RuntimeError(
+                "google-cloud-storage is required for the live GCS range fetch; install it."
+            )
         self.project = require_project()
         self.client = storage.Client(project=self.project)
 
@@ -275,8 +285,12 @@ def write_single_inversion_hardcalls_tsv(
 ) -> None:
     """
     Write a TSV with one hard-call column named with the CANONICAL inversion id:
-        SampleID <TAB> chr17-45585160-INV-706887-HARD
+        SampleID <TAB> chr17-45585160-INV-706887
     Values: 0, 1, 2, or blank for no-call. The tag-SNP span is logged as provenance only.
+
+    The column MUST be the bare canonical id (no '-HARD' suffix): phewas/run.py filters its
+    target inversions by exact-set intersection against the dosages header, so any suffix
+    silently drops this feature from the entire PheWAS.
     """
     if not iids:
         raise RuntimeError("No samples found (empty IID list).")
@@ -289,17 +303,20 @@ def write_single_inversion_hardcalls_tsv(
         start_bp = min(selected_bps)
         end_bp   = max(selected_bps)
 
-    # Feature name = canonical inversion id (NOT the tag-SNP span). Tag span/method below
-    # are provenance only.
-    inv_id = f"{CANONICAL_INV_ID}-HARD"
+    # Feature name = canonical inversion id (NOT the tag-SNP span, NOT a '-HARD' suffix).
+    # The tag-SNP span and method are written as SEPARATE provenance columns so they are
+    # recorded without masquerading as the structural-variant coordinate.
+    inv_id = CANONICAL_INV_ID
     tag_span = f"{chr_label}:{start_bp}-{end_bp}"
+    tag_method = f"unanimity_hardcall(n_tags={len(selected_bps)};bps={selected_bps})"
     print(f"[WRITE] Building '{out_path}' (N={len(iids)}), column='{inv_id}' "
           f"(tag-SNP hard call; {len(selected_bps)} tag(s)={selected_bps}; span={tag_span})")
 
     with open(out_path, "w") as fo, tqdm(total=len(iids), desc="Write TSV", unit="sample") as bar:
-        fo.write(f"SampleID\t{inv_id}\n")
+        fo.write(f"SampleID\t{inv_id}\tTag_SNP_Span\tTag_SNP_Method\n")
         for iid, v in zip(iids, calls):
-            fo.write(f"{iid}\t{'' if np.isnan(v) else str(int(v))}\n")
+            call = "" if np.isnan(v) else str(int(v))
+            fo.write(f"{iid}\t{call}\t{tag_span}\t{tag_method}\n")
             bar.update(1)
 
     print(f"[DONE] Wrote {out_path} with unanimity-only hard calls '{inv_id}'.")

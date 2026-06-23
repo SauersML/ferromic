@@ -793,6 +793,28 @@ PHENO_PROTECT = set()
 MAX_CONCURRENT_INVERSIONS_DEFAULT = tctx["MAX_CONCURRENT_INVERSIONS_DEFAULT"]
 MAX_CONCURRENT_INVERSIONS_BOOT = tctx["MAX_CONCURRENT_INVERSIONS_BOOT"]
 
+def _align_ancestry_dummies(A_global, target_index):
+    """Align the ANC_* dummy matrix to ``target_index`` (participant ids), failing loudly.
+
+    ``A_global`` is indexed by string participant ids. The previous code reindexed by the
+    raw (possibly int-typed) subset index and then zero-filled the misses, which matched
+    nothing whenever the target index dtype differed (e.g. int vs str). Otherwise put: the
+    ANC_* fixed effects would be silently zeroed for every participant, removing the
+    categorical ancestry adjustment. Here we reindex on a string-cast index and raise if any
+    participant is unmatched, instead of fabricating all-zero ancestry rows.
+    """
+    target_str = target_index.astype(str)
+    A_slice = A_global.reindex(target_str)
+    missing = int(A_slice.isna().any(axis=1).sum()) if A_slice.shape[1] else 0
+    if missing:
+        raise RuntimeError(
+            f"{missing} participants have no ancestry dummy row after alignment; the ANC_* "
+            "fixed effects would be silently zeroed. Check participant-id dtype/coverage."
+        )
+    A_slice.index = target_index
+    return A_slice.astype(np.float32)
+
+
 # --- Per-ancestry thresholds and multiple-testing for ancestry splits ---
 PER_ANC_MIN_CASES = 100
 PER_ANC_MIN_CONTROLS = 100
@@ -1035,10 +1057,16 @@ def _pipeline_once(pipeline_config: Optional[dict[str, object]] = None):
                       f"Examples: {', '.join(missing[:5])}")
 
             run.TARGET_INVERSIONS = run.TARGET_INVERSIONS & available_inversions
-            if not run.TARGET_INVERSIONS:
-                raise RuntimeError("No target inversions remain after filtering; check your dosages file and configuration.")
         except Exception as e:
+            # This guards only the header *inspection* (I/O / parse failures). It must NOT
+            # swallow the "no targets remain" business-rule check below -- otherwise an empty
+            # target set (e.g. from a dosages-column id mismatch) silently continues.
             print(f"[Config WARN] Could not inspect dosages header at '{dosages_path}': {e}")
+
+        if not run.TARGET_INVERSIONS:
+            raise RuntimeError(
+                "No target inversions remain after filtering; check your dosages file and configuration."
+            )
 
         try:
             print("\n--- Computing inversion population allele frequencies... ---", flush=True)
@@ -1260,7 +1288,7 @@ def _pipeline_once(pipeline_config: Optional[dict[str, object]] = None):
                 covariate_cols = [target_inversion] + ["sex"] + pc_cols + ["AGE_c", "AGE_c_sq"]
                 core_df_subset = core_df[covariate_cols].astype(np.float32, copy=False)
                 core_df_subset["const"] = np.float32(1.0)
-                A_slice = shared_data['A_global'].reindex(core_df_subset.index).fillna(0.0).astype(np.float32)
+                A_slice = _align_ancestry_dummies(shared_data['A_global'], core_df_subset.index)
                 core_df_with_const = pd.concat([core_df_subset, A_slice], axis=1, copy=False).astype(np.float32, copy=False)
                 print(
                     f"{log_prefix} [Stage 2/{stage_total}] Covariate matrix ready with "
@@ -1772,7 +1800,7 @@ def _pipeline_once(pipeline_config: Optional[dict[str, object]] = None):
                 covariate_cols = [target_inversion] + ["sex"] + pc_cols + ["AGE_c", "AGE_c_sq"]
                 core_df_subset = core_df[covariate_cols].astype(np.float32, copy=False)
                 core_df_subset["const"] = np.float32(1.0)
-                A_slice = A_global.reindex(core_df_subset.index).fillna(0.0).astype(np.float32)
+                A_slice = _align_ancestry_dummies(A_global, core_df_subset.index)
                 core_df_with_const = pd.concat([core_df_subset, A_slice], axis=1, copy=False).astype(np.float32, copy=False)
                 core_index = pd.Index(core_df_with_const.index.astype(str), name="person_id")
                 global_notnull_mask = np.isfinite(core_df_with_const.to_numpy()).all(axis=1)

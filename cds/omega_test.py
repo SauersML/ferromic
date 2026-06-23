@@ -21,9 +21,14 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 try:
     import pipeline_lib as lib
-except ImportError:
-    print("Error: Could not import pipeline_lib. Ensure it is in the same directory.")
-    sys.exit(1)
+except ImportError as exc:
+    # Do NOT sys.exit() at import time: that aborts `pytest` collection (and any tool that
+    # merely imports this module) with an internal error. Defer the failure to main().
+    print(f"Error: Could not import pipeline_lib ({exc}). Ensure it is in the same directory.")
+    lib = None
+    _PIPELINE_LIB_IMPORT_ERROR = exc
+else:
+    _PIPELINE_LIB_IMPORT_ERROR = None
 
 # --- Configuration ---
 
@@ -319,6 +324,11 @@ def run_overlapped(region_infos, region_gene_map, log_q, status_dict, iqtree_bin
     return all_results
 
 def main():
+    if lib is None:
+        raise SystemExit(
+            f"pipeline_lib could not be imported: {_PIPELINE_LIB_IMPORT_ERROR}. "
+            "Install its dependencies (e.g. ete3) before running this pipeline."
+        )
     log_q, listener = start_logging()
     root = logging.getLogger()
     root.handlers[:] = [QueueHandler(log_q)]

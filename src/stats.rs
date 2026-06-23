@@ -266,9 +266,20 @@ impl DenseGenotypeMatrix {
         ploidy: usize,
         max_allele: u8,
     ) -> Self {
-        debug_assert_eq!(
+        // Permanent invariant (NOT debug_assert!): later access reads this buffer through
+        // unchecked indexing (e.g. `dense_missing` / `data.as_ptr().add(..)`), whose safety
+        // relies on `data.len() == variant_count * sample_count * ploidy`. A `debug_assert!`
+        // is compiled out in release builds, which would let a safe caller of this safe
+        // constructor build an invalid matrix and trigger out-of-bounds reads (UB). The size
+        // is computed with checked arithmetic so an overflowing product cannot wrap to a
+        // smaller value that spuriously matches a too-short buffer.
+        let expected_len = variant_count
+            .checked_mul(sample_count)
+            .and_then(|product| product.checked_mul(ploidy))
+            .expect("dense genotype matrix dimensions overflow usize");
+        assert_eq!(
             data.len(),
-            variant_count * sample_count * ploidy,
+            expected_len,
             "dense genotype matrix requires variants * samples * ploidy entries",
         );
         let data = Arc::<[u8]>::from(data.into_boxed_slice());
@@ -3830,7 +3841,51 @@ pub fn count_segregating_sites_for_population(context: &PopulationContext<'_>) -
             return count_segregating_sites_dense(matrix, &membership);
         }
     }
-    count_segregating_sites(context.variants)
+    // Sparse fallback. This MUST count sites segregating within THIS population's
+    // haplotypes, exactly like the dense path above. Calling the cohort-wide
+    // `count_segregating_sites(context.variants)` here counted any site polymorphic across
+    // the whole VCF, so a site fixed inside this population but variable elsewhere was
+    // wrongly counted as segregating -- making the result depend on whether the dense or
+    // sparse representation happened to be used.
+    count_segregating_sites_for_haplotypes(context.variants, &context.haplotypes)
+}
+
+/// Counts sites that are segregating *within the supplied haplotype subset only*.
+///
+/// A site is segregating in the subset when at least two distinct called alleles occur
+/// among those haplotypes. Missing genotypes (and haplotype sides absent from a genotype)
+/// are skipped rather than treated as the reference allele.
+fn count_segregating_sites_for_haplotypes(
+    variants: &[Variant],
+    haplotypes: &[(usize, HaplotypeSide)],
+) -> usize {
+    variants
+        .par_iter()
+        .filter(|variant| variant_is_segregating_in_haplotypes(variant, haplotypes))
+        .count()
+}
+
+fn variant_is_segregating_in_haplotypes(
+    variant: &Variant,
+    haplotypes: &[(usize, HaplotypeSide)],
+) -> bool {
+    let mut first = None;
+    for &(sample_idx, side) in haplotypes {
+        let genotype = match variant.genotypes.get(sample_idx) {
+            Some(genotype) => genotype,
+            None => continue, // missing genotype: not a called allele
+        };
+        let allele = match genotype.get(side as usize) {
+            Some(&allele) => allele,
+            None => continue, // this haplotype side is absent (e.g. haploid call)
+        };
+        match first {
+            None => first = Some(allele),
+            Some(value) if value != allele => return true,
+            _ => {}
+        }
+    }
+    false
 }
 
 fn count_segregating_sites_dense(

@@ -28,6 +28,57 @@ mod tests {
         }
     }
 
+    // Regression: the segregating-site count for a population must be identical whether the
+    // dense or sparse backend is used, and must reflect within-population polymorphism only.
+    // Previously the sparse fallback counted cohort-wide polymorphism, so a site fixed inside
+    // the requested population but variable elsewhere was wrongly counted as segregating.
+    #[test]
+    fn test_segregating_sites_population_dense_sparse_parity() {
+        use crate::stats::{
+            count_segregating_sites_for_population, DenseGenotypeMatrix, PopulationContext,
+            PopulationId,
+        };
+
+        let sample_names = vec!["s0".to_string(), "s1".to_string()];
+
+        // Population A = both haplotypes of sample 0. Population B = both haplotypes of sample 1.
+        let pop_a = vec![(0usize, HaplotypeSide::Left), (0usize, HaplotypeSide::Right)];
+
+        // Case 1: site is polymorphic ACROSS populations but fixed WITHIN A.
+        //   sample0 = 0|0 (pop A), sample1 = 1|1 (pop B)  ->  A is fixed-ref, B is fixed-alt.
+        let variants_fixed =
+            vec![create_variant(100, vec![Some(vec![0, 0]), Some(vec![1, 1])])];
+        // Case 2: site is polymorphic WITHIN A (sample0 = 0|1).
+        let variants_within =
+            vec![create_variant(100, vec![Some(vec![0, 1]), Some(vec![1, 1])])];
+
+        let count = |variants: &Vec<Variant>, dense: bool| -> usize {
+            let matrix = if dense {
+                Some(DenseGenotypeMatrix::from_variants(variants, sample_names.len()).unwrap())
+            } else {
+                None
+            };
+            let ctx = PopulationContext {
+                id: PopulationId::HaplotypeGroup(0),
+                haplotypes: pop_a.clone(),
+                variants,
+                sample_names: &sample_names,
+                sequence_length: 1,
+                dense_genotypes: matrix.as_ref(),
+                dense_summary: None,
+            };
+            count_segregating_sites_for_population(&ctx)
+        };
+
+        // Fixed within A: both backends must report 0 (NOT 1 from the cohort-wide view).
+        assert_eq!(count(&variants_fixed, false), 0, "sparse: fixed-in-A must be 0");
+        assert_eq!(count(&variants_fixed, true), 0, "dense: fixed-in-A must be 0");
+
+        // Polymorphic within A: both backends must report 1.
+        assert_eq!(count(&variants_within, false), 1, "sparse: within-A poly must be 1");
+        assert_eq!(count(&variants_within, true), 1, "dense: within-A poly must be 1");
+    }
+
     #[test]
     fn test_missing_sites_default_to_zero_diversity() {
         // This integration test verifies that the dense writer (append_diversity_falsta)
