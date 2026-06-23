@@ -18,6 +18,9 @@ on:
       - '.github/workflows/ancestral_orientation.yml'
       - 'stats/polarize_orientation_v2.py'
       - 'stats/polarize_v2_experiment.py'
+      - 'stats/integrate_gold_polarity.py'
+      - 'data/apes2025_t2t_polarity.tsv'
+      - 'data/strandseq_polarity.tsv'
 
 permissions:
   contents: write
@@ -67,6 +70,17 @@ jobs:
         run: |
           python stats/polarize_orientation_v2.py \
             --aln-rbest aln_rbest --aln-all aln_all \
+            --out data/inversion_polarity.tsv
+
+      - name: Overlay gold-standard evidence (T2T apes + Strand-seq + deep-OG)
+        run: |
+          # The v2 synteny call is only ~53% accurate vs the Strand-seq gold standard
+          # and cannot resolve deep-toggling loci (17q21.31, 8p23.1). Layer the
+          # committed assembly/Strand-seq gold tables on top, by fixed precedence, so
+          # the regenerated table REPRODUCES the gold-integrated source of truth
+          # instead of reverting it. Idempotent: re-running reproduces the table.
+          python stats/integrate_gold_polarity.py \
+            --base data/inversion_polarity.tsv \
             --out data/inversion_polarity.tsv
 
       - name: Show result table head
