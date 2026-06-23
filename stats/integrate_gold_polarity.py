@@ -64,11 +64,20 @@ def clean_deep_ss(ss):
             and sum(v == "HET" for v in st.values()) == 0)
 
 
-def tier_for(t2t, ss):
+def tier_for(t2t, ss, aa=None):
     """Return (tier, flip_override_or_None, conf_override_or_None).
 
     Precedence: gold_t2t_apes > gold_deepOG > gold_strandseq(high/mod) >
-    recurrent_* > gold_*(clean-deep) > synteny.
+    recurrent_* > gold_*(clean-deep) > gold_ancestral_allele(high/mod) > synteny.
+
+    gold_ancestral_allele is the multi-SNP ancestral-allele method
+    (stats/ancestral_allele_polarize.py): for each SNP in tight LD with the inversion,
+    the orientation linked to the chimp-ancestral allele (VCF AA field) is ancestral;
+    votes across all tag SNPs. Validated 88% (high) / 82% (high+mod) vs the published
+    assembly/Strand-seq gold -- gold-equivalent, and INDEPENDENT of sequence alignment,
+    so it resolves SD-rich loci that defeat every alignment method (44-57%). It ranks
+    below the direct-observation tiers and the recurrent flags, filling the loci they
+    do not cover.
     The clean-deep tiers rescue loci whose deep-outgroup assembly signal is unambiguous
     (a deep ape HOM-inverted with no toggling) even though the per-species count was
     too sparse for the primary high/moderate gate -- assembly evidence beats chain
@@ -93,6 +102,8 @@ def tier_for(t2t, ss):
         return "gold_t2t_apes", t2t.get("t2t_flip"), "moderate"
     if ss and clean_deep_ss(ss):
         return "gold_strandseq", ss.get("strandseq_flip"), "moderate"
+    if aa and aa.get("confidence") in ("high", "moderate") and aa.get("aa_flip") in ("0", "1"):
+        return "gold_ancestral_allele", aa.get("aa_flip"), aa.get("confidence")
     return "synteny", None, None
 
 
@@ -119,6 +130,27 @@ def main():
 
     t2t = load(os.path.join(DATA, "apes2025_t2t_polarity.tsv"))
     ss = load(os.path.join(DATA, "strandseq_polarity.tsv"))
+    # ancestral-allele calls are keyed by callset inv_id, so index by coordinate instead
+    aa_by_coord = {}
+    aap = os.path.join(DATA, "ancestral_allele_polarity.tsv")
+    if os.path.exists(aap):
+        for r in csv.DictReader(open(aap), delimiter="\t"):
+            ch = r["chrom"] if r["chrom"].startswith("chr") else "chr" + r["chrom"]
+            try:
+                aa_by_coord[(ch, int(r["start"]), int(r["end"]))] = r
+            except (ValueError, KeyError):
+                continue
+
+    def aa_for(row):
+        ch = row["chrom"] if row["chrom"].startswith("chr") else "chr" + row["chrom"]
+        s, e = int(row["start"]), int(row["end"])
+        for ds in (0, -1, 1, -2, 2):
+            for de in (0, -1, 1, -2, 2):
+                a = aa_by_coord.get((ch, s + ds, e + de))
+                if a:
+                    return a
+        return None
+
     rows = list(csv.DictReader(open(args.base), delimiter="\t"))
     cols = ["inv_id", "chrom", "start", "end", "orig_id", "recurrence_class", "sources",
             "ancestral_orientation", "derived_orientation", "flip_ref_polarity",
@@ -127,7 +159,8 @@ def main():
             "orient_gorilla", "orient_orangutan", "orient_macaque", "evidence",
             "inv_af_ref", "derived_af", "minor_is_derived", "strandseq_flip",
             "strandseq_confidence", "strandseq_source", "evidence_tier",
-            "t2t_ape_flip", "t2t_ape_confidence", "resolution_status"]
+            "t2t_ape_flip", "t2t_ape_confidence", "aa_flip", "aa_confidence",
+            "aa_n_tag", "resolution_status"]
 
     from collections import Counter
     tiers = Counter()
@@ -135,7 +168,8 @@ def main():
     for r in rows:
         iid = r["inv_id"]
         t, s = t2t.get(iid), ss.get(iid)
-        tier, flip_ov, conf_ov = tier_for(t, s)
+        a = aa_for(r)
+        tier, flip_ov, conf_ov = tier_for(t, s, a)
         tiers[tier] += 1
         has_ortho = any(r.get(f"orient_{o}") in ("collinear", "inverted")
                         for o in ("chimp", "gorilla", "orangutan", "macaque"))
@@ -147,6 +181,9 @@ def main():
         r["strandseq_source"] = s.get("source", "") if s else ""
         r["t2t_ape_flip"] = t.get("t2t_flip", "") if t else ""
         r["t2t_ape_confidence"] = t.get("confidence", "") if t else ""
+        r["aa_flip"] = a.get("aa_flip", "") if a else ""
+        r["aa_confidence"] = a.get("confidence", "") if a else ""
+        r["aa_n_tag"] = a.get("n_tag", "") if a else ""
         r["evidence_tier"] = tier
         if flip_ov is not None and str(flip_ov) != "":
             r["flip_ref_polarity"] = str(flip_ov)
