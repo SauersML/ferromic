@@ -799,6 +799,15 @@ def _merge_population_metrics(inv_df: pd.DataFrame) -> pd.DataFrame:
         ["_merge_chr", "_merge_start", "_merge_end", "hudson_fst_hap_group_0v1", "0_pi_filtered", "1_pi_filtered"]
     ]
 
+    # The upstream VCF pipeline can occasionally emit the same locus twice (a tiny
+    # zero-diversity region), which would break the one_to_one validation below. Collapse
+    # duplicate metric rows on the merge key (keep the most-informative copy) so a benign
+    # upstream duplicate cannot fail the whole supplementary-table generation.
+    metrics_trimmed = (
+        metrics_trimmed.sort_values(["0_pi_filtered", "1_pi_filtered"], na_position="first")
+        .drop_duplicates(subset=["_merge_chr", "_merge_start", "_merge_end"], keep="last")
+    )
+
     merged = inv_with_keys.merge(
         metrics_trimmed,
         how="left",
