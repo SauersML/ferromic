@@ -17,13 +17,13 @@ Sample sizes for diversity analyses:
 DIVERSITY
 Nucleotide diversity (π) by orientation and recurrence:
   Total loci with finite π estimates: 62.
-  Across all loci: mean π(inverted) = 0.000407, mean π(direct) = 0.000436.
-    Median π(inverted) = 0.000331, median π(direct) = 0.000309.
-    Median π(inverted) is 1.068-fold higher than median π(direct).
-    Two-sided paired t-test comparing orientations: t = -0.635, p = 0.528.
-  Single-event inversions: median π(inverted) = 0.000251, median π(direct) = 0.000215.
+  Across all loci: mean π(inverted) = 0.000397, mean π(direct) = 0.000447.
+    Median π(inverted) = 0.000324, median π(direct) = 0.000338.
+    Median π(inverted) is 1.043-fold lower than median π(direct).
+    Two-sided paired t-test comparing orientations: t = -1.097, p = 0.277.
+  Single-event inversions: median π(inverted) = 0.000218, median π(direct) = 0.000239.
   Recurrent inversions: median π(inverted) = 0.000421, median π(direct) = 0.000465.
-  Within inverted haplotypes: recurrent median π = 0.000421; single-event median π = 0.000251.
+  Within inverted haplotypes: recurrent median π = 0.000421; single-event median π = 0.000218.
 
 PI STRUCTURE
 Nucleotide diversity structure (Edge vs Middle and Internal Decay), filtered by consensus inversion status:
@@ -196,25 +196,25 @@ Orientation × recurrence linear models (replicated strict logic):
     [Model C] Outcome Δlogπ as in Model A with predictors Recurrent + z-scored covariates ln1p(Number_recurrent_events), ln(Size_kbp), Inverted_AF (raw z), ln(Formation_rate_per_generation); HC3 robust SEs; rows with missing covariates are dropped and effects are per +1 SD.
   Detection floor applied before logs: ε = 6.500000e-06.
   [Model A] Δ-logπ = log(π_inv+ε) – log(π_dir+ε) ~ 1 + Recurrent (HC3 SEs). No weights or covariates; effects reported for single-event, recurrent, interaction, and pooled Δ-logπ.
-    Single-event: Inverted vs Direct: fold-change = 0.975 (95% CI 0.427–2.226), p = 0.952.
+    Single-event: Inverted vs Direct: fold-change = 0.717 (95% CI 0.317–1.622), p = 0.424.
     Recurrent: Inverted vs Direct: fold-change = 0.912 (95% CI 0.755–1.102), p = 0.340.
-    Interaction (difference between those two): fold-change = 0.936 (95% CI 0.401–2.183), p = 0.878.
-    Overall inversion effect (pooled Δ-logπ): fold-change = 0.942 (95% CI 0.629–1.411), p = 0.772.
+    Interaction (difference between those two): fold-change = 1.273 (95% CI 0.550–2.942), p = 0.573.
+    Overall inversion effect (pooled Δ-logπ): fold-change = 0.812 (95% CI 0.543–1.212), p = 0.308.
   [Model B] log(π+ε) ~ Inverted + Inverted:Recurrent + C(region_id); cluster-robust by region_id. Recurrence main effect absorbed by fixed effects; contrasts give single-event, recurrent, and interaction pairs.
-    Single-event: Inverted vs Direct: fold-change = 0.975 (95% CI 0.308–3.086), p = 0.965.
+    Single-event: Inverted vs Direct: fold-change = 0.717 (95% CI 0.229–2.240), p = 0.567.
     Recurrent: Inverted vs Direct: fold-change = 0.912 (95% CI 0.700–1.188), p = 0.495.
-    Interaction (difference between those two): fold-change = 0.936 (95% CI 0.287–3.052), p = 0.912.
+    Interaction (difference between those two): fold-change = 1.273 (95% CI 0.395–4.099), p = 0.686.
   [Model C] Δ-logπ ~ 1 + Recurrent + z-scored covariates from inv_properties.tsv (Number_recurrent_events ln1p, Size_.kbp. ln, Inverted_AF, Formation_rate_per_generation ln). HC3 SEs; rows require complete covariates with missingness dummies excluded.
     Covariates included in fit: Covariate: Number_recurrent_events (ln1p, z), Covariate: Size_.kbp. (ln, z), Covariate: Inverted_AF (z), Covariate: Formation_rate_per_generation (ln, z)
-    Single-event: Inverted vs Direct (adjusted): fold-change = 0.870 (95% CI 0.484–1.565), p = 0.642.
-    Recurrent: Inverted vs Direct (adjusted): fold-change = 0.947 (95% CI 0.383–2.342), p = 0.907.
-    Interaction (difference between those two): fold-change = 1.089 (95% CI 0.453–2.618), p = 0.849.
-    Covariate: Number_recurrent_events (ln1p, z): fold-change = 1.440 (95% CI 0.600–3.456), p = 0.414.
-    Covariate: Size_.kbp. (ln, z): fold-change = 1.215 (95% CI 0.827–1.783), p = 0.321.
-    Covariate: Inverted_AF (z): fold-change = 2.038 (95% CI 1.194–3.480), p = 9.085e-03.
-    Covariate: Formation_rate_per_generation (ln, z): fold-change = 0.584 (95% CI 0.165–2.064), p = 0.404.
+    Single-event: Inverted vs Direct (adjusted): fold-change = 0.724 (95% CI 0.419–1.251), p = 0.246.
+    Recurrent: Inverted vs Direct (adjusted): fold-change = 0.615 (95% CI 0.264–1.432), p = 0.260.
+    Interaction (difference between those two): fold-change = 0.850 (95% CI 0.327–2.212), p = 0.739.
+    Covariate: Number_recurrent_events (ln1p, z): fold-change = 1.108 (95% CI 0.477–2.576), p = 0.811.
+    Covariate: Size_.kbp. (ln, z): fold-change = 1.329 (95% CI 0.904–1.955), p = 0.148.
+    Covariate: Inverted_AF (z): fold-change = 2.497 (95% CI 1.584–3.937), p = 8.174e-05.
+    Covariate: Formation_rate_per_generation (ln, z): fold-change = 1.020 (95% CI 0.326–3.191), p = 0.973.
   [Permutation] Model A interaction (n=10000):
-    Observed Δ(mean log-ratio) = -0.0666, p = 0.8743.
+    Observed Δ(mean log-ratio) = 0.2410, p = 0.5488.
 
 CDS CONSERVATION
 CDS conservation GLM (proportion of identical CDS pairs):
