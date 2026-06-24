@@ -106,7 +106,41 @@ def tier_for(t2t, ss, aa=None):
         # high-conf only: 88% vs published gold (gold-equivalent). AA-moderate is just
         # ~69% on a small sample, so it is NOT promoted to gold -- quality over coverage.
         return "gold_ancestral_allele", aa.get("aa_flip"), "high"
+    # below all single-method gates, multi-method CONCORDANCE (validated 96% vs gold) is
+    # applied in main() via concordance_call() -> tier "gold_concordant". See that function.
     return "synteny", None, None
+
+
+def concordance_call(syn_flip, t2t, ss, aa):
+    """Validated multi-method concordance (96% vs gold-reference, 81/84). Resolves provisional
+    loci where independent methods (T2T-ape, Strand-seq, ancestral-allele) concur, even when
+    each individual call is below its own high/moderate gate. Single low-confidence calls are
+    unreliable (aa 63%, strandseq 43%, t2t 71%); CONCORDANCE is what restores gold quality.
+      RULE B  synteny backed by >=1 orthogonal method and NOT opposed by >=2  -> keep synteny.
+      RULE A  >=2 orthogonal methods agree (may override an unreliable synteny call, which is
+              only ~39% right on its own).
+      Conflicts (2-vs-2, or orthogonal tie) -> None (stay provisional, never forced)."""
+    m = {}
+    tf = (t2t or {}).get("t2t_flip"); sf = (ss or {}).get("strandseq_flip"); af = (aa or {}).get("aa_flip")
+    if tf in ("0", "1"): m["t2t"] = tf
+    if sf in ("0", "1"): m["ss"] = sf
+    if af in ("0", "1"): m["aa"] = af
+    if not m:
+        return None, None
+    n0 = sum(1 for v in m.values() if v == "0"); n1 = sum(1 for v in m.values() if v == "1")
+    ortho = "1" if n1 > n0 else ("0" if n0 > n1 else None)
+    ortho_tie = (n0 == n1)
+    syn = syn_flip if syn_flip in ("0", "1") else None
+    if syn is not None:
+        agree = sum(1 for v in m.values() if v == syn); oppose = len(m) - agree
+        if agree >= 1 and oppose < 2:
+            return syn, "high"          # RULE B (validated ~100% on the backed subset)
+        if oppose >= 2 and ortho is not None and ortho != syn and not ortho_tie:
+            return ortho, "moderate"    # RULE A override of unreliable synteny
+        return None, None               # conflict
+    if len(m) >= 2 and ortho is not None and not ortho_tie:
+        return ortho, "moderate"        # RULE A, no synteny baseline
+    return None, None
 
 
 def resolution_status(tier, has_ortho):
@@ -162,7 +196,7 @@ def main():
             "inv_af_ref", "derived_af", "minor_is_derived", "strandseq_flip",
             "strandseq_confidence", "strandseq_source", "evidence_tier",
             "t2t_ape_flip", "t2t_ape_confidence", "aa_flip", "aa_confidence",
-            "aa_n_tag", "resolution_status"]
+            "aa_n_tag", "synteny_flip", "resolution_status"]
 
     from collections import Counter
     tiers = Counter()
@@ -171,7 +205,17 @@ def main():
         iid = r["inv_id"]
         t, s = t2t.get(iid), ss.get(iid)
         a = aa_for(r)
+        # pristine v2 synteny flip, captured once and never mutated by concordance (so RULE A
+        # overrides cannot escalate their own confidence on re-runs -> fully idempotent).
+        syn_base = r.get("synteny_flip", "") or r["flip_ref_polarity"]
+        r["synteny_flip"] = syn_base
         tier, flip_ov, conf_ov = tier_for(t, s, a)
+        if tier == "synteny":
+            # validated multi-method concordance rescues provisional loci where the gold tiers
+            # individually fall below their gate but independent methods concur (96% vs gold).
+            cflip, cconf = concordance_call(syn_base, t, s, a)
+            if cflip is not None:
+                tier, flip_ov, conf_ov = "gold_concordant", cflip, cconf
         tiers[tier] += 1
         has_ortho = any(r.get(f"orient_{o}") in ("collinear", "inverted")
                         for o in ("chimp", "gorilla", "orangutan", "macaque"))
