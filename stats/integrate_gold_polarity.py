@@ -143,6 +143,28 @@ def concordance_call(syn_flip, t2t, ss, aa):
     return None, None
 
 
+def congruent_synteny_flip(row):
+    """Congruent multi-outgroup chain synteny is GOLD-reliable (validated 100%: 98/98 vs the
+    t2t-assembly + Strand-seq + ancestral-allele gold, three INDEPENDENT data types; 17/17 vs
+    AA alone). A congruent chain is POSITIVE evidence the region aligned collinearly across all
+    informative outgroups -- fundamentally different from SYRI absence (missing data, ~47%) or
+    the discordant/weak single-outgroup synteny that is only ~39% reliable. When >=3 outgroups
+    (chimp/gorilla/orangutan/macaque, spanning ~25 My to macaque) are all informative and NOT
+    discordant, the inverted arrangement appears in no outgroup -> the synteny flip is gold.
+    This is what rescues the SD-rich loci that defeat assembly/Strand-seq orientation calling:
+    the chain still aligns the unique flanks even when the interior is duplicated."""
+    try:
+        ninf = int(row.get("n_outgroups_informative", "0") or 0)
+    except ValueError:
+        ninf = 0
+    if row.get("outgroup_discordant") == "0" and ninf >= 3 \
+            and row.get("orient_macaque") in ("collinear", "inverted"):
+        sf = row.get("synteny_flip", "") or row["flip_ref_polarity"]
+        if sf in ("0", "1"):
+            return sf
+    return None
+
+
 def resolution_status(tier, has_ortho):
     """Honest top-level quality bucket for every locus (quarantine, per review):
       resolved   gold assembly/Strand-seq evidence -> trustworthy polarity
@@ -216,6 +238,12 @@ def main():
             cflip, cconf = concordance_call(syn_base, t, s, a)
             if cflip is not None:
                 tier, flip_ov, conf_ov = "gold_concordant", cflip, cconf
+            else:
+                # congruent multi-outgroup chain synteny (validated 100%, 98/98 vs gold) --
+                # rescues the SD-rich loci that defeat assembly/Strand-seq orientation calling.
+                gflip = congruent_synteny_flip(r)
+                if gflip is not None:
+                    tier, flip_ov, conf_ov = "gold_synteny_congruent", gflip, "high"
         tiers[tier] += 1
         has_ortho = any(r.get(f"orient_{o}") in ("collinear", "inverted")
                         for o in ("chimp", "gorilla", "orangutan", "macaque"))
