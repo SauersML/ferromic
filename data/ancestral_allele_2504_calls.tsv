@@ -1,0 +1,15 @@
+inv_id	flip	ntag	frac	carr2504	confidence	gold_tier	gold_flip
+chr1:13104252-13122521	0	1	1.000	1	low	synteny	0
+chr1:21203917-21204602	0	62	0.984	72	high	synteny	0
+chr1:43593641-43594291	1	24	0.885	2240	high	gold_ancestral_allele	1
+chr1:91666232-91667085	0	63	0.610	316	low	synteny	0
+chr1:197787659-197788856	0	106	0.637	574	low	gold_strandseq	1
+chr10:15742803-15760427	0	45	0.901	48	high	synteny	0
+chr10:37105149-37111121	0	9	1.000	1	moderate	gold_ancestral_allele	0
+chr10:46144703-46204851	0	38	1.000	1	moderate	gold_t2t_apes	1
+chr10:47649265-47756785	0	27	1.000	1	moderate	recurrent_t2t_apes	0
+chr10:47983093-48044442	0	25	1.000	1	moderate	recurrent_t2t_apes	0
+chr10:55007431-55013434	0	8	0.868	543	high	gold_t2t_apes	1
+chr10:73657969-73660146	1	33	0.586	1356	low	gold_t2t_apes	1
+chr10:113411933-113412252	0	32	0.932	166	high	synteny	0
+chr12:46896694-46915975	0	67	0.868	232	high	synteny	0
