@@ -233,17 +233,20 @@ def main():
         r["synteny_flip"] = syn_base
         tier, flip_ov, conf_ov = tier_for(t, s, a)
         if tier == "synteny":
-            # validated multi-method concordance rescues provisional loci where the gold tiers
-            # individually fall below their gate but independent methods concur (96% vs gold).
-            cflip, cconf = concordance_call(syn_base, t, s, a)
-            if cflip is not None:
-                tier, flip_ov, conf_ov = "gold_concordant", cflip, cconf
+            # PRECEDENCE: congruent multi-outgroup chain synteny is the MOST reliable rule
+            # (100%, 98/98 vs gold; and 1/1 where >=2 orthogonal methods OPPOSE it, vs RULE A
+            # 0/1) -- so it is checked FIRST and concordance RULE A may NOT override a congruent
+            # locus. A congruent 4-outgroup alignment (incl. deep macaque) beats 2 low-conf
+            # orthogonal calls. Non-congruent synteny falls through to concordance.
+            gflip = congruent_synteny_flip(r)
+            if gflip is not None:
+                tier, flip_ov, conf_ov = "gold_synteny_congruent", gflip, "high"
             else:
-                # congruent multi-outgroup chain synteny (validated 100%, 98/98 vs gold) --
-                # rescues the SD-rich loci that defeat assembly/Strand-seq orientation calling.
-                gflip = congruent_synteny_flip(r)
-                if gflip is not None:
-                    tier, flip_ov, conf_ov = "gold_synteny_congruent", gflip, "high"
+                # validated multi-method concordance rescues the remaining provisional loci
+                # where the gold tiers fall below their gate but independent methods concur.
+                cflip, cconf = concordance_call(syn_base, t, s, a)
+                if cflip is not None:
+                    tier, flip_ov, conf_ov = "gold_concordant", cflip, cconf
         tiers[tier] += 1
         has_ortho = any(r.get(f"orient_{o}") in ("collinear", "inverted")
                         for o in ("chimp", "gorilla", "orangutan", "macaque"))
