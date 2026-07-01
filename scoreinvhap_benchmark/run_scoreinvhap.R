@@ -83,9 +83,13 @@ cat(sprintf("Subsetting VCF to %d reference SNPs (of %d total).\n", sum(keep), l
 vcf <- vcf[keep, ]
 
 # inv=<id> triggers internal loading of the bundled reference objects.
-# Parallelize the per-sample scoring across all available cores so the full
+# Parallelize the per-sample scoring across the ALLOCATED cores so the full
 # ~2504-sample panel scores in minutes rather than ~50 min single-threaded.
-ncores <- max(1L, parallel::detectCores())
+# Use `nproc` (respects the CI cgroup / Slurm allocation): R's detectCores()
+# reads the HOST's physical cores on shared runners and over-reports, which
+# oversubscribes and thrashes (each fork copies the data) -- slower than serial.
+ncores <- suppressWarnings(as.integer(system("nproc", intern = TRUE))[1])
+if (is.na(ncores) || ncores < 1L) ncores <- max(1L, parallel::detectCores())
 cat(sprintf("Scoring %d samples across %d core(s)...\n", ncol(vcf), ncores))
 res <- scoreInvHap(SNPlist = vcf, inv = inv_id,
                    BPPARAM = MulticoreParam(workers = ncores))
