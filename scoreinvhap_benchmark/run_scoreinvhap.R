@@ -18,6 +18,7 @@
 suppressMessages({
   library(scoreInvHap)
   library(VariantAnnotation)
+  library(BiocParallel)
 })
 
 args <- commandArgs(trailingOnly = TRUE)
@@ -82,7 +83,12 @@ cat(sprintf("Subsetting VCF to %d reference SNPs (of %d total).\n", sum(keep), l
 vcf <- vcf[keep, ]
 
 # inv=<id> triggers internal loading of the bundled reference objects.
-res <- scoreInvHap(SNPlist = vcf, inv = inv_id)
+# Parallelize the per-sample scoring across all available cores so the full
+# ~2504-sample panel scores in minutes rather than ~50 min single-threaded.
+ncores <- max(1L, parallel::detectCores())
+cat(sprintf("Scoring %d samples across %d core(s)...\n", ncol(vcf), ncores))
+res <- scoreInvHap(SNPlist = vcf, inv = inv_id,
+                   BPPARAM = MulticoreParam(workers = ncores))
 
 # inversion=TRUE collapses haplotype labels (Na/Ia/...) into N/I, giving
 # inversion genotypes NN / NI / II.
