@@ -209,6 +209,23 @@ jobs:
           bcftools view -i 'ID=@ref_inv17.txt' b37_chr17.vcf.gz -Oz -o b37_chr17.sub.vcf.gz
           echo "subset chr8:  $(bcftools view -H b37_chr8.sub.vcf.gz | wc -l) variants x $(bcftools query -l b37_chr8.sub.vcf.gz | wc -l) samples (ref $(wc -l < ref_inv8.txt))"
           echo "subset chr17: $(bcftools view -H b37_chr17.sub.vcf.gz | wc -l) variants x $(bcftools query -l b37_chr17.sub.vcf.gz | wc -l) samples (ref $(wc -l < ref_inv17.txt))"
+          # Report the ancestry composition of the scored panel. Under the old `head -500`
+          # cap this was AMR/EUR/EAS only (0 AFR, 0 SAS); scoring the full 2504 restores all
+          # five 1000G superpopulations (AFR 661, AMR 347, EAS 504, EUR 503, SAS 489).
+          ped=data/integrated_call_samples_v3.20250704.ALL.ped
+          echo "scored-panel ancestry composition (1000G superpopulation):"
+          awk -F'\t' '
+            BEGIN{
+              split("ACB ASW ESN GWD LWK MSL YRI",a," "); for(i in a)S[a[i]]="AFR"
+              split("CLM MXL PEL PUR",a," ");             for(i in a)S[a[i]]="AMR"
+              split("CDX CHB CHS CHD JPT KHV",a," ");      for(i in a)S[a[i]]="EAS"
+              split("CEU FIN GBR IBS TSI",a," ");          for(i in a)S[a[i]]="EUR"
+              split("BEB GIH ITU PJL STU",a," ");          for(i in a)S[a[i]]="SAS"
+            }
+            NR==FNR{ if(FNR>1) pop[$2]=$7; next }
+            { sp=S[pop[$1]]; c[sp?sp:"UNK"]++ }
+            END{ for(k in c) printf "  %s\t%d\n", k, c[k] }
+          ' "$ped" <(bcftools query -l b37_chr8.sub.vcf.gz) | sort
           Rscript scoreinvhap_benchmark/run_scoreinvhap.R b37_chr8.sub.vcf.gz  inv8p23.1   sih_8p23.tsv
           Rscript scoreinvhap_benchmark/run_scoreinvhap.R b37_chr17.sub.vcf.gz inv17q21.31 sih_17q21.tsv
           head sih_8p23.tsv sih_17q21.tsv
