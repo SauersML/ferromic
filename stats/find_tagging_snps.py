@@ -46,15 +46,7 @@ INVERSION_PHY_RE = re.compile(
 DIRECT_GROUP = 0
 INVERTED_GROUP = 1
 
-# Chimp polarization: phy group0/group1 are the raw hg38 reference / non-reference
-# orientations. is_flipped() tells us which loci must have those swapped so that
-# "direct" == ANCESTRAL and "inverted" == DERIVED (inverted == derived w.r.t. chimp).
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-try:
-    from _inv_common import is_flipped as _is_flipped
-except Exception:  # pragma: no cover
-    def _is_flipped(*_a, **_k):
-        return False
 
 # Limit base handling to the common alignment characters to keep memory overhead small.
 BASE_CODES = np.array([ord("A"), ord("C"), ord("G"), ord("T"), ord("N"), ord("-")], dtype=np.uint8)
@@ -342,14 +334,8 @@ def analyze_inversion_pair(key: InversionKey, files: Dict[int, str]) -> List[dic
             f"Missing inversion group(s) {', '.join(missing)} for {key.label}"
         )
 
-    # Polarize: for flipped loci the hg38 reference (group0) is the DERIVED
-    # orientation, so treat group1 as direct/ancestral and group0 as inverted/derived.
-    if _is_flipped(key.chrom, key.start, key.end):
-        direct_file = files[INVERTED_GROUP]
-        inverted_file = files[DIRECT_GROUP]
-    else:
-        direct_file = files[DIRECT_GROUP]
-        inverted_file = files[INVERTED_GROUP]
+    direct_file = files[DIRECT_GROUP]
+    inverted_file = files[INVERTED_GROUP]
 
     alignment_direct = parse_phylip(direct_file)
     alignment_inverted = parse_phylip(inverted_file)

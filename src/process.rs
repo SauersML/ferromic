@@ -816,16 +816,6 @@ If a sample’s config entry says (left_tsv=0, right_tsv=1), that sample appears
 Keep in mind that 0 or 1 in the config is about which haplotype group (e.g., reference or inverted) each side belongs to, whereas the “0|1” in the VCF refers to ref vs. alt alleles at a position. The config tells you which side (left or right) to collect into group_0 or group_1, and the VCF tells you whether that haplotype is ref or alt at each site.
 
 Hence the files named group_0_<transcript>_chr_<...>.phy gather all haplotypes labeled as group 0, with lines like “SampleA_L” or “SampleB_R” (whichever sides matched group 0). Meanwhile, group_1_<transcript>_chr_<...>.phy holds group 1 haplotypes, labeled “SampleA_R,” “SampleB_L,” and so on, depending on each sample’s config. If your config uses 1 to mean “inversion,” then group_1_... will contain inverted haplotypes, while group_0_... contains non-inverted.
-
-NOTE on polarization (chimp cutover): the group_0/group_1 labels and the
-output.csv 0_ / 1_ columns produced here are in the RAW hg38-reference encoding
-(0 = reference orientation, 1 = the inversion call from the config). The
-project-wide convention "inverted == DERIVED w.r.t. chimp" is applied DOWNSTREAM
-from data/inversion_polarity.tsv: small tables (output.csv, etc.) are re-keyed by
-scripts/apply_polarity.py, and phy consumers (cds/combine_phy.py,
-stats/find_tagging_snps.py, stats/four_fold_pi.py, stats/pin_pis.py) swap
-group_0<->group_1 for "flipped" loci via stats/_inv_common.is_flipped(). This
-Rust stage itself is intentionally polarization-agnostic.
 */
 
 pub fn process_variants(

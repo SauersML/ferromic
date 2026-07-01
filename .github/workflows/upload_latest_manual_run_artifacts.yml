@@ -167,19 +167,6 @@ jobs:
             rm -rf "$dest"
           done
 
-      - name: Polarize output.csv (inverted == derived w.r.t. chimp)
-        if: env.OUTPUT_CSV_UPDATED == '1'
-        run: |
-          set -euo pipefail
-          # The Rust pipeline emits output.csv in the raw hg38-reference encoding
-          # (0_* = reference orientation). Re-key it to the chimp-polarized
-          # convention (0_* = ANCESTRAL/direct, 1_* = DERIVED/inverted) using the
-          # committed data/inversion_polarity.tsv. --only scopes the flip to this
-          # one freshly-produced file and bypasses the dataset-wide marker.
-          python3 scripts/apply_polarity.py --apply --only output.csv
-          echo "First data rows after polarization:"
-          head -2 data/output.csv
-
       - name: Commit and push data updates
         env:
           RUN_ID: ${{ needs.collect-artifacts.outputs.run-id }}
