@@ -579,10 +579,108 @@ IMPUTATION_RESULTS_MERGED_URL = (
     "imputation_results_merged.tsv"
 )
 
+ORIENTATION_SYNTENY_TSV = DATA_DIR / "synteny_orientation.tsv"
+ORIENTATION_T2T_TSV = DATA_DIR / "apes2025_t2t_polarity.tsv"
+ORIENTATION_STRANDSEQ_TSV = DATA_DIR / "strandseq_polarity.tsv"
+ORIENTATION_AA_TSV = DATA_DIR / "ancestral_allele_polarity.tsv"
+
 TABLE_S1 = DATA_DIR / "tables.xlsx - Table S1.tsv"
 TABLE_S2 = DATA_DIR / "tables.xlsx - Table S2.tsv"
 TABLE_S3 = DATA_DIR / "tables.xlsx - Table S3.tsv"
 TABLE_S4 = DATA_DIR / "tables.xlsx - Table S4.tsv"
+
+
+ORIENTATION_COLUMN_DEFS: Dict[str, str] = OrderedDict(
+    [
+        ("inv_id", "Inversion locus (chromosome:start-end, GRCh38). Calls and coordinates are from Porubsky et al. (2022); inversions are neither called nor re-oriented in this study."),
+        ("orig_id", "Inversion identifier in the source callset."),
+        ("recurrence_class", "Recurrence classification (single-event / recurrent / unknown) from Porubsky et al. (2022)."),
+        ("reference_inverted_AF", "Frequency of the hg38-reference INVERTED arrangement in the analysed panel. This is the reference orientation used throughout the study; no ancestral/derived polarization is applied."),
+        ("t2t_apes", "Orientation inferred for the reference arrangement from the Yoo et al. (2025) telomere-to-telomere ape assemblies (SYRI/PAV): ancestral, derived, or blank if uninformative."),
+        ("t2t_apes_confidence", "Confidence of the T2T-ape inference (high / moderate / low)."),
+        ("t2t_apes_species", "Per-species T2T-ape genotypes contributing to the call (species:HOM/HET)."),
+        ("strandseq", "Orientation inferred for the reference arrangement from Porubsky et al. (2020) Strand-seq great-ape genotypes: ancestral, derived, or blank."),
+        ("strandseq_confidence", "Confidence of the Strand-seq inference."),
+        ("strandseq_species", "Per-species Strand-seq genotypes contributing to the call (species:HOM/HET)."),
+        ("ancestral_allele", "Orientation inferred for the reference arrangement by multi-SNP chimpanzee ancestral-allele voting: ancestral, derived, or blank."),
+        ("ancestral_allele_confidence", "Confidence of the ancestral-allele inference."),
+        ("ancestral_allele_n_tag", "Number of ancestral-informative tag SNPs contributing to the vote."),
+        ("synteny", "Orientation inferred for the reference arrangement from chain synteny against chimpanzee/gorilla/orangutan/macaque: ancestral, derived, recurrent, or blank."),
+        ("synteny_chimp", "Chain-synteny orientation of the reference interior vs chimpanzee (collinear / inverted)."),
+        ("synteny_gorilla", "Chain-synteny orientation vs gorilla (collinear / inverted)."),
+        ("synteny_orangutan", "Chain-synteny orientation vs orangutan (collinear / inverted)."),
+        ("synteny_macaque", "Chain-synteny orientation vs macaque (collinear / inverted)."),
+        ("n_methods_informative", "Number of methods returning a definite ancestral/derived orientation."),
+        ("n_call_ancestral", "Number of methods inferring the reference arrangement to be ancestral."),
+        ("n_call_derived", "Number of methods inferring the reference arrangement to be derived."),
+        ("consensus", "Cross-method agreement: concordant:ancestral, concordant:derived, discordant, single_method, or none."),
+    ]
+)
+
+
+def _load_orientation_methods() -> pd.DataFrame:
+    """Descriptive per-locus summary of the orientation-inference methods.
+
+    Merges the committed method tables (chain synteny, Yoo 2025 T2T apes,
+    Porubsky 2020 Strand-seq, chimp ancestral-allele) into one table stating, in
+    the reference frame, what each method reports for every inversion. It is
+    purely descriptive — nothing here feeds back into the analysis, which uses
+    the published reference orientation throughout."""
+
+    def _read(path: Path) -> List[dict]:
+        if not path.exists():
+            return []
+        return pd.read_csv(path, sep="\t", dtype=str).fillna("").to_dict("records")
+
+    def _call(flip: str, confidence: str = "") -> str:
+        if str(confidence).strip() == "recurrent":
+            return "recurrent"
+        return {"0": "ancestral", "1": "derived"}.get(str(flip).strip(), "")
+
+    def _coord(rec) -> tuple:
+        chrom = str(rec.get("chrom", "")).strip().lower().removeprefix("chr")
+        return (chrom, str(rec.get("start", "")).strip(), str(rec.get("end", "")).strip())
+
+    t2t = {r["inv_id"]: r for r in _read(ORIENTATION_T2T_TSV)}
+    strandseq = {r["inv_id"]: r for r in _read(ORIENTATION_STRANDSEQ_TSV)}
+    aa = {_coord(r): r for r in _read(ORIENTATION_AA_TSV)}
+
+    rows: List[dict] = []
+    for c in _read(ORIENTATION_SYNTENY_TSV):
+        t = t2t.get(c["inv_id"], {})
+        s = strandseq.get(c["inv_id"], {})
+        a = aa.get(_coord(c), {})
+        t2t_call = _call(t.get("t2t_flip"), t.get("confidence"))
+        ss_call = _call(s.get("strandseq_flip"), s.get("confidence"))
+        aa_call = _call(a.get("aa_flip"), a.get("confidence"))
+        synteny = ("recurrent"
+                   if c.get("recurrence_class") == "recurrent" and c.get("outgroup_discordant") == "1"
+                   else _call(c.get("synteny_flip")))
+        calls = [t2t_call, ss_call, aa_call, synteny]
+        anc = sum(1 for x in calls if x == "ancestral")
+        der = sum(1 for x in calls if x == "derived")
+        inf = anc + der
+        consensus = ("none" if inf == 0 else "single_method" if inf == 1
+                     else "discordant" if anc and der
+                     else ("concordant:ancestral" if anc else "concordant:derived"))
+        rows.append({
+            "inv_id": c["inv_id"], "orig_id": c.get("orig_id", ""),
+            "recurrence_class": c.get("recurrence_class", ""),
+            "reference_inverted_AF": c.get("inv_af_ref", ""),
+            "t2t_apes": t2t_call, "t2t_apes_confidence": t.get("confidence", ""),
+            "t2t_apes_species": t.get("apes", ""),
+            "strandseq": ss_call, "strandseq_confidence": s.get("confidence", ""),
+            "strandseq_species": s.get("apes", ""),
+            "ancestral_allele": aa_call, "ancestral_allele_confidence": a.get("confidence", ""),
+            "ancestral_allele_n_tag": a.get("n_tag", ""),
+            "synteny": synteny,
+            "synteny_chimp": c.get("orient_chimp", ""), "synteny_gorilla": c.get("orient_gorilla", ""),
+            "synteny_orangutan": c.get("orient_orangutan", ""), "synteny_macaque": c.get("orient_macaque", ""),
+            "n_methods_informative": inf, "n_call_ancestral": anc, "n_call_derived": der,
+            "consensus": consensus,
+        })
+    df = pd.DataFrame(rows, columns=list(ORIENTATION_COLUMN_DEFS.keys()))
+    return _prune_columns(df, ORIENTATION_COLUMN_DEFS, "Orientation inference methods")
 
 
 @dataclass
@@ -1513,6 +1611,25 @@ def build_workbook(output_path: Path) -> None:
             ),
             column_defs=INVERSION_COLUMN_DEFS,
             loader=_load_inversion_catalog,
+        )
+    )
+
+    register(
+        SheetInfo(
+            name="Orientation inference methods",
+            description=(
+                "Descriptive comparison of independent methods for inferring the ancestral vs derived orientation "
+                "of each inversion, reported in the GRCh38 reference frame. Inversions are analysed in their published "
+                "(Porubsky et al. 2022) reference orientation throughout this study; this table is provided only to "
+                "document the extent of agreement and disagreement across orientation-inference methods, and does not "
+                "feed into any analysis. Each method column states whether that method infers the reference arrangement "
+                "to be ancestral or derived (blank = uninformative). Methods: chain synteny against "
+                "chimpanzee/gorilla/orangutan/macaque; the Yoo et al. (2025) telomere-to-telomere ape assemblies "
+                "(SYRI/PAV); Porubsky et al. (2020) Strand-seq great-ape genotypes; and multi-SNP chimpanzee "
+                "ancestral-allele voting. The consensus column summarises cross-method agreement."
+            ),
+            column_defs=ORIENTATION_COLUMN_DEFS,
+            loader=_load_orientation_methods,
         )
     )
 

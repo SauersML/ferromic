@@ -263,23 +263,6 @@ jobs:
               raise SystemExit("No .phy or .phy.gz files found inside phy_outputs.zip")
           PY
 
-      - name: Polarize staged output.csv (inverted == derived w.r.t. chimp)
-        shell: bash
-        run: |
-          set -euo pipefail
-          # The VCF pipeline artefact staged at analysis_downloads/public_internet/
-          # output.csv is in the raw hg38-reference encoding, and replicate_figures
-          # reads it (CWD/downloads-first) for all diversity figures. Re-key it to
-          # the chimp-polarized convention so the published figures show ancestral
-          # vs derived diversity rather than reference vs non-reference.
-          staged="analysis_downloads/public_internet/output.csv"
-          if [[ -f "$staged" ]]; then
-            python3 scripts/apply_polarity.py --apply --only output.csv \
-              --data-dir analysis_downloads/public_internet
-          else
-            echo "No staged output.csv to polarize ($staged absent)."
-          fi
-
       - name: Run replicate_figures.py
         id: run-figures
         shell: bash

@@ -4,46 +4,6 @@ from collections import defaultdict
 import sys
 import gzip
 
-# Chimp polarization: phy files use the raw hg38 group encoding (group0 = hg38
-# reference orientation, group1 = the other orientation). To make the PAML taxon
-# prefix mean 0 == ANCESTRAL/direct and 1 == DERIVED/inverted, the group labels
-# are swapped for inversions whose reference orientation is itself derived.
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "stats"))
-try:
-    from _inv_common import is_flipped
-except Exception:  # pragma: no cover - polarity table optional/absent
-    def is_flipped(*_a, **_k):
-        return False
-
-_INV_COORDS_RE = re.compile(r"_inv_start(\d+)_inv_end(\d+)")
-_REGION_ID_RE = re.compile(r"^inversion_([A-Za-z0-9]+)_start(\d+)_end(\d+)$")
-_CHR_RE = re.compile(r"_(chr[0-9XYMT]+)_")
-
-
-def _phy_locus_flipped(identifier, sample_filename):
-    """Return True if this locus' hg38 reference orientation is the DERIVED one,
-    so group0/group1 must be swapped. Coordinates are recovered from the region
-    identifier (inversion_<chr>_start<s>_end<e>) or the gene phy filename
-    (..._chrN_..._inv_start<s>_inv_end<e>...)."""
-    m = _REGION_ID_RE.match(identifier or "")
-    if m:
-        chrom, s, e = m.group(1), int(m.group(2)), int(m.group(3))
-        if not str(chrom).startswith("chr"):
-            chrom = "chr" + str(chrom)
-        return is_flipped(chrom, s, e)
-    mc = _INV_COORDS_RE.search(sample_filename or "")
-    mchr = _CHR_RE.search(sample_filename or "")
-    if mc and mchr:
-        return is_flipped(mchr.group(1), int(mc.group(1)), int(mc.group(2)))
-    return False
-
-
-def _polarize(collected, flipped):
-    """Swap group0<->group1 tags when the locus is flipped (outgroup untouched)."""
-    if not flipped:
-        return collected
-    swap = {"group0": "group1", "group1": "group0"}
-    return [(t, s, swap.get(g, g)) for (t, s, g) in collected]
 
 def parse_specific_phy_file(filename, group_type):
     """
@@ -291,7 +251,6 @@ def find_and_combine_phy_files():
         if alignment_length is None:
             continue
 
-        collected = _polarize(collected, _phy_locus_flipped(identifier, files_dict.get('group0', '')))
         if _write_combined_output(output_filename, collected, alignment_length):
             trios_processed_count += 1
             # AGGRESSIVE CLEANUP
@@ -357,7 +316,6 @@ def find_and_combine_phy_files():
         if alignment_length is None:
             continue
 
-        collected = _polarize(collected, _phy_locus_flipped(identifier, files_dict.get('group0', '')))
         if _write_combined_output(output_filename, collected, alignment_length):
             pairs_processed_count += 1
             # AGGRESSIVE CLEANUP

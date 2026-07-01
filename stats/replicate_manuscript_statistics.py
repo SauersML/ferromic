@@ -10,7 +10,6 @@ from contextlib import contextmanager
 import gzip
 import shutil
 import zipfile
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable, List, Tuple
@@ -148,34 +147,6 @@ def _temporary_workdir(path: Path):
         os.chdir(prev)
 
 
-def _polarize_inplace(basename: str) -> None:
-    """Re-key a freshly-produced RAW data table to the chimp-polarized convention.
-
-    The VCF pipeline emits ``output.csv`` and the CDS pipeline emits
-    ``gene_inversion_direct_inverted.tsv`` in the historical hg38-REFERENCE
-    encoding (0_/direct = reference arrangement). Every committed copy and every
-    downstream consumer in this repo, however, expects the chimp-POLARIZED
-    encoding (0_/direct = ANCESTRAL, 1_/inverted = DERIVED). This applies that
-    re-keying via ``scripts/apply_polarity.py --only`` exactly once, immediately
-    after the raw file is (re)generated, so the report below is computed on
-    polarized diversity and the committed artifact never reverts to raw.
-
-    Must be called only on a genuinely raw, freshly-(re)produced file; calling it
-    on an already-polarized copy would double-flip it.
-    """
-
-    script = REPO_ROOT / "scripts" / "apply_polarity.py"
-    target = DATA_DIR / basename
-    if not target.exists():
-        return
-    print(f"... Polarizing {basename} (inverted == derived w.r.t. chimp) ...")
-    subprocess.run(
-        [sys.executable, str(script), "--apply", "--only", basename],
-        check=True,
-        cwd=str(REPO_ROOT),
-    )
-
-
 def download_latest_artifacts():
     """
     Automatically downloads the required artifacts from the latest successful
@@ -307,13 +278,6 @@ def download_latest_artifacts():
 
             print(f"  Success: {target_path.name} updated.")
 
-            # The VCF pipeline emits output.csv in the raw hg38-reference
-            # encoding. Polarize it in place immediately so the report below and
-            # the committed copy both use the chimp-polarized (inverted ==
-            # derived) convention that every other consumer assumes.
-            if name == "run-vcf-output-csv":
-                _polarize_inplace("output.csv")
-
         except Exception as e:
             print(f"  FAILED to process {name}: {e}")
             # We don't exit here, try to get other files
@@ -440,11 +404,6 @@ def run_fresh_cds_pipeline():
                     print(f"  Copied {filename} to data/")
                 else:
                     print(f"  WARNING: {filename} not found, skipping copy.")
-
-            # cds_differences.py emits per-gene direct/inverted proportions in the
-            # raw hg38-reference encoding. Re-key to the chimp-polarized
-            # convention so the committed table matches the rest of the dataset.
-            _polarize_inplace("gene_inversion_direct_inverted.tsv")
 
             print("\n>>> PIPELINE: GENERATION COMPLETE. Proceeding to manuscript report...\n")
 

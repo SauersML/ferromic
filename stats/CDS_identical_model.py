@@ -11,20 +11,6 @@ import statsmodels.formula.api as smf
 from scipy.special import expit, logit
 from scipy.stats import norm
 
-# Chimp polarization: phy_group in cds_identical_proportions.tsv is the raw hg38
-# reference(0)/non-reference(1) orientation. is_flipped() identifies loci whose
-# reference arrangement is itself DERIVED, so phy_group must be swapped to make
-# 0 == ANCESTRAL/direct and 1 == DERIVED/inverted (the project-wide convention).
-try:  # repo-root import (matches find_tagging_snps.py)
-    from stats._inv_common import is_flipped as _is_flipped
-except Exception:  # pragma: no cover - keep the model runnable in isolation
-    try:
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        from _inv_common import is_flipped as _is_flipped
-    except Exception:
-        def _is_flipped(*_a, **_k):
-            return False
-
 # ---------- helpers ----------
 
 CAT_LABELS = {
@@ -98,21 +84,6 @@ def load_data() -> pd.DataFrame:
         return f"{chr_}:{start}-{end}"
 
     df["inv_id"] = df.apply(format_inv_id, axis=1)
-
-    # Polarize phy_group to ancestral(0)/derived(1). For flipped loci the raw
-    # reference orientation (phy_group 0) is the DERIVED arrangement, so swap the
-    # 0/1 labels; the matched-orientation filtering and EMM categories below then
-    # describe ancestral vs derived instead of reference vs non-reference.
-    if "phy_group" in df.columns:
-        flip_mask = df.apply(
-            lambda r: _is_flipped(r.get("chr"), r.get("inv_start"), r.get("inv_end")),
-            axis=1,
-        )
-        n_flip = int(flip_mask.sum())
-        if n_flip:
-            df.loc[flip_mask, "phy_group"] = 1 - df.loc[flip_mask, "phy_group"]
-            print(f"Polarized phy_group for {n_flip} flipped CDS records "
-                  f"({df.loc[flip_mask, 'inv_id'].nunique()} loci).")
 
     # exact-only
     # df = df[df["inv_exact_match"] == 1].copy()
