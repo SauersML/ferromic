@@ -8,18 +8,6 @@ from collections import Counter
 import numpy as np
 import pandas as pd
 
-# Chimp polarization: phy_group in cds_identical_proportions.tsv is raw hg38
-# reference(0)/non-reference(1). is_flipped() flags loci whose reference
-# orientation is DERIVED, so phy_group must be swapped to 0 == ancestral/direct.
-try:
-    from stats._inv_common import is_flipped as _is_flipped
-except Exception:  # pragma: no cover
-    try:
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        from _inv_common import is_flipped as _is_flipped
-    except Exception:
-        def _is_flipped(*_a, **_k):
-            return False
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
@@ -380,20 +368,6 @@ def load_cds_summary() -> pd.DataFrame:
         print("[load_cds_summary] inv_id examples (10):", df["inv_id"].dropna().head(10).tolist())
     except Exception:
         pass
-
-    # Polarize phy_group to ancestral(0)/derived(1) so the orientation labels and
-    # cds_conservation_table directions agree with the chimp-polarized
-    # gene_inversion_direct_inverted.tsv loaded alongside. For flipped loci the raw
-    # reference orientation (phy_group 0) is the DERIVED arrangement, so swap 0/1.
-    if "phy_group" in df.columns:
-        _flip = df.apply(
-            lambda r: _is_flipped(r.get("chr"), r.get("inv_start"), r.get("inv_end")),
-            axis=1,
-        )
-        _nf = int(_flip.sum())
-        if _nf:
-            df.loc[_flip, "phy_group"] = 1 - pd.to_numeric(df.loc[_flip, "phy_group"])
-            print(f"[load_cds_summary] polarized phy_group for {_nf} flipped records.")
 
     # ------------------------ derived labels ------------------------
     df["category"]    = df.apply(lambda r: build_category(r["consensus"], r["phy_group"]), axis=1)
