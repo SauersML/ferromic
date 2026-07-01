@@ -1,17 +1,17 @@
 model	statistic	observed_value	observed_df	parametric_p	permutation_p	n_perm	null_realized_typeI_alpha0.05	null_ks_uniform_D	null_ks_uniform_p	calibration_verdict
-adjusted	orientation_global_wald	16.40652733388554	2.0	0.00027375865334436985	0.026486756621689155	2000	0.16	0.162312100447634	1.6622818983711695e-46	ANTI-conservative
-adjusted	orientation_main_effect_wald	-3.8501831765663233	1.0	0.00011802951850209745	0.02448775612193903	2000	0.1605	0.15149758977448635	1.529613210629911e-40	anti-conservative
-adjusted	power_inject_logit_0.00	0.0				500				power_main=0.166;power_global=0.176
-adjusted	power_inject_logit_0.25	0.25				500				power_main=0.190;power_global=0.228
-adjusted	power_inject_logit_0.50	0.5				500				power_main=0.268;power_global=0.450
-adjusted	power_inject_logit_0.75	0.75				500				power_main=0.366;power_global=0.736
-adjusted	power_inject_logit_1.00	1.0				500				power_main=0.528;power_global=0.910
-adjusted	power_inject_logit_1.50	1.5				500				power_main=0.788;power_global=1.000
-no_covariates	orientation_global_wald	11.315056006714538	2.0	0.003491136317490784	0.057971014492753624	2000	0.162	0.15288187467400938	2.783695023297277e-41	ANTI-conservative
-no_covariates	orientation_main_effect_wald	-3.3330793922064275	1.0	0.0008589042941299584	0.044977511244377814	2000	0.1675	0.1448279298361615	4.504217670564853e-37	anti-conservative
-no_covariates	power_inject_logit_0.00	0.0				500				power_main=0.164;power_global=0.166
-no_covariates	power_inject_logit_0.25	0.25				500				power_main=0.218;power_global=0.220
-no_covariates	power_inject_logit_0.50	0.5				500				power_main=0.272;power_global=0.408
-no_covariates	power_inject_logit_0.75	0.75				500				power_main=0.368;power_global=0.688
-no_covariates	power_inject_logit_1.00	1.0				500				power_main=0.534;power_global=0.892
-no_covariates	power_inject_logit_1.50	1.5				500				power_main=0.810;power_global=0.996
+adjusted	orientation_global_wald	9.376149436451424	2.0	0.009204390152789697	0.07896051974012994	2000	0.16	0.15796378400482075	4.668482152812691e-44	ANTI-conservative
+adjusted	orientation_main_effect_wald	2.661625757433457	1.0	0.007776428593099783	0.08045977011494253	2000	0.1715	0.1423190033277258	8.267858028536844e-36	anti-conservative
+adjusted	power_inject_logit_0.00	0.0				500				power_main=0.166;power_global=0.154
+adjusted	power_inject_logit_0.25	0.25				500				power_main=0.178;power_global=0.256
+adjusted	power_inject_logit_0.50	0.5				500				power_main=0.232;power_global=0.468
+adjusted	power_inject_logit_0.75	0.75				500				power_main=0.384;power_global=0.736
+adjusted	power_inject_logit_1.00	1.0				500				power_main=0.526;power_global=0.916
+adjusted	power_inject_logit_1.50	1.5				500				power_main=0.770;power_global=0.998
+no_covariates	orientation_global_wald	9.389637689777787	2.0	0.009142523432731513	0.0769615192403798	2000	0.164	0.16477962653311898	6.324255938631474e-48	ANTI-conservative
+no_covariates	orientation_main_effect_wald	2.9670767258435182	1.0	0.0030064592375122655	0.05997001499250375	2000	0.1705	0.13243540759894662	4.757885881811839e-31	anti-conservative
+no_covariates	power_inject_logit_0.00	0.0				500				power_main=0.162;power_global=0.148
+no_covariates	power_inject_logit_0.25	0.25				500				power_main=0.180;power_global=0.236
+no_covariates	power_inject_logit_0.50	0.5				500				power_main=0.232;power_global=0.432
+no_covariates	power_inject_logit_0.75	0.75				500				power_main=0.378;power_global=0.730
+no_covariates	power_inject_logit_1.00	1.0				500				power_main=0.516;power_global=0.894
+no_covariates	power_inject_logit_1.50	1.5				500				power_main=0.778;power_global=1.000
