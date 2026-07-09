@@ -23,6 +23,11 @@ env/
 *.png
 *.pdf
 .DS_Store
+
+# VCF/tabix index blobs and local diff dumps — never commit
+*.tbi
+*.csi
+diffs_last_2_weeks*.diff
 web/figures-site/public/downloads/supplementary_tables.xlsx
 
 # Node/Next.js artifacts
