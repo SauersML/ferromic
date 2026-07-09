@@ -254,7 +254,7 @@ function parseId(id){ const m=/^(chr\w+)-(\d+)-INV-(\d+)$/.exec(id);
 let DATA=null, FILTERED=[], curIdx=-1, curView="direction";
 const $ = id => document.getElementById(id);
 
-fetch("./data.json").then(r=>{if(!r.ok)throw new Error("HTTP "+r.status);return r.json();})
+fetch("./data.json?v=3",{cache:"no-store"}).then(r=>{if(!r.ok)throw new Error("HTTP "+r.status);return r.json();})
   .then(d=>{
     DATA=d;
     $("genat").textContent = (d.generatedAt?("Generated "+d.generatedAt.slice(0,10)+" · "):"")
