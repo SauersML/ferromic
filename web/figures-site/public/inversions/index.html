@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inversion Atlas — 292 loci</title>
+<style>
+  :root{
+    --bg:#0b0d12; --panel:#141821; --panel2:#1b212d; --border:#262d3a;
+    --fg:#e7ecf4; --muted:#95a1b5; --accent:#5b9dff; --accent2:#33d69f;
+    --ref:#33d69f; --inv:#5b9dff; --amb:#c9a227;
+  }
+  @media (prefers-color-scheme: light){
+    :root{
+      --bg:#f6f8fb; --panel:#ffffff; --panel2:#f0f3f8; --border:#dce1ea;
+      --fg:#121722; --muted:#5a6678; --accent:#2563eb; --accent2:#059669;
+      --ref:#059669; --inv:#2563eb; --amb:#b7791f;
+    }
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  a{color:var(--accent)}
+  header{padding:28px 22px 14px;max-width:1400px;margin:0 auto}
+  h1{margin:0 0 4px;font-size:26px;letter-spacing:-.02em}
+  .sub{color:var(--muted);font-size:14px;margin:0}
+  .stats{display:flex;flex-wrap:wrap;gap:10px;margin:18px 0 6px}
+  .stat{background:var(--panel);border:1px solid var(--border);border-radius:10px;
+    padding:10px 14px;min-width:96px}
+  .stat b{display:block;font-size:20px;line-height:1.1}
+  .stat span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .controls{position:sticky;top:0;z-index:10;background:var(--bg);
+    border-bottom:1px solid var(--border);padding:12px 22px}
+  .controls .row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;
+    max-width:1400px;margin:0 auto}
+  input,select{background:var(--panel);color:var(--fg);border:1px solid var(--border);
+    border-radius:8px;padding:8px 10px;font-size:13px;outline:none}
+  input:focus,select:focus{border-color:var(--accent)}
+  #search{flex:1;min-width:180px}
+  .count{color:var(--muted);font-size:13px;margin-left:auto}
+  main{max-width:1400px;margin:0 auto;padding:18px 22px 60px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;
+    overflow:hidden;cursor:pointer;transition:transform .08s,border-color .12s}
+  .card:hover{transform:translateY(-2px);border-color:var(--accent)}
+  .card .thumb{width:100%;aspect-ratio:4/3;background:#fff;object-fit:contain;display:block}
+  .card .meta{padding:9px 11px}
+  .card .id{font-size:12.5px;font-weight:600;word-break:break-all;line-height:1.25}
+  .card .row2{display:flex;justify-content:space-between;align-items:center;margin-top:6px;
+    font-size:11px;color:var(--muted)}
+  .pill{font-size:10px;padding:2px 7px;border-radius:20px;font-weight:600;white-space:nowrap}
+  .pill.ref{background:color-mix(in srgb,var(--ref) 18%,transparent);color:var(--ref)}
+  .pill.inv{background:color-mix(in srgb,var(--inv) 18%,transparent);color:var(--inv)}
+  .pill.amb{background:color-mix(in srgb,var(--amb) 20%,transparent);color:var(--amb)}
+  /* lightbox */
+  .lb{position:fixed;inset:0;background:rgba(0,0,0,.86);z-index:100;display:none;
+    flex-direction:column;padding:14px}
+  .lb.open{display:flex}
+  .lb .bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;color:#fff}
+  .lb .bar h2{font-size:16px;margin:0;word-break:break-all}
+  .lb .bar .close{margin-left:auto;background:#222a37;border:1px solid #3a4557;color:#fff;
+    border-radius:8px;padding:8px 12px;cursor:pointer;font-size:14px}
+  .lb .tabs{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}
+  .lb .tabs button{background:#1b212d;border:1px solid #333c4b;color:#cdd6e5;
+    padding:7px 12px;border-radius:8px;cursor:pointer;font-size:12.5px}
+  .lb .tabs button.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .lb .stage{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;
+    background:#fff;border-radius:10px;margin-top:4px;overflow:auto}
+  .lb .stage img{max-width:100%;max-height:100%;object-fit:contain}
+  .lb .info{color:#aab4c5;font-size:12.5px;margin-top:8px;display:flex;gap:16px;flex-wrap:wrap}
+  .nav{background:#222a37;border:1px solid #3a4557;color:#fff;border-radius:8px;
+    padding:8px 12px;cursor:pointer;font-size:14px}
+  .foot{color:var(--muted);font-size:12px;text-align:center;padding:24px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Inversion Atlas</h1>
+  <p class="sub">Per-locus assembly-vs-GRCh38 miropeat alignments across HGSVC3 haplotypes + chimp ancestral. <span id="genAt"></span></p>
+  <div class="stats" id="stats"></div>
+</header>
+
+<div class="controls">
+  <div class="row">
+    <input id="search" type="search" placeholder="Search locus, chromosome…">
+    <select id="chrom"><option value="">All chromosomes</option></select>
+    <select id="pol">
+      <option value="">All orientations</option>
+      <option value="hg38-ref">GRCh38 reference</option>
+      <option value="hg38-inv">GRCh38 inverted</option>
+    </select>
+    <select id="sort">
+      <option value="chrom">Sort: genomic position</option>
+      <option value="size_desc">Size ↓</option>
+      <option value="size_asc">Size ↑</option>
+      <option value="conc_desc">Concordance ↓</option>
+      <option value="conc_asc">Concordance ↑</option>
+    </select>
+    <span class="count" id="count"></span>
+  </div>
+</div>
+
+<main><div class="grid" id="grid"></div><div class="foot" id="foot"></div></main>
+
+<div class="lb" id="lb">
+  <div class="bar">
+    <button class="nav" id="prev">‹ Prev</button>
+    <h2 id="lbTitle"></h2>
+    <button class="nav" id="next">Next ›</button>
+    <button class="close" id="close">✕ Close</button>
+  </div>
+  <div class="tabs" id="tabs"></div>
+  <div class="stage"><img id="lbImg" alt=""></div>
+  <div class="info" id="lbInfo"></div>
+</div>
+
+<script>
+const VIEWS = {
+  direction:{suffix:"",       label:"Direction"},
+  gradient: {suffix:".miro_grad", label:"Gradient"},
+  identity: {suffix:".miro_id",   label:"Identity"},
+  track:    {suffix:".track",     label:"Population strand"},
+  popgrad:  {suffix:".grad",      label:"Population gradient"},
+};
+const fmtBp = n => n>=1e6 ? (n/1e6).toFixed(2)+" Mb" : n>=1e3 ? (n/1e3).toFixed(1)+" kb" : n+" bp";
+const chromNum = c => { const m=/chr(\w+)/.exec(c); if(!m) return 99; const v=m[1];
+  return v==="X"?23:v==="Y"?24:v==="M"?25:parseInt(v)||99; };
+const polClass = p => p==="hg38-inv" ? "inv" : p==="hg38-ref" ? "ref" : "amb";
+const polLabel = p => p==="hg38-inv" ? "GRCh38 inv" : p==="hg38-ref" ? "GRCh38 ref" : "ambiguous";
+
+let DATA=null, FILTERED=[], curIdx=-1, curView="direction";
+
+fetch("./data.json").then(r=>r.json()).then(d=>{
+  DATA=d;
+  document.getElementById("genAt").textContent = d.generatedAt ? "Generated "+d.generatedAt.slice(0,10) : "";
+  renderStats(d);
+  // chrom options
+  const chroms=[...new Set(d.records.map(r=>r.chrom))].sort((a,b)=>chromNum(a)-chromNum(b));
+  const cs=document.getElementById("chrom");
+  chroms.forEach(c=>{const o=document.createElement("option");o.value=c;o.textContent=c;cs.appendChild(o);});
+  apply();
+});
+
+function renderStats(d){
+  const s=[
+    [d.n_total,"loci"],
+    [d.n_assessed,"assessed"],
+    [d.polarity_ref ?? "–","GRCh38 ref"],
+    [d.polarity_inv ?? "–","GRCh38 inv"],
+    [d.conc_median!=null?d.conc_median.toFixed(3):"–","median conc."],
+    [d.within02!=null?Math.round(d.within02*100)+"%":"–","within 0.20"],
+  ];
+  document.getElementById("stats").innerHTML =
+    s.map(([v,l])=>`<div class="stat"><b>${v}</b><span>${l}</span></div>`).join("");
+}
+
+function apply(){
+  const q=document.getElementById("search").value.trim().toLowerCase();
+  const ch=document.getElementById("chrom").value;
+  const pol=document.getElementById("pol").value;
+  const sort=document.getElementById("sort").value;
+  FILTERED=DATA.records.filter(r=>{
+    if(ch && r.chrom!==ch) return false;
+    if(pol && r.polarity!==pol) return false;
+    if(q && !r.inv_id.toLowerCase().includes(q) && !r.chrom.toLowerCase().includes(q)) return false;
+    return true;
+  });
+  FILTERED.sort((a,b)=>{
+    switch(sort){
+      case "size_desc": return b.size_bp-a.size_bp;
+      case "size_asc":  return a.size_bp-b.size_bp;
+      case "conc_desc": return (b.af_concordance??-1)-(a.af_concordance??-1);
+      case "conc_asc":  return (a.af_concordance??1e9)-(b.af_concordance??1e9);
+      default: return chromNum(a.chrom)-chromNum(b.chrom) || a.size_bp-b.size_bp;
+    }
+  });
+  render();
+}
+
+function render(){
+  const g=document.getElementById("grid");
+  document.getElementById("count").textContent=`${FILTERED.length} of ${DATA.records.length}`;
+  g.innerHTML=FILTERED.map((r,i)=>{
+    const pc=polClass(r.polarity);
+    const conc=r.af_concordance!=null?r.af_concordance.toFixed(3):"–";
+    return `<div class="card" data-i="${i}">
+      <img class="thumb" loading="lazy" src="./thumb/${r.inv_id}.webp" alt="${r.inv_id}">
+      <div class="meta">
+        <div class="id">${r.inv_id}</div>
+        <div class="row2">
+          <span>${fmtBp(r.size_bp)}${r.recurrent?" · rec":""}</span>
+          <span class="pill ${pc}">${polLabel(r.polarity)}</span>
+        </div>
+        <div class="row2"><span>n=${r.n_hap_assessed} hap</span><span>conc ${conc}</span></div>
+      </div>
+    </div>`;
+  }).join("");
+  document.getElementById("foot").textContent=`${DATA.records.length} inversion loci · click any panel for all views`;
+  g.querySelectorAll(".card").forEach(c=>c.onclick=()=>openLB(+c.dataset.i));
+}
+
+function openLB(i){
+  curIdx=i; const r=FILTERED[i];
+  curView = r.views.includes(curView)?curView:r.views[0];
+  const tabs=document.getElementById("tabs");
+  tabs.innerHTML=r.views.map(v=>`<button data-v="${v}" class="${v===curView?'active':''}">${VIEWS[v].label}</button>`).join("");
+  tabs.querySelectorAll("button").forEach(b=>b.onclick=()=>{curView=b.dataset.v;paint();});
+  document.getElementById("lb").classList.add("open");
+  paint();
+}
+function paint(){
+  const r=FILTERED[curIdx];
+  document.getElementById("lbTitle").textContent=`${r.inv_id}  (${r.chrom}, ${fmtBp(r.size_bp)})`;
+  const suf=VIEWS[curView].suffix;
+  document.getElementById("lbImg").src=`./img/${r.inv_id}${suf}.webp`;
+  document.querySelectorAll("#tabs button").forEach(b=>b.classList.toggle("active",b.dataset.v===curView));
+  const conc=r.af_concordance!=null?r.af_concordance.toFixed(3):"–";
+  document.getElementById("lbInfo").innerHTML=[
+    `<span>${polLabel(r.polarity)}</span>`,
+    `<span>n reference: ${r.n_reference}</span>`,
+    `<span>n inverted: ${r.n_inverted}</span>`,
+    `<span>n ambiguous: ${r.n_ambiguous}</span>`,
+    `<span>expected inv AF: ${r.inverted_af_expected}</span>`,
+    `<span>observed frac inv: ${r.frac_inverted_observed}</span>`,
+    `<span>AF concordance: ${conc}</span>`,
+    `<span>${curIdx+1} / ${FILTERED.length}</span>`,
+  ].join("");
+}
+function step(d){ if(curIdx<0)return; let n=curIdx+d;
+  if(n<0)n=FILTERED.length-1; if(n>=FILTERED.length)n=0; openLB(n); }
+
+document.getElementById("close").onclick=()=>document.getElementById("lb").classList.remove("open");
+document.getElementById("prev").onclick=()=>step(-1);
+document.getElementById("next").onclick=()=>step(1);
+document.getElementById("lb").onclick=e=>{if(e.target.id==="lb")document.getElementById("lb").classList.remove("open");};
+document.addEventListener("keydown",e=>{
+  if(!document.getElementById("lb").classList.contains("open"))return;
+  if(e.key==="Escape")document.getElementById("lb").classList.remove("open");
+  if(e.key==="ArrowLeft")step(-1);
+  if(e.key==="ArrowRight")step(1);
+});
+["search","chrom","pol","sort"].forEach(id=>document.getElementById(id).addEventListener("input",apply));
+</script>
+</body>
+</html>
