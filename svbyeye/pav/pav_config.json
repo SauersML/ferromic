@@ -1,0 +1,6 @@
+{
+  "reference": "/projects/standard/hsiehph/sauer354/di/hg38.no_alt.fa",
+  "assembly_table": "assemblies.tsv",
+  "aligner": "minimap2",
+  "map_threads": 12
+}
