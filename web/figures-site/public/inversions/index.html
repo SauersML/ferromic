@@ -245,7 +245,7 @@ const VIEWS = {
   track:    {suffix:".track",     label:"Population strand"},
   popgrad:  {suffix:".grad",      label:"Population gradient"},
 };
-const IMGV="5";
+const IMGV="6";
 const fmtBp = n => n>=1e6 ? (n/1e6).toFixed(2)+" Mb" : n>=1e3 ? (n/1e3).toFixed(0)+" kb" : n+" bp";
 const chromNum = c => { const m=/chr(\w+)/.exec(c); if(!m) return 99; const v=m[1];
   return v==="X"?23:v==="Y"?24:v==="M"?25:parseInt(v)||99; };
