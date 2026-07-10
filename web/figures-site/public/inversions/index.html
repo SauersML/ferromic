@@ -180,20 +180,15 @@
 </head>
 <body>
 <div class="hero"><div class="wrap">
-  <p class="eyebrow">Structural variation · HGSVC3 long-read assemblies</p>
-  <h1>Inversion Atlas — <span class="g">every inversion, visualized</span></h1>
-  <p class="lede">Each manuscript inversion locus, shown as a GRCh38 versus inverted-haplotype
-    miropeat — the blue strand-crossing between the red lines <em>is</em> the inversion. Chimpanzee
-    (panTro6) ancestral, population-strand, and per-haplotype views are one click away.</p>
+  <h1>Inversion Atlas</h1>
   <p class="genat" id="genat"></p>
   <div class="stats" id="stats"></div>
   <div class="legend">
-    <span class="lg"><span class="dot ref"></span> GRCh38 reference orientation</span>
-    <span class="lg"><span class="dot inv"></span> GRCh38 inverted allele</span>
+    <span class="lg"><span class="dot ref"></span> GRCh38 reference</span>
+    <span class="lg"><span class="dot inv"></span> GRCh38 inverted</span>
     <span class="lg"><span class="dot na"></span> not assessed</span>
     <span class="sep"></span>
-    <span class="lg">AF&nbsp;Δ&nbsp;(observed − expected):
-      &nbsp;<span class="dot good"></span>&lt;0.10&nbsp; <span class="dot ok"></span>0.10–0.20&nbsp; <span class="dot poor"></span>&gt;0.20</span>
+    <span class="lg">AF Δ <span class="dot good"></span>&lt;0.10 <span class="dot ok"></span>0.10–0.20 <span class="dot poor"></span>&gt;0.20</span>
   </div>
 </div></div>
 
@@ -247,7 +242,7 @@ const VIEWS = {
   popgrad:  {suffix:".grad",      label:"Population gradient"},
 };
 const VIEW_ORDER=["invhap","chimp","track","direction","gradient","identity","popgrad"];
-const IMGV="7";
+const IMGV="8";
 const fmtBp = n => n>=1e6 ? (n/1e6).toFixed(2)+" Mb" : n>=1e3 ? (n/1e3).toFixed(0)+" kb" : n+" bp";
 const chromNum = c => { const m=/chr(\w+)/.exec(c); if(!m) return 99; const v=m[1];
   return v==="X"?23:v==="Y"?24:v==="M"?25:parseInt(v)||99; };
@@ -319,7 +314,7 @@ function render(){
     return `<div class="card" tabindex="0" data-i="${i}">
       <div class="thumbwrap">
         <span class="otag ${o}"><span class="dot ${o}"></span>${orientLabel[o]}</span>
-        <img loading="lazy" src="${thumb}" alt="${r.inv_id} inversion"
+        <img loading="lazy" decoding="async" src="${thumb}" alt="${r.inv_id} inversion"
              onerror="this.onerror=null;this.src='./thumb/${r.inv_id}.chimp.webp?v='+IMGV">
       </div>
       <div class="meta">
@@ -332,7 +327,7 @@ function render(){
       </div>
     </div>`;
   }).join("");
-  $("foot").textContent=`${DATA.records.length} inversion loci · click any panel for chimp, human & population views · ← → to browse`;
+  $("foot").textContent=`${DATA.records.length} loci`;
   document.querySelectorAll(".card").forEach(c=>{
     c.onclick=()=>openLB(+c.dataset.i);
     c.onkeydown=e=>{if(e.key==="Enter")openLB(+c.dataset.i);};
@@ -358,7 +353,7 @@ function paint(){
     ["Expected inv AF",r.inverted_af_expected],
     ["Observed frac",r.frac_inverted_observed!=null?r.frac_inverted_observed.toFixed(3):"–"],
     ["AF Δ",d!=null?d.toFixed(3):"–"]);
-  else chips.push(["Status","below assembly-alignment floor"],["Expected inv AF",r.inverted_af_expected]);
+  else chips.push(["Status","not assessed"],["Expected inv AF",r.inverted_af_expected]);
   chips.push(["",`${curIdx+1} / ${FILTERED.length}`]);
   $("lbInfo").innerHTML=chips.map(([k,v])=>`<span class="chip">${k}<b>${v}</b></span>`).join("");
 }
