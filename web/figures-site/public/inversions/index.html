@@ -245,6 +245,7 @@ const VIEWS = {
   track:    {suffix:".track",     label:"Population strand"},
   popgrad:  {suffix:".grad",      label:"Population gradient"},
 };
+const IMGV="5";
 const fmtBp = n => n>=1e6 ? (n/1e6).toFixed(2)+" Mb" : n>=1e3 ? (n/1e3).toFixed(0)+" kb" : n+" bp";
 const chromNum = c => { const m=/chr(\w+)/.exec(c); if(!m) return 99; const v=m[1];
   return v==="X"?23:v==="Y"?24:v==="M"?25:parseInt(v)||99; };
@@ -312,12 +313,12 @@ function render(){
     const o=orient(r),p=parseId(r.inv_id),d=r.assessed?r.af_concordance:null,qc=qualClass(d);
     const rec=r.recurrent===1?`<span class="badge rec">recurrent</span>`:"";
     const qt=d!=null?`Δ ${d.toFixed(3)}`:"n/a";
-    const thumb=`./thumb/${r.inv_id}.chimp.webp`;
+    const thumb=`./thumb/${r.inv_id}.chimp.webp?v=${IMGV}`;
     return `<div class="card" tabindex="0" data-i="${i}">
       <div class="thumbwrap">
         <span class="otag ${o}"><span class="dot ${o}"></span>${orientLabel[o]}</span>
         <img loading="lazy" src="${thumb}" alt="${r.inv_id} chimp vs GRCh38"
-             onerror="this.onerror=null;this.src='./thumb/${r.inv_id}.webp'">
+             onerror="this.onerror=null;this.src='./thumb/${r.inv_id}.webp?v='+IMGV">
       </div>
       <div class="meta">
         <div class="idline mono"><span class="chr">${p.chr}</span><span class="coord">:${p.pos.toLocaleString()}</span></div>
@@ -347,7 +348,7 @@ function paint(){
   const r=FILTERED[curIdx],p=parseId(r.inv_id);
   $("lbTitle").innerHTML=`<span class="chr mono">${p.chr}:${p.pos.toLocaleString()}</span>`
     +`<span class="dim">${fmtBp(r.size_bp)}${r.recurrent===1?" · recurrent":""}</span>`;
-  $("lbImg").src=`./img/${r.inv_id}${VIEWS[curView].suffix}.webp`;
+  $("lbImg").src=`./img/${r.inv_id}${VIEWS[curView].suffix}.webp?v=${IMGV}`;
   document.querySelectorAll("#tabs button").forEach(b=>b.classList.toggle("active",b.dataset.v===curView));
   const o=orient(r),d=r.assessed?r.af_concordance:null;
   const chips=[["Orientation",orientLabel[o]],["Chimp alignment",r.chimp?"yes":"none"]];
