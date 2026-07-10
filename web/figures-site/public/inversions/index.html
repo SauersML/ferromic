@@ -181,10 +181,10 @@
 <body>
 <div class="hero"><div class="wrap">
   <p class="eyebrow">Structural variation · HGSVC3 long-read assemblies</p>
-  <h1>Inversion Atlas — <span class="g">chimpanzee vs&nbsp;GRCh38</span></h1>
-  <p class="lede">Every manuscript inversion locus, shown as a chimpanzee (panTro6) versus GRCh38
-    miropeat alignment — the ancestral-orientation reference for reading each inversion. Human
-    HGSVC3 haplotype and population views are one click away.</p>
+  <h1>Inversion Atlas — <span class="g">every inversion, visualized</span></h1>
+  <p class="lede">Each manuscript inversion locus, shown as a GRCh38 versus inverted-haplotype
+    miropeat — the blue strand-crossing between the red lines <em>is</em> the inversion. Chimpanzee
+    (panTro6) ancestral, population-strand, and per-haplotype views are one click away.</p>
   <p class="genat" id="genat"></p>
   <div class="stats" id="stats"></div>
   <div class="legend">
@@ -238,14 +238,16 @@
 <script>
 // primary view is chimp; others are secondary
 const VIEWS = {
+  invhap:   {suffix:".invhap",    label:"Inversion"},
   chimp:    {suffix:".chimp",     label:"Chimp vs GRCh38"},
-  direction:{suffix:"",           label:"Human haplotypes"},
+  track:    {suffix:".track",     label:"Population strand"},
+  direction:{suffix:"",           label:"Haplotype panels"},
   gradient: {suffix:".miro_grad", label:"Gradient"},
   identity: {suffix:".miro_id",   label:"Identity"},
-  track:    {suffix:".track",     label:"Population strand"},
   popgrad:  {suffix:".grad",      label:"Population gradient"},
 };
-const IMGV="6";
+const VIEW_ORDER=["invhap","chimp","track","direction","gradient","identity","popgrad"];
+const IMGV="7";
 const fmtBp = n => n>=1e6 ? (n/1e6).toFixed(2)+" Mb" : n>=1e3 ? (n/1e3).toFixed(0)+" kb" : n+" bp";
 const chromNum = c => { const m=/chr(\w+)/.exec(c); if(!m) return 99; const v=m[1];
   return v==="X"?23:v==="Y"?24:v==="M"?25:parseInt(v)||99; };
@@ -253,9 +255,9 @@ function orient(r){ if(!r.assessed) return "na"; return r.polarity==="hg38-inv"?
 const orientLabel={ref:"GRCh38 reference",inv:"GRCh38 inverted",na:"not assessed"};
 function qualClass(d){ if(d==null) return "na"; return d<0.10?"good":d<=0.20?"ok":"poor"; }
 function parseId(id){ const m=/^(chr\w+)-(\d+)-INV-(\d+)$/.exec(id); return m?{chr:m[1],pos:+m[2]}:{chr:id,pos:0}; }
-function viewsFor(r){ const v=["chimp"]; (r.views||[]).forEach(x=>{if(!v.includes(x))v.push(x)}); return v; }
+function viewsFor(r){ return VIEW_ORDER.filter(v => v==="invhap"||v==="chimp"||(r.views||[]).includes(v)); }
 
-let DATA=null, FILTERED=[], curIdx=-1, curView="chimp";
+let DATA=null, FILTERED=[], curIdx=-1, curView="invhap";
 const $=id=>document.getElementById(id);
 
 fetch("./data.json?v=4",{cache:"no-store"}).then(r=>{if(!r.ok)throw new Error("HTTP "+r.status);return r.json();})
@@ -313,16 +315,16 @@ function render(){
     const o=orient(r),p=parseId(r.inv_id),d=r.assessed?r.af_concordance:null,qc=qualClass(d);
     const rec=r.recurrent===1?`<span class="badge rec">recurrent</span>`:"";
     const qt=d!=null?`Δ ${d.toFixed(3)}`:"n/a";
-    const thumb=`./thumb/${r.inv_id}.chimp.webp?v=${IMGV}`;
+    const thumb=`./thumb/${r.inv_id}.invhap.webp?v=${IMGV}`;
     return `<div class="card" tabindex="0" data-i="${i}">
       <div class="thumbwrap">
         <span class="otag ${o}"><span class="dot ${o}"></span>${orientLabel[o]}</span>
-        <img loading="lazy" src="${thumb}" alt="${r.inv_id} chimp vs GRCh38"
-             onerror="this.onerror=null;this.src='./thumb/${r.inv_id}.webp?v='+IMGV">
+        <img loading="lazy" src="${thumb}" alt="${r.inv_id} inversion"
+             onerror="this.onerror=null;this.src='./thumb/${r.inv_id}.chimp.webp?v='+IMGV">
       </div>
       <div class="meta">
         <div class="idline mono"><span class="chr">${p.chr}</span><span class="coord">:${p.pos.toLocaleString()}</span></div>
-        <div class="idsub">${fmtBp(r.size_bp)} inversion${r.chimp?"":" · no chimp alignment"}</div>
+        <div class="idsub">${fmtBp(r.size_bp)} inversion${r.assessed?"":" · not assessed"}</div>
         <div class="sub2">
           <span class="left">${r.assessed?`${r.n_hap_assessed} haplotypes`:"not assessed"} ${rec}</span>
           <span class="qual"><span class="dot ${qc}"></span>${qt}</span>
