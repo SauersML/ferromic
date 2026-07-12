@@ -1,0 +1,22 @@
+{
+  "_note": "Input paths/URLs for the inversion structure-vs-SNV decomposition. Paths below are the ones used in the silico run; for the ferromic PR these are the documented inputs a runner must provide. All public data.",
+  "reference_2bit": "GRCh38 2bit (e.g. hg38.2bit)",
+  "porubsky_callset_tsv": "2AGRCh38_unifiedCallset.tsv (phased per-sample inversion genotypes; ferromic/data)",
+  "inv_properties_tsv": "ferromic/inv_properties.tsv (recurrence consensus, coords, AF)",
+  "tag_snps_source": "per-locus tag SNP (chrom, hg38 pos, ref, alt); here taken from exp#8 inversions.tsv",
+  "thousand_genomes_panel_dir": "https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/20220422_3202_phased_SNV_INDEL_SV/",
+  "thousand_genomes_panel_file_autosome": "1kGP_high_coverage_Illumina.{chrom}.filtered.SNV_INDEL_SV_phased_panel.vcf.gz",
+  "thousand_genomes_panel_file_chrX": "1kGP_high_coverage_Illumina.chrX.filtered.SNV_INDEL_SV_phased_panel.v2.vcf.gz",
+  "gencode_gtf": "gencode.v46.basic.annotation.gtf.gz",
+  "geuvadis_rpkm": "GD462.GeneQuantRPKM.50FN.samplename.resk10.txt.gz (optional, Handle 3)",
+  "paml_results_tsv": "ferromic/data/GRAND_PAML_RESULTS.tsv (optional, orientation dN/dS)",
+  "params": {
+    "alphagenome_window_bp": 131072,
+    "splice_output": "SPLICE_SITE_USAGE",
+    "consensus_alt_freq_threshold": 0.5,
+    "tag_reliability_concordance_min": 0.90,
+    "flank_restricted_metric": true,
+    "seed": 42
+  },
+  "requirements": ["ALPHAGENOME_API_KEY env var", "outbound internet (AlphaGenome + EBI)"]
+}

@@ -1,0 +1,163 @@
+[
+ {
+  "locus": "chr16:14954790-15100859",
+  "gene": "ENSG00000103512",
+  "n_samples": 449,
+  "inv_dosage_var": 0.421833225033606,
+  "marginal_beta": -0.051022607798831436,
+  "marginal_p": 0.5353512807477088,
+  "superpop_levels": [
+   "GBR",
+   "CEU",
+   "FIN",
+   "TSI",
+   "YRI"
+  ],
+  "top_cis_pos": 14890843,
+  "top_cis_r2_with_expr": 0.0456,
+  "top_cis_r2_with_inversion": 0.0006,
+  "conditional_inv_beta": -0.03499307385736174,
+  "conditional_inv_p": 0.6633599671181749,
+  "conditional_cis_beta": -0.459320972940762,
+  "conditional_cis_p": 2.0849814928899095e-06,
+  "inv_effect_survives": false
+ },
+ {
+  "locus": "chr7:65219157-65531823",
+  "gene": "ENSG00000152926",
+  "n_samples": 449,
+  "inv_dosage_var": 0.4688766424769719,
+  "marginal_beta": 0.024471201818004225,
+  "marginal_p": 0.7372079943243148,
+  "superpop_levels": [
+   "GBR",
+   "CEU",
+   "FIN",
+   "TSI",
+   "YRI"
+  ],
+  "top_cis_pos": 65237739,
+  "top_cis_r2_with_expr": 0.047,
+  "top_cis_r2_with_inversion": 0.0538,
+  "conditional_inv_beta": -0.018066494979540437,
+  "conditional_inv_p": 0.8013648480125146,
+  "conditional_cis_beta": -0.5620457553044944,
+  "conditional_cis_p": 3.2963162509267053e-06,
+  "inv_effect_survives": false
+ },
+ {
+  "locus": "chr8:7301024-12598379",
+  "gene": "ENSG00000205873",
+  "n_samples": 449,
+  "inv_dosage_var": 0.48046388658786415,
+  "marginal_beta": -0.042694524923460674,
+  "marginal_p": 0.5412780391381126,
+  "superpop_levels": [
+   "GBR",
+   "CEU",
+   "FIN",
+   "TSI",
+   "YRI"
+  ],
+  "top_cis_pos": 12591033,
+  "top_cis_r2_with_expr": 0.024,
+  "top_cis_r2_with_inversion": 0.0267,
+  "conditional_inv_beta": -0.04105567511909897,
+  "conditional_inv_p": 0.554606413543835,
+  "conditional_cis_beta": 0.2659314873994987,
+  "conditional_cis_p": 0.012911138499228286,
+  "inv_effect_survives": false
+ },
+ {
+  "locus": "chr16:28471892-28637651",
+  "gene": "ENSG00000168488",
+  "n_samples": 449,
+  "inv_dosage_var": 0.4387180619143754,
+  "marginal_beta": 0.043380450137542007,
+  "marginal_p": 0.5494124512825361,
+  "superpop_levels": [
+   "GBR",
+   "CEU",
+   "FIN",
+   "TSI",
+   "YRI"
+  ],
+  "top_cis_pos": 28490210,
+  "top_cis_r2_with_expr": 0.0156,
+  "top_cis_r2_with_inversion": 0.0221,
+  "conditional_inv_beta": 0.06524688636388266,
+  "conditional_inv_p": 0.36655728445863633,
+  "conditional_cis_beta": 0.28715126105231276,
+  "conditional_cis_p": 0.003597367112766993,
+  "inv_effect_survives": false
+ },
+ {
+  "locus": "chr3:195749463-195980207",
+  "gene": "ENSG00000176945",
+  "n_samples": 449,
+  "inv_dosage_var": 0.537080669242712,
+  "marginal_beta": -0.09242746544274666,
+  "marginal_p": 0.2165172342839626,
+  "superpop_levels": [
+   "GBR",
+   "CEU",
+   "FIN",
+   "TSI",
+   "YRI"
+  ],
+  "top_cis_pos": 195716019,
+  "top_cis_r2_with_expr": 0.1073,
+  "top_cis_r2_with_inversion": 0.0501,
+  "conditional_inv_beta": -0.0005367880125544366,
+  "conditional_inv_p": 0.9940326982622965,
+  "conditional_cis_beta": -0.7763919767749604,
+  "conditional_cis_p": 1.2775615218397267e-12,
+  "inv_effect_survives": false
+ },
+ {
+  "locus": "chr7:54234014-54308393",
+  "gene": "ENSG00000146648",
+  "n_samples": 449,
+  "inv_dosage_var": 0.47414447348971495,
+  "marginal_beta": -0.08639293309978303,
+  "marginal_p": 0.2103221367836592,
+  "superpop_levels": [
+   "GBR",
+   "CEU",
+   "FIN",
+   "TSI",
+   "YRI"
+  ],
+  "top_cis_pos": 54321631,
+  "top_cis_r2_with_expr": 0.0112,
+  "top_cis_r2_with_inversion": 0.1204,
+  "conditional_inv_beta": -0.038801415096375955,
+  "conditional_inv_p": 0.5965004307362218,
+  "conditional_cis_beta": -0.16765097558403308,
+  "conditional_cis_p": 0.06206791956785821,
+  "inv_effect_survives": false
+ },
+ {
+  "locus": "chr17:45585159-46292045",
+  "gene": "ENSG00000120071",
+  "n_samples": 449,
+  "inv_dosage_var": 0.31525637273624635,
+  "marginal_beta": 0.45755836807202954,
+  "marginal_p": 5.778619708469096e-07,
+  "superpop_levels": [
+   "GBR",
+   "CEU",
+   "FIN",
+   "TSI",
+   "YRI"
+  ],
+  "top_cis_pos": 45621746,
+  "top_cis_r2_with_expr": 0.07,
+  "top_cis_r2_with_inversion": 0.8867,
+  "conditional_inv_beta": 0.054924594550141925,
+  "conditional_inv_p": 0.8239459634825593,
+  "conditional_cis_beta": 0.5106518528150716,
+  "conditional_cis_p": 0.08037043187160871,
+  "inv_effect_survives": false
+ }
+]

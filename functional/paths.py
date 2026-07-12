@@ -71,6 +71,17 @@ INPUTS = {
         "gtex_eqtls", "gtex/gtex_eqtls.tsv",
         "GTEx v10 significant cis-eQTLs at inversion tag SNPs (GTEx portal API).",
     ),
+    "reference_2bit": Input(
+        "reference_2bit", "reference/hg38.2bit",
+        "GRCh38 reference in UCSC 2bit format (hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/hg38.2bit); "
+        "used by the structural decomposition to build breakpoint-window sequences.",
+    ),
+    "thousand_genomes_panel_dir": Input(
+        "thousand_genomes_panel_dir",
+        "https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/20220422_3202_phased_SNV_INDEL_SV/",
+        "1000G high-coverage GRCh38 3202-sample phased SNV/INDEL/SV panel (EBI FTP, region-streamed). "
+        "A directory/URL prefix, not a single file; may be an EBI URL or a local mirror.",
+    ),
     "alphagenome_scores": Input(
         "alphagenome_scores", "agscore",
         "Per-inversion AlphaGenome signed per-tissue RNA LFC + splice disruption (.npz), one per event.",
