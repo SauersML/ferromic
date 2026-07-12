@@ -1,0 +1,39 @@
+{
+  "n_cds_sites": 45,
+  "n_missense": 24,
+  "n_synonymous": 21,
+  "n_genes": 22,
+  "n_loci": 6,
+  "n_functional_3of3": 2,
+  "n_likely_2of3": 1,
+  "n_seqmodel_only": 2,
+  "top_call": [
+    {
+      "gene": "SPPL2C",
+      "pc": "R461P",
+      "band": "17q21.31",
+      "am": "0.8506",
+      "esmc": "-10.890625",
+      "evo2": "-15.809362411499023",
+      "call": "functional (3/3 methods)"
+    },
+    {
+      "gene": "MAPT",
+      "pc": "R445W",
+      "band": "17q21.31",
+      "am": "0.312",
+      "esmc": "-8.03125",
+      "evo2": "-39.03544998168945",
+      "call": "likely functional (2/3 methods)"
+    },
+    {
+      "gene": "ACTR1B",
+      "pc": "A143V",
+      "band": "",
+      "am": "0.9541",
+      "esmc": "-7.8125",
+      "evo2": "-10.000964164733888",
+      "call": "functional (3/3 methods)"
+    }
+  ]
+}

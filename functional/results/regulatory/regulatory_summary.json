@@ -1,0 +1,12 @@
+{
+  "n_loci": 68,
+  "n_measured_molecular_any": 37,
+  "frac_measured_molecular": 0.544,
+  "n_with_geuvadis_eqtl": 12,
+  "n_with_gtex_eqtl": 33,
+  "n_with_any_eqtl": 35,
+  "n_with_sqtl": 32,
+  "n_featured": 11,
+  "n_featured_measured": 10,
+  "note": "cis-eQTL is ubiquitous for common variants; no class-enrichment claim is made for eQTL. Genome-wide molecular-consequence fraction establishes that these haplotypes are molecularly active ('just LD' and 'functional' are not exclusive), NOT selection or causality. Haplotype-level throughout."
+}
