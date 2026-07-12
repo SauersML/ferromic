@@ -2,7 +2,9 @@
 
 Reproducible analysis code + result tables behind the functional-consequence supplement:
 what measurable and predicted molecular consequences do inversion haplotypes carry at the
-coding, splicing, and regulatory levels? Three independent analyses, one per subdirectory.
+coding, splicing, and regulatory levels, and how much of a predicted effect is the
+orientation flip itself versus the SNVs linked to it? Four independent analyses, one per
+subdirectory.
 
 **Scope:** analysis code and the result tables it produces. There is no interpretive prose
 here — the "what it means" lives with the study. All results are **associational and
@@ -15,6 +17,7 @@ haplotype-level**: a tag-SNP dosage indexes the inversion haplotype, not the inv
 | [`coding/`](coding/README.md) | Coding functional scoring of orientation-differentiating missense variants | AlphaMissense + ESM C + Evo 2 7B zero-shot | `results/coding/arm1_coding_calls.tsv` |
 | [`splice/`](splice/README.md) | Gene-localised AlphaGenome splice-disruption + GTEx-sQTL validation | AlphaGenome API | `results/splice/per_inversion_splice.tsv` |
 | [`regulatory/`](regulatory/README.md) | Measured cis eQTL & sQTL by inversion-tag dosage | Geuvadis LCL RNA-seq + GTEx v10 | `results/regulatory/{arm_eqtl,regulatory_per_locus}.tsv` |
+| [`structural/`](structural/README.md) | Structure-vs-linked-SNV decomposition of the predicted splice effect | AlphaGenome counterfactual on real phased haplotypes | `results/structural/{master_table.csv,debias_summary.json}` |
 
 Each analysis has a runnable CLI (`python -m functional.<analysis>.cli ...`); see the
 per-module READMEs for exact commands.
@@ -28,6 +31,7 @@ functional/
   coding/             AlphaMissense / ESM C / Evo 2 scoring + cross-method consolidation
   splice/             AlphaGenome per-gene splice formulation + GTEx validation
   regulatory/         Geuvadis/GTEx eQTL + sQTL + per-locus integration
+  structural/         AlphaGenome structure-vs-SNV counterfactual decomposition
   data/               small committed reference inputs (inversions, tag variants, panel, ...)
   results/            committed recorded result tables (the reference outputs)
   tests/              reproduction + QC tests (see "Verification")

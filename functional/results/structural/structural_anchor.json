@@ -1,0 +1,410 @@
+[
+ {
+  "locus": "chr16:14954790-15100859",
+  "chrom": "chr16",
+  "bpL": 14954790,
+  "bpR": 15100859,
+  "genes_at_bpL": [],
+  "genes_at_bpR": [
+   "PDXDC1"
+  ],
+  "breakpoint_in_gene": true,
+  "bp_mediated_genes": [
+   "PDXDC1"
+  ],
+  "measured_qtl_gene": "ENSG00000103512",
+  "measured_qtl_gene_is_breakpoint_mediated": false,
+  "recur_consensus": "1",
+  "measured_any": 1
+ },
+ {
+  "locus": "chr7:65219157-65531823",
+  "chrom": "chr7",
+  "bpL": 65219157,
+  "bpR": 65531823,
+  "genes_at_bpL": [],
+  "genes_at_bpR": [],
+  "breakpoint_in_gene": false,
+  "bp_mediated_genes": [],
+  "measured_qtl_gene": "ENSG00000152926",
+  "measured_qtl_gene_is_breakpoint_mediated": false,
+  "recur_consensus": "1",
+  "measured_any": 1
+ },
+ {
+  "locus": "chr8:7301024-12598379",
+  "chrom": "chr8",
+  "bpL": 7301024,
+  "bpR": 12598379,
+  "genes_at_bpL": [],
+  "genes_at_bpR": [],
+  "breakpoint_in_gene": false,
+  "bp_mediated_genes": [],
+  "measured_qtl_gene": "ENSG00000205873",
+  "measured_qtl_gene_is_breakpoint_mediated": false,
+  "recur_consensus": "1",
+  "measured_any": 1
+ },
+ {
+  "locus": "chr16:28471892-28637651",
+  "chrom": "chr16",
+  "bpL": 28471892,
+  "bpR": 28637651,
+  "genes_at_bpL": [
+   "NPIPB7",
+   "ENSG00000261832"
+  ],
+  "genes_at_bpR": [],
+  "breakpoint_in_gene": true,
+  "bp_mediated_genes": [
+   "ENSG00000261832",
+   "NPIPB7"
+  ],
+  "measured_qtl_gene": "ENSG00000168488",
+  "measured_qtl_gene_is_breakpoint_mediated": false,
+  "recur_consensus": "1",
+  "measured_any": 1
+ },
+ {
+  "locus": "chr3:195749463-195980207",
+  "chrom": "chr3",
+  "bpL": 195749463,
+  "bpR": 195980207,
+  "genes_at_bpL": [
+   "MUC4"
+  ],
+  "genes_at_bpR": [],
+  "breakpoint_in_gene": true,
+  "bp_mediated_genes": [
+   "MUC4"
+  ],
+  "measured_qtl_gene": "ENSG00000176945",
+  "measured_qtl_gene_is_breakpoint_mediated": false,
+  "recur_consensus": "1",
+  "measured_any": 1
+ },
+ {
+  "locus": "chr11:50154999-50324102",
+  "chrom": "chr11",
+  "bpL": 50154999,
+  "bpR": 50324102,
+  "genes_at_bpL": [],
+  "genes_at_bpR": [],
+  "breakpoint_in_gene": false,
+  "bp_mediated_genes": [],
+  "measured_qtl_gene": "ENSG00000254840",
+  "measured_qtl_gene_is_breakpoint_mediated": false,
+  "recur_consensus": "1",
+  "measured_any": 1
+ },
+ {
+  "locus": "chr1:108310642-108383736",
+  "chrom": "chr1",
+  "bpL": 108310642,
+  "bpR": 108383736,
+  "genes_at_bpL": [],
+  "genes_at_bpR": [],
+  "breakpoint_in_gene": false,
+  "bp_mediated_genes": [],
+  "measured_qtl_gene": "SLC25A24",
+  "measured_qtl_gene_is_breakpoint_mediated": false,
+  "recur_consensus": "1",
+  "measured_any": 1
+ },
+ {
+  "locus": "chr7:54234014-54308393",
+  "chrom": "chr7",
+  "bpL": 54234014,
+  "bpR": 54308393,
+  "genes_at_bpL": [],
+  "genes_at_bpR": [],
+  "breakpoint_in_gene": false,
+  "bp_mediated_genes": [],
+  "measured_qtl_gene": "ENSG00000146648",
+  "measured_qtl_gene_is_breakpoint_mediated": false,
+  "recur_consensus": "0",
+  "measured_any": 1
+ },
+ {
+  "locus": "chrX:149681035-149722249",
+  "chrom": "chrX",
+  "bpL": 149681035,
+  "bpR": 149722249,
+  "genes_at_bpL": [],
+  "genes_at_bpR": [],
+  "breakpoint_in_gene": false,
+  "bp_mediated_genes": [],
+  "measured_qtl_gene": "IDS",
+  "measured_qtl_gene_is_breakpoint_mediated": false,
+  "recur_consensus": "1",
+  "measured_any": 1
+ },
+ {
+  "locus": "chrX:152729753-152738707",
+  "chrom": "chrX",
+  "bpL": 152729753,
+  "bpR": 152738707,
+  "genes_at_bpL": [
+   "CSAG1"
+  ],
+  "genes_at_bpR": [],
+  "breakpoint_in_gene": true,
+  "bp_mediated_genes": [
+   "CSAG1"
+  ],
+  "measured_qtl_gene": "MAGEA2",
+  "measured_qtl_gene_is_breakpoint_mediated": false,
+  "recur_consensus": "1",
+  "measured_any": 1
+ },
+ {
+  "locus": "chrX:153149748-153250226",
+  "chrom": "chrX",
+  "bpL": 153149748,
+  "bpR": 153250226,
+  "genes_at_bpL": [],
+  "genes_at_bpR": [],
+  "breakpoint_in_gene": false,
+  "bp_mediated_genes": [],
+  "measured_qtl_gene": "PNMA5",
+  "measured_qtl_gene_is_breakpoint_mediated": false,
+  "recur_consensus": "1",
+  "measured_any": 1
+ },
+ {
+  "locus": "chrX:154347246-154384867",
+  "chrom": "chrX",
+  "bpL": 154347246,
+  "bpR": 154384867,
+  "genes_at_bpL": [],
+  "genes_at_bpR": [],
+  "breakpoint_in_gene": false,
+  "bp_mediated_genes": [],
+  "measured_qtl_gene": "FLNA",
+  "measured_qtl_gene_is_breakpoint_mediated": false,
+  "recur_consensus": "1",
+  "measured_any": 1
+ },
+ {
+  "locus": "chrX:154591327-154613096",
+  "chrom": "chrX",
+  "bpL": 154591327,
+  "bpR": 154613096,
+  "genes_at_bpL": [],
+  "genes_at_bpR": [],
+  "breakpoint_in_gene": false,
+  "bp_mediated_genes": [],
+  "measured_qtl_gene": "IKBKG",
+  "measured_qtl_gene_is_breakpoint_mediated": false,
+  "recur_consensus": "1",
+  "measured_any": 1
+ },
+ {
+  "locus": "chr11:89920623-89923848",
+  "chrom": "chr11",
+  "bpL": 89920623,
+  "bpR": 89923848,
+  "genes_at_bpL": [
+   "TRIM49D1"
+  ],
+  "genes_at_bpR": [],
+  "breakpoint_in_gene": true,
+  "bp_mediated_genes": [
+   "TRIM49D1"
+  ],
+  "measured_qtl_gene": "",
+  "measured_qtl_gene_is_breakpoint_mediated": false,
+  "recur_consensus": "1",
+  "measured_any": 0
+ },
+ {
+  "locus": "chr15:84373375-84416696",
+  "chrom": "chr15",
+  "bpL": 84373375,
+  "bpR": 84416696,
+  "genes_at_bpL": [],
+  "genes_at_bpR": [],
+  "breakpoint_in_gene": false,
+  "bp_mediated_genes": [],
+  "measured_qtl_gene": "",
+  "measured_qtl_gene_is_breakpoint_mediated": false,
+  "recur_consensus": "1",
+  "measured_any": 0
+ },
+ {
+  "locus": "chr1:13104252-13122521",
+  "chrom": "chr1",
+  "bpL": 13104252,
+  "bpR": 13122521,
+  "genes_at_bpL": [],
+  "genes_at_bpR": [],
+  "breakpoint_in_gene": false,
+  "bp_mediated_genes": [],
+  "measured_qtl_gene": "",
+  "measured_qtl_gene_is_breakpoint_mediated": false,
+  "recur_consensus": "1",
+  "measured_any": 0
+ },
+ {
+  "locus": "chr1:144376209-144600799",
+  "chrom": "chr1",
+  "bpL": 144376209,
+  "bpR": 144600799,
+  "genes_at_bpL": [],
+  "genes_at_bpR": [],
+  "breakpoint_in_gene": false,
+  "bp_mediated_genes": [],
+  "measured_qtl_gene": "",
+  "measured_qtl_gene_is_breakpoint_mediated": false,
+  "recur_consensus": "0",
+  "measured_any": 0
+ },
+ {
+  "locus": "chr1:149843518-149850293",
+  "chrom": "chr1",
+  "bpL": 149843518,
+  "bpR": 149850293,
+  "genes_at_bpL": [],
+  "genes_at_bpR": [],
+  "breakpoint_in_gene": false,
+  "bp_mediated_genes": [],
+  "measured_qtl_gene": "ENSG00000117362",
+  "measured_qtl_gene_is_breakpoint_mediated": false,
+  "recur_consensus": "0",
+  "measured_any": 0
+ },
+ {
+  "locus": "chr2:91832040-92012663",
+  "chrom": "chr2",
+  "bpL": 91832040,
+  "bpR": 92012663,
+  "genes_at_bpL": [],
+  "genes_at_bpR": [],
+  "breakpoint_in_gene": false,
+  "bp_mediated_genes": [],
+  "measured_qtl_gene": "ENSG00000143429",
+  "measured_qtl_gene_is_breakpoint_mediated": false,
+  "recur_consensus": "1",
+  "measured_any": 0
+ },
+ {
+  "locus": "chr7:62290674-62363143",
+  "chrom": "chr7",
+  "bpL": 62290674,
+  "bpR": 62363143,
+  "genes_at_bpL": [],
+  "genes_at_bpR": [],
+  "breakpoint_in_gene": false,
+  "bp_mediated_genes": [],
+  "measured_qtl_gene": "",
+  "measured_qtl_gene_is_breakpoint_mediated": false,
+  "recur_consensus": "1",
+  "measured_any": 0
+ },
+ {
+  "locus": "chr7:62408486-62456444",
+  "chrom": "chr7",
+  "bpL": 62408486,
+  "bpR": 62456444,
+  "genes_at_bpL": [],
+  "genes_at_bpR": [],
+  "breakpoint_in_gene": false,
+  "bp_mediated_genes": [],
+  "measured_qtl_gene": "",
+  "measured_qtl_gene_is_breakpoint_mediated": false,
+  "recur_consensus": "1",
+  "measured_any": 0
+ },
+ {
+  "locus": "chr8:2343351-2378385",
+  "chrom": "chr8",
+  "bpL": 2343351,
+  "bpR": 2378385,
+  "genes_at_bpL": [],
+  "genes_at_bpR": [],
+  "breakpoint_in_gene": false,
+  "bp_mediated_genes": [],
+  "measured_qtl_gene": "",
+  "measured_qtl_gene_is_breakpoint_mediated": false,
+  "recur_consensus": "1",
+  "measured_any": 0
+ },
+ {
+  "locus": "chrX:103989434-104049428",
+  "chrom": "chrX",
+  "bpL": 103989434,
+  "bpR": 104049428,
+  "genes_at_bpL": [],
+  "genes_at_bpR": [],
+  "breakpoint_in_gene": false,
+  "bp_mediated_genes": [],
+  "measured_qtl_gene": "",
+  "measured_qtl_gene_is_breakpoint_mediated": false,
+  "recur_consensus": "1",
+  "measured_any": 0
+ },
+ {
+  "locus": "chrX:155386727-155453982",
+  "chrom": "chrX",
+  "bpL": 155386727,
+  "bpR": 155453982,
+  "genes_at_bpL": [],
+  "genes_at_bpR": [],
+  "breakpoint_in_gene": false,
+  "bp_mediated_genes": [],
+  "measured_qtl_gene": "",
+  "measured_qtl_gene_is_breakpoint_mediated": false,
+  "recur_consensus": "1",
+  "measured_any": 0
+ },
+ {
+  "locus": "chrX:52077120-52176974",
+  "chrom": "chrX",
+  "bpL": 52077120,
+  "bpR": 52176974,
+  "genes_at_bpL": [],
+  "genes_at_bpR": [],
+  "breakpoint_in_gene": false,
+  "bp_mediated_genes": [],
+  "measured_qtl_gene": "",
+  "measured_qtl_gene_is_breakpoint_mediated": false,
+  "recur_consensus": "1",
+  "measured_any": 0
+ },
+ {
+  "locus": "chrX:72997772-73077479",
+  "chrom": "chrX",
+  "bpL": 72997772,
+  "bpR": 73077479,
+  "genes_at_bpL": [],
+  "genes_at_bpR": [
+   "PABPC1L2A"
+  ],
+  "breakpoint_in_gene": true,
+  "bp_mediated_genes": [
+   "PABPC1L2A"
+  ],
+  "measured_qtl_gene": "",
+  "measured_qtl_gene_is_breakpoint_mediated": false,
+  "recur_consensus": "1",
+  "measured_any": 0
+ },
+ {
+  "locus": "chr17:45585159-46292045",
+  "chrom": "chr17",
+  "bpL": 45585159,
+  "bpR": 46292045,
+  "genes_at_bpL": [],
+  "genes_at_bpR": [
+   "ARL17B"
+  ],
+  "breakpoint_in_gene": true,
+  "bp_mediated_genes": [
+   "ARL17B"
+  ],
+  "measured_qtl_gene": "ENSG00000120071",
+  "measured_qtl_gene_is_breakpoint_mediated": false,
+  "recur_consensus": "0",
+  "measured_any": 1
+ }
+]
