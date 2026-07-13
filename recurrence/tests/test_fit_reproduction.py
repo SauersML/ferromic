@@ -65,3 +65,57 @@ def test_fit_is_deterministic():
     m1 = C.fit(train[FEATURE_NAMES].values, train["label"].values, FEATURE_NAMES)
     m2 = C.fit(train[FEATURE_NAMES].values, train["label"].values, FEATURE_NAMES)
     assert np.allclose(np.array(m1.w), np.array(m2.w), atol=1e-10)
+
+
+def _is_binary(vals):
+    return set(np.unique(np.asarray(vals))).issubset({0, 1})
+
+
+def test_calibration_argument_order():
+    """Guard against the (label, score) -> (score, score) argument swap in the
+    calibration table: `_calibration(y, s)` must bin by the continuous scores `s`
+    (many populated bins, monotone-increasing mean_pred that observed frequency
+    tracks), NOT by the binary labels `y` (which would populate <= 2 bins)."""
+    df = pd.read_csv(paths.SIM_FEATURES)
+    train, test = fit._split(df)
+    _, full_metrics, _ = fit.fit_full(train.copy(), test.copy())
+    calib = full_metrics["calibration_test"]
+
+    # binning the continuous scores populates many bins; binning the 0/1 labels
+    # (the swapped call) would populate at most 2.
+    assert len(calib) >= 5
+    preds = [r["mean_pred"] for r in calib]
+    obs = [r["obs_freq"] for r in calib]
+    assert preds == sorted(preds), "mean_pred not monotone -> not binned by score"
+    # every bin's mean predicted score lies inside that bin's score range
+    for r in calib:
+        assert r["bin_lo"] <= r["mean_pred"] <= r["bin_hi"]
+    # observed label frequency tracks predicted score (calibration is real, not swapped)
+    assert np.corrcoef(preds, obs)[0, 1] > 0.9
+
+    # explicit swap detector: recompute scores and feed _calibration in both orders.
+    # correct (labels, scores) bins by scores -> many bins and equals the committed
+    # table; swapped (scores, labels) bins the 0/1 labels -> collapses to <= 2 bins.
+    y = test["label"].values
+    m = C.fit(train[FEATURE_NAMES].values, train["label"].values, FEATURE_NAMES)
+    sc = m.score(test[FEATURE_NAMES].values)
+    assert _is_binary(y)
+    correct = fit._calibration(y, sc)
+    swapped = fit._calibration(sc, y)
+    assert len(correct) >= 5
+    assert len(swapped) <= 2, "swapped (score, label) call should collapse to <=2 label bins"
+    assert correct == calib  # the committed table uses the correct order
+
+
+def test_committed_calibration_matches_recompute():
+    """The committed calibration_test tables reproduce from the committed training set."""
+    _, full_metrics, _, tf_metrics = _refit()
+    for recomputed, ref_path in ((full_metrics, paths.SIM_METRICS),
+                                 (tf_metrics, paths.TF_SIM_METRICS)):
+        ref = json.load(open(ref_path))
+        got, want = recomputed["calibration_test"], ref["calibration_test"]
+        assert len(got) == len(want)
+        for g, w in zip(got, want):
+            assert abs(g["mean_pred"] - w["mean_pred"]) < 1e-6
+            assert abs(g["obs_freq"] - w["obs_freq"]) < 1e-6
+            assert g["n"] == w["n"]
