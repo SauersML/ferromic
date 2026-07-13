@@ -110,6 +110,11 @@ committed data only — no msprime, no network):
   recorded model coefficients (warm-logistic to 1e-4; pAUC-refined to 1e-2);
 - **held-out AUC** — the recorded 0.927 full / 0.890 transferable held-out simulation
   AUC and 0.826 power @ FPR ≤ 0.10 reproduce;
+- **calibration argument order** — the calibration table is computed as
+  `_calibration(labels, scores)` (binned by the continuous scores, observed label
+  frequency tracking predicted score), and the swapped `(scores, labels)` call is
+  detectably wrong (collapses to ≤ 2 label bins); the committed calibration tables
+  reproduce from the training set;
 - **parsimony baseline** — the parsimony-count rule reproduces at 0.000 power @ FPR ≤ 0.10;
 - **determinism / order-invariance** — `classify()` returns the same origin count under
   arbitrary haplotype re-ordering (canonicalized before tree building);
