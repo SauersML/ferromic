@@ -1,0 +1,16 @@
+{
+  "generated_at_utc": "2026-07-13T03:43:57.083267+00:00",
+  "inputs": {
+    "model": "recurrence/results/transferable_model.json",
+    "inv_properties": "recurrence/data/inv_properties.tsv",
+    "output_csv": "recurrence/data/output.csv",
+    "sim_pred": "recurrence/results/tf_sim_test_pred.csv.gz"
+  },
+  "versions": {
+    "numpy": "2.5.1",
+    "scipy": "1.18.0",
+    "sklearn": "1.9.0",
+    "pandas": "3.0.3",
+    "msprime": "1.4.2"
+  }
+}
