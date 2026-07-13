@@ -81,7 +81,7 @@ def fit_full(train, test):
         "test": C.evaluate(test.label.values, test.score.values),
         "test_warm_logistic": C.evaluate(test.label.values, test.warm_score.values),
         "test_parsimony_rule": C.evaluate(test.label.values, test.parsimony.values),
-        "calibration_test": _calibration(test.score.values, test.label.values),
+        "calibration_test": _calibration(test.label.values, test.score.values),
         "strata_test": _strat_metrics(test, "score"),
         "weights_pauc": {n: float(w) for n, w in zip(FEATURE_NAMES, model.w)},
         "weights_warm_logistic": {n: float(w) for n, w in zip(FEATURE_NAMES, model.warm_w)},
@@ -100,7 +100,7 @@ def fit_transferable(train, test):
         "train": C.evaluate(train.label.values, train.tf_score.values),
         "test": C.evaluate(test.label.values, test.tf_score.values),
         "weights": {n: float(w) for n, w in zip(TRANSFERABLE_FEATURES, model.w)},
-        "calibration_test": _calibration(test.tf_score.values, test.label.values),
+        "calibration_test": _calibration(test.label.values, test.tf_score.values),
         "strata_test": _strat_metrics(test.assign(score=test.tf_score), "score"),
     }
     return model, metrics
