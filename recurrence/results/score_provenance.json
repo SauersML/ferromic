@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-07-13T03:43:57.083267+00:00",
+  "generated_at_utc": "2026-07-13T03:56:08.931141+00:00",
   "inputs": {
     "model": "recurrence/results/transferable_model.json",
     "inv_properties": "recurrence/data/inv_properties.tsv",
