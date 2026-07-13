@@ -37,6 +37,19 @@ test = [
     "pytest-benchmark",
     "patchelf; platform_system == 'Linux'",
 ]
+# recurrence/ pop-gen recurrence classifier. Fit + score + tests need only the
+# scientific stack; msprime is required only to regenerate the training set
+# (recurrence.cli simulate).
+recurrence = [
+    "numpy>=1.23",
+    "scipy>=1.10",
+    "scikit-learn>=1.2",
+    "pandas>=2.0",
+    "pytest",
+]
+recurrence-sim = [
+    "msprime>=1.2",
+]
 
 [tool.pytest.ini_options]
 markers = [
