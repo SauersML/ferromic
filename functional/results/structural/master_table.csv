@@ -1,0 +1,26 @@
+locus,chrom,size_bp,recurrent,inv_AF,n_hap_inverted,n_hap_direct,tag_porubsky_concordance,tag_reliable,fraction_structural,between_bg_divergence,n_diff_sites_050,tag_max_r2_cis,breakpoint_in_gene,bp_mediated_genes,measured_any,cond_marginal_p,cond_inv_p,cond_top_cis_r2_with_inv,verdict
+chr1:108310642-108383736,chr1,73094,recurrent,0.57,3169,3235,0.769,False,0.961,0.154,31,0.9055,False,,1,,,,"tag-unreliable (background assignment uncertain, concordance 0.77)"
+chrX:149681035-149722249,chrX,41214,recurrent,0.61,3137,1669,0.837,False,0.919,0.147,34,0.9248,False,,1,,,,"tag-unreliable (background assignment uncertain, concordance 0.84)"
+chr16:28471892-28637651,chr16,165759,recurrent,0.36,1523,4881,0.889,False,0.918,0.19,164,0.9565,True,ENSG00000261832;NPIPB7,1,0.5494124512825361,0.36655728445863633,0.0221,"tag-unreliable (background assignment uncertain, concordance 0.89)"
+chr8:7301024-12598379,chr8,5297355,recurrent,0.5,3217,3187,0.942,True,0.9,0.037,0,0.0634,False,,1,0.5412780391381126,0.554606413543835,0.0267,consistent with structural (in-silico structure-dominant)
+chr16:14954790-15100859,chr16,146069,recurrent,0.77,4711,1693,0.981,True,0.899,0.152,95,0.9464,True,PDXDC1,1,0.5353512807477088,0.6633599671181749,0.0006,consistent with structural (in-silico structure-dominant)
+chr3:195749463-195980207,chr3,230744,recurrent,0.26,2157,4247,0.969,True,0.883,0.087,26,0.6379,True,MUC4,1,0.2165172342839626,0.9940326982622965,0.0501,consistent with structural (in-silico structure-dominant)
+chr11:50154999-50324102,chr11,169103,recurrent,0.4,2638,3766,0.812,False,0.867,0.205,282,0.8524,False,,1,,,,"tag-unreliable (background assignment uncertain, concordance 0.81)"
+chrX:152729753-152738707,chrX,8954,recurrent,0.4,1902,2904,0.675,False,0.861,0.252,70,0.9326,True,CSAG1,1,,,,"tag-unreliable (background assignment uncertain, concordance 0.68)"
+chrX:153149748-153250226,chrX,100478,recurrent,0.6,640,4166,0.667,False,0.834,0.146,9,0.6595,False,,1,,,,"tag-unreliable (background assignment uncertain, concordance 0.67)"
+chr7:54234014-54308393,chr7,74379,single,0.62,3199,3205,0.958,True,0.815,0.117,66,0.963,False,,1,0.2103221367836592,0.5965004307362218,0.1204,consistent with structural (in-silico structure-dominant)
+chrX:154347246-154384867,chrX,37621,recurrent,0.44,2475,2331,0.93,True,0.797,0.165,49,0.901,False,,1,,,,consistent with structural (in-silico structure-dominant)
+chr17:45585159-46292045,chr17,706886,single,0.11,557,5847,1.0,True,0.752,0.473,979,0.9131,True,ARL17B,1,5.778619708469096e-07,0.8239459634825593,0.8867,consistent with structural (in-silico structure-dominant)
+chr7:65219157-65531823,chr7,312666,recurrent,0.33,1838,4566,0.939,True,0.683,0.169,218,0.9765,False,,1,0.7372079943243148,0.8013648480125146,0.0538,consistent with structural (in-silico structure-dominant)
+chrX:154591327-154613096,chrX,21769,recurrent,0.43,2053,2753,0.763,False,0.629,0.131,15,0.9481,False,,1,,,,"tag-unreliable (background assignment uncertain, concordance 0.76)"
+chrX:72997772-73077479,chrX,79707,recurrent,0.2,186,4620,0.898,False,0.903,0.17,26,0.9498,True,PABPC1L2A,0,,,,"tag-unreliable (background assignment uncertain, concordance 0.90)"
+chrX:155386727-155453982,chrX,67255,recurrent,0.15,82,4724,0.918,True,0.869,0.237,34,0.9032,False,,0,,,,consistent with structural (in-silico structure-dominant)
+chr15:84373375-84416696,chr15,43321,recurrent,0.56,4553,1851,0.904,True,0.846,0.147,33,0.7019,False,,0,,,,consistent with structural (in-silico structure-dominant)
+chrX:52077120-52176974,chrX,99854,recurrent,0.36,30,4776,0.698,False,0.836,0.112,18,0.934,False,,0,,,,"tag-unreliable (background assignment uncertain, concordance 0.70)"
+chrX:103989434-104049428,chrX,59994,recurrent,0.63,2489,2317,0.848,False,0.769,0.237,69,0.6883,False,,0,,,,"tag-unreliable (background assignment uncertain, concordance 0.85)"
+chr1:13104252-13122521,chr1,18269,recurrent,0.69,4740,1664,0.778,False,0.754,0.129,27,0.818,False,,0,,,,"tag-unreliable (background assignment uncertain, concordance 0.78)"
+chr2:91832040-92012663,chr2,180623,recurrent,0.41,302,6102,0.74,False,0.747,0.083,51,0.6479,False,,0,,,,"tag-unreliable (background assignment uncertain, concordance 0.74)"
+chr7:62408486-62456444,chr7,47958,recurrent,0.57,6184,220,0.739,False,0.688,0.156,115,0.9629,False,,0,,,,"tag-unreliable (background assignment uncertain, concordance 0.74)"
+chr11:89920623-89923848,chr11,3225,recurrent,0.53,6383,21,0.618,False,0.603,0.175,26,0.9067,True,TRIM49D1,0,,,,"tag-unreliable (background assignment uncertain, concordance 0.62)"
+chr7:62290674-62363143,chr7,72469,recurrent,0.42,1124,5280,0.696,False,0.528,0.114,138,0.9657,False,,0,,,,"tag-unreliable (background assignment uncertain, concordance 0.70)"
+chr1:149843518-149850293,chr1,6775,single,0.61,6272,132,0.762,False,0.494,0.09,27,0.4322,False,,0,,,,"tag-unreliable (background assignment uncertain, concordance 0.76)"

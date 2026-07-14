@@ -1,0 +1,10 @@
+{
+ "median_consensus": 0.846,
+ "median_debiased": 0.7991319565356461,
+ "n": 9,
+ "n_structure_dominant": 9,
+ "locus_min_debiased": 0.7060616616575398,
+ "locus_max_debiased": 0.9074280059715131,
+ "indiv_min": 0.33014415464702834,
+ "indiv_max": 0.976482785278098
+}
