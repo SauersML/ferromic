@@ -1,0 +1,2663 @@
+[
+ {
+  "locus": "chr16:14954790-15100859",
+  "chrom": "chr16",
+  "start38": 14954790,
+  "end38": 15100859,
+  "size": 146069,
+  "tag_snp": "rs9927842",
+  "tag_variantId": "chr16_15059860_T_C_b38",
+  "recur_consensus": "1",
+  "inv_AF": "0.77",
+  "n_hom_inv": 24,
+  "n_hom_dir": 3,
+  "background": {
+   "inv_allele": 1,
+   "inv_bg_mean_alt_dosage": 1.0,
+   "dir_bg_mean_alt_dosage": 0.16666666666666666,
+   "n_porubsky_hom_inv_in_panel": 23,
+   "n_porubsky_hom_dir_in_panel": 3,
+   "tag_porubsky_concordance": 0.9807692307692307,
+   "n_hap_inverted": 4711,
+   "n_hap_direct": 1693
+  },
+  "windows": [
+   {
+    "chrom": "chr16",
+    "win_start": 14889254,
+    "win_end": 15020326,
+    "b1": 14954790,
+    "b2": 15100859,
+    "qc": {
+     "win_start": 14889254,
+     "win_end": 15020326,
+     "L": 131072,
+     "seg_i1": 65536,
+     "seg_i2": 131072,
+     "seg_len": 65536,
+     "n_inv_variants_applied": 32,
+     "n_inv_variants_refmismatch": 0,
+     "n_dir_variants_applied": 11,
+     "n_dir_variants_refmismatch": 0,
+     "rc_roundtrip_ok": true,
+     "len_ok": true,
+     "structural_diff_confined": true
+    },
+    "reconciliation_max_abs_err": 5.960464477539063e-08,
+    "ntracks": 734,
+    "disruption_flank": {
+     "struct": 2590.86376953125,
+     "snv": 96.42645263671875,
+     "total": 2605.8271484375
+    },
+    "disruption_all": {
+     "struct": 17845.421875,
+     "snv": 124.53988647460938,
+     "total": 17858.19140625
+    },
+    "fraction_structural_flank": 0.9641175888479485,
+    "fraction_structural_all": 0.9930695519485407,
+    "genes": {
+     "NOMO1": {
+      "struct": 64.1219711303711,
+      "snv": 17.718103408813477,
+      "total": 79.30634307861328,
+      "fraction_structural": 0.783503332461774,
+      "n_pos": 6903,
+      "gstart": 14833720,
+      "gend": 14896157
+     },
+     "NPIPA1": {
+      "struct": 1635.134033203125,
+      "snv": 56.65359878540039,
+      "total": 1639.751953125,
+      "fraction_structural": 0.9665125824812836,
+      "n_pos": 29259,
+      "gstart": 14922801,
+      "gend": 14952060
+     }
+    },
+    "window_label": "bpL",
+    "n_snvs_fetched": 3664,
+    "n_inv_consensus": 32,
+    "n_dir_consensus": 11,
+    "n_sites_differential_ge02": 99,
+    "elapsed_s": 24.8
+   },
+   {
+    "chrom": "chr16",
+    "win_start": 15035323,
+    "win_end": 15166395,
+    "b1": 14954790,
+    "b2": 15100859,
+    "qc": {
+     "win_start": 15035323,
+     "win_end": 15166395,
+     "L": 131072,
+     "seg_i1": 0,
+     "seg_i2": 65536,
+     "seg_len": 65536,
+     "n_inv_variants_applied": 82,
+     "n_inv_variants_refmismatch": 0,
+     "n_dir_variants_applied": 6,
+     "n_dir_variants_refmismatch": 0,
+     "rc_roundtrip_ok": true,
+     "len_ok": true,
+     "structural_diff_confined": true
+    },
+    "reconciliation_max_abs_err": 5.960464477539063e-08,
+    "ntracks": 734,
+    "disruption_flank": {
+     "struct": 1745.85205078125,
+     "snv": 390.24285888671875,
+     "total": 2079.2421875
+    },
+    "disruption_all": {
+     "struct": 38158.296875,
+     "snv": 489.2901611328125,
+     "total": 38449.53125
+    },
+    "fraction_structural_flank": 0.8173101498812253,
+    "fraction_structural_all": 0.9873396970249304,
+    "genes": {
+     "PDXDC1": {
+      "struct": 1685.58349609375,
+      "snv": 341.83172607421875,
+      "total": 1995.950439453125,
+      "fraction_structural": 0.8313953045549846,
+      "n_pos": 38480,
+      "gstart": 14974590,
+      "gend": 15139339
+     }
+    },
+    "window_label": "bpR",
+    "n_snvs_fetched": 3456,
+    "n_inv_consensus": 82,
+    "n_dir_consensus": 6,
+    "n_sites_differential_ge02": 115,
+    "elapsed_s": 22.4
+   }
+  ]
+ },
+ {
+  "locus": "chr7:65219157-65531823",
+  "chrom": "chr7",
+  "start38": 65219157,
+  "end38": 65531823,
+  "size": 312666,
+  "tag_snp": "rs17782771",
+  "tag_variantId": "chr7_65262271_G_C_b38",
+  "recur_consensus": "1",
+  "inv_AF": "0.33",
+  "n_hom_inv": 9,
+  "n_hom_dir": 24,
+  "background": {
+   "inv_allele": 1,
+   "inv_bg_mean_alt_dosage": 0.9444444444444444,
+   "dir_bg_mean_alt_dosage": 0.0625,
+   "n_porubsky_hom_inv_in_panel": 9,
+   "n_porubsky_hom_dir_in_panel": 24,
+   "tag_porubsky_concordance": 0.9393939393939394,
+   "n_hap_inverted": 1838,
+   "n_hap_direct": 4566
+  },
+  "windows": [
+   {
+    "chrom": "chr7",
+    "win_start": 65153621,
+    "win_end": 65284693,
+    "b1": 65219157,
+    "b2": 65531823,
+    "qc": {
+     "win_start": 65153621,
+     "win_end": 65284693,
+     "L": 131072,
+     "seg_i1": 65536,
+     "seg_i2": 131072,
+     "seg_len": 65536,
+     "n_inv_variants_applied": 167,
+     "n_inv_variants_refmismatch": 0,
+     "n_dir_variants_applied": 77,
+     "n_dir_variants_refmismatch": 0,
+     "rc_roundtrip_ok": true,
+     "len_ok": true,
+     "structural_diff_confined": true
+    },
+    "reconciliation_max_abs_err": 5.960464477539063e-08,
+    "ntracks": 734,
+    "disruption_flank": {
+     "struct": 588.812255859375,
+     "snv": 279.4472351074219,
+     "total": 592.783935546875
+    },
+    "disruption_all": {
+     "struct": 1093.445068359375,
+     "snv": 314.5529479980469,
+     "total": 1083.2987060546875
+    },
+    "fraction_structural_flank": 0.6781523979700347,
+    "fraction_structural_all": 0.7765956028746298,
+    "window_label": "bpL",
+    "n_snvs_fetched": 2953,
+    "n_inv_consensus": 167,
+    "n_dir_consensus": 77,
+    "n_sites_differential_ge02": 197,
+    "elapsed_s": 18.7
+   },
+   {
+    "chrom": "chr7",
+    "win_start": 65466287,
+    "win_end": 65597359,
+    "b1": 65219157,
+    "b2": 65531823,
+    "qc": {
+     "win_start": 65466287,
+     "win_end": 65597359,
+     "L": 131072,
+     "seg_i1": 0,
+     "seg_i2": 65536,
+     "seg_len": 65536,
+     "n_inv_variants_applied": 33,
+     "n_inv_variants_refmismatch": 0,
+     "n_dir_variants_applied": 63,
+     "n_dir_variants_refmismatch": 0,
+     "rc_roundtrip_ok": true,
+     "len_ok": true,
+     "structural_diff_confined": true
+    },
+    "reconciliation_max_abs_err": 1.4901161193847656e-08,
+    "ntracks": 734,
+    "disruption_flank": {
+     "struct": 17.55029296875,
+     "snv": 2.23297119140625,
+     "total": 17.37175750732422
+    },
+    "disruption_all": {
+     "struct": 318.9296875,
+     "snv": 19.089275360107422,
+     "total": 314.7771301269531
+    },
+    "fraction_structural_flank": 0.8871282730024157,
+    "fraction_structural_all": 0.9435260223314521,
+    "window_label": "bpR",
+    "n_snvs_fetched": 2666,
+    "n_inv_consensus": 33,
+    "n_dir_consensus": 63,
+    "n_sites_differential_ge02": 110,
+    "elapsed_s": 18.2
+   }
+  ]
+ },
+ {
+  "locus": "chr8:7301024-12598379",
+  "chrom": "chr8",
+  "start38": 7301024,
+  "end38": 12598379,
+  "size": 5297355,
+  "tag_snp": "rs898137",
+  "tag_variantId": "chr8_9403846_T_A_b38",
+  "recur_consensus": "1",
+  "inv_AF": "0.5",
+  "n_hom_inv": 13,
+  "n_hom_dir": 13,
+  "background": {
+   "inv_allele": 0,
+   "inv_bg_mean_alt_dosage": 0.038461538461538464,
+   "dir_bg_mean_alt_dosage": 0.9230769230769231,
+   "n_porubsky_hom_inv_in_panel": 13,
+   "n_porubsky_hom_dir_in_panel": 13,
+   "tag_porubsky_concordance": 0.9423076923076923,
+   "n_hap_inverted": 3217,
+   "n_hap_direct": 3187
+  },
+  "windows": [
+   {
+    "chrom": "chr8",
+    "win_start": 7235488,
+    "win_end": 7366560,
+    "b1": 7301024,
+    "b2": 12598379,
+    "qc": {
+     "win_start": 7235488,
+     "win_end": 7366560,
+     "L": 131072,
+     "seg_i1": 65536,
+     "seg_i2": 131072,
+     "seg_len": 65536,
+     "n_inv_variants_applied": 5,
+     "n_inv_variants_refmismatch": 0,
+     "n_dir_variants_applied": 4,
+     "n_dir_variants_refmismatch": 0,
+     "rc_roundtrip_ok": true,
+     "len_ok": true,
+     "structural_diff_confined": true
+    },
+    "reconciliation_max_abs_err": 5.960464477539063e-08,
+    "ntracks": 734,
+    "disruption_flank": {
+     "struct": 157.25244140625,
+     "snv": 3.4330852031707764,
+     "total": 155.89752197265625
+    },
+    "disruption_all": {
+     "struct": 2220.509521484375,
+     "snv": 17.826093673706055,
+     "total": 2212.2529296875
+    },
+    "fraction_structural_flank": 0.9786347577432061,
+    "fraction_structural_all": 0.9920360049882657,
+    "genes": {
+     "FAM90A15": {
+      "struct": 3.4902703762054443,
+      "snv": 0.13112187385559082,
+      "total": 3.4570107460021973,
+      "fraction_structural": 0.9637924133036456,
+      "n_pos": 3011,
+      "gstart": 7256903,
+      "gend": 7259914
+     },
+     "FAM90A3": {
+      "struct": 2.4385862350463867,
+      "snv": 0.09628742933273315,
+      "total": 2.426055431365967,
+      "fraction_structural": 0.9620149001168004,
+      "n_pos": 3011,
+      "gstart": 7264525,
+      "gend": 7267536
+     },
+     "FAM90A13": {
+      "struct": 3.1915998458862305,
+      "snv": 0.0827254205942154,
+      "total": 3.1689164638519287,
+      "fraction_structural": 0.9747351243808663,
+      "n_pos": 3011,
+      "gstart": 7279769,
+      "gend": 7282780
+     },
+     "FAM90A5": {
+      "struct": 4.859552383422852,
+      "snv": 0.13805675506591797,
+      "total": 4.7707719802856445,
+      "fraction_structural": 0.9723754396872131,
+      "n_pos": 3011,
+      "gstart": 7287391,
+      "gend": 7290402
+     },
+     "FAM90A20": {
+      "struct": 7.885846138000488,
+      "snv": 0.3081221282482147,
+      "total": 7.725072383880615,
+      "fraction_structural": 0.9623964703991614,
+      "n_pos": 3011,
+      "gstart": 7295013,
+      "gend": 7298024
+     }
+    },
+    "window_label": "bpL",
+    "n_snvs_fetched": 2830,
+    "n_inv_consensus": 5,
+    "n_dir_consensus": 4,
+    "n_sites_differential_ge02": 0,
+    "elapsed_s": 19.1
+   },
+   {
+    "chrom": "chr8",
+    "win_start": 12532843,
+    "win_end": 12663915,
+    "b1": 7301024,
+    "b2": 12598379,
+    "qc": {
+     "win_start": 12532843,
+     "win_end": 12663915,
+     "L": 131072,
+     "seg_i1": 0,
+     "seg_i2": 65536,
+     "seg_len": 65536,
+     "n_inv_variants_applied": 82,
+     "n_inv_variants_refmismatch": 0,
+     "n_dir_variants_applied": 91,
+     "n_dir_variants_refmismatch": 0,
+     "rc_roundtrip_ok": true,
+     "len_ok": true,
+     "structural_diff_confined": true
+    },
+    "reconciliation_max_abs_err": 2.9802322387695312e-08,
+    "ntracks": 734,
+    "disruption_flank": {
+     "struct": 124.8460693359375,
+     "snv": 27.75604248046875,
+     "total": 138.51504516601562
+    },
+    "disruption_all": {
+     "struct": 648.283447265625,
+     "snv": 57.451576232910156,
+     "total": 674.8975830078125
+    },
+    "fraction_structural_flank": 0.8181149516865028,
+    "fraction_structural_all": 0.9185932760597514,
+    "window_label": "bpR",
+    "n_snvs_fetched": 5033,
+    "n_inv_consensus": 82,
+    "n_dir_consensus": 91,
+    "n_sites_differential_ge02": 42,
+    "elapsed_s": 22.8
+   }
+  ]
+ },
+ {
+  "locus": "chr16:28471892-28637651",
+  "chrom": "chr16",
+  "start38": 28471892,
+  "end38": 28637651,
+  "size": 165759,
+  "tag_snp": "rs12447461",
+  "tag_variantId": "chr16_28571620_C_A_b38",
+  "recur_consensus": "1",
+  "inv_AF": "0.36",
+  "n_hom_inv": 8,
+  "n_hom_dir": 20,
+  "background": {
+   "inv_allele": 1,
+   "inv_bg_mean_alt_dosage": 0.625,
+   "dir_bg_mean_alt_dosage": 0.0,
+   "n_porubsky_hom_inv_in_panel": 8,
+   "n_porubsky_hom_dir_in_panel": 19,
+   "tag_porubsky_concordance": 0.8888888888888888,
+   "n_hap_inverted": 1523,
+   "n_hap_direct": 4881
+  },
+  "windows": [
+   {
+    "chrom": "chr16",
+    "win_start": 28406356,
+    "win_end": 28537428,
+    "b1": 28471892,
+    "b2": 28637651,
+    "qc": {
+     "win_start": 28406356,
+     "win_end": 28537428,
+     "L": 131072,
+     "seg_i1": 65536,
+     "seg_i2": 131072,
+     "seg_len": 65536,
+     "n_inv_variants_applied": 79,
+     "n_inv_variants_refmismatch": 0,
+     "n_dir_variants_applied": 8,
+     "n_dir_variants_refmismatch": 0,
+     "rc_roundtrip_ok": true,
+     "len_ok": true,
+     "structural_diff_confined": true
+    },
+    "reconciliation_max_abs_err": 5.960464477539063e-08,
+    "ntracks": 734,
+    "disruption_flank": {
+     "struct": 58.16706085205078,
+     "snv": 7.212486267089844,
+     "total": 57.44779586791992
+    },
+    "disruption_all": {
+     "struct": 23788.15625,
+     "snv": 97.16472625732422,
+     "total": 23832.865234375
+    },
+    "fraction_structural_flank": 0.889682835307094,
+    "fraction_structural_all": 0.9959320317966877,
+    "genes": {
+     "NPIPB7": {
+      "struct": 46.59965133666992,
+      "snv": 5.881089210510254,
+      "total": 46.04262924194336,
+      "fraction_structural": 0.8879381436086414,
+      "n_pos": 15564,
+      "gstart": 28456328,
+      "gend": 28472336
+     },
+     "ENSG00000261832": {
+      "struct": 46.58229446411133,
+      "snv": 5.879947662353516,
+      "total": 46.02595520019531,
+      "fraction_structural": 0.8879203895216795,
+      "n_pos": 15522,
+      "gstart": 28456370,
+      "gend": 28492098
+     }
+    },
+    "window_label": "bpL",
+    "n_snvs_fetched": 2324,
+    "n_inv_consensus": 79,
+    "n_dir_consensus": 8,
+    "n_sites_differential_ge02": 94,
+    "elapsed_s": 16.8
+   },
+   {
+    "chrom": "chr16",
+    "win_start": 28572115,
+    "win_end": 28703187,
+    "b1": 28471892,
+    "b2": 28637651,
+    "qc": {
+     "win_start": 28572115,
+     "win_end": 28703187,
+     "L": 131072,
+     "seg_i1": 0,
+     "seg_i2": 65536,
+     "seg_len": 65536,
+     "n_inv_variants_applied": 131,
+     "n_inv_variants_refmismatch": 0,
+     "n_dir_variants_applied": 34,
+     "n_dir_variants_refmismatch": 0,
+     "rc_roundtrip_ok": true,
+     "len_ok": true,
+     "structural_diff_confined": true
+    },
+    "reconciliation_max_abs_err": 5.960464477539063e-08,
+    "ntracks": 734,
+    "disruption_flank": {
+     "struct": 125.08917999267578,
+     "snv": 9.16147232055664,
+     "total": 131.64149475097656
+    },
+    "disruption_all": {
+     "struct": 24240.732421875,
+     "snv": 817.0637817382812,
+     "total": 24363.19140625
+    },
+    "fraction_structural_flank": 0.9317584520991289,
+    "fraction_structural_all": 0.9673928315523429,
+    "genes": {
+     "NPIPB8": {
+      "struct": 104.48733520507812,
+      "snv": 6.511893272399902,
+      "total": 109.55879974365234,
+      "fraction_structural": 0.9413338870754298,
+      "n_pos": 21091,
+      "gstart": 28637653,
+      "gend": 28658744
+     },
+     "EIF3C": {
+      "struct": 18.60252571105957,
+      "snv": 2.2818336486816406,
+      "total": 20.103443145751953,
+      "fraction_structural": 0.8907395908403907,
+      "n_pos": 14630,
+      "gstart": 28688557,
+      "gend": 28735727
+     }
+    },
+    "window_label": "bpR",
+    "n_snvs_fetched": 2571,
+    "n_inv_consensus": 131,
+    "n_dir_consensus": 34,
+    "n_sites_differential_ge02": 143,
+    "elapsed_s": 16.2
+   }
+  ]
+ },
+ {
+  "locus": "chr3:195749463-195980207",
+  "chrom": "chr3",
+  "start38": 195749463,
+  "end38": 195980207,
+  "size": 230744,
+  "tag_snp": "rs6791220",
+  "tag_variantId": "chr3_195802897_G_A_b38",
+  "recur_consensus": "1",
+  "inv_AF": "0.26",
+  "n_hom_inv": 6,
+  "n_hom_dir": 27,
+  "background": {
+   "inv_allele": 1,
+   "inv_bg_mean_alt_dosage": 1.0,
+   "dir_bg_mean_alt_dosage": 0.038461538461538464,
+   "n_porubsky_hom_inv_in_panel": 6,
+   "n_porubsky_hom_dir_in_panel": 26,
+   "tag_porubsky_concordance": 0.96875,
+   "n_hap_inverted": 2157,
+   "n_hap_direct": 4247
+  },
+  "windows": [
+   {
+    "chrom": "chr3",
+    "win_start": 195683927,
+    "win_end": 195814999,
+    "b1": 195749463,
+    "b2": 195980207,
+    "qc": {
+     "win_start": 195683927,
+     "win_end": 195814999,
+     "L": 131072,
+     "seg_i1": 65536,
+     "seg_i2": 131072,
+     "seg_len": 65536,
+     "n_inv_variants_applied": 155,
+     "n_inv_variants_refmismatch": 0,
+     "n_dir_variants_applied": 227,
+     "n_dir_variants_refmismatch": 0,
+     "rc_roundtrip_ok": true,
+     "len_ok": true,
+     "structural_diff_confined": true
+    },
+    "reconciliation_max_abs_err": 5.960464477539063e-08,
+    "ntracks": 734,
+    "disruption_flank": {
+     "struct": 800.1996459960938,
+     "snv": 113.82073974609375,
+     "total": 794.4212646484375
+    },
+    "disruption_all": {
+     "struct": 9364.916015625,
+     "snv": 686.8878784179688,
+     "total": 8850.1875
+    },
+    "fraction_structural_flank": 0.8754724276158558,
+    "fraction_structural_all": 0.9316652129649046,
+    "genes": {
+     "MUC20": {
+      "struct": 162.1695556640625,
+      "snv": 27.834423065185547,
+      "total": 163.2476043701172,
+      "fraction_structural": 0.8535061041808548,
+      "n_pos": 20240,
+      "gstart": 195720883,
+      "gend": 195741123
+     },
+     "MUC4": {
+      "struct": 217.92237854003906,
+      "snv": 20.495206832885742,
+      "total": 198.57525634765625,
+      "fraction_structural": 0.9140365137041891,
+      "n_pos": 2699,
+      "gstart": 195746764,
+      "gend": 195811973
+     }
+    },
+    "window_label": "bpL",
+    "n_snvs_fetched": 5545,
+    "n_inv_consensus": 155,
+    "n_dir_consensus": 227,
+    "n_sites_differential_ge02": 255,
+    "elapsed_s": 24.3
+   },
+   {
+    "chrom": "chr3",
+    "win_start": 195914671,
+    "win_end": 196045743,
+    "b1": 195749463,
+    "b2": 195980207,
+    "qc": {
+     "win_start": 195914671,
+     "win_end": 196045743,
+     "L": 131072,
+     "seg_i1": 0,
+     "seg_i2": 65536,
+     "seg_len": 65536,
+     "n_inv_variants_applied": 114,
+     "n_inv_variants_refmismatch": 0,
+     "n_dir_variants_applied": 99,
+     "n_dir_variants_refmismatch": 0,
+     "rc_roundtrip_ok": true,
+     "len_ok": true,
+     "structural_diff_confined": true
+    },
+    "reconciliation_max_abs_err": 5.960464477539063e-08,
+    "ntracks": 734,
+    "disruption_flank": {
+     "struct": 263.6549072265625,
+     "snv": 26.75475311279297,
+     "total": 258.7171936035156
+    },
+    "disruption_all": {
+     "struct": 11773.5576171875,
+     "snv": 148.01077270507812,
+     "total": 11800.8984375
+    },
+    "fraction_structural_flank": 0.907872372146543,
+    "fraction_structural_all": 0.9875846224368796,
+    "genes": {
+     "TFRC": {
+      "struct": 5.4960737228393555,
+      "snv": 4.12205696105957,
+      "total": 8.52780818939209,
+      "fraction_structural": 0.57142847227476,
+      "n_pos": 33233,
+      "gstart": 196012510,
+      "gend": 196082153
+     }
+    },
+    "window_label": "bpR",
+    "n_snvs_fetched": 4758,
+    "n_inv_consensus": 114,
+    "n_dir_consensus": 99,
+    "n_sites_differential_ge02": 84,
+    "elapsed_s": 22.4
+   }
+  ]
+ },
+ {
+  "locus": "chr11:50154999-50324102",
+  "chrom": "chr11",
+  "start38": 50154999,
+  "end38": 50324102,
+  "size": 169103,
+  "tag_snp": "rs10901897",
+  "tag_variantId": "chr11_50240216_T_C_b38",
+  "recur_consensus": "1",
+  "inv_AF": "0.4",
+  "n_hom_inv": 8,
+  "n_hom_dir": 17,
+  "background": {
+   "inv_allele": 1,
+   "inv_bg_mean_alt_dosage": 0.9375,
+   "dir_bg_mean_alt_dosage": 0.25,
+   "n_porubsky_hom_inv_in_panel": 8,
+   "n_porubsky_hom_dir_in_panel": 16,
+   "tag_porubsky_concordance": 0.8125,
+   "n_hap_inverted": 2638,
+   "n_hap_direct": 3766
+  },
+  "windows": [
+   {
+    "chrom": "chr11",
+    "win_start": 50089463,
+    "win_end": 50220535,
+    "b1": 50154999,
+    "b2": 50324102,
+    "qc": {
+     "win_start": 50089463,
+     "win_end": 50220535,
+     "L": 131072,
+     "seg_i1": 65536,
+     "seg_i2": 131072,
+     "seg_len": 65536,
+     "n_inv_variants_applied": 79,
+     "n_inv_variants_refmismatch": 0,
+     "n_dir_variants_applied": 199,
+     "n_dir_variants_refmismatch": 0,
+     "rc_roundtrip_ok": true,
+     "len_ok": true,
+     "structural_diff_confined": true
+    },
+    "reconciliation_max_abs_err": 2.9802322387695312e-08,
+    "ntracks": 734,
+    "disruption_flank": {
+     "struct": 77.3040542602539,
+     "snv": 5.983420372009277,
+     "total": 76.00485229492188
+    },
+    "disruption_all": {
+     "struct": 465.2989501953125,
+     "snv": 76.1831283569336,
+     "total": 525.49365234375
+    },
+    "fraction_structural_flank": 0.9281594213484357,
+    "fraction_structural_all": 0.8593062792389667,
+    "window_label": "bpL",
+    "n_snvs_fetched": 3782,
+    "n_inv_consensus": 79,
+    "n_dir_consensus": 199,
+    "n_sites_differential_ge02": 323,
+    "elapsed_s": 19.7
+   },
+   {
+    "chrom": "chr11",
+    "win_start": 50258566,
+    "win_end": 50389638,
+    "b1": 50154999,
+    "b2": 50324102,
+    "qc": {
+     "win_start": 50258566,
+     "win_end": 50389638,
+     "L": 131072,
+     "seg_i1": 0,
+     "seg_i2": 65536,
+     "seg_len": 65536,
+     "n_inv_variants_applied": 78,
+     "n_inv_variants_refmismatch": 0,
+     "n_dir_variants_applied": 183,
+     "n_dir_variants_refmismatch": 0,
+     "rc_roundtrip_ok": true,
+     "len_ok": true,
+     "structural_diff_confined": true
+    },
+    "reconciliation_max_abs_err": 5.960464477539063e-08,
+    "ntracks": 734,
+    "disruption_flank": {
+     "struct": 120.38329315185547,
+     "snv": 24.27852439880371,
+     "total": 142.1870574951172
+    },
+    "disruption_all": {
+     "struct": 2880.1083984375,
+     "snv": 317.3622131347656,
+     "total": 2786.101318359375
+    },
+    "fraction_structural_flank": 0.8321704731084164,
+    "fraction_structural_all": 0.9007458545557322,
+    "window_label": "bpR",
+    "n_snvs_fetched": 3365,
+    "n_inv_consensus": 78,
+    "n_dir_consensus": 183,
+    "n_sites_differential_ge02": 249,
+    "elapsed_s": 19.8
+   }
+  ]
+ },
+ {
+  "locus": "chr1:108310642-108383736",
+  "chrom": "chr1",
+  "start38": 108310642,
+  "end38": 108383736,
+  "size": 73094,
+  "tag_snp": "rs9661538",
+  "tag_variantId": "chr1_108362984_T_G_b38",
+  "recur_consensus": "1",
+  "inv_AF": "0.57",
+  "n_hom_inv": 17,
+  "n_hom_dir": 10,
+  "background": {
+   "inv_allele": 1,
+   "inv_bg_mean_alt_dosage": 0.75,
+   "dir_bg_mean_alt_dosage": 0.2,
+   "n_porubsky_hom_inv_in_panel": 16,
+   "n_porubsky_hom_dir_in_panel": 10,
+   "tag_porubsky_concordance": 0.7692307692307693,
+   "n_hap_inverted": 3169,
+   "n_hap_direct": 3235
+  },
+  "windows": [
+   {
+    "chrom": "chr1",
+    "win_start": 108281653,
+    "win_end": 108412725,
+    "b1": 108310642,
+    "b2": 108383736,
+    "qc": {
+     "win_start": 108281653,
+     "win_end": 108412725,
+     "L": 131072,
+     "seg_i1": 28989,
+     "seg_i2": 102083,
+     "seg_len": 73094,
+     "n_inv_variants_applied": 34,
+     "n_inv_variants_refmismatch": 0,
+     "n_dir_variants_applied": 3,
+     "n_dir_variants_refmismatch": 0,
+     "rc_roundtrip_ok": true,
+     "len_ok": true,
+     "structural_diff_confined": true
+    },
+    "reconciliation_max_abs_err": 5.960464477539063e-08,
+    "ntracks": 734,
+    "disruption_flank": {
+     "struct": 316.7005920410156,
+     "snv": 12.878954887390137,
+     "total": 326.8938903808594
+    },
+    "disruption_all": {
+     "struct": 2309.70751953125,
+     "snv": 99.86369323730469,
+     "total": 2396.640869140625
+    },
+    "fraction_structural_flank": 0.9609230760603363,
+    "fraction_structural_all": 0.9585554090669256,
+    "window_label": "whole",
+    "n_snvs_fetched": 1460,
+    "n_inv_consensus": 34,
+    "n_dir_consensus": 3,
+    "n_sites_differential_ge02": 75,
+    "elapsed_s": 13.9
+   }
+  ]
+ },
+ {
+  "locus": "chr7:54234014-54308393",
+  "chrom": "chr7",
+  "start38": 54234014,
+  "end38": 54308393,
+  "size": 74379,
+  "tag_snp": "rs4338053",
+  "tag_variantId": "chr7_54251064_A_G_b38",
+  "recur_consensus": "0",
+  "inv_AF": "0.62",
+  "n_hom_inv": 18,
+  "n_hom_dir": 7,
+  "background": {
+   "inv_allele": 1,
+   "inv_bg_mean_alt_dosage": 0.9444444444444444,
+   "dir_bg_mean_alt_dosage": 0.0,
+   "n_porubsky_hom_inv_in_panel": 18,
+   "n_porubsky_hom_dir_in_panel": 6,
+   "tag_porubsky_concordance": 0.9583333333333334,
+   "n_hap_inverted": 3199,
+   "n_hap_direct": 3205
+  },
+  "windows": [
+   {
+    "chrom": "chr7",
+    "win_start": 54205667,
+    "win_end": 54336739,
+    "b1": 54234014,
+    "b2": 54308393,
+    "qc": {
+     "win_start": 54205667,
+     "win_end": 54336739,
+     "L": 131072,
+     "seg_i1": 28347,
+     "seg_i2": 102726,
+     "seg_len": 74379,
+     "n_inv_variants_applied": 78,
+     "n_inv_variants_refmismatch": 0,
+     "n_dir_variants_applied": 4,
+     "n_dir_variants_refmismatch": 0,
+     "rc_roundtrip_ok": true,
+     "len_ok": true,
+     "structural_diff_confined": true
+    },
+    "reconciliation_max_abs_err": 0.0,
+    "ntracks": 734,
+    "disruption_flank": {
+     "struct": 7.81329345703125,
+     "snv": 1.769728183746338,
+     "total": 7.877963066101074
+    },
+    "disruption_all": {
+     "struct": 55.589473724365234,
+     "snv": 5.185420036315918,
+     "total": 54.809120178222656
+    },
+    "fraction_structural_flank": 0.8153267048656337,
+    "fraction_structural_all": 0.9146782542025491,
+    "window_label": "whole",
+    "n_snvs_fetched": 3059,
+    "n_inv_consensus": 78,
+    "n_dir_consensus": 4,
+    "n_sites_differential_ge02": 166,
+    "elapsed_s": 19.2
+   }
+  ]
+ },
+ {
+  "locus": "chrX:149681035-149722249",
+  "chrom": "chrX",
+  "start38": 149681035,
+  "end38": 149722249,
+  "size": 41214,
+  "tag_snp": "rs56258957",
+  "tag_variantId": "chrX_149705262_C_T_b38",
+  "recur_consensus": "1",
+  "inv_AF": "0.61",
+  "n_hom_inv": 20,
+  "n_hom_dir": 10,
+  "background": {
+   "inv_allele": 0,
+   "inv_bg_mean_alt_dosage": 0.18421052631578946,
+   "dir_bg_mean_alt_dosage": 0.8,
+   "n_porubsky_hom_inv_in_panel": 19,
+   "n_porubsky_hom_dir_in_panel": 10,
+   "tag_porubsky_concordance": 0.8372093023255814,
+   "n_hap_inverted": 3137,
+   "n_hap_direct": 1669
+  },
+  "windows": [
+   {
+    "chrom": "chrX",
+    "win_start": 149636106,
+    "win_end": 149767178,
+    "b1": 149681035,
+    "b2": 149722249,
+    "qc": {
+     "win_start": 149636106,
+     "win_end": 149767178,
+     "L": 131072,
+     "seg_i1": 44929,
+     "seg_i2": 86143,
+     "seg_len": 41214,
+     "n_inv_variants_applied": 30,
+     "n_inv_variants_refmismatch": 0,
+     "n_dir_variants_applied": 20,
+     "n_dir_variants_refmismatch": 0,
+     "rc_roundtrip_ok": true,
+     "len_ok": true,
+     "structural_diff_confined": true
+    },
+    "reconciliation_max_abs_err": 2.9802322387695312e-08,
+    "ntracks": 734,
+    "disruption_flank": {
+     "struct": 20.8875732421875,
+     "snv": 1.8493112325668335,
+     "total": 21.213932037353516
+    },
+    "disruption_all": {
+     "struct": 400.27081298828125,
+     "snv": 11.184347152709961,
+     "total": 399.715576171875
+    },
+    "fraction_structural_flank": 0.9186647038374938,
+    "fraction_structural_all": 0.9728175795659545,
+    "genes": {},
+    "window_label": "whole",
+    "n_snvs_fetched": 1359,
+    "n_inv_consensus": 30,
+    "n_dir_consensus": 20,
+    "n_sites_differential_ge02": 69,
+    "elapsed_s": 15.9
+   }
+  ]
+ },
+ {
+  "locus": "chrX:152729753-152738707",
+  "chrom": "chrX",
+  "start38": 152729753,
+  "end38": 152738707,
+  "size": 8954,
+  "tag_snp": "rs62613176",
+  "tag_variantId": "chrX_152738160_A_G_b38",
+  "recur_consensus": "1",
+  "inv_AF": "0.4",
+  "n_hom_inv": 10,
+  "n_hom_dir": 18,
+  "background": {
+   "inv_allele": 1,
+   "inv_bg_mean_alt_dosage": 0.5,
+   "dir_bg_mean_alt_dosage": 0.2647058823529412,
+   "n_porubsky_hom_inv_in_panel": 10,
+   "n_porubsky_hom_dir_in_panel": 17,
+   "tag_porubsky_concordance": 0.675,
+   "n_hap_inverted": 1902,
+   "n_hap_direct": 2904
+  },
+  "windows": [
+   {
+    "chrom": "chrX",
+    "win_start": 152668694,
+    "win_end": 152799766,
+    "b1": 152729753,
+    "b2": 152738707,
+    "qc": {
+     "win_start": 152668694,
+     "win_end": 152799766,
+     "L": 131072,
+     "seg_i1": 61059,
+     "seg_i2": 70013,
+     "seg_len": 8954,
+     "n_inv_variants_applied": 75,
+     "n_inv_variants_refmismatch": 0,
+     "n_dir_variants_applied": 0,
+     "n_dir_variants_refmismatch": 0,
+     "rc_roundtrip_ok": true,
+     "len_ok": true,
+     "structural_diff_confined": true
+    },
+    "reconciliation_max_abs_err": 2.9802322387695312e-08,
+    "ntracks": 734,
+    "disruption_flank": {
+     "struct": 182.181884765625,
+     "snv": 29.32448959350586,
+     "total": 198.34591674804688
+    },
+    "disruption_all": {
+     "struct": 610.87060546875,
+     "snv": 66.42821502685547,
+     "total": 663.4705810546875
+    },
+    "fraction_structural_flank": 0.8613541096226545,
+    "fraction_structural_all": 0.9019218504201035,
+    "genes": {
+     "MAGEA3": {
+      "struct": 0.8964012265205383,
+      "snv": 0.7685645222663879,
+      "total": 0.7691433429718018,
+      "fraction_structural": 0.5383901904130132,
+      "n_pos": 3581,
+      "gstart": 152698766,
+      "gend": 152702347
+     },
+     "CSAG2": {
+      "struct": 5.113960266113281,
+      "snv": 1.7526694536209106,
+      "total": 3.9029297828674316,
+      "fraction_structural": 0.744755502312311,
+      "n_pos": 13401,
+      "gstart": 152708260,
+      "gend": 152721661
+     },
+     "MAGEA2B": {
+      "struct": 0.5682449340820312,
+      "snv": 0.22933539748191833,
+      "total": 0.532597541809082,
+      "fraction_structural": 0.7124610670473507,
+      "n_pos": 4022,
+      "gstart": 152714585,
+      "gend": 152718607
+     },
+     "CSAG1": {
+      "struct": 48.96556854248047,
+      "snv": 1.4052411317825317,
+      "total": 49.883941650390625,
+      "fraction_structural": 0.972102073783012,
+      "n_pos": 2270,
+      "gstart": 152727483,
+      "gend": 152733735
+     },
+     "MAGEA2": {
+      "struct": 0.5888226628303528,
+      "snv": 0.18466833233833313,
+      "total": 0.5946526527404785,
+      "fraction_structural": 0.7612534166631637,
+      "n_pos": 4022,
+      "gstart": 152749862,
+      "gend": 152753884
+     },
+     "CSAG3": {
+      "struct": 1.5186387300491333,
+      "snv": 1.1238162517547607,
+      "total": 1.8335039615631104,
+      "fraction_structural": 0.574707512713205,
+      "n_pos": 6302,
+      "gstart": 152753920,
+      "gend": 152760222
+     },
+     "MAGEA6": {
+      "struct": 1.9846513271331787,
+      "snv": 1.163312315940857,
+      "total": 2.035278081893921,
+      "fraction_structural": 0.6304556062773126,
+      "n_pos": 3581,
+      "gstart": 152766135,
+      "gend": 152769716
+     }
+    },
+    "window_label": "whole",
+    "n_snvs_fetched": 1164,
+    "n_inv_consensus": 75,
+    "n_dir_consensus": 0,
+    "n_sites_differential_ge02": 81,
+    "elapsed_s": 13.1
+   }
+  ]
+ },
+ {
+  "locus": "chrX:153149748-153250226",
+  "chrom": "chrX",
+  "start38": 153149748,
+  "end38": 153250226,
+  "size": 100478,
+  "tag_snp": "rs12556948",
+  "tag_variantId": "chrX_153167677_G_T_b38",
+  "recur_consensus": "1",
+  "inv_AF": "0.6",
+  "n_hom_inv": 23,
+  "n_hom_dir": 14,
+  "background": {
+   "inv_allele": 1,
+   "inv_bg_mean_alt_dosage": 0.4318181818181818,
+   "dir_bg_mean_alt_dosage": 0.0,
+   "n_porubsky_hom_inv_in_panel": 22,
+   "n_porubsky_hom_dir_in_panel": 14,
+   "tag_porubsky_concordance": 0.6666666666666666,
+   "n_hap_inverted": 640,
+   "n_hap_direct": 4166
+  },
+  "windows": [
+   {
+    "chrom": "chrX",
+    "win_start": 153134451,
+    "win_end": 153265523,
+    "b1": 153149748,
+    "b2": 153250226,
+    "qc": {
+     "win_start": 153134451,
+     "win_end": 153265523,
+     "L": 131072,
+     "seg_i1": 15297,
+     "seg_i2": 115775,
+     "seg_len": 100478,
+     "n_inv_variants_applied": 23,
+     "n_inv_variants_refmismatch": 0,
+     "n_dir_variants_applied": 12,
+     "n_dir_variants_refmismatch": 0,
+     "rc_roundtrip_ok": true,
+     "len_ok": true,
+     "structural_diff_confined": true
+    },
+    "reconciliation_max_abs_err": 2.9802322387695312e-08,
+    "ntracks": 734,
+    "disruption_flank": {
+     "struct": 3.2088279724121094,
+     "snv": 0.6405806541442871,
+     "total": 3.186112880706787
+    },
+    "disruption_all": {
+     "struct": 375.54248046875,
+     "snv": 7.928060531616211,
+     "total": 379.0216064453125
+    },
+    "fraction_structural_flank": 0.8335898533283702,
+    "fraction_structural_all": 0.9793255030466378,
+    "genes": {},
+    "window_label": "whole",
+    "n_snvs_fetched": 1661,
+    "n_inv_consensus": 23,
+    "n_dir_consensus": 12,
+    "n_sites_differential_ge02": 161,
+    "elapsed_s": 14.6
+   }
+  ]
+ },
+ {
+  "locus": "chrX:154347246-154384867",
+  "chrom": "chrX",
+  "start38": 154347246,
+  "end38": 154384867,
+  "size": 37621,
+  "tag_snp": "rs2070822",
+  "tag_variantId": "chrX_154351080_A_G_b38",
+  "recur_consensus": "1",
+  "inv_AF": "0.44",
+  "n_hom_inv": 16,
+  "n_hom_dir": 20,
+  "background": {
+   "inv_allele": 1,
+   "inv_bg_mean_alt_dosage": 0.90625,
+   "dir_bg_mean_alt_dosage": 0.07894736842105263,
+   "n_porubsky_hom_inv_in_panel": 16,
+   "n_porubsky_hom_dir_in_panel": 19,
+   "tag_porubsky_concordance": 0.9298245614035088,
+   "n_hap_inverted": 2475,
+   "n_hap_direct": 2331
+  },
+  "windows": [
+   {
+    "chrom": "chrX",
+    "win_start": 154300520,
+    "win_end": 154431592,
+    "b1": 154347246,
+    "b2": 154384867,
+    "qc": {
+     "win_start": 154300520,
+     "win_end": 154431592,
+     "L": 131072,
+     "seg_i1": 46726,
+     "seg_i2": 84347,
+     "seg_len": 37621,
+     "n_inv_variants_applied": 58,
+     "n_inv_variants_refmismatch": 0,
+     "n_dir_variants_applied": 4,
+     "n_dir_variants_refmismatch": 0,
+     "rc_roundtrip_ok": true,
+     "len_ok": true,
+     "structural_diff_confined": true
+    },
+    "reconciliation_max_abs_err": 5.960464477539063e-08,
+    "ntracks": 734,
+    "disruption_flank": {
+     "struct": 373.71881103515625,
+     "snv": 95.0267562866211,
+     "total": 362.310546875
+    },
+    "disruption_all": {
+     "struct": 74419.6796875,
+     "snv": 141.049072265625,
+     "total": 74398.890625
+    },
+    "fraction_structural_flank": 0.7972743362042535,
+    "fraction_structural_all": 0.9981082659114011,
+    "genes": {
+     "TKTL1": {
+      "struct": 71.6815185546875,
+      "snv": 19.050785064697266,
+      "total": 66.51803588867188,
+      "fraction_structural": 0.7900330499199725,
+      "n_pos": 29830,
+      "gstart": 154295794,
+      "gend": 154330350
+     },
+     "RPL10": {
+      "struct": 52.20653533935547,
+      "snv": 30.613256454467773,
+      "total": 61.24022674560547,
+      "fraction_structural": 0.6303630353155399,
+      "n_pos": 19214,
+      "gstart": 154389954,
+      "gend": 154409168
+     },
+     "DNASE1L1": {
+      "struct": 74.66816711425781,
+      "snv": 32.25135803222656,
+      "total": 79.89669799804688,
+      "fraction_structural": 0.6983585740018878,
+      "n_pos": 10877,
+      "gstart": 154401235,
+      "gend": 154412112
+     },
+     "TAFAZZIN": {
+      "struct": 157.9516143798828,
+      "snv": 26.45407485961914,
+      "total": 150.30616760253906,
+      "fraction_structural": 0.8565441501901756,
+      "n_pos": 10203,
+      "gstart": 154411523,
+      "gend": 154421726
+     },
+     "ATP6AP1": {
+      "struct": 18.932462692260742,
+      "snv": 3.2960143089294434,
+      "total": 17.435644149780273,
+      "fraction_structural": 0.8517210914291176,
+      "n_pos": 2960,
+      "gstart": 154428632,
+      "gend": 154436516
+     }
+    },
+    "window_label": "whole",
+    "n_snvs_fetched": 1895,
+    "n_inv_consensus": 58,
+    "n_dir_consensus": 4,
+    "n_sites_differential_ge02": 117,
+    "elapsed_s": 15.5
+   }
+  ]
+ },
+ {
+  "locus": "chrX:154591327-154613096",
+  "chrom": "chrX",
+  "start38": 154591327,
+  "end38": 154613096,
+  "size": 21769,
+  "tag_snp": "rs5986876",
+  "tag_variantId": "chrX_154591448_G_A_b38",
+  "recur_consensus": "1",
+  "inv_AF": "0.43",
+  "n_hom_inv": 16,
+  "n_hom_dir": 22,
+  "background": {
+   "inv_allele": 0,
+   "inv_bg_mean_alt_dosage": 0.4,
+   "dir_bg_mean_alt_dosage": 0.8181818181818182,
+   "n_porubsky_hom_inv_in_panel": 15,
+   "n_porubsky_hom_dir_in_panel": 22,
+   "tag_porubsky_concordance": 0.7627118644067796,
+   "n_hap_inverted": 2053,
+   "n_hap_direct": 2753
+  },
+  "windows": [
+   {
+    "chrom": "chrX",
+    "win_start": 154536675,
+    "win_end": 154667747,
+    "b1": 154591327,
+    "b2": 154613096,
+    "qc": {
+     "win_start": 154536675,
+     "win_end": 154667747,
+     "L": 131072,
+     "seg_i1": 54652,
+     "seg_i2": 76421,
+     "seg_len": 21769,
+     "n_inv_variants_applied": 18,
+     "n_inv_variants_refmismatch": 0,
+     "n_dir_variants_applied": 37,
+     "n_dir_variants_refmismatch": 0,
+     "rc_roundtrip_ok": true,
+     "len_ok": true,
+     "structural_diff_confined": true
+    },
+    "reconciliation_max_abs_err": 7.450580596923828e-09,
+    "ntracks": 734,
+    "disruption_flank": {
+     "struct": 71.8670883178711,
+     "snv": 42.446678161621094,
+     "total": 77.3058090209961
+    },
+    "disruption_all": {
+     "struct": 115.05451202392578,
+     "snv": 44.50703430175781,
+     "total": 121.20159912109375
+    },
+    "fraction_structural_flank": 0.6286827084012143,
+    "fraction_structural_all": 0.7210666647030745,
+    "genes": {
+     "G6PD": {
+      "struct": 5.8471999168396,
+      "snv": 3.741018295288086,
+      "total": 4.4059553146362305,
+      "fraction_structural": 0.6098317526236263,
+      "n_pos": 10897,
+      "gstart": 154517824,
+      "gend": 154547572
+     },
+     "IKBKG": {
+      "struct": 44.6367301940918,
+      "snv": 17.644779205322266,
+      "total": 35.99759292602539,
+      "fraction_structural": 0.7166931345198216,
+      "n_pos": 23848,
+      "gstart": 154541198,
+      "gend": 154565046
+     },
+     "CTAG1A": {
+      "struct": 1.6323554515838623,
+      "snv": 0.1097835898399353,
+      "total": 1.6270592212677002,
+      "fraction_structural": 0.9369834512461115,
+      "n_pos": 1684,
+      "gstart": 154585132,
+      "gend": 154586816
+     },
+     "CTAG1B": {
+      "struct": 0.682348370552063,
+      "snv": 0.08961880207061768,
+      "total": 0.7235263586044312,
+      "fraction_structural": 0.8839085323199083,
+      "n_pos": 1674,
+      "gstart": 154617608,
+      "gend": 154619282
+     },
+     "CTAG2": {
+      "struct": 1.3822823762893677,
+      "snv": 6.83087158203125,
+      "total": 5.838398456573486,
+      "fraction_structural": 0.16830104285199707,
+      "n_pos": 1608,
+      "gstart": 154651971,
+      "gend": 154653579
+     }
+    },
+    "window_label": "whole",
+    "n_snvs_fetched": 1028,
+    "n_inv_consensus": 18,
+    "n_dir_consensus": 37,
+    "n_sites_differential_ge02": 45,
+    "elapsed_s": 13.8
+   }
+  ]
+ },
+ {
+  "locus": "chr11:89920623-89923848",
+  "chrom": "chr11",
+  "start38": 89920623,
+  "end38": 89923848,
+  "size": 3225,
+  "tag_snp": "rs74378710",
+  "tag_variantId": "chr11_89921945_C_G_b38",
+  "recur_consensus": "1",
+  "inv_AF": "0.53",
+  "n_hom_inv": 10,
+  "n_hom_dir": 7,
+  "background": {
+   "inv_allele": 0,
+   "inv_bg_mean_alt_dosage": 0.0,
+   "dir_bg_mean_alt_dosage": 0.07142857142857142,
+   "n_porubsky_hom_inv_in_panel": 10,
+   "n_porubsky_hom_dir_in_panel": 7,
+   "tag_porubsky_concordance": 0.6176470588235294,
+   "n_hap_inverted": 6383,
+   "n_hap_direct": 21
+  },
+  "windows": [
+   {
+    "chrom": "chr11",
+    "win_start": 89856699,
+    "win_end": 89987771,
+    "b1": 89920623,
+    "b2": 89923848,
+    "qc": {
+     "win_start": 89856699,
+     "win_end": 89987771,
+     "L": 131072,
+     "seg_i1": 63924,
+     "seg_i2": 67149,
+     "seg_len": 3225,
+     "n_inv_variants_applied": 12,
+     "n_inv_variants_refmismatch": 0,
+     "n_dir_variants_applied": 39,
+     "n_dir_variants_refmismatch": 0,
+     "rc_roundtrip_ok": true,
+     "len_ok": true,
+     "structural_diff_confined": true
+    },
+    "reconciliation_max_abs_err": 0.0,
+    "ntracks": 734,
+    "disruption_flank": {
+     "struct": 4.244043350219727,
+     "snv": 2.79475474357605,
+     "total": 5.058306694030762
+    },
+    "disruption_all": {
+     "struct": 4.970915794372559,
+     "snv": 2.8742945194244385,
+     "total": 5.786468029022217
+    },
+    "fraction_structural_flank": 0.602950005621068,
+    "fraction_structural_all": 0.6336242873732073,
+    "genes": {
+     "TRIM64B": {
+      "struct": 0.086654432117939,
+      "snv": 0.24824893474578857,
+      "total": 0.2364179939031601,
+      "fraction_structural": 0.25874458333886724,
+      "n_pos": 8050,
+      "gstart": 89870437,
+      "gend": 89878487
+     },
+     "TRIM49D1": {
+      "struct": 1.2507472038269043,
+      "snv": 0.14170721173286438,
+      "total": 1.2851669788360596,
+      "fraction_structural": 0.8982320640809647,
+      "n_pos": 9513,
+      "gstart": 89911110,
+      "gend": 89922245
+     },
+     "TRIM49D2": {
+      "struct": 1.6503410339355469,
+      "snv": 0.19783088564872742,
+      "total": 1.5042235851287842,
+      "fraction_structural": 0.8929586130205748,
+      "n_pos": 9000,
+      "gstart": 89924063,
+      "gend": 89933063
+     },
+     "TRIM64": {
+      "struct": 0.06885253638029099,
+      "snv": 0.09569185972213745,
+      "total": 0.09275999665260315,
+      "fraction_structural": 0.4184435204796064,
+      "n_pos": 8036,
+      "gstart": 89966036,
+      "gend": 89974072
+     }
+    },
+    "window_label": "whole",
+    "n_snvs_fetched": 1263,
+    "n_inv_consensus": 12,
+    "n_dir_consensus": 39,
+    "n_sites_differential_ge02": 36,
+    "elapsed_s": 13.6
+   }
+  ]
+ },
+ {
+  "locus": "chr15:84373375-84416696",
+  "chrom": "chr15",
+  "start38": 84373375,
+  "end38": 84416696,
+  "size": 43321,
+  "tag_snp": "",
+  "tag_variantId": "",
+  "recur_consensus": "1",
+  "inv_AF": "0.56",
+  "n_hom_inv": 16,
+  "n_hom_dir": 11,
+  "background": {
+   "inv_allele": 0,
+   "inv_bg_mean_alt_dosage": 0.0,
+   "dir_bg_mean_alt_dosage": 0.75,
+   "n_porubsky_hom_inv_in_panel": 16,
+   "n_porubsky_hom_dir_in_panel": 10,
+   "tag_porubsky_concordance": 0.9038461538461539,
+   "n_hap_inverted": 4553,
+   "n_hap_direct": 1851
+  },
+  "windows": [
+   {
+    "chrom": "chr15",
+    "win_start": 84329499,
+    "win_end": 84460571,
+    "b1": 84373375,
+    "b2": 84416696,
+    "qc": {
+     "win_start": 84329499,
+     "win_end": 84460571,
+     "L": 131072,
+     "seg_i1": 43876,
+     "seg_i2": 87197,
+     "seg_len": 43321,
+     "n_inv_variants_applied": 37,
+     "n_inv_variants_refmismatch": 0,
+     "n_dir_variants_applied": 77,
+     "n_dir_variants_refmismatch": 0,
+     "rc_roundtrip_ok": true,
+     "len_ok": true,
+     "structural_diff_confined": true
+    },
+    "reconciliation_max_abs_err": 5.960464477539063e-08,
+    "ntracks": 734,
+    "disruption_flank": {
+     "struct": 94.36762237548828,
+     "snv": 17.15743064880371,
+     "total": 91.99382019042969
+    },
+    "disruption_all": {
+     "struct": 2467.447998046875,
+     "snv": 214.4923553466797,
+     "total": 2581.4365234375
+    },
+    "fraction_structural_flank": 0.8461562654889163,
+    "fraction_structural_all": 0.9200234430734916,
+    "window_label": "whole",
+    "n_snvs_fetched": 2191,
+    "n_inv_consensus": 37,
+    "n_dir_consensus": 77,
+    "n_sites_differential_ge02": 120,
+    "elapsed_s": 15.4
+   }
+  ]
+ },
+ {
+  "locus": "chr1:13104252-13122521",
+  "chrom": "chr1",
+  "start38": 13104252,
+  "end38": 13122521,
+  "size": 18269,
+  "tag_snp": "rs61149350",
+  "tag_variantId": "chr1_13104656_C_G_b38",
+  "recur_consensus": "1",
+  "inv_AF": "0.69",
+  "n_hom_inv": 15,
+  "n_hom_dir": 4,
+  "background": {
+   "inv_allele": 0,
+   "inv_bg_mean_alt_dosage": 0.17857142857142858,
+   "dir_bg_mean_alt_dosage": 0.625,
+   "n_porubsky_hom_inv_in_panel": 14,
+   "n_porubsky_hom_dir_in_panel": 4,
+   "tag_porubsky_concordance": 0.7777777777777778,
+   "n_hap_inverted": 4740,
+   "n_hap_direct": 1664
+  },
+  "windows": [
+   {
+    "chrom": "chr1",
+    "win_start": 13047850,
+    "win_end": 13178922,
+    "b1": 13104252,
+    "b2": 13122521,
+    "qc": {
+     "win_start": 13047850,
+     "win_end": 13178922,
+     "L": 131072,
+     "seg_i1": 56402,
+     "seg_i2": 74671,
+     "seg_len": 18269,
+     "n_inv_variants_applied": 10,
+     "n_inv_variants_refmismatch": 0,
+     "n_dir_variants_applied": 48,
+     "n_dir_variants_refmismatch": 0,
+     "rc_roundtrip_ok": true,
+     "len_ok": true,
+     "structural_diff_confined": true
+    },
+    "reconciliation_max_abs_err": 0.0,
+    "ntracks": 734,
+    "disruption_flank": {
+     "struct": 4.254886627197266,
+     "snv": 1.387190341949463,
+     "total": 4.371387958526611
+    },
+    "disruption_all": {
+     "struct": 18.017597198486328,
+     "snv": 2.085838794708252,
+     "total": 18.191055297851562
+    },
+    "fraction_structural_flank": 0.754134807175583,
+    "fraction_structural_all": 0.8962446620859066,
+    "genes": {
+     "PRAMEF27": {
+      "struct": 0.32524868845939636,
+      "snv": 0.13168974220752716,
+      "total": 0.2763654589653015,
+      "fraction_structural": 0.7117998107199701,
+      "n_pos": 7100,
+      "gstart": 13049475,
+      "gend": 13056575
+     },
+     "HNRNPCL3": {
+      "struct": 0.04744287580251694,
+      "snv": 0.04476816579699516,
+      "total": 0.04584493488073349,
+      "fraction_structural": 0.5145031980938817,
+      "n_pos": 2110,
+      "gstart": 13060768,
+      "gend": 13062878
+     },
+     "PRAMEF25": {
+      "struct": 0.22368818521499634,
+      "snv": 0.08998605608940125,
+      "total": 0.23096328973770142,
+      "fraction_structural": 0.7131225831129804,
+      "n_pos": 9208,
+      "gstart": 13068676,
+      "gend": 13077884
+     },
+     "PRAMEF26": {
+      "struct": 0.1734563410282135,
+      "snv": 0.1161302849650383,
+      "total": 0.1386737823486328,
+      "fraction_structural": 0.5989791152587811,
+      "n_pos": 9212,
+      "gstart": 13148904,
+      "gend": 13158116
+     },
+     "HNRNPCL4": {
+      "struct": 0.06529144942760468,
+      "snv": 0.0341232493519783,
+      "total": 0.04687231034040451,
+      "fraction_structural": 0.6567585098493879,
+      "n_pos": 1718,
+      "gstart": 13163913,
+      "gend": 13165631
+     },
+     "PRAMEF9": {
+      "struct": 0.11924391984939575,
+      "snv": 0.08745688199996948,
+      "total": 0.11106998473405838,
+      "fraction_structural": 0.5768914236544455,
+      "n_pos": 7075,
+      "gstart": 13171847,
+      "gend": 13179459
+     }
+    },
+    "window_label": "whole",
+    "n_snvs_fetched": 2080,
+    "n_inv_consensus": 10,
+    "n_dir_consensus": 48,
+    "n_sites_differential_ge02": 170,
+    "elapsed_s": 16.2
+   }
+  ]
+ },
+ {
+  "locus": "chr1:144376209-144600799",
+  "error": "invalid literal for int() with base 10: ''"
+ },
+ {
+  "locus": "chr1:149843518-149850293",
+  "chrom": "chr1",
+  "start38": 149843518,
+  "end38": 149850293,
+  "size": 6775,
+  "tag_snp": "rs1509899",
+  "tag_variantId": "chr1_149845498_T_A_b38",
+  "recur_consensus": "0",
+  "inv_AF": "0.61",
+  "n_hom_inv": 16,
+  "n_hom_dir": 6,
+  "background": {
+   "inv_allele": 0,
+   "inv_bg_mean_alt_dosage": 0.0,
+   "dir_bg_mean_alt_dosage": 0.16666666666666666,
+   "n_porubsky_hom_inv_in_panel": 15,
+   "n_porubsky_hom_dir_in_panel": 6,
+   "tag_porubsky_concordance": 0.7619047619047619,
+   "n_hap_inverted": 6272,
+   "n_hap_direct": 132
+  },
+  "windows": [
+   {
+    "chrom": "chr1",
+    "win_start": 149781369,
+    "win_end": 149912441,
+    "b1": 149843518,
+    "b2": 149850293,
+    "qc": {
+     "win_start": 149781369,
+     "win_end": 149912441,
+     "L": 131072,
+     "seg_i1": 62149,
+     "seg_i2": 68924,
+     "seg_len": 6775,
+     "n_inv_variants_applied": 3,
+     "n_inv_variants_refmismatch": 0,
+     "n_dir_variants_applied": 34,
+     "n_dir_variants_refmismatch": 0,
+     "rc_roundtrip_ok": true,
+     "len_ok": true,
+     "structural_diff_confined": true
+    },
+    "reconciliation_max_abs_err": 0.0,
+    "ntracks": 734,
+    "disruption_flank": {
+     "struct": 83.18985748291016,
+     "snv": 85.186767578125,
+     "total": 134.5050048828125
+    },
+    "disruption_all": {
+     "struct": 108.2973403930664,
+     "snv": 86.37824249267578,
+     "total": 159.51287841796875
+    },
+    "fraction_structural_flank": 0.49407010891657027,
+    "fraction_structural_all": 0.5562964743073486,
+    "genes": {
+     "FCGR1A": {
+      "struct": 19.34718132019043,
+      "snv": 7.55489444732666,
+      "total": 15.14647388458252,
+      "fraction_structural": 0.7191705758092907,
+      "n_pos": 9005,
+      "gstart": 149782670,
+      "gend": 149791675
+     },
+     "H2BC18": {
+      "struct": 21.991958618164062,
+      "snv": 9.498331069946289,
+      "total": 18.440004348754883,
+      "fraction_structural": 0.698372699520369,
+      "n_pos": 29685,
+      "gstart": 149782688,
+      "gend": 149812373
+     },
+     "H3C13": {
+      "struct": 0.13906574249267578,
+      "snv": 0.22080719470977783,
+      "total": 0.12559886276721954,
+      "fraction_structural": 0.3864301205134567,
+      "n_pos": 469,
+      "gstart": 149813224,
+      "gend": 149813693
+     },
+     "H4C14": {
+      "struct": 2.4459033012390137,
+      "snv": 0.6594900488853455,
+      "total": 2.791271448135376,
+      "fraction_structural": 0.7876307525232076,
+      "n_pos": 7111,
+      "gstart": 149832656,
+      "gend": 149839767
+     },
+     "H3C14": {
+      "struct": 0.18403398990631104,
+      "snv": 0.03747151792049408,
+      "total": 0.18724378943443298,
+      "fraction_structural": 0.8308325680560819,
+      "n_pos": 522,
+      "gstart": 149840686,
+      "gend": 149841208
+     },
+     "H2AC18": {
+      "struct": 0.2667449712753296,
+      "snv": 0.06889097392559052,
+      "total": 0.25385063886642456,
+      "fraction_structural": 0.7947449463902007,
+      "n_pos": 533,
+      "gstart": 149842217,
+      "gend": 149842750
+     },
+     "H2AC19": {
+      "struct": 0.11950147151947021,
+      "snv": 0.04336782544851303,
+      "total": 0.11588799953460693,
+      "fraction_structural": 0.733726207112945,
+      "n_pos": 534,
+      "gstart": 149851060,
+      "gend": 149851594
+     },
+     "H3C15": {
+      "struct": 0.058162495493888855,
+      "snv": 0.0285661481320858,
+      "total": 0.06183172017335892,
+      "fraction_structural": 0.6706261399027527,
+      "n_pos": 518,
+      "gstart": 149852607,
+      "gend": 149853125
+     },
+     "H4C15": {
+      "struct": 2.6550674438476562,
+      "snv": 1.6694432497024536,
+      "total": 3.9493203163146973,
+      "fraction_structural": 0.6139578861043441,
+      "n_pos": 7115,
+      "gstart": 149854044,
+      "gend": 149861159
+     },
+     "H2BC21": {
+      "struct": 0.9405605792999268,
+      "snv": 1.6534093618392944,
+      "total": 0.8346120119094849,
+      "fraction_structural": 0.362595018694338,
+      "n_pos": 2224,
+      "gstart": 149884458,
+      "gend": 149886682
+     },
+     "H2AC20": {
+      "struct": 0.08773218095302582,
+      "snv": 0.08636084198951721,
+      "total": 0.08452941477298737,
+      "fraction_structural": 0.5039385236132099,
+      "n_pos": 494,
+      "gstart": 149886917,
+      "gend": 149887411
+     },
+     "H2AC21": {
+      "struct": 0.07953688502311707,
+      "snv": 0.11637507379055023,
+      "total": 0.08828570693731308,
+      "fraction_structural": 0.4059827970928765,
+      "n_pos": 497,
+      "gstart": 149887468,
+      "gend": 149887965
+     },
+     "BOLA1": {
+      "struct": 5.323634624481201,
+      "snv": 11.072888374328613,
+      "total": 8.398755073547363,
+      "fraction_structural": 0.3246807036386697,
+      "n_pos": 12909,
+      "gstart": 149887889,
+      "gend": 149900798
+     },
+     "SV2A": {
+      "struct": 17.658336639404297,
+      "snv": 57.6636962890625,
+      "total": 67.77449798583984,
+      "fraction_structural": 0.23443786569295585,
+      "n_pos": 9124,
+      "gstart": 149903317,
+      "gend": 149917844
+     }
+    },
+    "window_label": "whole",
+    "n_snvs_fetched": 1793,
+    "n_inv_consensus": 3,
+    "n_dir_consensus": 34,
+    "n_sites_differential_ge02": 39,
+    "elapsed_s": 16.2
+   }
+  ]
+ },
+ {
+  "locus": "chr2:91832040-92012663",
+  "chrom": "chr2",
+  "start38": 91832040,
+  "end38": 92012663,
+  "size": 180623,
+  "tag_snp": "rs10210240",
+  "tag_variantId": "chr2_91893951_C_G_b38",
+  "recur_consensus": "1",
+  "inv_AF": "0.41",
+  "n_hom_inv": 9,
+  "n_hom_dir": 17,
+  "background": {
+   "inv_allele": 1,
+   "inv_bg_mean_alt_dosage": 0.2777777777777778,
+   "dir_bg_mean_alt_dosage": 0.0,
+   "n_porubsky_hom_inv_in_panel": 9,
+   "n_porubsky_hom_dir_in_panel": 16,
+   "tag_porubsky_concordance": 0.74,
+   "n_hap_inverted": 302,
+   "n_hap_direct": 6102
+  },
+  "windows": [
+   {
+    "chrom": "chr2",
+    "win_start": 91766504,
+    "win_end": 91897576,
+    "b1": 91832040,
+    "b2": 92012663,
+    "qc": {
+     "win_start": 91766504,
+     "win_end": 91897576,
+     "L": 131072,
+     "seg_i1": 65536,
+     "seg_i2": 131072,
+     "seg_len": 65536,
+     "n_inv_variants_applied": 38,
+     "n_inv_variants_refmismatch": 0,
+     "n_dir_variants_applied": 8,
+     "n_dir_variants_refmismatch": 0,
+     "rc_roundtrip_ok": true,
+     "len_ok": true,
+     "structural_diff_confined": true
+    },
+    "reconciliation_max_abs_err": 5.960464477539063e-08,
+    "ntracks": 734,
+    "disruption_flank": {
+     "struct": 30.4130916595459,
+     "snv": 12.954757690429688,
+     "total": 34.34043502807617
+    },
+    "disruption_all": {
+     "struct": 1701.521484375,
+     "snv": 84.46005249023438,
+     "total": 1655.8404541015625
+    },
+    "fraction_structural_flank": 0.7012819892015931,
+    "fraction_structural_all": 0.9527094481399404,
+    "window_label": "bpL",
+    "n_snvs_fetched": 3385,
+    "n_inv_consensus": 38,
+    "n_dir_consensus": 8,
+    "n_sites_differential_ge02": 41,
+    "elapsed_s": 24.1
+   },
+   {
+    "chrom": "chr2",
+    "win_start": 91947127,
+    "win_end": 92078199,
+    "b1": 91832040,
+    "b2": 92012663,
+    "qc": {
+     "win_start": 91947127,
+     "win_end": 92078199,
+     "L": 131072,
+     "seg_i1": 0,
+     "seg_i2": 65536,
+     "seg_len": 65536,
+     "n_inv_variants_applied": 44,
+     "n_inv_variants_refmismatch": 0,
+     "n_dir_variants_applied": 15,
+     "n_dir_variants_refmismatch": 0,
+     "rc_roundtrip_ok": true,
+     "len_ok": true,
+     "structural_diff_confined": true
+    },
+    "reconciliation_max_abs_err": 2.9802322387695312e-08,
+    "ntracks": 734,
+    "disruption_flank": {
+     "struct": 13.968801498413086,
+     "snv": 2.0959837436676025,
+     "total": 14.69822883605957
+    },
+    "disruption_all": {
+     "struct": 76.60688018798828,
+     "snv": 4.527682304382324,
+     "total": 76.94880676269531
+    },
+    "fraction_structural_flank": 0.8695293020054009,
+    "fraction_structural_all": 0.9441953938580974,
+    "window_label": "bpR",
+    "n_snvs_fetched": 4029,
+    "n_inv_consensus": 44,
+    "n_dir_consensus": 15,
+    "n_sites_differential_ge02": 38,
+    "elapsed_s": 25.3
+   }
+  ]
+ },
+ {
+  "locus": "chr7:62290674-62363143",
+  "chrom": "chr7",
+  "start38": 62290674,
+  "end38": 62363143,
+  "size": 72469,
+  "tag_snp": "rs34251137",
+  "tag_variantId": "chr7_62315290_T_C_b38",
+  "recur_consensus": "1",
+  "inv_AF": "0.42",
+  "n_hom_inv": 12,
+  "n_hom_dir": 17,
+  "background": {
+   "inv_allele": 0,
+   "inv_bg_mean_alt_dosage": 0.7083333333333334,
+   "dir_bg_mean_alt_dosage": 1.0,
+   "n_porubsky_hom_inv_in_panel": 12,
+   "n_porubsky_hom_dir_in_panel": 16,
+   "tag_porubsky_concordance": 0.6964285714285714,
+   "n_hap_inverted": 1124,
+   "n_hap_direct": 5280
+  },
+  "windows": [
+   {
+    "chrom": "chr7",
+    "win_start": 62261372,
+    "win_end": 62392444,
+    "b1": 62290674,
+    "b2": 62363143,
+    "qc": {
+     "win_start": 62261372,
+     "win_end": 62392444,
+     "L": 131072,
+     "seg_i1": 29302,
+     "seg_i2": 101771,
+     "seg_len": 72469,
+     "n_inv_variants_applied": 43,
+     "n_inv_variants_refmismatch": 0,
+     "n_dir_variants_applied": 166,
+     "n_dir_variants_refmismatch": 0,
+     "rc_roundtrip_ok": true,
+     "len_ok": true,
+     "structural_diff_confined": true
+    },
+    "reconciliation_max_abs_err": 0.0,
+    "ntracks": 734,
+    "disruption_flank": {
+     "struct": 4.1477861404418945,
+     "snv": 3.714933395385742,
+     "total": 5.3441901206970215
+    },
+    "disruption_all": {
+     "struct": 24.670177459716797,
+     "snv": 6.019583702087402,
+     "total": 26.335243225097656
+    },
+    "fraction_structural_flank": 0.5275256381131106,
+    "fraction_structural_all": 0.8038569387897602,
+    "window_label": "whole",
+    "n_snvs_fetched": 8231,
+    "n_inv_consensus": 43,
+    "n_dir_consensus": 166,
+    "n_sites_differential_ge02": 267,
+    "elapsed_s": 29.3
+   }
+  ]
+ },
+ {
+  "locus": "chr7:62408486-62456444",
+  "chrom": "chr7",
+  "start38": 62408486,
+  "end38": 62456444,
+  "size": 47958,
+  "tag_snp": "rs1191996926",
+  "tag_variantId": "chr7_62411540_A_G_b38",
+  "recur_consensus": "1",
+  "inv_AF": "0.57",
+  "n_hom_inv": 15,
+  "n_hom_dir": 8,
+  "background": {
+   "inv_allele": 0,
+   "inv_bg_mean_alt_dosage": 0.0,
+   "dir_bg_mean_alt_dosage": 0.25,
+   "n_porubsky_hom_inv_in_panel": 15,
+   "n_porubsky_hom_dir_in_panel": 8,
+   "tag_porubsky_concordance": 0.7391304347826086,
+   "n_hap_inverted": 6184,
+   "n_hap_direct": 220
+  },
+  "windows": [
+   {
+    "chrom": "chr7",
+    "win_start": 62366929,
+    "win_end": 62498001,
+    "b1": 62408486,
+    "b2": 62456444,
+    "qc": {
+     "win_start": 62366929,
+     "win_end": 62498001,
+     "L": 131072,
+     "seg_i1": 41557,
+     "seg_i2": 89515,
+     "seg_len": 47958,
+     "n_inv_variants_applied": 82,
+     "n_inv_variants_refmismatch": 0,
+     "n_dir_variants_applied": 196,
+     "n_dir_variants_refmismatch": 0,
+     "rc_roundtrip_ok": true,
+     "len_ok": true,
+     "structural_diff_confined": true
+    },
+    "reconciliation_max_abs_err": 0.0,
+    "ntracks": 734,
+    "disruption_flank": {
+     "struct": 7.21835470199585,
+     "snv": 3.2764055728912354,
+     "total": 7.447507858276367
+    },
+    "disruption_all": {
+     "struct": 94.45146179199219,
+     "snv": 8.57404899597168,
+     "total": 94.74290466308594
+    },
+    "fraction_structural_flank": 0.68780558230269,
+    "fraction_structural_all": 0.9167774182297638,
+    "window_label": "whole",
+    "n_snvs_fetched": 6776,
+    "n_inv_consensus": 82,
+    "n_dir_consensus": 196,
+    "n_sites_differential_ge02": 220,
+    "elapsed_s": 24.7
+   }
+  ]
+ },
+ {
+  "locus": "chr8:2343351-2378385",
+  "error": "invalid literal for int() with base 10: ''"
+ },
+ {
+  "locus": "chrX:103989434-104049428",
+  "chrom": "chrX",
+  "start38": 103989434,
+  "end38": 104049428,
+  "size": 59994,
+  "tag_snp": "",
+  "tag_variantId": "",
+  "recur_consensus": "1",
+  "inv_AF": "0.63",
+  "n_hom_inv": 21,
+  "n_hom_dir": 10,
+  "background": {
+   "inv_allele": 1,
+   "inv_bg_mean_alt_dosage": 0.825,
+   "dir_bg_mean_alt_dosage": 0.1,
+   "n_porubsky_hom_inv_in_panel": 20,
+   "n_porubsky_hom_dir_in_panel": 10,
+   "tag_porubsky_concordance": 0.8478260869565217,
+   "n_hap_inverted": 2489,
+   "n_hap_direct": 2317
+  },
+  "windows": [
+   {
+    "chrom": "chrX",
+    "win_start": 103953895,
+    "win_end": 104084967,
+    "b1": 103989434,
+    "b2": 104049428,
+    "qc": {
+     "win_start": 103953895,
+     "win_end": 104084967,
+     "L": 131072,
+     "seg_i1": 35539,
+     "seg_i2": 95533,
+     "seg_len": 59994,
+     "n_inv_variants_applied": 26,
+     "n_inv_variants_refmismatch": 0,
+     "n_dir_variants_applied": 70,
+     "n_dir_variants_refmismatch": 0,
+     "rc_roundtrip_ok": true,
+     "len_ok": true,
+     "structural_diff_confined": true
+    },
+    "reconciliation_max_abs_err": 2.9802322387695312e-08,
+    "ntracks": 734,
+    "disruption_flank": {
+     "struct": 66.81964874267578,
+     "snv": 20.066524505615234,
+     "total": 66.81161499023438
+    },
+    "disruption_all": {
+     "struct": 222.513916015625,
+     "snv": 29.133750915527344,
+     "total": 222.12936401367188
+    },
+    "fraction_structural_flank": 0.7690481263540982,
+    "fraction_structural_all": 0.8842280110488846,
+    "genes": {
+     "TMSB15B": {
+      "struct": 11.011054039001465,
+      "snv": 7.782975196838379,
+      "total": 10.436902046203613,
+      "fraction_structural": 0.5858804357930657,
+      "n_pos": 12817,
+      "gstart": 103918895,
+      "gend": 103966712
+     },
+     "TMSB15C": {
+      "struct": 24.544601440429688,
+      "snv": 6.386007785797119,
+      "total": 23.519132614135742,
+      "fraction_structural": 0.7935376009217991,
+      "n_pos": 12366,
+      "gstart": 104063870,
+      "gend": 104076236
+     }
+    },
+    "window_label": "whole",
+    "n_snvs_fetched": 1300,
+    "n_inv_consensus": 26,
+    "n_dir_consensus": 70,
+    "n_sites_differential_ge02": 90,
+    "elapsed_s": 13.9
+   }
+  ]
+ },
+ {
+  "locus": "chrX:155386727-155453982",
+  "chrom": "chrX",
+  "start38": 155386727,
+  "end38": 155453982,
+  "size": 67255,
+  "tag_snp": "rs112513387",
+  "tag_variantId": "chrX_155390418_G_A_b38",
+  "recur_consensus": "1",
+  "inv_AF": "0.15",
+  "n_hom_inv": 4,
+  "n_hom_dir": 35,
+  "background": {
+   "inv_allele": 1,
+   "inv_bg_mean_alt_dosage": 0.0,
+   "dir_bg_mean_alt_dosage": 0.0,
+   "n_porubsky_hom_inv_in_panel": 4,
+   "n_porubsky_hom_dir_in_panel": 34,
+   "tag_porubsky_concordance": 0.9180327868852459,
+   "n_hap_inverted": 82,
+   "n_hap_direct": 4724
+  },
+  "windows": [
+   {
+    "chrom": "chrX",
+    "win_start": 155354818,
+    "win_end": 155485890,
+    "b1": 155386727,
+    "b2": 155453982,
+    "qc": {
+     "win_start": 155354818,
+     "win_end": 155485890,
+     "L": 131072,
+     "seg_i1": 31909,
+     "seg_i2": 99164,
+     "seg_len": 67255,
+     "n_inv_variants_applied": 85,
+     "n_inv_variants_refmismatch": 0,
+     "n_dir_variants_applied": 74,
+     "n_dir_variants_refmismatch": 0,
+     "rc_roundtrip_ok": true,
+     "len_ok": true,
+     "structural_diff_confined": true
+    },
+    "reconciliation_max_abs_err": 2.9802322387695312e-08,
+    "ntracks": 734,
+    "disruption_flank": {
+     "struct": 13.856597900390625,
+     "snv": 2.0930662155151367,
+     "total": 13.983688354492188
+    },
+    "disruption_all": {
+     "struct": 376.0582275390625,
+     "snv": 51.01255416870117,
+     "total": 335.98968505859375
+    },
+    "fraction_structural_flank": 0.8687705145196235,
+    "fraction_structural_all": 0.8805524602626454,
+    "genes": {
+     "H2AB2": {
+      "struct": 0.04026712477207184,
+      "snv": 0.010142406448721886,
+      "total": 0.0426955409348011,
+      "fraction_structural": 0.7987998260825289,
+      "n_pos": 591,
+      "gstart": 155380708,
+      "gend": 155381299
+     },
+     "F8A2": {
+      "struct": 0.7689998745918274,
+      "snv": 0.21106606721878052,
+      "total": 0.7691242694854736,
+      "fraction_structural": 0.7846409530068459,
+      "n_pos": 1707,
+      "gstart": 155382094,
+      "gend": 155383801
+     },
+     "F8A3": {
+      "struct": 0.7045501470565796,
+      "snv": 0.2353592813014984,
+      "total": 0.708733081817627,
+      "fraction_structural": 0.7495936584946848,
+      "n_pos": 1707,
+      "gstart": 155456913,
+      "gend": 155458620
+     },
+     "H2AB3": {
+      "struct": 0.02791665494441986,
+      "snv": 0.012220790609717369,
+      "total": 0.03415488079190254,
+      "fraction_structural": 0.6955264481583908,
+      "n_pos": 591,
+      "gstart": 155459414,
+      "gend": 155460005
+     }
+    },
+    "window_label": "whole",
+    "n_snvs_fetched": 1147,
+    "n_inv_consensus": 85,
+    "n_dir_consensus": 74,
+    "n_sites_differential_ge02": 94,
+    "elapsed_s": 12.2
+   }
+  ]
+ },
+ {
+  "locus": "chrX:52077120-52176974",
+  "chrom": "chrX",
+  "start38": 52077120,
+  "end38": 52176974,
+  "size": 99854,
+  "tag_snp": "rs12391211",
+  "tag_variantId": "chrX_52088953_G_A_b38",
+  "recur_consensus": "1",
+  "inv_AF": "0.36",
+  "n_hom_inv": 9,
+  "n_hom_dir": 21,
+  "background": {
+   "inv_allele": 1,
+   "inv_bg_mean_alt_dosage": 0.0,
+   "dir_bg_mean_alt_dosage": 0.0,
+   "n_porubsky_hom_inv_in_panel": 8,
+   "n_porubsky_hom_dir_in_panel": 21,
+   "tag_porubsky_concordance": 0.6976744186046512,
+   "n_hap_inverted": 30,
+   "n_hap_direct": 4776
+  },
+  "windows": [
+   {
+    "chrom": "chrX",
+    "win_start": 52061511,
+    "win_end": 52192583,
+    "b1": 52077120,
+    "b2": 52176974,
+    "qc": {
+     "win_start": 52061511,
+     "win_end": 52192583,
+     "L": 131072,
+     "seg_i1": 15609,
+     "seg_i2": 115463,
+     "seg_len": 99854,
+     "n_inv_variants_applied": 47,
+     "n_inv_variants_refmismatch": 0,
+     "n_dir_variants_applied": 44,
+     "n_dir_variants_refmismatch": 0,
+     "rc_roundtrip_ok": true,
+     "len_ok": true,
+     "structural_diff_confined": true
+    },
+    "reconciliation_max_abs_err": 0.0,
+    "ntracks": 734,
+    "disruption_flank": {
+     "struct": 511.6960144042969,
+     "snv": 100.65223693847656,
+     "total": 588.7440795898438
+    },
+    "disruption_all": {
+     "struct": 581.759521484375,
+     "snv": 103.9576644897461,
+     "total": 659.8110961914062
+    },
+    "fraction_structural_flank": 0.8356290938730311,
+    "fraction_structural_all": 0.8483957138363607,
+    "genes": {
+     "MAGED4B": {
+      "struct": 406.9991455078125,
+      "snv": 62.20289611816406,
+      "total": 466.23150634765625,
+      "fraction_structural": 0.8674283344918841,
+      "n_pos": 7393,
+      "gstart": 52061826,
+      "gend": 52069219
+     },
+     "MAGED4": {
+      "struct": 103.00943756103516,
+      "snv": 38.334503173828125,
+      "total": 120.84367370605469,
+      "fraction_structural": 0.7287856630109316,
+      "n_pos": 7393,
+      "gstart": 52184875,
+      "gend": 52192268
+     }
+    },
+    "window_label": "whole",
+    "n_snvs_fetched": 2303,
+    "n_inv_consensus": 47,
+    "n_dir_consensus": 44,
+    "n_sites_differential_ge02": 22,
+    "elapsed_s": 19.4
+   }
+  ]
+ },
+ {
+  "locus": "chrX:72997772-73077479",
+  "chrom": "chrX",
+  "start38": 72997772,
+  "end38": 73077479,
+  "size": 79707,
+  "tag_snp": "rs73500394",
+  "tag_variantId": "chrX_73018917_G_A_b38",
+  "recur_consensus": "1",
+  "inv_AF": "0.2",
+  "n_hom_inv": 6,
+  "n_hom_dir": 32,
+  "background": {
+   "inv_allele": 1,
+   "inv_bg_mean_alt_dosage": 0.16666666666666666,
+   "dir_bg_mean_alt_dosage": 0.0,
+   "n_porubsky_hom_inv_in_panel": 6,
+   "n_porubsky_hom_dir_in_panel": 31,
+   "tag_porubsky_concordance": 0.8983050847457628,
+   "n_hap_inverted": 186,
+   "n_hap_direct": 4620
+  },
+  "windows": [
+   {
+    "chrom": "chrX",
+    "win_start": 72972089,
+    "win_end": 73103161,
+    "b1": 72997772,
+    "b2": 73077479,
+    "qc": {
+     "win_start": 72972089,
+     "win_end": 73103161,
+     "L": 131072,
+     "seg_i1": 25683,
+     "seg_i2": 105390,
+     "seg_len": 79707,
+     "n_inv_variants_applied": 47,
+     "n_inv_variants_refmismatch": 0,
+     "n_dir_variants_applied": 37,
+     "n_dir_variants_refmismatch": 0,
+     "rc_roundtrip_ok": true,
+     "len_ok": true,
+     "structural_diff_confined": true
+    },
+    "reconciliation_max_abs_err": 0.0,
+    "ntracks": 734,
+    "disruption_flank": {
+     "struct": 32.22563171386719,
+     "snv": 3.4721107482910156,
+     "total": 30.919803619384766
+    },
+    "disruption_all": {
+     "struct": 107.08470153808594,
+     "snv": 6.648170471191406,
+     "total": 105.37283325195312
+    },
+    "fraction_structural_flank": 0.9027358452156556,
+    "fraction_structural_all": 0.9415457435151281,
+    "genes": {
+     "PABPC1L2A": {
+      "struct": 2.5904781818389893,
+      "snv": 0.18758270144462585,
+      "total": 2.5467066764831543,
+      "fraction_structural": 0.9324771092767029,
+      "n_pos": 2033,
+      "gstart": 73077275,
+      "gend": 73079512
+     }
+    },
+    "window_label": "whole",
+    "n_snvs_fetched": 2414,
+    "n_inv_consensus": 47,
+    "n_dir_consensus": 37,
+    "n_sites_differential_ge02": 184,
+    "elapsed_s": 15.4
+   }
+  ]
+ },
+ {
+  "locus": "chr17:45585159-46292045",
+  "chrom": "chr17",
+  "start38": 45585159,
+  "end38": 46292045,
+  "size": 706886,
+  "tag_snp": "rs1724390",
+  "tag_variantId": "chr17_45585881_C_A_b38",
+  "recur_consensus": "0",
+  "inv_AF": "0.11",
+  "n_hom_inv": 1,
+  "n_hom_dir": 35,
+  "background": {
+   "inv_allele": 1,
+   "inv_bg_mean_alt_dosage": 1.0,
+   "dir_bg_mean_alt_dosage": 0.0,
+   "n_porubsky_hom_inv_in_panel": 1,
+   "n_porubsky_hom_dir_in_panel": 35,
+   "tag_porubsky_concordance": 1.0,
+   "n_hap_inverted": 557,
+   "n_hap_direct": 5847
+  },
+  "windows": [
+   {
+    "chrom": "chr17",
+    "win_start": 45519623,
+    "win_end": 45650695,
+    "b1": 45585159,
+    "b2": 46292045,
+    "qc": {
+     "win_start": 45519623,
+     "win_end": 45650695,
+     "L": 131072,
+     "seg_i1": 65536,
+     "seg_i2": 131072,
+     "seg_len": 65536,
+     "n_inv_variants_applied": 280,
+     "n_inv_variants_refmismatch": 0,
+     "n_dir_variants_applied": 13,
+     "n_dir_variants_refmismatch": 0,
+     "rc_roundtrip_ok": true,
+     "len_ok": true,
+     "structural_diff_confined": true
+    },
+    "reconciliation_max_abs_err": 5.960464477539063e-08,
+    "ntracks": 734,
+    "disruption_flank": {
+     "struct": 218.80703735351562,
+     "snv": 73.71886444091797,
+     "total": 254.47531127929688
+    },
+    "disruption_all": {
+     "struct": 4917.431640625,
+     "snv": 294.88970947265625,
+     "total": 5017.54833984375
+    },
+    "fraction_structural_flank": 0.7479920103187226,
+    "fraction_structural_all": 0.9434244956007689,
+    "genes": {},
+    "window_label": "bpL",
+    "n_snvs_fetched": 2754,
+    "n_inv_consensus": 280,
+    "n_dir_consensus": 13,
+    "n_sites_differential_ge02": 288,
+    "elapsed_s": 17.3
+   },
+   {
+    "chrom": "chr17",
+    "win_start": 46226509,
+    "win_end": 46357581,
+    "b1": 45585159,
+    "b2": 46292045,
+    "qc": {
+     "win_start": 46226509,
+     "win_end": 46357581,
+     "L": 131072,
+     "seg_i1": 0,
+     "seg_i2": 65536,
+     "seg_len": 65536,
+     "n_inv_variants_applied": 725,
+     "n_inv_variants_refmismatch": 0,
+     "n_dir_variants_applied": 21,
+     "n_dir_variants_refmismatch": 0,
+     "rc_roundtrip_ok": true,
+     "len_ok": true,
+     "structural_diff_confined": true
+    },
+    "reconciliation_max_abs_err": 2.9802322387695312e-08,
+    "ntracks": 734,
+    "disruption_flank": {
+     "struct": 180.02301025390625,
+     "snv": 58.07667922973633,
+     "total": 155.81031799316406
+    },
+    "disruption_all": {
+     "struct": 994.572021484375,
+     "snv": 283.992919921875,
+     "total": 1094.12841796875
+    },
+    "fraction_structural_flank": 0.7560825074753985,
+    "fraction_structural_all": 0.7778815054872998,
+    "genes": {
+     "ARL17B": {
+      "struct": 180.02301025390625,
+      "snv": 58.07667922973633,
+      "total": 155.81031799316406,
+      "fraction_structural": 0.7560825074753985,
+      "n_pos": 65536,
+      "gstart": 46274783,
+      "gend": 46361766
+     },
+     "LRRC37A": {
+      "struct": 106.45388793945312,
+      "snv": 23.599822998046875,
+      "total": 114.3788833618164,
+      "fraction_structural": 0.8185378730993055,
+      "n_pos": 45345,
+      "gstart": 46292732,
+      "gend": 46338077
+     }
+    },
+    "window_label": "bpR",
+    "n_snvs_fetched": 2360,
+    "n_inv_consensus": 725,
+    "n_dir_consensus": 21,
+    "n_sites_differential_ge02": 773,
+    "elapsed_s": 16.5
+   }
+  ]
+ }
+]
