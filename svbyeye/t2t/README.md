@@ -26,6 +26,7 @@ minimap2 parameters as the parent pipeline (`-x asm20 -c --eqx --secondary=no
 |---|---|
 | loci where panTro6 had NO alignment but T2T covers | **9** |
 | loci with >1 pp better window coverage under T2T | **83** |
+| loci with >1 pp **worse** window coverage under T2T (SD multi-mapping) | **26** |
 | loci with fewer alignment gaps under T2T | **57** |
 | empty-alignment loci | 27 (panTro6) → 21 (T2T) |
 | loci inverted in the chimp outgroup (rev frac >0.6) | 79 |
