@@ -1,0 +1,50 @@
+# SVbyEye inversion synteny — T2T ape reference configuration
+# Pins the exact assemblies + alignment parameters so the regeneration is
+# reproducible and deterministic.
+
+target_reference:
+  name: GRCh38 (no-alt analysis set)
+  file: hg38.analysisSet.fa
+  url: https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/analysisSet/hg38.analysisSet.fa.gz
+  md5_gz: 6d3c82e1e12b127d526395294526b9c8
+
+# Ape outgroup: the T2T chimpanzee is the direct panTro6 replacement (closest
+# outgroup). Trivially swappable to another primate-T2T assembly by editing this
+# block (bonobo mPanPan1, gorilla mGorGor1, orangutan mPonAbe1/mPonPyg2).
+ape_reference:
+  name: T2T chimpanzee NHGRI_mPanTro3-v2.0_pri
+  species: Pan troglodytes
+  genbank_accession: GCA_028858775.2
+  release: T2T-Primates consortium (Makova/Phillippy/Eichler), 2024
+  file: t2t_chimp.mPanTro3v2.fna.gz
+  url: https://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/028/858/775/GCA_028858775.2_NHGRI_mPanTro3-v2.0_pri/GCA_028858775.2_NHGRI_mPanTro3-v2.0_pri_genomic.fna.gz
+  assembly_report: GCA_028858775.2_NHGRI_mPanTro3-v2.0_pri_assembly_report.txt
+  md5_gz: b1d6f7965d27505d090cf48071c0ad9d
+  query_prefix: chimpT2T   # FASTA headers relabelled chimpT2T_<chrom>
+
+# The assembly being replaced, aligned identically for the T2T-vs-panTro6 diff.
+comparison_reference:
+  name: panTro6 (UCSC)
+  url: https://hgdownload.soe.ucsc.edu/goldenPath/panTro6/bigZips/panTro6.fa.gz
+  md5_gz: e8c43676e041465ca687400c8e52ba9b
+  query_prefix: panTro6
+
+# minimap2 parameters — identical to the original panTro6 pipeline
+# (svbyeye/bin/align_asm.sbatch / align_hg38_to_chimp.sbatch).
+alignment:
+  tool: minimap2
+  version: "2.30"
+  preset: asm20
+  extra_flags: "-c --eqx --secondary=no -s 25000 -K 1G"
+  orientation: chimp assembly = query, GRCh38 = target (matches align_asm)
+
+inversions:
+  source: inv_properties.tsv        # repo root callset (292 loci)
+  window: min(max(size_bp, 50kb), 1Mb) flank each side   # matches make_inv_table.py
+
+plotting:
+  tool: SVbyEye (daewoooo/SVbyEye) plotMiro, color.by=direction
+  min_align_len: 2000
+  annotation: inversion interval drawn as a rectangle on the target (INV)
+
+seed: deterministic (no randomness); outputs fixed given the pinned assemblies
