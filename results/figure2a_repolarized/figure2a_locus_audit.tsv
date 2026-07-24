@@ -1,0 +1,94 @@
+inv_id	chrom	start	end	recurrence	chimp_call	flip_ref_polarity	included_in_plot	included_in_model	plot_exclusion_reason	model_exclusion_reason	raw_pi_group0	raw_pi_group1	pi_ancestral	pi_derived	output_region_start	output_region_end
+chr1-13084312-INV-62181	chr1	13104252	13122521	Recurrent	na		False	False	unresolved_chimp_orientation	unresolved_chimp_orientation	0.00164	0.001386			13104252	13122521
+chr1-25338356-INV-24067	chr1	25324280	25369060	Single-event	na		False	False	unresolved_chimp_orientation	unresolved_chimp_orientation	4e-05				25324280	25369060
+chr1-81642914-INV-66617	chr1	81650508	81707447	Single-event	direct	0	True	False		one_orientation_missing_pi	0.000615		0.000615		81650508	81707447
+chr1-108311808-INV-57118	chr1	108310642	108383736	Recurrent	na		False	False	unresolved_chimp_orientation	unresolved_chimp_orientation	0.000188	0.000106			108310642	108383736
+chr1-144376210-INV-224591	chr1	144376209	144600799	Single-event	na		False	False	unresolved_chimp_orientation	unresolved_chimp_orientation	1.6e-05	1.8e-05			144376209	144600799
+chr1-149842162-INV-9508	chr1	149843518	149850293	Single-event	direct	0	True	True			0.000199	0.000194	0.000199	0.000194	149843518	149850293
+chr1-248128774-INV-300084	chr1	248128773	248428856	Single-event	direct	0	True	False		one_orientation_missing_pi	0.001017		0.001017		248128773	248428856
+chr10-15742645-INV-17942	chr10	15742803	15760427	Single-event	direct	0	True	False		one_orientation_missing_pi	0.000492		0.000492		15742803	15760427
+chr10-46135869-INV-77646	chr10	46144703	46204851	Single-event	na		False	False	unresolved_chimp_orientation	unresolved_chimp_orientation	0.000433	0.00039			46144703	46204851
+chr10-46983452-INV-484782	chr10	46983451	47468232	Recurrent	na		False	False	unresolved_chimp_orientation	unresolved_chimp_orientation	0.000442	0.000512			46983451	47468232
+chr10-55007454-INV-5370	chr10	55007431	55013434	Single-event	direct	0	True	True			0.000264	0.000167	0.000264	0.000167	55007431	55013434
+chr10-65465442-INV-4580	chr10	65465445	65470067	Single-event	direct	0	True	False		one_orientation_missing_pi	0.001531		0.001531		65465445	65470067
+chr10-79542902-INV-674513	chr10	79542901	80217413	Single-event	inverted	1	True	True			0.000632	1.3e-05	1.3e-05	0.000632	79542901	80217413
+chr11-18246600-INV-21672	chr11	18249084	18265819	Single-event	direct	0	True	False		one_orientation_missing_pi	0.001114		0.001114		18249084	18265819
+chr11-50136371-INV-206505	chr11	50154999	50324102	Recurrent	inverted	1	True	True			0.000593	0.000592	0.000592	0.000593	50154999	50324102
+chr11-71571191-INV-6980	chr11	71571819	71576724	Single-event	direct	0	True	True			0.000965	0.001359	0.000965	0.001359	71571819	71576724
+chr11-89920625-INV-3224	chr11	89920623	89923848	Recurrent	na		False	False	unresolved_chimp_orientation	unresolved_chimp_orientation	0.000864	0.000887			89920623	89923848
+chr12-46897663-INV-16289	chr12	46896694	46915975	Single-event	direct	0	True	True			0.000649	0.0	0.000649	0.0	46896694	46915975
+chr12-75713181-INV-18615	chr12	75713180	75731794	Single-event	direct	0	True	False		one_orientation_missing_pi	0.000585		0.000585		75713180	75731794
+chr12-131312082-INV-332759	chr12	131312081	131644839	Single-event	direct	0	True	True			0.001036	0.000331	0.001036	0.000331	131312081	131644839
+chr13-48199211-INV-7451	chr13	48199250	48206639	Single-event	direct	0	True	True			0.000377	0.000271	0.000377	0.000271	48199250	48206639
+chr13-52310303-INV-10653	chr13	52310302	52320954	Single-event	na		False	False	unresolved_chimp_orientation	unresolved_chimp_orientation	0.000184	0.000375			52310302	52320954
+chr13-53902574-INV-190801	chr13	53902573	54093373	Single-event	direct	0	True	False		one_orientation_missing_pi	0.000678		0.000678		53902573	54093373
+chr13-64598738-INV-17482	chr13	64598737	64616218	Single-event	direct	0	True	False		one_orientation_missing_pi	0.000828		0.000828		64598737	64616218
+chr14-60604531-INV-8718	chr14	60606118	60611659	Single-event	direct	0	True	True			0.000172	2.6e-05	0.000172	2.6e-05	60606118	60611659
+chr14-85872201-INV-17070	chr14	85872200	85889269	Single-event	direct	0	True	False		one_orientation_missing_pi	0.000484		0.000484		85872200	85889269
+chr15-23295577-INV-22616	chr15	23295576	23318191	Single-event	na		False	False	unresolved_chimp_orientation	unresolved_chimp_orientation	0.0	0.0			23295576	23318191
+chr15-23345460-INV-5044410	chr15	23345459	28389868	Single-event	inverted	1	True	False		one_orientation_missing_pi	0.000888			0.000888	23345459	28389868
+chr15-30618104-INV-1535102	chr15	30618103	32153204	Recurrent	direct	0	True	True			0.000713	0.000347	0.000713	0.000347	30618103	32153204
+chr15-84373376-INV-43322	chr15	84373375	84416696	Recurrent	na		False	False	unresolved_chimp_orientation	unresolved_chimp_orientation	0.001456	0.000664			84373375	84416696
+chr16-15028481-INV-133352	chr16	14954790	15100859	Recurrent	na		False	False	unresolved_chimp_orientation	unresolved_chimp_orientation	7.2e-05	0.000236			14954790	15100859
+chr16-15384483-INV-891665	chr16	15384482	16276146	Single-event	na		False	False	unresolved_chimp_orientation	unresolved_chimp_orientation	0.000567				15384482	16276146
+chr16-16721274-INV-1352270	chr16	16721273	18073542	Recurrent	direct	0	True	True			0.000788	0.000602	0.000788	0.000602	16721273	18073542
+chr16-28471894-INV-165758	chr16	28471892	28637651	Recurrent	direct	0	True	True			7.6e-05	0.000169	7.6e-05	0.000169	28471892	28637651
+chr16-35945424-INV-12423	chr16	35946683	35952382	Single-event	direct	0	True	True			0.0	6.3e-05	0.0	6.3e-05	35946683	35952382
+chr16-75204855-INV-19244	chr16	75206214	75222748	Single-event	na		False	False	unresolved_chimp_orientation	unresolved_chimp_orientation	0.000188	0.000725			75206214	75222748
+chr17-3052058-INV-200164	chr17	3082008	3221835	Single-event	direct	0	True	False		one_orientation_missing_pi	0.00084		0.00084		3082008	3221835
+chr17-16823491-INV-1560701	chr17	16823490	18384190	Single-event	na		False	False	unresolved_chimp_orientation	unresolved_chimp_orientation	0.000469	0.000242			16823490	18384190
+chr17-45573557-INV-11603	chr17	45573556	45585158	Single-event	na		False	False	unresolved_chimp_orientation	unresolved_chimp_orientation	0.0	0.0			45573556	45585158
+chr17-45585160-INV-706887	chr17	45585159	46292045	Single-event	na		False	False	unresolved_chimp_orientation	unresolved_chimp_orientation	0.000238	0.000129			45585159	46292045
+chr2-45062769-INV-12977	chr2	45065588	45081777	Single-event	direct	0	True	True			0.000935	0.000165	0.000935	0.000165	45065588	45081777
+chr2-87987172-INV-23268233	chr2	87987171	111255403	Single-event	na		False	False	unresolved_chimp_orientation	unresolved_chimp_orientation	0.000448				87987171	111255403
+chr2-87995842-INV-184695	chr2	87995841	88180536	Single-event	direct	0	True	False		one_orientation_missing_pi	0.000528		0.000528		87995841	88180536
+chr2-91832041-INV-180624	chr2	91832040	92012663	Recurrent	na		False	False	unresolved_chimp_orientation	unresolved_chimp_orientation	0.000158	0.000169			91832040	92012663
+chr2-95800192-INV-224213	chr2	95800191	96024403	Recurrent	na		False	False	unresolved_chimp_orientation	unresolved_chimp_orientation	8.4e-05	9.9e-05			95800191	96024403
+chr2-130138213-INV-1062391	chr2	130138212	131200602	Single-event	na		False	False	unresolved_chimp_orientation	unresolved_chimp_orientation	0.000535	0.000487			130138212	131200602
+chr2-130138213-INV-1392323	chr2	130138212	131530534	Single-event	na		False	False	unresolved_chimp_orientation	unresolved_chimp_orientation	0.000637	0.000516			130138212	131530534
+chr20-24397727-INV-8419	chr20	24397726	24406144	Single-event	direct	0	True	False		one_orientation_missing_pi	0.000824		0.000824		24397726	24406144
+chr20-29257747-INV-162005	chr20	29257746	29419750	Single-event	na		False	False	unresolved_chimp_orientation	unresolved_chimp_orientation	0.000164				29257746	29419750
+chr20-47827034-INV-77611	chr20	47841016	47888238	Single-event	direct	0	True	False		one_orientation_missing_pi	0.000828		0.000828		47841016	47888238
+chr21-13992018-INV-65632	chr21	13987773	14056796	Single-event	direct	0	True	True			0.000237	2.9e-05	0.000237	2.9e-05	13987773	14056796
+chr21-19877735-INV-192437	chr21	19877734	20070170	Single-event	direct	0	True	False		one_orientation_missing_pi	0.000894		0.000894		19877734	20070170
+chr21-43821743-INV-13374	chr21	43821742	43835116	Single-event	direct	0	True	False		one_orientation_missing_pi	0.001792		0.001792		43821742	43835116
+chr3-75454478-INV-1238	chr3	75454477	75455715	Single-event	direct	0	True	False		one_orientation_missing_pi	0.000683		0.000683		75454477	75455715
+chr3-195749464-INV-230745	chr3	195749463	195980207	Recurrent	direct	0	True	True			0.000494	0.000513	0.000494	0.000513	195749463	195980207
+chr4-33098029-INV-7075	chr4	33098066	33104924	Single-event	direct	0	True	True			0.000163	0.0	0.000163	0.0	33098066	33104924
+chr5-71009587-INV-84412	chr5	71009586	71093997	Single-event	na		False	False	unresolved_chimp_orientation	unresolved_chimp_orientation	0.000366	0.0			71009586	71093997
+chr5-112179912-INV-56689	chr5	112179911	112236600	Single-event	direct	0	True	False		one_orientation_missing_pi	0.000718		0.000718		112179911	112236600
+chr5-124425561-INV-121098	chr5	124425560	124546657	Single-event	direct	0	True	False		one_orientation_missing_pi	0.001002		0.001002		124425560	124546657
+chr5-177946130-INV-57824	chr5	177946129	178003952	Single-event	na		False	False	unresolved_chimp_orientation	unresolved_chimp_orientation	0.001044				177946129	178003952
+chr5-179633880-INV-24659	chr5	179643529	179651253	Single-event	direct	0	True	False		one_orientation_missing_pi		0.000567		0.000567	179643529	179651253
+chr6-76111919-INV-44661	chr6	76109081	76158474	Single-event	direct	0	True	True			0.000375	1.3e-05	0.000375	1.3e-05	76109081	76158474
+chr6-123106042-INV-3793	chr6	123106049	123109821	Single-event	direct	0	True	True			0.000362	0.0	0.000362	0.0	123106049	123109821
+chr6-141867315-INV-29159	chr6	141866310	141898728	Single-event	direct	0	True	True			0.000624	1.5e-05	0.000624	1.5e-05	141866310	141898728
+chr6-167181003-INV-209976	chr6	167209001	167357782	Single-event	direct	0	True	True			0.001303	6.7e-05	0.001303	6.7e-05	167209001	167357782
+chr7-5989047-INV-746598	chr7	5989046	6735643	Recurrent	inverted	1	True	True			0.000612	0.000671	0.000671	0.000612	5989046	6735643
+chr7-33990522-INV-19762	chr7	33990735	34010143	Single-event	direct	0	True	False		one_orientation_missing_pi	0.000359		0.000359		33990735	34010143
+chr7-54220528-INV-101153	chr7	54234014	54308393	Single-event	direct	0	True	True			0.000497	0.000306	0.000497	0.000306	54234014	54308393
+chr7-57835189-INV-284465	chr7	57835188	58119653	Single-event	na		False	False	unresolved_chimp_orientation	unresolved_chimp_orientation	0.000125				57835188	58119653
+chr7-60911892-INV-666133	chr7	60911891	61578023	Recurrent	na		False	False	unresolved_chimp_orientation	unresolved_chimp_orientation	0.000101	0.000163			60911891	61578023
+chr7-62290675-INV-72470	chr7	62290674	62363143	Recurrent	na		False	False	unresolved_chimp_orientation	unresolved_chimp_orientation	5.5e-05	9.5e-05			62290674	62363143
+chr7-62408487-INV-47959	chr7	62408486	62456444	Recurrent	na		False	False	unresolved_chimp_orientation	unresolved_chimp_orientation	0.000646	0.00062			62408486	62456444
+chr7-65219158-INV-312667	chr7	65219157	65531823	Recurrent	inverted	1	True	True			0.000699	0.000241	0.000241	0.000699	65219157	65531823
+chr7-70955928-INV-18020	chr7	70961198	70973901	Single-event	direct	0	True	True			0.000568	6e-06	0.000568	6e-06	70961198	70973901
+chr7-73113990-INV-1685041	chr7	73113989	74799029	Recurrent	na		False	False	unresolved_chimp_orientation	unresolved_chimp_orientation	0.000292	0.000313			73113989	74799029
+chr7-74799031-INV-480422	chr7	74869950	75058098	Recurrent	na		False	False	unresolved_chimp_orientation	unresolved_chimp_orientation	0.000277	0.00024			74869950	75058098
+chr7-97445827-INV-13775	chr7	97445822	97459601	Single-event	direct	0	True	False		one_orientation_missing_pi	0.000551		0.000551		97445822	97459601
+chr8-2340295-INV-42058	chr8	2343351	2378385	Recurrent	direct	0	True	True			0.0011	0.001839	0.0011	0.001839	2343351	2378385
+chr8-7301025-INV-5297356	chr8	7301024	12598379	Recurrent	direct	0	True	True			0.000796	0.000871	0.000796	0.000871	7301024	12598379
+chr9-12016541-INV-55306	chr9	12004038	12074552	Single-event	direct	0	True	True			0.001024	4.3e-05	0.001024	4.3e-05	12004038	12074552
+chr9-85796067-INV-6026	chr9	85797070	85801040	Single-event	direct	0	True	False		one_orientation_missing_pi	0.00067		0.00067		85797070	85801040
+chr9-87942698-INV-167577	chr9	87942696	88110274	Single-event	na		False	False	unresolved_chimp_orientation	unresolved_chimp_orientation	0.000787				87942696	88110274
+chrX-52040360-INV-173922	chrX	52077120	52176974	Recurrent	inverted	1	True	True			0.000926	0.000699	0.000699	0.000926	52077120	52176974
+chrX-72996081-INV-91407	chrX	72997772	73077479	Recurrent	direct	0	True	True			0.000453	0.0004	0.000453	0.0004	72997772	73077479
+chrX-103954976-INV-128112	chrX	103989434	104049428	Recurrent	na		False	False	unresolved_chimp_orientation	unresolved_chimp_orientation	0.000252	0.000305			103989434	104049428
+chrX-112504687-INV-12274	chrX	112504686	112516959	Single-event	direct	0	True	False		one_orientation_missing_pi	0.000753		0.000753		112504686	112516959
+chrX-149599491-INV-56477	chrX	149599490	149655967	Recurrent	na		False	False	unresolved_chimp_orientation	unresolved_chimp_orientation	0.000192	0.000142			149599490	149655967
+chrX-149654273-INV-94882	chrX	149681035	149722249	Recurrent	na		False	False	unresolved_chimp_orientation	unresolved_chimp_orientation	0.000476	0.000514			149681035	149722249
+chrX-152678163-INV-111649	chrX	152729753	152738707	Recurrent	na		False	False	unresolved_chimp_orientation	unresolved_chimp_orientation	0.001268	0.001296			152729753	152738707
+chrX-153067814-INV-226118	chrX	153149748	153250226	Recurrent	direct	0	True	True			0.00053	0.000517	0.00053	0.000517	153149748	153250226
+chrX-154339398-INV-53354	chrX	154347246	154384867	Recurrent	inverted	1	True	True			7e-05	0.00033	0.00033	7e-05	154347246	154384867
+chrX-154555919-INV-93915	chrX	154591327	154613096	Recurrent	na		False	False	unresolved_chimp_orientation	unresolved_chimp_orientation	0.000102	0.000364			154591327	154613096
+chrX-155366835-INV-100636	chrX	155386727	155453982	Recurrent	direct	0	True	True			0.00027	0.000317	0.00027	0.000317	155386727	155453982

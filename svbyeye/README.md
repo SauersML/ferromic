@@ -72,3 +72,20 @@ sbatch --array=1-66 bin/distribute.sbatch         # after alignments
 sbatch --array=1-292%60 bin/plot_inv.sbatch       # after distribute
 sbatch bin/finalize.sbatch                        # after plots -> gallery + QC
 ```
+
+## Manual chimp-alignment review
+
+From the repository root, run:
+
+```bash
+python3 svbyeye/review_chimp_alignments.py
+```
+
+The local review app opens every pre-made `chimp vs GRCh38` figure in genomic
+order. Choose **Direct**, **Inverted**, or **N/A**; each click is immediately
+saved to `data/chimp_alignment_responses.json` with the exact inversion ID,
+coordinates, and source image filename. Existing responses are loaded when the
+app is restarted, and the app can export the current records as CSV or JSON.
+
+Keyboard shortcuts are `D`, `I`, and `N`; use the left and right arrow keys to
+move without changing a response.
