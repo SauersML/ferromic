@@ -1,0 +1,50 @@
+{
+  "polarity_dataset": "chimp_vs_hg38_inversion_alignments",
+  "polarity_updated_at": "2026-07-24T06:26:05.350509+00:00",
+  "n_reviewed_total": 292,
+  "n_manuscript_loci": 93,
+  "epsilon": 5.135e-06,
+  "model": "log((pi_derived + epsilon)/(pi_ancestral + epsilon)) ~ recurrent",
+  "covariance": "HC3",
+  "n_included": 33,
+  "n_single_event": 19,
+  "mean_pi_ancestral_single_event": 0.0005138421052631579,
+  "mean_pi_derived_single_event": 0.00019405263157894735,
+  "median_pi_ancestral_single_event": 0.000377,
+  "median_pi_derived_single_event": 6.3e-05,
+  "n_recurrent": 14,
+  "mean_pi_ancestral_recurrent": 0.0005537857142857143,
+  "mean_pi_derived_recurrent": 0.0006053571428571428,
+  "median_pi_ancestral_recurrent": 0.000561,
+  "median_pi_derived_recurrent": 0.0005549999999999999,
+  "n_plot_loci": 57,
+  "n_model_loci": 33,
+  "n_excluded_from_plot": 36,
+  "n_excluded_from_model": 60,
+  "plot_exclusion_counts": {
+    "unresolved_chimp_orientation": 36
+  },
+  "model_exclusion_counts": {
+    "unresolved_chimp_orientation": 36,
+    "one_orientation_missing_pi": 24
+  },
+  "chimp_calls_in_manuscript_loci": {
+    "direct": 50,
+    "na": 36,
+    "inverted": 7
+  },
+  "input_files": {
+    "output_csv": {
+      "path": "/projects/standard/hsiehph/sauer354/ferromic-runs/figure2a-repolarized-20260724/data/output.csv",
+      "sha256": "c19cd7af05d9100df4aca76599cfffd7e63ae46b081a67cca2e5d9c1fd8f7737"
+    },
+    "inv_properties": {
+      "path": "/projects/standard/hsiehph/sauer354/ferromic-runs/figure2a-repolarized-20260724/data/inv_properties.tsv",
+      "sha256": "fc6bcb95681737e6b838db8495e730e2e28e74d219f1905a0037dc066b04cc34"
+    },
+    "polarity_json": {
+      "path": "/projects/standard/hsiehph/sauer354/ferromic-runs/figure2a-repolarized-20260724/data/chimp_alignment_responses.json",
+      "sha256": "5b869ebd2106509f83fea49234e0a2204ecd76ef1985d2215b1e921e1e4ff3e5"
+    }
+  }
+}
