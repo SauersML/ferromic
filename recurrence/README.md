@@ -43,49 +43,30 @@ Held-out simulation metrics (30% of 11,250 labelled loci, spanning every axis ce
 
 | Classifier | AUC | Power @ FPR ≤ 0.10 | Brier |
 |---|---|---|---|
-| full (13-feature) | 0.913 | 0.837 | 0.105 |
-| transferable (8-feature) | 0.914 | 0.840 | — |
-| reference parsimony rule (≥ 2 origins) | 0.831 | **0.000** | — |
-
-The reference rule has zero power in the low-FPR region the classifier targets, because
-its own false-positive rate on these simulations is **0.155**, well above 0.10 — see
-below. The learned model is what recovers power there.
+| full (13-feature) | 0.955 | 0.919 | 0.070 |
+| transferable (8-feature) | 0.947 | 0.907 | — |
+| reference parsimony rule (≥ 2 origins) | 0.859 | 0.816 | — |
 
 ### What the reference classifier does on this grid
 
-Scoring all 11,250 loci through the upstream pipeline (`simulations/refsim/`):
+Scoring all 11,250 loci through the upstream pipeline (`simulations/refsim/`), with
+the corrected one-divergence single-event model:
 
 | | single-origin FPR | recurrent power |
 |---|---|---|
-| overall | **0.155** | **0.805** |
+| overall | **0.097** | **0.805** |
 
-by recombination rate (single-origin FPR):
+by recombination rate: 0.179 at ρ = 0, 0.110 at ρ = 10⁻⁸, 0.0005 at ρ = 10⁻⁶.
+By inversion age: 0.250 at 50 kya, 0.034 at 100 kya, 0.006 at 250 kya.
+Across between-orientation flux (m = 0 → 10⁻⁶): 0.079, 0.109, 0.101, 0.082, 0.111 —
+flat.
 
-| depth | ρ = 0 | ρ = 10⁻⁸ | ρ = 10⁻⁶ |
-|---|---|---|---|
-| recent | 0.502 | 0.459 | 0.013 |
-| young | 0.243 | 0.117 | 0.000 |
-| old | 0.051 | 0.008 | 0.000 |
+**An earlier version of this file reported the parsimony rule at 0.000 power @
+FPR ≤ 0.10.** That was an artefact of a mis-specified single-event scenario, which
+inflated the rule's own false-positive rate above 0.10 and so put it outside the
+region entirely. Corrected, its FPR is 0.097, it has real power (0.816), and the
+learned model improves on it by a margin rather than rescuing it.
 
-and across between-orientation flux:
-
-| m_flux | 0 | 10⁻⁹ | 10⁻⁸ | 10⁻⁷ | 10⁻⁶ |
-|---|---|---|---|---|---|
-| single-origin FPR | 0.149 | 0.158 | 0.159 | 0.152 | 0.156 |
-| recurrent power | 0.804 | 0.789 | 0.806 | 0.808 | 0.816 |
-
-Two things follow.
-
-* **Flux does not degrade the classifier.** On the corrected 5,400-locus sweep the
-  single-origin false-positive rate goes 0.113 → 0.106 (p = 0.70) and power 0.891 → 0.907
-  (p = 0.36) across m = 0 → 10⁻⁶ — neither moves detectably. This is the manuscript's
-  claim, measured with the manuscript's own classifier.
-* **The false-positive rates above are from a mis-specified single-event scenario and
-  are being regenerated.** Constraining only the inverted-deme admixture proportion does
-  not produce a single-origin sample: direct haplotypes could still be drawn from the
-  deme sister to the inverted one, and those lineages force extra parsimony steps. On a
-  genuine single-origin sample the rate is 1.6%, consistent with the manuscript's < 5%.
-  See `simulations/refsim/README.md`.
 
 ## Layout
 

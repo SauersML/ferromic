@@ -36,27 +36,36 @@ def test_full_coefficients_reproduce():
 def test_held_out_sim_auc_reproduces():
     _, m, _, _ = _refit()
     ref = json.load(open(paths.SIM_METRICS))
-    # headline validated numbers, from the reference-classifier training set:
-    # AUC ~0.913, power@FPR<=0.10 ~0.837, Brier ~0.105
-    assert abs(m["test"]["auc"] - 0.913) < 3e-3
+    # headline validated numbers, from the corrected single-event training set:
+    # AUC ~0.955, power@FPR<=0.10 ~0.919, Brier ~0.070
+    assert abs(m["test"]["auc"] - 0.955) < 3e-3
     assert abs(m["test"]["auc"] - ref["test"]["auc"]) < 3e-3
-    assert abs(m["test"]["power_at_fpr10"] - 0.837) < 2e-2
-    assert abs(m["test"]["brier"] - 0.105) < 5e-3
+    assert abs(m["test"]["power_at_fpr10"] - 0.919) < 2e-2
+    assert abs(m["test"]["brier"] - 0.070) < 5e-3
 
 
-def test_parsimony_baseline_zero_power():
-    """The parsimony-count rule has no power in the low-FPR region the classifier
-    targets -- the contrast that motivates the learned model."""
+def test_parsimony_baseline_reproduces():
+    """The reference parsimony rule's own performance on the simulations.
+
+    This used to assert zero power at FPR <= 0.10, which was true only because the
+    single-event scenario was mis-specified and inflated the rule's false-positive
+    rate above 0.10. With the corrected one-divergence model the rule's FPR is
+    0.097, so it sits inside the low-FPR region and has real power (0.816). The
+    learned model still improves on it (0.919), but the contrast is now a margin
+    rather than a rescue.
+    """
     _, m, _, _ = _refit()
-    assert m["test_parsimony_rule"]["power_at_fpr10"] == 0.0
+    par = m["test_parsimony_rule"]
+    assert abs(par["power_at_fpr10"] - 0.816) < 2e-2
+    assert abs(par["auc"] - 0.859) < 3e-3
 
 
 def test_transferable_reproduces():
     _, _, tf_model, tf_metrics = _refit()
     ref = json.load(open(paths.MODEL_TRANSFERABLE))
     assert ref["feature_names"] == TRANSFERABLE_FEATURES
-    assert abs(tf_metrics["test"]["auc"] - 0.914) < 3e-3
-    assert abs(tf_metrics["test"]["power_at_fpr10"] - 0.840) < 2e-2
+    assert abs(tf_metrics["test"]["auc"] - 0.947) < 3e-3
+    assert abs(tf_metrics["test"]["power_at_fpr10"] - 0.907) < 2e-2
 
 
 def test_fit_is_deterministic():
