@@ -1,0 +1,301 @@
+name: Revision Analyses
+
+# Regenerates every analysis added or corrected for the manuscript revision and
+# commits the resulting tables back. All of these run from committed inputs only
+# -- no All of Us, no network, no coalescent simulation, no per-CDS alignments --
+# so the whole set is reproducible from a clean checkout.
+#
+# The coalescent grid lives in its own workflow (refsim_simulations.yml) because it
+# is sharded across a matrix; the AGES multi-SNP check is a second job here because
+# it needs a 1.8 GB download and should not block the fast tables.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/revision_analyses.yml'
+      - 'stats/**'
+      - 'cds/pipeline_lib.py'
+      - 'data/inv_properties.tsv'
+      - 'data/cds_identical_proportions.tsv'
+      - 'data/GRAND_PAML_RESULTS.tsv'
+      - 'data/four_fold_pi_by_inversion.tsv'
+      - 'data/pin_pis_by_inversion.tsv'
+      - 'data/output.csv'
+      - 'data/per_site_diversity_output.falsta.gz'
+  pull_request:
+    paths:
+      - '.github/workflows/revision_analyses.yml'
+      - 'stats/**'
+
+concurrency:
+  group: revision-analyses-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  regenerate:
+    runs-on: ubuntu-latest
+    env:
+      GIT_LFS_SKIP_SMUDGE: 1
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          lfs: false
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy pandas scipy statsmodels matplotlib xlsxwriter openpyxl
+
+      # --- provenance guards -------------------------------------------------
+      # The June 2026 chimp-polarization cutover rewrote several committed
+      # outputs into the ancestral/derived frame and was reverted on 2026-07-01
+      # without regenerating them. Fail loudly if any analysis input is left in
+      # that state rather than silently producing polarized results.
+      - name: Guard against chimp-polarized inputs
+        run: |
+          set -euo pipefail
+          POL='b4506bca|076b4d63|2174bf44|7b42282e|078bbe38|c346e3fc'
+          bad=0
+          for f in data/GRAND_PAML_RESULTS.tsv data/four_fold_pi_by_inversion.tsv \
+                   data/pin_pis_by_inversion.tsv data/inv_properties.tsv \
+                   data/cds_identical_proportions.tsv data/output.csv; do
+            [ -f "$f" ] || continue
+            c=$(git log -1 --format=%h -- "$f")
+            if echo "$c" | grep -qE "^($POL)"; then
+              echo "FATAL: $f is still in the chimp-polarized frame (last commit $c)"
+              bad=1
+            fi
+          done
+          [ "$bad" -eq 0 ] && echo "OK: all analysis inputs are in the raw hg38 reference frame"
+          exit $bad
+
+      # --- analyses that answer specific reviewer comments -------------------
+      - name: Table S5 exclusion reasons (R2 #5)
+        run: python stats/table_s5_exclusion_reasons.py
+
+      - name: Per-gene haplotype counts by orientation
+        run: python stats/cds_haplotype_counts.py
+
+      - name: Clade-model omega identifiability (R2 #2)
+        run: python stats/paml_extreme_omega_check.py
+
+      - name: 4-fold diversity concordance (R1)
+        run: python stats/four_fold_pi_correlations.py
+
+      - name: 4-fold and piN/piS test tables
+        working-directory: data
+        run: |
+          python ../stats/four_fold_pi.py --from-table
+          python ../stats/pin_pis.py --from-table
+
+      - name: CDS conservation model + calibration (R2 #1)
+        working-directory: data
+        run: |
+          python ../stats/CDS_identical_model.py
+          python ../stats/cds_conservation_calibration.py
+
+      - name: Corrected CDS reanalysis (R2 #1)
+        run: python stats/robust_cds_reanalysis.py
+
+      - name: Non-circular SD-architecture recurrence check (R1)
+        working-directory: data
+        run: python ../stats/recurrence_sd_architecture.py
+
+      - name: Rebuild supplementary tables workbook
+        run: python stats/generate_tables.py
+
+      # --- reproducibility assertions ---------------------------------------
+      # These numbers are quoted in the response letter. If a regeneration moves
+      # them, the run must fail rather than silently rewrite the record.
+      - name: Assert the headline revision numbers reproduce
+        run: |
+          python - <<'PY'
+          import csv, sys
+          fail = []
+
+          def close(a, b, tol):
+              return abs(float(a) - float(b)) <= tol
+
+          # SD-architecture hard rule: agreement and the pi interaction
+          rows = {r["quantity"]: r for r in
+                  csv.DictReader(open("data/recurrence_sd_summary.tsv"), delimiter="\t")}
+          agree = float(rows["hard-rule agreement with consensus"]["value"])
+          if not close(agree, 0.7957, 5e-4):
+              fail.append(f"SD hard-rule agreement {agree} != 0.7957")
+          key = "[SD hard rule (primary)] Interaction (difference between those two)"
+          inter_p = float(rows[key]["p"])
+          if not close(inter_p, 0.000356, 5e-5):
+              fail.append(f"SD interaction p {inter_p} != 0.000356")
+
+          # PAML identifiability: orientation direction must match the manuscript
+          pam = {r["gene"]: r for r in
+                 csv.DictReader(open("data/paml_extreme_omega_check.tsv"), delimiter="\t")}
+          if pam["FDFT1"]["clade_with_higher_omega2"] != "inverted":
+              fail.append("FDFT1 higher omega is not in the inverted clade "
+                          "(table may be chimp-polarized)")
+          if pam["BLK"]["clade_with_higher_omega2"] != "direct":
+              fail.append("BLK higher omega is not in the direct clade "
+                          "(table may be chimp-polarized)")
+
+          # Analysis-set accounting
+          ex = list(csv.DictReader(open("data/table_s5_exclusion_reasons.tsv"), delimiter="\t"))
+          n_used = sum(1 for r in ex if r["analysed"] == "yes")
+          if (len(ex), n_used) != (292, 93):
+              fail.append(f"analysis set is {n_used}/{len(ex)}, expected 93/292")
+
+          if fail:
+              print("REPRODUCIBILITY CHECK FAILED:")
+              for f in fail:
+                  print("  -", f)
+              sys.exit(1)
+          print("All headline revision numbers reproduce.")
+          PY
+
+      - name: Commit and push regenerated tables
+        if: github.event_name != 'pull_request'
+        env:
+          PUSH_TOKEN: ${{ secrets.WRITE_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          files=(
+            data/table_s5_exclusion_reasons.tsv
+            data/cds_haplotype_counts.tsv
+            data/paml_extreme_omega_check.tsv
+            data/four_fold_pi_correlations.tsv
+            data/four_fold_pi_tests.tsv
+            data/pin_pis_tests.tsv
+            data/cds_pairwise_adjusted.tsv
+            data/cds_pairwise_nocov.tsv
+            data/cds_emm_adjusted.tsv
+            data/cds_emm_nocov.tsv
+            data/cds_conservation_calibration.tsv
+            data/robust_cds_reanalysis_results.tsv
+            data/robust_cds_reanalysis_inversion_effects.tsv
+            data/robust_cds_reanalysis_power.tsv
+            data/robust_cds_reanalysis_report.md
+            data/recurrence_sd_calls.tsv
+            data/recurrence_sd_summary.tsv
+          )
+          for f in "${files[@]}"; do
+            [ -f "$f" ] && git add -- "$f" || echo "missing (skipped): $f"
+          done
+
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+
+          git commit -m "Regenerate revision analyses [skip ci]"
+          git pull https://${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git main \
+            --rebase --autostash --strategy=recursive -X ours
+
+          for attempt in 1 2 3; do
+            if git push https://${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git HEAD:main; then
+              echo "Push succeeded on attempt $attempt"
+              exit 0
+            fi
+            echo "Push failed (attempt $attempt); refreshing and retrying"
+            git pull https://${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git main \
+              --rebase --autostash --strategy=recursive -X ours
+          done
+          echo "Push failed after 3 attempts"
+          exit 1
+
+      - name: Upload regenerated tables as an artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: revision-analyses
+          path: |
+            data/table_s5_exclusion_reasons.tsv
+            data/cds_haplotype_counts.tsv
+            data/paml_extreme_omega_check.tsv
+            data/four_fold_pi_correlations.tsv
+            data/four_fold_pi_tests.tsv
+            data/pin_pis_tests.tsv
+            data/cds_*.tsv
+            data/robust_cds_reanalysis_*
+            data/recurrence_sd_*.tsv
+            web/figures-site/public/downloads/supplementary_tables.xlsx
+          if-no-files-found: warn
+
+  ages-multi-snp:
+    # Reviewer 2 #9: is the ancient-DNA selection signal specific to one tagging
+    # SNP, or carried across the locus? Separate job because it downloads the
+    # 1.8 GB AGES summary statistics.
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy pandas scipy requests tqdm
+
+      - name: AGES selection stats across tagging SNPs
+        run: python stats/ages_multi_tag_snps.py
+
+      - name: Assert every locus is sign-coherent once aligned to the inverted allele
+        run: |
+          python - <<'PY'
+          import csv, sys
+          rows = [r for r in csv.DictReader(open("data/ages_multi_tag_snps.tsv"), delimiter="\t")
+                  if r["in_ages"] == "yes" and r["ages_S_inverted_allele"]]
+          bad = []
+          for region in sorted({r["region"] for r in rows}):
+              strong = [r for r in rows
+                        if r["region"] == region and abs(float(r["abs_r"])) >= 0.5]
+              if not strong:
+                  continue
+              signs = {float(r["ages_S_inverted_allele"]) > 0 for r in strong}
+              if len(signs) != 1:
+                  bad.append(f"{region}: mixed sign across {len(strong)} tags with |r| >= 0.5")
+          if bad:
+              print("AGES SIGN-COHERENCE CHECK FAILED:")
+              for b in bad:
+                  print("  -", b)
+              sys.exit(1)
+          print(f"All loci sign-coherent at |r| >= 0.5 ({len(rows)} SNPs in AGES).")
+          PY
+
+      - name: Commit the AGES table
+        if: github.event_name != 'pull_request'
+        env:
+          PUSH_TOKEN: ${{ secrets.WRITE_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- data/ages_multi_tag_snps.tsv
+          if git diff --staged --quiet; then echo "No changes."; exit 0; fi
+          git commit -m "Regenerate AGES multi-tagging-SNP table [skip ci]"
+          git pull https://${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git main \
+            --rebase --autostash --strategy=recursive -X ours
+          git push https://${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git HEAD:main
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ages-multi-tag-snps
+          path: data/ages_multi_tag_snps.tsv
+          if-no-files-found: warn
