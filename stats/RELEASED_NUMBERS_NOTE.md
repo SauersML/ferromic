@@ -139,13 +139,26 @@ that says "per base pair per generation" for the flux sweep should be corrected.
 The recombination rates ρ (0, 1×10⁻⁸, 1×10⁻⁶) *are* per base pair per
 generation — that sentence is right, which is probably how the two got conflated.
 
-## Imputation summary
+## Imputation summary — both reconcile, with one off-by-one
 
-`replicate_manuscript_statistics.txt` reports 158 models evaluated with 21 at
-r² > 0.3 and BH p < 0.05; the manuscript quotes 12 of 93 at r² > 0.5. These are
-different thresholds over different denominators rather than a contradiction, but
-only one pair of numbers should appear in the paper, and it should be the pair
-the released tables support.
+Resolved by `stats/imputation_threshold_summary.py`. The two counts are not in
+conflict: they use different thresholds over **different denominators**, and both
+reproduce. 158 is every model fit; only 75 of those sit at a locus in the
+93-locus consensus set.
+
+| subset | n | r² > 0.3 | + BH | r² > 0.5 | + BH | r² > 0.7 | + BH |
+|---|---|---|---|---|---|---|---|
+| all models fit | 158 | 35 | **21** | 18 | 16 | 12 | 12 |
+| consensus 93-locus set | 75 | 20 | 14 | **12** | 11 | 9 | 9 |
+
+* The log's "158 models evaluated, 21 with r² > 0.3 and BH p < 0.05" reproduces
+  exactly, over all models fit.
+* The manuscript's "12 of the 93" reproduces as the count at **r² > 0.5 alone**
+  within the consensus set.
+
+**The off-by-one:** the manuscript writes "12 … (r² > 0.5 and BH p < 0.05)", but
+12 is the r²-only count; requiring BH p < 0.05 as well gives **11**. Either drop
+the BH clause from that sentence or change 12 to 11.
 
 ## Recurrence simulation false-positive rate — still unresolved
 

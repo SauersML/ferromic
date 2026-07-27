@@ -110,6 +110,9 @@ jobs:
         working-directory: data
         run: python ../stats/recurrence_sd_architecture.py
 
+      - name: Imputation threshold reconciliation
+        run: python stats/imputation_threshold_summary.py
+
       - name: Breakpoint-decay Spearman variants
         run: python stats/decay_spearman_variants.py
 
@@ -189,6 +192,7 @@ jobs:
             data/robust_cds_reanalysis_power.tsv
             data/robust_cds_reanalysis_report.md
             data/decay_spearman_variants.tsv
+            data/imputation_threshold_summary.tsv
             data/recurrence_sd_calls.tsv
             data/recurrence_sd_summary.tsv
           )
