@@ -110,6 +110,12 @@ jobs:
         working-directory: data
         run: python ../stats/recurrence_sd_architecture.py
 
+      - name: Divergence (Dxy / da) by recurrence, and breakpoint decay (R1)
+        working-directory: data
+        run: |
+          python ../stats/divergence_da_dxy_by_type.py
+          python ../stats/divergence_edge_decay.py
+
       - name: Imputation threshold reconciliation
         run: python stats/imputation_threshold_summary.py
 
@@ -193,8 +199,12 @@ jobs:
             data/robust_cds_reanalysis_report.md
             data/decay_spearman_variants.tsv
             data/imputation_threshold_summary.tsv
+            data/divergence_middle_vs_flank.tsv
+            data/divergence_edge_decay_spearman.tsv
             data/recurrence_sd_calls.tsv
             data/recurrence_sd_summary.tsv
+            data/divergence_middle_vs_flank.tsv
+            data/divergence_edge_decay_spearman.tsv
           )
           for f in "${files[@]}"; do
             [ -f "$f" ] && git add -- "$f" || echo "missing (skipped): $f"
