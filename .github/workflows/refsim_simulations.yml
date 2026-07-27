@@ -5,13 +5,23 @@ name: Reference Recurrence Simulations
 # cluster-only: it is sharded across a matrix so each runner does a slice, then a
 # single aggregation job merges, refits, and pushes.
 #
-# Cost per task (2-core runner, --procs 2):
-#   flux      5,400 loci / 20 shards = 270 each  ~15-25 min
-#   trainset 11,250 loci / 20 shards = 563 each  ~10-15 min
-#   extreme   1,200 loci / 20 shards =  60 each  ~5 min
+# Cost, MEASURED rather than guessed. A GitHub 2-core runner takes >50 s per
+# 240-haplotype locus, against ~7 s/locus on a 128-core MSI node -- IQ-TREE on a
+# 200 kbp alignment does not fit a small runner well. So:
 #
-# Not run on push -- this is heavy. Trigger it explicitly, or on a change to the
-# pipeline itself.
+#   flux      5,400 loci / 20 shards = 270 each   ~2 h per shard, ~80 CPU-h total
+#   extreme   1,200 loci / 20 shards =  60 each   ~30 min per shard
+#   trainset 11,250 loci / 20 shards = 563 each   much faster (88 haplotypes, not 240)
+#
+# An earlier version of this comment claimed 15-25 min per flux shard; that was
+# extrapolated from MSI timings and was wrong by roughly an order of magnitude.
+#
+# This workflow is therefore the *reproducibility* path, not the routine one: it
+# proves the pipeline runs end to end from a clean checkout with no cluster. For
+# actually regenerating the grids, a cluster is far cheaper -- see
+# simulations/refsim/refsim.sbatch. Use the `reps` input for a cheap smoke test.
+#
+# Not run on push except when the simulation code itself changes.
 
 on:
   workflow_dispatch:

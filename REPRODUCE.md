@@ -8,7 +8,7 @@ inputs, and commits its outputs back. Nothing needs a local machine or a cluster
 | Workflow | What it regenerates | Trigger |
 |---|---|---|
 | `revision_analyses.yml` | every table added or corrected for the revision (below) | push to `stats/**`, or manual |
-| `refsim_simulations.yml` | the reference recurrence simulations, 20-way sharded, then refit + rescore | manual, or a change to `simulations/refsim/*.py` |
+| `refsim_simulations.yml` | the reference recurrence simulations, 20-way sharded, then refit + rescore. **~80 CPU-hours** on GitHub runners (>50 s/locus on 2 cores vs ~7 s on a cluster node) — it exists to prove the pipeline runs from a clean checkout; use `simulations/refsim/refsim.sbatch` to actually regenerate. `reps=1` gives a cheap smoke test. | manual, or a change to `refsim.py` / `run_grid.py` |
 | `recurrence.yml` | the `recurrence/` reproduction and QC tests, with IQ-TREE installed | push to `recurrence/**` |
 | `replicate_manuscript_statistics.yml` | the main statistics report and CDS tables | push to `stats/**` or `data/**` |
 | `generate_supplementary_tables.yml` | `supplementary_tables.xlsx` | push |
