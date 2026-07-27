@@ -116,8 +116,20 @@ top of the event count in the original pipeline that is not present in its publi
 code. Until that is identified, the flux result should be reported as a relative
 statement (flux does not degrade the classifier) rather than against a "< 5%" baseline.
 
+## AGES multiple-testing correction — say which one
+
+Two different corrections are in play and they differ by three orders of magnitude:
+
+* `data/best_tagging_snps_qvalues.tsv` — Benjamini-Hochberg **across the inversion
+  candidate set only**. This is what the manuscript quotes, and it reproduces exactly
+  (8p23.1 q = 4.29e-04, 12q13.11 q = 0.005, 10q22.3 q = 4.29e-04, 7p11.2 q = 0.033).
+* `ages_FDR` in `data/ages_multi_tag_snps.tsv` — AGES's **own genome-wide** correction
+  across every SNP in their scan. For the same SNP, rs4268452 at 10q22.3 has
+  P_X = 7.2e-05 and AGES FDR = 0.37.
+
+Both are legitimate for their own family. The Methods must name which is reported,
+because a reviewer pulling the SNP straight from the AGES database will see 0.37.
+
 ## Not checked here
 
-The AGES q-values in `data/best_tagging_snps_qvalues.tsv` reproduce the
-manuscript exactly (8p23.1 q = 4.29e-04, 12q13.11 q = 0.005, 10q22.3
-q = 4.29e-04, 7p11.2 q = 0.033) and need no action.
+Nothing outstanding in this section.
