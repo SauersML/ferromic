@@ -1,11 +1,15 @@
 #!/usr/bin/env python
 """GTEx eQTL evidence for the inversion tagging SNPs.
 
-The draft carries a gene-expression claim (PRAG1) with no code behind it. This
-supplies the reproducible basis for any such claim: for each inversion's tagging
-SNPs, every single-tissue eQTL GTEx v8 reports, with the effect re-signed onto the
-inversion-associated allele and each eQTL gene flagged for whether it lies inside
-the inversion.
+Supplies a reproducible basis for any expression claim at these loci: for each
+inversion's tagging SNPs, every single-tissue eQTL GTEx v8 reports, with the effect
+re-signed onto the inversion-associated allele and each eQTL gene flagged for
+whether it lies inside the inversion.
+
+(The manuscript makes no PRAG1 claim; a PRAG1 result was raised separately as
+lacking committed code. For the record, PRAG1 returns no eQTL at any 8p23.1
+tagging SNP in GTEx v8 -- see data/inversion_eqtl.tsv -- so if such a result
+exists it does not come from this source.)
 
 What this can and cannot support
 --------------------------------

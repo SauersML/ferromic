@@ -191,18 +191,18 @@ Two different corrections are in play and they differ by three orders of magnitu
 Both are legitimate for their own family. The Methods must name which is reported,
 because a reviewer pulling the SNP straight from the AGES database will see 0.37.
 
-## PRAG1 — not supported by the obvious public evidence
+## eQTL evidence at the inversion tagging SNPs
 
-The draft carries a PRAG1 result with no code behind it. `stats/inversion_eqtl_lookup.py`
-now queries GTEx v8 for every eQTL at the 8p23.1 tagging SNPs, and **PRAG1 does not
-appear**: 0 records, against 22 other genes that do (AF131215.9, CLDN23, ERI1, MFHAS1,
-MSRA, MTMR9, PPP1R3B, PRSS55, RP1L1, TNKS, …).
+`stats/inversion_eqtl_lookup.py` queries GTEx v8 for every single-tissue eQTL at the
+tagging SNPs — 1,212 records across six loci.
 
-So either the PRAG1 claim came from a source that is not GTEx v8 single-tissue eQTL —
-in which case that source has to be named and committed — or it should be dropped.
-As it stands nothing in this repository supports it.
+The manuscript makes no PRAG1 claim. A PRAG1 result was raised separately as having no
+committed code behind it; for the record, **PRAG1 returns no eQTL at any 8p23.1 tagging
+SNP in GTEx v8** (0 records, against 22 genes that do: AF131215.9, CLDN23, ERI1,
+MFHAS1, MSRA, MTMR9, PPP1R3B, PRSS55, RP1L1, TNKS, …). So if such a result exists it
+does not come from this source, and the source would need naming.
 
-Worth noting the same table *does* support two claims that are made: the 8p23.1
+The table *does* support two claims that are made: the 8p23.1
 haplotype has a thyroid eQTL (AF131215.9, Thyroid, p = 3.1e-17), matching the thyroid
 phenotype cluster; and 17q21.31 has very strong expression effects (KANSL1-AS1
 p = 6.2e-158, LRRC37A4P p = 1.9e-174), consistent with the Geuvadis KANSL1 result the
