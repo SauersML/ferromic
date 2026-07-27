@@ -16,19 +16,22 @@ rather than from haplotype diversity.
 
 What this does
 --------------
-1. Fits ``P(recurrent) ~ log10(SD size kbp) + SD identity(%)`` on the 93
-   consensus-classified loci -- architecture only, no diversity term.
-2. Produces **leave-one-out cross-validated** calls, so each locus is labelled by
-   a model that never saw its own consensus label, and reports agreement with the
-   consensus both in-sample and out-of-sample.
+1. **Primary: a hard rule fixed a priori.** Recurrent-prone iff flanking-repeat
+   identity >= 95% AND repeat size >= 10 kbp -- the NAHR substrate thresholds,
+   chosen from the mechanism, *not* fitted to the 93 labels. Nothing about the
+   consensus classification enters the call, so this is non-circular in the
+   strong sense: no fitting, no cross-validation needed.
+2. **Supplementary: a fitted logistic** on the same two features, with
+   leave-one-out cross-validation. Reported only as a sensitivity check. It is
+   weaker on both counts -- it agrees with the consensus less often *and* it is
+   trained on the labels, which the hard rule never touches.
 3. Refits the primary Δ-logπ model (``inv_dir_recur_model.run_model_A``, HC3 SEs,
-   the same quantile-derived epsilon) with the SD-derived labels substituted for
-   the consensus labels.
+   the same quantile-derived epsilon) under each label set.
 
-The classifier is trained on the consensus labels, so the *mapping* from
-architecture to recurrence is learned. What matters for the circularity argument
-is that the resulting per-locus label is a function of architecture alone: no
-locus's diversity enters its own recurrence call.
+The hard rule is the one to quote. An earlier version of this script used only the
+fitted logistic and reported 74.2% agreement; that was the wrong classifier --
+both less concordant and, being label-fitted, less able to answer the circularity
+charge it exists to answer.
 
 Run from ``data/`` (the primary model resolves ``./output.csv``):
 
@@ -65,6 +68,13 @@ SD_SIZE = "Flanking_inverted_repeat_size.kbp."
 SD_IDENT = "Flanking_Inverted_repeat_identity"
 CONSENSUS = "0_single_1_recur_consensus"
 
+# A-priori NAHR thresholds. Recurrent inversions recur by non-allelic homologous
+# recombination between flanking segmental duplications, which needs repeats that
+# are both long enough and similar enough to misalign. These two numbers are set
+# from that mechanism and are never tuned against the consensus labels.
+NAHR_MIN_IDENTITY_PCT = 95.0
+NAHR_MIN_SIZE_KBP = 10.0
+
 OUT_CALLS = "recurrence_sd_calls.tsv"
 OUT_SUMMARY = "recurrence_sd_summary.tsv"
 
@@ -100,6 +110,30 @@ def load_architecture(invinfo_tsv):
     return df.reset_index(drop=True)
 
 
+def hard_rule(arch):
+    """The a-priori NAHR call: identity >= 95% AND repeat >= 10 kbp."""
+    return ((arch["sd_identity_pct"] >= NAHR_MIN_IDENTITY_PCT)
+            & (arch["sd_size_kbp"] >= NAHR_MIN_SIZE_KBP)).astype(int)
+
+
+def nahr_score(arch):
+    """Threshold-free NAHR potential: how far into the recurrent-prone corner a
+    locus sits. Monotone in both features, so it orders loci the same way the hard
+    rule splits them, without depending on where the thresholds fall."""
+    return (np.log10(arch["sd_size_kbp"].clip(lower=1e-3))
+            + (arch["sd_identity_pct"] - NAHR_MIN_IDENTITY_PCT) / 10.0)
+
+
+def cohens_kappa(a, b):
+    a = np.asarray(a, int)
+    b = np.asarray(b, int)
+    n = len(a)
+    po = float((a == b).mean())
+    pe = float(((a == 1).mean() * (b == 1).mean())
+               + ((a == 0).mean() * (b == 0).mean()))
+    return (po - pe) / (1 - pe) if pe < 1 else float("nan")
+
+
 def _fit_logit(X, y):
     import statsmodels.api as sm
     return sm.Logit(y, sm.add_constant(X, has_constant="add")).fit(disp=0, maxiter=200)
@@ -128,6 +162,8 @@ def sd_calls(arch, threshold=0.5):
             sm.add_constant(X[i:i + 1], has_constant="add"))[0])
 
     out = arch.copy()
+    out["sd_call_hard"] = hard_rule(arch)
+    out["nahr_score"] = nahr_score(arch)
     out["p_recurrent_insample"] = p_in
     out["p_recurrent_loo"] = p_loo
     out["sd_call_insample"] = (p_in >= threshold).astype(int)
@@ -169,15 +205,30 @@ def main(argv=None):
           f"{int((arch['consensus'] == 0).sum())} single-event)")
 
     out, full, feats = sd_calls(arch, args.threshold)
-    print("\nArchitecture-only logistic (no diversity term):")
-    for name, coef, p in zip(["intercept"] + feats, full.params, full.pvalues):
-        print(f"  {name:18s} beta = {coef:+8.4f}   p = {p:.4g}")
 
+    print("\nPRIMARY -- a-priori NAHR hard rule "
+          f"(identity >= {NAHR_MIN_IDENTITY_PCT:.0f}% AND size >= {NAHR_MIN_SIZE_KBP:.0f} kbp)")
+    acc_hard, n_hard, tot_hard = _agreement(out, "sd_call_hard")
+    k_hard = cohens_kappa(out["sd_call_hard"], out["consensus"])
+    tp = int(((out.sd_call_hard == 1) & (out.consensus == 1)).sum())
+    fp = int(((out.sd_call_hard == 1) & (out.consensus == 0)).sum())
+    fn = int(((out.sd_call_hard == 0) & (out.consensus == 1)).sum())
+    tn = int(((out.sd_call_hard == 0) & (out.consensus == 0)).sum())
+    print(f"  agreement with consensus  {acc_hard * 100:.1f}%  ({n_hard}/{tot_hard})   "
+          f"kappa = {k_hard:.3f}")
+    print(f"  TP={tp} FP={fp} FN={fn} TN={tn}   reclassified = {fp + fn}")
+    for lab, sel in (("recurrent", out.consensus == 1), ("single-event", out.consensus == 0)):
+        g = out[sel]
+        print(f"  consensus {lab:12s} median identity {g.sd_identity_pct.median():.1f}%  "
+              f"median size {g.sd_size_kbp.median():.2f} kbp")
+
+    print("\nSUPPLEMENTARY -- fitted logistic (label-trained; sensitivity only)")
+    for name, coef, pv in zip(["intercept"] + feats, full.params, full.pvalues):
+        print(f"  {name:18s} beta = {coef:+8.4f}   p = {pv:.4g}")
     acc_in, n_in, tot_in = _agreement(out, "sd_call_insample")
     acc_loo, n_loo, tot_loo = _agreement(out, "sd_call_loo")
-    print(f"\nAgreement with the consensus calls:")
-    print(f"  in-sample        {acc_in * 100:.1f}%  ({n_in}/{tot_in})")
-    print(f"  leave-one-out    {acc_loo * 100:.1f}%  ({n_loo}/{tot_loo})")
+    print(f"  agreement in-sample     {acc_in * 100:.1f}%  ({n_in}/{tot_in})")
+    print(f"  agreement leave-one-out {acc_loo * 100:.1f}%  ({n_loo}/{tot_loo})")
 
     matched = load_and_match(args.output_csv, args.invinfo)
     # Same quantile-derived detection floor as the primary run, so the refitted
@@ -190,14 +241,19 @@ def main(argv=None):
     rows = []
     rows.append({"quantity": "loci with consensus + SD architecture",
                  "value": len(arch), "p": ""})
-    rows.append({"quantity": "SD-call agreement with consensus (in-sample)",
+    rows.append({"quantity": "hard-rule agreement with consensus",
+                 "value": f"{acc_hard:.4f}", "p": ""})
+    rows.append({"quantity": "hard-rule Cohen kappa", "value": f"{k_hard:.4f}", "p": ""})
+    rows.append({"quantity": "hard-rule loci reclassified", "value": fp + fn, "p": ""})
+    rows.append({"quantity": "logistic agreement (in-sample)",
                  "value": f"{acc_in:.4f}", "p": ""})
-    rows.append({"quantity": "SD-call agreement with consensus (leave-one-out)",
+    rows.append({"quantity": "logistic agreement (leave-one-out)",
                  "value": f"{acc_loo:.4f}", "p": ""})
 
     for label, col in (("consensus", None),
-                       ("SD architecture (in-sample)", "sd_call_insample"),
-                       ("SD architecture (leave-one-out)", "sd_call_loo")):
+                       ("SD hard rule (primary)", "sd_call_hard"),
+                       ("SD logistic (in-sample)", "sd_call_insample"),
+                       ("SD logistic (leave-one-out)", "sd_call_loo")):
         if col is None:
             _res, tab, dfA = run_model_A(matched, eps)
             n = len(dfA)
@@ -206,15 +262,29 @@ def main(argv=None):
             n = len(merged)
         print(f"\n--- Delta-log pi, recurrence labelled by: {label}  (n = {n}) ---")
         for _, r in tab.iterrows():
-            eff = r["ratio"]
-            print(f"  {str(r['effect']):46s} fold-change = {float(eff):.3f}  "
+            print(f"  {str(r['effect']):46s} fold-change = {float(r['ratio']):.3f}  "
                   f"p = {float(r['p']):.4g}")
             rows.append({"quantity": f"[{label}] {r['effect']}",
-                         "value": f"{float(eff):.6f}", "p": f"{float(r['p']):.6g}"})
+                         "value": f"{float(r['ratio']):.6f}", "p": f"{float(r['p']):.6g}"})
+
+    # Threshold-free control: does the outcome track the continuous NAHR score?
+    from scipy import stats as _st
+    key = ["chr_std", "Start", "End"]
+    m2 = matched.copy()
+    m2["chr_std"] = m2["chr_std"].astype(str)
+    g = m2.merge(out[key + ["nahr_score"]], on=key, how="inner")
+    g["dlogpi"] = (np.log(g["pi_inverted"].to_numpy(float) + eps)
+                   - np.log(g["pi_direct"].to_numpy(float) + eps))
+    rho, pv = _st.spearmanr(g["nahr_score"], g["dlogpi"])
+    print(f"\nContinuous NAHR-score gradient (threshold-free): "
+          f"Spearman rho = {rho:.3f}, p = {pv:.4g}  (n = {len(g)})")
+    rows.append({"quantity": "continuous NAHR score vs Delta-log pi (Spearman rho)",
+                 "value": f"{rho:.6f}", "p": f"{pv:.6g}"})
 
     pd.DataFrame(rows).to_csv(OUT_SUMMARY, sep="\t", index=False)
     keep = ["chr_std", "Start", "End", "sd_size_kbp", "sd_identity_pct",
-            "consensus", "p_recurrent_insample", "p_recurrent_loo",
+            "nahr_score", "consensus", "sd_call_hard",
+            "p_recurrent_insample", "p_recurrent_loo",
             "sd_call_insample", "sd_call_loo"]
     out[keep].to_csv(OUT_CALLS, sep="\t", index=False)
     print(f"\nWrote {OUT_CALLS} and {OUT_SUMMARY}")
