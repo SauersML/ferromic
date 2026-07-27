@@ -130,17 +130,19 @@ same model: in that subset the inverted lineages sit in a small deme for the ful
 100 kya to the P00 split, giving far more time to coalesce than the clean 50-kya model
 allows. Not comparable, and the claim is withdrawn.
 
-**Extreme extension** (1,200 loci at ρ = 10⁻⁸), marginal over the two depths:
+**Extreme extension** (1,200 loci at ρ = 10⁻⁸), corrected single-origin model,
+marginal over the two depths:
 
 | m_flux | 10⁻⁶ | 3×10⁻⁶ | 10⁻⁵ | 3×10⁻⁵ | 10⁻⁴ |
 |---|---|---|---|---|---|
-| single-origin FPR | 0.300 | 0.383 | 0.567 | 0.808 | 0.942 |
+| single-origin FPR | 0.192 | 0.333 | 0.492 | 0.800 | 0.983 |
 | recurrent power | 0.900 | 0.883 | 0.883 | 0.900 | 0.942 |
 
-Detection holds at 0.88–0.94 while the false-positive rate climbs to 0.94: past
-m ≈ 10⁻⁵ the classifier calls nearly everything recurrent and the two scenarios stop
-being distinguishable. The breakdown sits between 10⁻⁶ and 10⁻⁵, above the entire
-range the manuscript sweeps.
+Detection holds at 0.88–0.94 throughout while the false-positive rate climbs to
+0.98 (z = 12.5). Past m ≈ 10⁻⁵ the classifier calls nearly everything recurrent and
+the two scenarios stop being distinguishable. **The breakdown sits between 10⁻⁶ and
+10⁻⁵ — above the entire range the manuscript sweeps**, which is why the main sweep
+is flat.
 
 ## Reproduce
 

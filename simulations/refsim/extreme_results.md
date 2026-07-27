@@ -11,8 +11,8 @@ collapsed, Fitch parsimony on the orientation trait, recurrent iff
 
 | depth | m=1e-06 | m=3e-06 | m=1e-05 | m=3e-05 | m=1e-04 |
 |---|---|---|---|---|---|
-| recent | 0.450 | 0.517 | 0.650 | 0.800 | 0.933 |
-| young | 0.150 | 0.250 | 0.483 | 0.817 | 0.950 |
+| recent | 0.300 | 0.483 | 0.583 | 0.867 | 1.000 |
+| young | 0.083 | 0.183 | 0.400 | 0.733 | 0.967 |
 
 ## recurrent scenario — detection rate
 
@@ -27,12 +27,12 @@ collapsed, Fitch parsimony on the orientation trait, recurrent iff
 
 | scenario | m=1e-06 | m=3e-06 | m=1e-05 | m=3e-05 | m=1e-04 |
 |---|---|---|---|---|---|
-| single | 0.300 | 0.383 | 0.567 | 0.808 | 0.942 |
+| single | 0.192 | 0.333 | 0.492 | 0.800 | 0.983 |
 | recurrent | 0.900 | 0.883 | 0.883 | 0.900 | 0.942 |
 
 ## Lowest against highest flux, pooled over all cells
 
 | scenario | rate at m_lo | rate at m_hi | z | p |
 |---|---|---|---|---|
-| single | 0.3000 (n=120) | 0.9417 (n=120) | 10.24 | 0.0000 |
+| single | 0.1917 (n=120) | 0.9833 (n=120) | 12.46 | 0.0000 |
 | recurrent | 0.9000 (n=120) | 0.9417 (n=120) | 1.20 | 0.2319 |
