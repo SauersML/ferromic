@@ -135,9 +135,16 @@ def _run_one(job):
         mapping = refsim.mapping_hap_SV(sample_ids)
         aln = os.path.join(workdir, "locus.fa")
         n_sites = refsim.write_fasta(aln, mts, sample_ids, _BACKBONE)
-        treefile = refsim.run_iqtree(aln, os.path.join(workdir, "locus"),
-                                     seed=job["seed"])
-        n_events = int(refsim.min_mutations(treefile, mapping))
+        if n_sites == 0:
+            # A locus with no retained segregating site has no identifiable tree
+            # (IQ-TREE refuses an alignment with no variable column). The
+            # orientation trait can always be explained by a single change, which
+            # is the same convention parsimony.classify uses.
+            n_events = 1
+        else:
+            treefile = refsim.run_iqtree(aln, os.path.join(workdir, "locus"),
+                                         seed=job["seed"])
+            n_events = int(refsim.min_mutations(treefile, mapping))
     except Exception as exc:                        # noqa: BLE001
         return dict(job, error=repr(exc)[:300])
     finally:

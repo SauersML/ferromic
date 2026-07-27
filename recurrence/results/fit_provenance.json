@@ -1,14 +1,14 @@
 {
-  "generated_at_utc": "2026-07-13T03:56:06.163400+00:00",
+  "generated_at_utc": "2026-07-27T05:41:58.542395+00:00",
   "inputs": {
     "sim_features": "recurrence/data/sim_features.csv.gz"
   },
   "versions": {
-    "numpy": "2.5.1",
-    "scipy": "1.18.0",
-    "sklearn": "1.9.0",
-    "pandas": "3.0.3",
-    "msprime": "1.4.2"
+    "numpy": "2.2.6",
+    "scipy": "1.15.3",
+    "sklearn": "1.7.2",
+    "pandas": "2.3.3",
+    "msprime": "1.4.0"
   },
   "test_folds": [
     7,

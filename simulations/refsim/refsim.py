@@ -304,15 +304,30 @@ def write_fasta(path, mts, sample_ids, backbone, seq2berm=SEQ2BERM,
 # 5. ML tree -- Snakefile rule IQTree
 # ---------------------------------------------------------------------------
 def run_iqtree(aln_path, prefix, outgroup=OUTGROUP, seed=1, threads=1,
-               binary=None):
-    """Run IQ-TREE with the upstream flags and return the ``.treefile`` path."""
+               binary=None, max_attempts=3):
+    """Run IQ-TREE with the upstream flags and return the ``.treefile`` path.
+
+    IQ-TREE 2.1.2 fails for some large ``-seed`` values with "Tree taxa and
+    alignment sequence do not match": its initial parsimony tree comes back
+    missing taxa. The alignment is fine -- the same file succeeds at a different
+    seed. On failure the seed is therefore folded into a small range and retried.
+    Only loci that would otherwise fail outright are affected; every locus whose
+    first attempt succeeds keeps the seed it was given, so results are unchanged.
+    """
     binary = binary or iqtree_binary()
-    cmd = [binary, "-safe", "-s", aln_path, "-keep-ident", "-bb", "1000",
-           "-redo", "-m", "MFPMERGE", "-pre", prefix, "-o", outgroup,
-           "-nt", str(threads), "-seed", str(seed), "-quiet"]
-    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL,
-                   stderr=subprocess.STDOUT)
-    return prefix + ".treefile"
+    last = None
+    for attempt in range(max_attempts):
+        this_seed = seed if attempt == 0 else (int(seed) % 90_000) + attempt
+        cmd = [binary, "-safe", "-s", aln_path, "-keep-ident", "-bb", "1000",
+               "-redo", "-m", "MFPMERGE", "-pre", prefix, "-o", outgroup,
+               "-nt", str(threads), "-seed", str(this_seed), "-quiet"]
+        try:
+            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL,
+                           stderr=subprocess.STDOUT)
+            return prefix + ".treefile"
+        except subprocess.CalledProcessError as exc:
+            last = exc
+    raise last
 
 
 # ---------------------------------------------------------------------------
