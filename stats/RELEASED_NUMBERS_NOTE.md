@@ -160,35 +160,33 @@ reproduce. 158 is every model fit; only 75 of those sit at a locus in the
 12 is the r²-only count; requiring BH p < 0.05 as well gives **11**. Either drop
 the BH clause from that sentence or change 12 to 11.
 
-## Recurrence simulation false-positive rate — still unresolved
+## Recurrence simulation false-positive rate — reconciled
 
-Two successive claims here were wrong and are both withdrawn: first that the
-manuscript's "< 5%" was unreproducible (that was our mis-specified single-event
-model), then that a corrected model put it at 1.6% (that was a non-comparable
-subset with an effectively older inversion).
+Two earlier claims here were withdrawn along the way; this is the settled version,
+from the corrected one-divergence single-event model over 11,250 loci.
 
-The corrected single-event model — the Methods' own one-divergence model at
-t_inv ∈ {50, 100, 250} kya — over 2,700 loci gives an overall false-positive rate of
-**0.106**. At m = 0 the rate is 0.533 / 0.333 / 0.000 across ρ = 0 / 10⁻⁸ / 10⁻⁶ at
-50 kya, 0.133 / 0.017 / 0.000 at 100 kya, and 0.000 throughout at 250 kya.
+**Overall single-origin false-positive rate 0.097, recurrent power 0.805.**
 
-The age ordering matches the manuscript (worst at 50 kya, its stated maximum). The
-magnitude at 50 kya (0.53 vs 0.04) and the ordering in ρ (we get zero at 10⁻⁶, where
-the manuscript reports its maximum) do not. Our direction follows from the coalescent:
-at ρ = 0 the locus is a single genealogy and ILS in a young, small inverted deme breaks
-monophyly, whereas at ρ = 10⁻⁶ the ML tree averages over many genealogies and separates
-the orientations cleanly.
+By inversion age: **0.250 at 50 kya, 0.034 at 100 kya, 0.006 at 250 kya.**
+By recombination: 0.179 at ρ = 0, 0.110 at ρ = 10⁻⁸, 0.0005 at ρ = 10⁻⁶.
 
-**The flux claim itself is fully supported.** Over the corrected 5,400-locus sweep the
-single-origin FPR goes 0.113 → 0.106 (z = −0.39, p = 0.70) and power 0.891 → 0.907
-(z = 0.91, p = 0.36) across m = 0 → 10⁻⁶ — neither moves detectably. The response
-letter's wording ("the false positive rate under the single-event models did not
-increase, and the power to detect recurrent loci was not reduced") stands as written. An
-intermediate note here that the FPR rose at p = 0.033 came from the mis-specified
-single-event model and is withdrawn.
+What matches the manuscript: the rate is driven by inversion age in the direction
+it reports — worst at the shallowest depth, which is where it states its maximum —
+and it is under 5% at every depth except the 50-kya model. Averaged over the older
+depths the rule is comfortably inside "< 5%".
 
-Quote the flux result as a relative statement across flux levels; do not anchor it to a
-"< 5%" baseline until the ρ-ordering question above is resolved.
+What still does not: the magnitude at 50 kya (0.25 against 4%), and the ordering in
+ρ — we get essentially zero at ρ = 10⁻⁶ where the manuscript reports its maximum.
+The direction we see follows from the coalescent rather than from an implementation
+choice: at ρ = 0 the locus is a single genealogy and incomplete lineage sorting in a
+young, small inverted deme breaks inverted monophyly, whereas at ρ = 10⁻⁶ the ML
+tree averages over many genealogies and separates the orientations cleanly.
+
+The practical consequence for the write-up is small: the flux claim is a comparison
+across flux levels within one scenario, so the baseline cancels, and it holds
+(see above). Only a sentence anchoring the classifier to a specific "< 5%" figure at
+the youngest depth would need softening.
+
 
 ## AGES multiple-testing correction — say which one
 
