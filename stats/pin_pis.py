@@ -467,15 +467,31 @@ def make_figure(df):
 
 
 def main():
-    phy_dir, tmp_dir = resolve_phy_dir()
-    try:
-        df = collect_pin_pis(phy_dir)
-    finally:
-        if tmp_dir and os.path.isdir(tmp_dir):
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-    df = df.sort_values(["chr", "region_start"]).reset_index(drop=True)
-    df.to_csv(OUT_TABLE, sep="\t", index=False)
-    print(f"Saved per-inversion table -> {OUT_TABLE} ({len(df)} loci)")
+    import argparse
+
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
+    ap.add_argument("--from-table", action="store_true",
+                    help="skip the alignment pass and recompute the downstream tests "
+                         "and figure from the committed per-inversion table. The tests "
+                         "are a deterministic function of that table, so this "
+                         "regenerates them exactly without needing phy_outputs.zip.")
+    args = ap.parse_args()
+
+    if args.from_table:
+        if not os.path.exists(OUT_TABLE):
+            raise SystemExit(f"{OUT_TABLE} not found; run without --from-table first")
+        df = pd.read_csv(OUT_TABLE, sep="\t")
+        print(f"Loaded per-inversion table <- {OUT_TABLE} ({len(df)} loci)")
+    else:
+        phy_dir, tmp_dir = resolve_phy_dir()
+        try:
+            df = collect_pin_pis(phy_dir)
+        finally:
+            if tmp_dir and os.path.isdir(tmp_dir):
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+        df = df.sort_values(["chr", "region_start"]).reset_index(drop=True)
+        df.to_csv(OUT_TABLE, sep="\t", index=False)
+        print(f"Saved per-inversion table -> {OUT_TABLE} ({len(df)} loci)")
 
     tests = run_tests(df)
     tests.to_csv(OUT_TESTS, sep="\t", index=False)
