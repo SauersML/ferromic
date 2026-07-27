@@ -20,10 +20,15 @@ jobs:
 
     - name: Check for non-breaking spaces and fix them
       id: fix-nbsp
+      env:
+        # Never interpolate the commit message into the script body: it is
+        # attacker-controlled free text, and a message containing a quote, a
+        # backtick or a newline either breaks the shell parse or executes. Pass
+        # it through the environment, where it is data.
+        COMMIT_MSG: ${{ github.event.head_commit.message }}
       run: |
         set -ex # Enable verbose output and exit on error
-        
-        COMMIT_MSG="${{ github.event.head_commit.message }}"
+
         if [[ "$COMMIT_MSG" == *"[bot] Auto-fix non-breaking spaces"* ]]; then
           echo "Skipping: Last commit was an auto-fix by this action."
           echo "changes_made=false" >> $GITHUB_OUTPUT
@@ -198,12 +203,14 @@ jobs:
 
     - name: Commit and push changes
       if: steps.fix-nbsp.outputs.changes_made == 'true'
+      env:
+        FILES_CHANGED: ${{ steps.fix-nbsp.outputs.files_changed }}
       run: |
         set -ex
         git add .
         if ! git diff --staged --quiet; then
-          echo "Committing NBSP fixes for files: ${{ steps.fix-nbsp.outputs.files_changed }}"
-          git commit -m "[bot] Auto-fix non-breaking spaces in:${{ steps.fix-nbsp.outputs.files_changed }} [skip ci]"
+          echo "Committing NBSP fixes for files: $FILES_CHANGED"
+          git commit -m "[bot] Auto-fix non-breaking spaces in:$FILES_CHANGED [skip ci]"
           git push
         else
           echo "INFO: No changes to commit after NBSP fixing attempt."
@@ -211,13 +218,17 @@ jobs:
 
     - name: Summary
       if: always()
+      env:
+        COMMIT_MSG: ${{ github.event.head_commit.message }}
+        CHANGES_MADE: ${{ steps.fix-nbsp.outputs.changes_made }}
+        FILES_CHANGED: ${{ steps.fix-nbsp.outputs.files_changed }}
       run: |
-        if [ "${{ steps.fix-nbsp.outputs.changes_made }}" = "true" ]; then
+        if [ "$CHANGES_MADE" = "true" ]; then
           echo "✅ Non-breaking spaces were fixed in the following files:"
-          echo "${{ steps.fix-nbsp.outputs.files_changed }}"
+          echo "$FILES_CHANGED"
         else
-          if [[ "${{ github.event.head_commit.message }}" == *"[bot] Auto-fix non-breaking spaces"* && \
-                "${{ steps.fix-nbsp.outputs.changes_made }}" == "false" ]]; then
+          if [[ "$COMMIT_MSG" == *"[bot] Auto-fix non-breaking spaces"* && \
+                "$CHANGES_MADE" == "false" ]]; then
             echo "✅ Skipped: Last commit was an auto-fix. No new non-breaking spaces processing was needed."
           else
             echo "✅ No non-breaking spaces were found or no files required changes."
