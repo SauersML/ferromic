@@ -26,10 +26,12 @@ on:
   push:
     branches: [main]
     paths:
+      # Only the code that actually generates replicates. make_report.py just
+      # aggregates committed shards, so editing it must not launch a 60-job
+      # simulation -- doing so once saturated the runner limit and left every
+      # other workflow queued for hours.
       - 'simulations/refsim/refsim.py'
       - 'simulations/refsim/run_grid.py'
-      - 'simulations/refsim/make_report.py'
-      - '.github/workflows/refsim_simulations.yml'
 
 concurrency:
   group: refsim-${{ github.ref }}
@@ -62,7 +64,9 @@ jobs:
     timeout-minutes: 300
     strategy:
       fail-fast: false
-      max-parallel: 20
+      # Capped below the account's concurrent-runner limit so this workflow
+      # cannot starve the others while it runs.
+      max-parallel: 8
       matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
