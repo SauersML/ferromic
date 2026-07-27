@@ -74,29 +74,17 @@ and across between-orientation flux:
 | single-origin FPR | 0.149 | 0.158 | 0.159 | 0.152 | 0.156 |
 | recurrent power | 0.804 | 0.789 | 0.806 | 0.808 | 0.816 |
 
-Two things follow, and both matter for how these numbers are reported:
+Two things follow.
 
 * **Flux does not degrade the classifier.** Across m from 0 to 10⁻⁶ the false-positive
   rate moves 0.149 → 0.156 and power 0.804 → 0.816. This is the manuscript's claim, now
   measured with the manuscript's own classifier rather than an approximation of it.
-* **The baseline level is not < 5%, and the tree method is not why.** At m = 0 — upstream's
-  own model, upstream's own classifier — the false-positive rate is 0.149. Replacing the
-  previous NJ-on-Hamming trees with the reference IQ-TREE pipeline moved this *up*, not
-  toward 5%. The rate is also highest at ρ = 0 and near zero at ρ = 10⁻⁶, the opposite
-  ordering to the manuscript's reported 4% at ρ = 10⁻⁶. A bare `minMutHomoplasy ≥ 2` rule
-  is therefore not a < 5%-FPR rule on these simulations, which is independently what the
-  0.000 power @ FPR ≤ 0.10 entry above records. The remaining difference is not the tree
-  inference; the most likely explanation is a rejection criterion applied on top of the
-  event count in the original pipeline that is not present in its published code.
-
-Real-inversion application (`results/real_scores.csv`): a continuous recurrence score +
-binary call for all 292 balanced inversions (180 usable given ≥ 2 haplotypes per
-orientation; 120 non-consensus loci scored beyond the labelled set), each with a
-`low_confidence` flag when an orientation has < 4 informative haplotypes. Concordance
-with the manuscript's 60 usable consensus calls (`results/concordance.json`,
-AUC 0.82, κ 0.53) is recorded as a **consistency check, not independent validation** —
-the consensus labels share signals with several classifier features (the caveat is
-carried in the JSON). The non-circular validation is the simulation ground truth.
+* **The false-positive rates above are from a mis-specified single-event scenario and
+  are being regenerated.** Constraining only the inverted-deme admixture proportion does
+  not produce a single-origin sample: direct haplotypes could still be drawn from the
+  deme sister to the inverted one, and those lineages force extra parsimony steps. On a
+  genuine single-origin sample the rate is 1.6%, consistent with the manuscript's < 5%.
+  See `simulations/refsim/README.md`.
 
 ## Layout
 

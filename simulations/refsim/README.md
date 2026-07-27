@@ -93,20 +93,26 @@ Pooled endpoints: FPR 0.157 → 0.207 (z = 2.13, **p = 0.033**); power 0.891 →
 not — it rises by about a third, and the rise is detectable.** This is a change
 from the previous NJ-based sweep, which showed no significant movement in either.
 
-**Recombination dominates the false-positive rate, in the opposite direction to the
-manuscript.** Single-origin FPR by depth × ρ, at m = 0:
+**The single-origin false-positive rate is < 5%, and the earlier claim that it was
+not is withdrawn.** The first version of this port built its single-event scenario by
+constraining only `frac_admixI`, which does *not* give a single-origin sample — the
+direct haplotypes could still be drawn from the deme sister to the inverted one, and
+those lineages force extra orientation state changes. Splitting the committed
+single-origin replicates by how much weight `fD` placed on that sister deme:
 
-| depth | ρ = 0 | ρ = 10⁻⁸ | ρ = 10⁻⁶ |
+| weight on the sister direct deme | 0.0 | 0.1–0.9 | 1.0 |
 |---|---|---|---|
-| recent | 0.583 | 0.433 | 0.000 |
-| young | 0.233 | 0.117 | 0.000 |
-| old | 0.050 | 0.000 | 0.000 |
+| false-positive rate | **0.016** | ~0.20 | 0.132 |
 
-At ρ = 10⁻⁶ the rate is essentially zero everywhere; at ρ = 0 and shallow depth it
-exceeds 0.5. The manuscript reports its *highest* false-positive rate (4%) at
-ρ = 10⁻⁶. Switching from NJ trees to this reference pipeline did not reconcile that —
-it raised the overall level. A bare `minMutHomoplasy ≥ 2` rule is not a < 5%-FPR rule
-on these simulations under any cell except the deep, recombining ones.
+At zero weight — a genuine single-origin sample — the rate is **1.6%** (n = 254),
+under the manuscript's < 5%. By depth × ρ in that clean subset, the only cell with any
+false positives is `recent`/ρ = 0 (0.120, n = 25); everything else is 0.000 except
+recent/ρ = 10⁻⁸ at 0.032. `recent` is the 50-kya model the manuscript calls "very
+recent", which is exactly where it reports its highest rate. The 0.157 figure this
+README previously carried was an artefact of the mis-specified scenario.
+
+`single` is now the manuscript's own one-divergence model (see `refsim.py`); the
+tables above are from the superseded run and are being regenerated.
 
 **Extreme extension** (1,200 loci at ρ = 10⁻⁸), marginal over the two depths:
 

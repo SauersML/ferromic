@@ -95,26 +95,26 @@ different thresholds over different denominators rather than a contradiction, bu
 only one pair of numbers should appear in the paper, and it should be the pair
 the released tables support.
 
-## Recurrence simulation false-positive rate
+## Recurrence simulation false-positive rate — the manuscript is reproducible
 
-The manuscript's "< 5%" is not reproduced by the upstream pipeline itself. Scoring
-11,250 loci through `simulations/refsim/` — a step-for-step port of
-hsiehphLab/inversionSimulation — the single-origin false-positive rate of
-`minMutHomoplasy ≥ 2` is **0.155** overall and **0.149** at zero flux, which is
-upstream's own model. Replacing the previous NJ trees with the reference IQ-TREE
-pipeline moved this *up*, not toward 5%, so the tree method is not the explanation.
-The rate is also highest at ρ = 0 (0.266) and near zero at ρ = 10⁻⁶ (0.004), the
-opposite ordering to the manuscript's reported 4% at ρ = 10⁻⁶.
+**This entry previously said the manuscript's "< 5%" could not be reproduced. That was
+wrong, and the cause was a bug in our port, not in the manuscript.**
 
-What does hold, and is now measured with the manuscript's own classifier: across
-m_flux 0 → 10⁻⁶ the false-positive rate moves 0.149 → 0.156 and power 0.804 → 0.816.
-The extreme-flux extension locates the breakdown between 10⁻⁵ and 10⁻⁴, above the
-whole swept range, which is why the sweep is flat.
+The single-event scenario had been built by constraining only the inverted-deme
+admixture proportion, which still allowed direct haplotypes to be drawn from the deme
+*sister* to the inverted one. Those lineages enter the inverted clade's ancestor and
+force extra parsimony steps — false positives manufactured by the sampling scheme.
+Splitting the committed single-origin replicates by the weight placed on that sister
+deme: 0.016 at zero weight, ~0.20 at any positive weight.
 
-The most likely explanation for the remaining gap is a rejection criterion applied on
-top of the event count in the original pipeline that is not present in its published
-code. Until that is identified, the flux result should be reported as a relative
-statement (flux does not degrade the classifier) rather than against a "< 5%" baseline.
+At zero weight — a genuine single-origin sample — the false-positive rate is **1.6%**
+(n = 254), under the manuscript's < 5%, and the only depth showing any false positives
+is the 50-kya "very recent" model, which is where the manuscript reports its highest
+rate. The single-event model is now the manuscript's own one-divergence model and the
+full grid is being regenerated; the corrected numbers will replace these.
+
+The flux conclusion is unaffected either way, since it is a comparison across flux
+levels within the same scenario.
 
 ## AGES multiple-testing correction — say which one
 
