@@ -26,6 +26,7 @@ import subprocess
 import sys
 import warnings
 import zipfile
+import re
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
@@ -780,6 +781,128 @@ OMEGA_IDENT_COLUMN_DEFS = {
     "clade_with_higher_omega2": "Which clade carries the larger divergent-class omega.",
     "not_identifiable_flags": "Reasons the estimate is not identifiable (boundary omega, negligible site class).",
 }
+
+
+# --------------------------------------------------------------------------- #
+# Canonical inversion naming (Reviewer 2 #11)
+# --------------------------------------------------------------------------- #
+
+_CANON_COL = "inversion"
+
+
+def _canonical_locus_map() -> Dict[str, str]:
+    """Map every identifier style in the catalog to canonical ``chr:start-end``.
+
+    Sheets identify loci four different ways -- explicit chrom/start/end columns,
+    the Porubsky ``chrN-start-INV-length`` OrigID, an underscore-joined
+    ``chrN_start_end`` region key, and ``chr:start-end`` itself. The OrigID's
+    coordinates are *not* the analysed locus coordinates, so it has to be mapped
+    through the catalog rather than reformatted.
+    """
+    mapping: Dict[str, str] = {}
+    path = DATA_DIR / "inv_properties.tsv"
+    if not path.exists():
+        return mapping
+    inv = pd.read_csv(path, sep="\t", dtype=str).rename(columns=lambda c: c.strip())
+    for _, r in inv.iterrows():
+        chrom = str(r.get("Chromosome", "")).strip()
+        start, end = str(r.get("Start", "")).strip(), str(r.get("End", "")).strip()
+        if not chrom or not start or not end:
+            continue
+        if not chrom.startswith("chr"):
+            chrom = f"chr{chrom}"
+        try:
+            canon = f"{chrom}:{int(float(start))}-{int(float(end))}"
+        except ValueError:
+            continue
+        for key in (canon, f"{chrom}_{int(float(start))}_{int(float(end))}",
+                    str(r.get("OrigID", "")).strip()):
+            if key:
+                mapping[key] = canon
+    return mapping
+
+
+def _normalise_locus_token(token: str, locus_map: Dict[str, str]):
+    """Coerce any locus identifier style to canonical ``chr:start-end``.
+
+    Handles ``chrN:start-end``, bare ``N:start-end`` (Tables S10/S11/S17),
+    ``chrN_start_end`` (the PAML region key) and the Porubsky
+    ``chrN-start-INV-length`` OrigID, whose coordinates differ from the analysed
+    locus and so must go through the catalog rather than be reformatted.
+    """
+    if token is None:
+        return pd.NA
+    t = str(token).strip()
+    if not t or t.upper() == "NA":
+        return pd.NA
+    if t in locus_map:
+        return locus_map[t]
+    if not t.startswith("chr"):
+        prefixed = f"chr{t}"
+        if prefixed in locus_map:
+            return locus_map[prefixed]
+        t = prefixed
+    m = re.match(r"^(chr[\w]+)[:_](\d+)[-_](\d+)$", t)
+    if m:
+        canon = f"{m.group(1)}:{int(m.group(2))}-{int(m.group(3))}"
+        return locus_map.get(canon, canon)
+    return locus_map.get(t, pd.NA)
+
+
+def _add_canonical_inversion_column(df: pd.DataFrame,
+                                    locus_map: Dict[str, str]) -> pd.DataFrame:
+    """Prepend (or normalise) a canonical ``inversion`` column, Reviewer 2 #11.
+
+    Sheets identify loci four different ways. Original identifier columns are kept
+    so nothing becomes untraceable; this only guarantees that one consistently
+    formatted column exists and reads the same in every table.
+    """
+    if df.empty:
+        return df
+    cols = {str(c).strip().lower(): c for c in df.columns}
+
+    def pick(*names):
+        for n in names:
+            if n in cols:
+                return cols[n]
+        return None
+
+    chrom_c = pick("chromosome", "chr", "chrom", "chr_std")
+    start_c = pick("start", "region_start", "inv_start")
+    end_c = pick("end", "region_end", "inv_end")
+
+    canon = None
+    if chrom_c and start_c and end_c:
+        def build(row):
+            try:
+                c = str(row[chrom_c]).strip()
+                if not c or c.upper() == "NA":
+                    return pd.NA
+                if not c.startswith("chr"):
+                    c = f"chr{c}"
+                return f"{c}:{int(float(row[start_c]))}-{int(float(row[end_c]))}"
+            except (TypeError, ValueError):
+                return pd.NA
+        canon = df.apply(build, axis=1)
+    else:
+        for cand in ("inversion", "inversion id", "inv_id", "origid", "region",
+                     "inversion_region", "locus", "inversion_id"):
+            col = pick(cand)
+            if col is None:
+                continue
+            mapped = df[col].map(lambda v: _normalise_locus_token(v, locus_map))
+            if mapped.notna().sum() >= max(1, int(0.5 * len(df))):
+                canon = mapped
+                break
+
+    if canon is None or canon.notna().sum() == 0:
+        return df
+    out = df.copy()
+    if _CANON_COL in out.columns:
+        out[_CANON_COL] = canon                 # normalise in place
+        return out
+    out.insert(0, _CANON_COL, canon)
+    return out
 
 
 @dataclass
@@ -1635,6 +1758,7 @@ def _load_simulation_table(path: Path) -> pd.DataFrame:
 def build_workbook(output_path: Path) -> None:
     sheet_infos: List[SheetInfo] = []
     sheet_frames: List[pd.DataFrame] = []
+    _LOCUS_MAP = _canonical_locus_map()
 
     def _finalize_frame_for_output(df: pd.DataFrame) -> pd.DataFrame:
         """Return a copy of ``df`` with missing values filled for display.
@@ -1656,6 +1780,7 @@ def build_workbook(output_path: Path) -> None:
         sheet_infos.append(sheet)
         print(f"Preparing sheet: {sheet.name}")
         df = sheet.loader()
+        df = _add_canonical_inversion_column(df, _LOCUS_MAP)
         sheet_frames.append(_finalize_frame_for_output(df))
 
     register(

@@ -29,11 +29,39 @@ an outlier" from "the whole linked region carries the signal" -- it cannot
 distinguish an effect of the inversion from an effect of a linked variant, and
 nothing in the AGES data can.
 
+Multiple testing -- deliberately none applied here
+--------------------------------------------------
+No correction is applied across the SNPs in this table, and that is a considered
+choice rather than an omission.
+
+Benjamini-Hochberg would be wrong: BH assumes the tests are separate opportunities
+to find something, whereas these SNPs are chosen *because* they tag the same
+inversion and are therefore in strong LD. They are one signal observed through
+several near-duplicate windows, so correcting across them would both be
+statistically unjustified and imply a second, independent discovery analysis that
+was never performed.
+
+But raw ``P_X`` is not comparable across SNPs either: it depends on allele
+frequency and on how well the SNP tags the inversion, so a SNP with weaker tagging
+gets a larger p for exactly the same underlying selection. Comparing p-values
+across the rows of this table would therefore be reading noise.
+
+What *is* comparable is the effect estimate on a common scale. Use
+``ages_S_inverted_allele`` with ``ages_S_ci_lo`` / ``ages_S_ci_hi`` (the 95% Wald
+interval, also aligned to the inverted allele): the claim this table supports is
+that the estimates agree in sign and magnitude across the locus, not that each SNP
+independently clears a threshold. The printed summary reports sign concordance and
+the estimate range for that reason.
+
+**The manuscript's inference is untouched.** Its q-values are Benjamini-Hochberg
+across the inversion candidate set -- one best tagging SNP per locus, which *are*
+separate loci and so a legitimate family -- and this table neither changes nor
+re-derives them.
+
 On ``ages_FDR``: that column is AGES's own genome-wide correction across every
 SNP in their scan, so it is large even for small ``P_X`` (rs4268452 at 10q22.3:
-P_X = 7.2e-05, AGES FDR = 0.37). The manuscript's q-values are Benjamini-Hochberg
-across the inversion candidate set only, which is a different and much smaller
-family. Both are legitimate; whichever is quoted must be named explicitly.
+P_X = 7.2e-05, AGES FDR = 0.37). Both it and the manuscript's BH are legitimate
+for their own family; whichever is quoted must be named explicitly.
 
 Inputs
   data/tagging_snps.tsv                          per-locus tagging SNP table
@@ -145,12 +173,16 @@ def collect(regions, segments, top_n, tagging_tsv=TAGGING_TSV):
     for region, kind, res, key in picks:
         srow = lookup.get(key)
         sign = 0 if srow is None else _alt_orientation_sign(res.row, srow.get("ALT"))
-        s_raw = None
+        s_raw = se_raw = None
         if srow is not None:
             try:
                 s_raw = float(srow.get("S"))
             except (TypeError, ValueError):
                 s_raw = None
+            try:
+                se_raw = float(srow.get("SE"))
+            except (TypeError, ValueError):
+                se_raw = None
         rows.append({
             "region": region,
             "selection_kind": kind,
@@ -168,6 +200,10 @@ def collect(regions, segments, top_n, tagging_tsv=TAGGING_TSV):
             "ages_S": "" if srow is None else srow.get("S", ""),
             "ages_S_inverted_allele": ("" if (s_raw is None or sign == 0)
                                        else round(s_raw * sign, 8)),
+            "ages_S_ci_lo": ("" if (s_raw is None or sign == 0 or se_raw is None)
+                             else round(s_raw * sign - 1.96 * se_raw, 8)),
+            "ages_S_ci_hi": ("" if (s_raw is None or sign == 0 or se_raw is None)
+                             else round(s_raw * sign + 1.96 * se_raw, 8)),
             "ages_SE": "" if srow is None else srow.get("SE", ""),
             "ages_P_X": "" if srow is None else srow.get("P_X", ""),
             "ages_FDR": "" if srow is None else srow.get("FDR", ""),
@@ -213,7 +249,11 @@ def main(argv=None):
             if len(strong):
                 sp = int((strong > 0).sum())
                 print(f"    restricted to |r| >= 0.5: {sp} positive, "
-                      f"{len(strong) - sp} negative (n = {len(strong)})")
+                      f"{len(strong) - sp} negative (n = {len(strong)}); "
+                      f"estimates {strong.min():+.5f} to {strong.max():+.5f}")
+                print("    (no multiple-testing correction across these SNPs -- they tag "
+                      "one inversion\n     and are not independent tests; compare the "
+                      "estimates, not the p-values)")
     return 0
 
 
