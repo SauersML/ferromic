@@ -74,12 +74,17 @@ efficient_pca = { git = "https://github.com/SauersML/efficient_pca" }
 [profile.release]
 lto = true
 codegen-units = 1
-panic = 'abort'
+# No `panic = 'abort'` here. ferromic ships a PyO3 extension module, and PyO3
+# turns a Rust panic into a Python exception by catching the unwind; with
+# panic=abort a panic tears down the whole interpreter instead. It also made
+# nightly rustc ICE in codegen_ssa when combined with linker-plugin-lto
+# ("not immediate: OperandRef(Uninit ...)", compiling tokio), which is what
+# broke the Benchmarks workflow.
 
 [profile.bench]
 lto = true
 codegen-units = 1
-panic = 'abort'
+# Cargo ignores `panic` for the bench profile anyway and warns when it is set.
 
 [[bin]]
 name = "ferromic"
