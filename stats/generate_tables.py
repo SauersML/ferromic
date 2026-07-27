@@ -900,9 +900,11 @@ def _add_canonical_inversion_column(df: pd.DataFrame,
     out = df.copy()
     if _CANON_COL in out.columns:
         out[_CANON_COL] = canon                 # normalise in place
-        return out
-    out.insert(0, _CANON_COL, canon)
-    return out
+    else:
+        out.insert(0, _CANON_COL, canon)
+    # Always first, so the same identifier sits in the same place in every table.
+    ordered = [_CANON_COL] + [c for c in out.columns if c != _CANON_COL]
+    return out[ordered]
 
 
 @dataclass

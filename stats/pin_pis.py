@@ -65,6 +65,13 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+# Shared figure style so panels across the paper read as one system.
+try:
+    from stats._figstyle import apply as _apply_figstyle
+    _apply_figstyle()
+except Exception:  # style is cosmetic; never let it break a run
+    pass
+
 import sys as _sys
 _sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # Single source of truth for codon-aware diversity (shared with four_fold_pi.py):

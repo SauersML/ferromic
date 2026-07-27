@@ -158,44 +158,81 @@ def write_md(cs, path, rows=None):
 
 
 def plot(cs, path):
+    """Two panels: false-positive rate and power, against flux.
+
+    Colour encodes inversion age and line style encodes recombination rate, so
+    the two factors are separable at a glance rather than nine indistinguishable
+    series. One shared legend, split into its two parts, sits below the panels;
+    the 5% reference line appears only on the false-positive panel, where it
+    means something.
+    """
     FLUX = flux_values(cs)
+    import os
+    import sys
+
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    from matplotlib.lines import Line2D
 
+    sys.path.insert(0, os.path.dirname(os.path.dirname(
+        os.path.dirname(os.path.abspath(__file__)))))
+    try:
+        from stats._figstyle import CATEGORICAL
+        from stats._figstyle import apply as _apply_style
+        _apply_style()
+        depth_color = {"recent": CATEGORICAL[0], "young": CATEGORICAL[1],
+                       "old": CATEGORICAL[2]}
+    except Exception:
+        depth_color = {"recent": "tab:green", "young": "tab:orange", "old": "tab:blue"}
+
+    rhos = sorted({c["rho"] for c in cs})
+    rho_style = {r: st for r, st in zip(rhos, ["-", "--", ":"])}
     xticks = [max(m, 3e-10) for m in FLUX]
-    xlabels = ["0", "1e-9", "1e-8", "1e-7", "1e-6"]
-    styles = {0.0: "-", 1e-8: "--", 1e-6: ":"}
-    colors = {"recent": "tab:blue", "young": "tab:green", "old": "tab:red"}
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    xlabels = ["0"] + [f"{m:.0e}".replace("e-0", "e-") for m in FLUX[1:]]
+
+    fig, axes = plt.subplots(1, 2, figsize=(9.5, 4.0), sharey=True)
     for ax, sc, title, ylab in (
-            (axes[0], "single", "Single-origin: false-positive rate", "FPR"),
-            (axes[1], "recurrent", "Recurrent: detection rate", "power")):
+            (axes[0], "single", "Single-origin: false-positive rate", "rate"),
+            (axes[1], "recurrent", "Recurrent: detection rate", "")):
         for depth in DEPTH_ORDER:
-            for rho in sorted({c["rho"] for c in cs}):
+            for rho in rhos:
                 row = _grid(cs, sc, rho, depth, FLUX)
                 if not any(row):
                     continue
                 ax.plot(xticks,
                         [c["recurrent_call_rate"] if c else float("nan") for c in row],
-                        marker="o", ls=styles.get(rho, "-"),
-                        color=colors.get(depth, "k"),
-                        label=f"{depth}, rho={rho:.0e}")
+                        marker="o", ls=rho_style.get(rho, "-"),
+                        color=depth_color.get(depth, "#666666"))
         ax.set_xscale("log")
         ax.set_xticks(xticks)
         ax.set_xticklabels(xlabels)
-        ax.set_xlabel("between-orientation flux m (per lineage per generation)")
-        ax.set_ylabel(ylab)
-        ax.set_ylim(-0.03, 1.03)
+        ax.set_xlabel("between-orientation flux $m$\n(per lineage per generation)")
         ax.set_title(title)
-        ax.axhline(0.05, color="gray", lw=0.7, ls=":")
-        ax.legend(fontsize=7)
-    fig.suptitle("Between-orientation flux and the Porubsky et al. recurrence classifier\n"
-                 "(IQ-TREE ML tree + Fitch parsimony, hsiehphLab/inversionSimulation)",
-                 fontsize=12)
-    fig.tight_layout()
-    fig.savefig(path, dpi=150)
+        ax.set_ylim(-0.03, 1.03)
+        if ylab:
+            ax.set_ylabel(ylab)
+    # The 5% line is a false-positive benchmark; it says nothing about power.
+    axes[0].axhline(0.05, color="#999999", lw=0.8, ls=":", zorder=0)
+    axes[0].annotate("5%", xy=(xticks[0], 0.05), xytext=(0, 4),
+                     textcoords="offset points", fontsize=7, color="#666666")
+
+    handles = [Line2D([], [], color=depth_color[d], lw=2,
+                      label={"recent": "50 kya", "young": "100 kya",
+                             "old": "250 kya"}.get(d, d))
+               for d in DEPTH_ORDER if d in depth_color]
+    handles += [Line2D([], [], color="#444444", lw=1.6, ls=rho_style[r],
+                       label=f"$\\rho$ = {'0' if r == 0 else f'{r:.0e}'}")
+                for r in rhos]
+    fig.legend(handles=handles, loc="lower center", ncol=len(handles),
+               bbox_to_anchor=(0.5, -0.02), columnspacing=1.4, handlelength=2.2)
+    fig.suptitle("Between-orientation flux and the reference recurrence classifier",
+                 y=1.0)
+    fig.tight_layout(rect=(0, 0.07, 1, 0.97))
+    fig.savefig(path)
+    plt.close(fig)
     print("wrote", path)
+
 
 
 def main(argv=None):

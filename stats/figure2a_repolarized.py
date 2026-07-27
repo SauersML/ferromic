@@ -23,6 +23,13 @@ from pathlib import Path
 import matplotlib as mpl
 mpl.use("Agg")
 import matplotlib.pyplot as plt
+
+# Shared figure style so panels across the paper read as one system.
+try:
+    from stats._figstyle import apply as _apply_figstyle
+    _apply_figstyle()
+except Exception:  # style is cosmetic; never let it break a run
+    pass
 from matplotlib.colors import TwoSlopeNorm
 import numpy as np
 import pandas as pd

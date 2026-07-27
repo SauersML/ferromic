@@ -72,6 +72,13 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+# Shared figure style so panels across the paper read as one system.
+try:
+    from stats._figstyle import apply as _apply_figstyle
+    _apply_figstyle()
+except Exception:  # style is cosmetic; never let it break a run
+    pass
+
 # Reuse the EXACT model construction / data loading from the primary analysis so
 # that calibration is testing the same estimator the paper reports.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

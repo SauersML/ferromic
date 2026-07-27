@@ -8,7 +8,7 @@ wholeCDS	paired Wilcoxon (inverted vs direct, log1p)	single	7	0.0001895858755075
 wholeCDS	paired Wilcoxon (inverted vs direct, log1p)	recurrent	19	0.0002653927813163	0.0001782054709079	66.0	0.9176315934670087
 wholeCDS	Mann-Whitney U (delta: single vs recurrent)	single_vs_recurrent	26			60.5	0.7501169137201418
 wholeCDS	Mann-Whitney U (direct: single vs recurrent)	single_vs_recurrent	26	0.0001895858755075		63.5	0.8844023235967865
-wholeCDS	Mann-Whitney U (inverted: single vs recurrent)	single_vs_recurrent	26		0.0001782054709079	58.5	0.6640720486479236
+wholeCDS	Mann-Whitney U (inverted: single vs recurrent)	single_vs_recurrent	26		0.0001782054709079	58.5	0.6640720486479237
 wholeLocus	paired Wilcoxon (inverted vs direct, log1p)	single	7	0.000469	0.000242	6.0	0.21875
 wholeLocus	paired Wilcoxon (inverted vs direct, log1p)	recurrent	19	0.000453	0.000512	86.0	0.7380905151367188
 wholeLocus	Mann-Whitney U (delta: single vs recurrent)	single_vs_recurrent	26			46.0	0.2542110063849194
