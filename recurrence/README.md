@@ -43,12 +43,51 @@ Held-out simulation metrics (30% of 11,250 labelled loci, spanning every axis ce
 
 | Classifier | AUC | Power @ FPR ≤ 0.10 | Brier |
 |---|---|---|---|
-| full (13-feature) | 0.927 | 0.826 | 0.102 |
-| transferable (8-feature) | 0.890 | 0.810 | 0.117 |
-| parsimony-count rule (≥ 2 origins) | 0.794 | **0.000** | 0.206 |
+| full (13-feature) | 0.913 | 0.837 | 0.105 |
+| transferable (8-feature) | 0.914 | 0.840 | — |
+| reference parsimony rule (≥ 2 origins) | 0.831 | **0.000** | — |
 
-The parsimony-count baseline has zero power in the low-FPR region the classifier
-targets; the learned model is what recovers it.
+The reference rule has zero power in the low-FPR region the classifier targets, because
+its own false-positive rate on these simulations is **0.155**, well above 0.10 — see
+below. The learned model is what recovers power there.
+
+### What the reference classifier does on this grid
+
+Scoring all 11,250 loci through the upstream pipeline (`simulations/refsim/`):
+
+| | single-origin FPR | recurrent power |
+|---|---|---|
+| overall | **0.155** | **0.805** |
+
+by recombination rate (single-origin FPR):
+
+| depth | ρ = 0 | ρ = 10⁻⁸ | ρ = 10⁻⁶ |
+|---|---|---|---|
+| recent | 0.502 | 0.459 | 0.013 |
+| young | 0.243 | 0.117 | 0.000 |
+| old | 0.051 | 0.008 | 0.000 |
+
+and across between-orientation flux:
+
+| m_flux | 0 | 10⁻⁹ | 10⁻⁸ | 10⁻⁷ | 10⁻⁶ |
+|---|---|---|---|---|---|
+| single-origin FPR | 0.149 | 0.158 | 0.159 | 0.152 | 0.156 |
+| recurrent power | 0.804 | 0.789 | 0.806 | 0.808 | 0.816 |
+
+Two things follow, and both matter for how these numbers are reported:
+
+* **Flux does not degrade the classifier.** Across m from 0 to 10⁻⁶ the false-positive
+  rate moves 0.149 → 0.156 and power 0.804 → 0.816. This is the manuscript's claim, now
+  measured with the manuscript's own classifier rather than an approximation of it.
+* **The baseline level is not < 5%, and the tree method is not why.** At m = 0 — upstream's
+  own model, upstream's own classifier — the false-positive rate is 0.149. Replacing the
+  previous NJ-on-Hamming trees with the reference IQ-TREE pipeline moved this *up*, not
+  toward 5%. The rate is also highest at ρ = 0 and near zero at ρ = 10⁻⁶, the opposite
+  ordering to the manuscript's reported 4% at ρ = 10⁻⁶. A bare `minMutHomoplasy ≥ 2` rule
+  is therefore not a < 5%-FPR rule on these simulations, which is independently what the
+  0.000 power @ FPR ≤ 0.10 entry above records. The remaining difference is not the tree
+  inference; the most likely explanation is a rejection criterion applied on top of the
+  event count in the original pipeline that is not present in its published code.
 
 Real-inversion application (`results/real_scores.csv`): a continuous recurrence score +
 binary call for all 292 balanced inversions (180 usable given ≥ 2 haplotypes per

@@ -73,8 +73,13 @@ def merge(patterns, out=None):
     df = pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
     n_all = len(df)
     if "error" in df.columns:
-        failed = df["error"].astype(str).str.strip().replace("nan", "")
-        df = df[failed == ""].drop(columns=["error"])
+        # A replicate failed iff `error` is both present and non-empty. Test that
+        # directly: when every replicate succeeded the whole column is empty, so
+        # pandas types it float64 NaN and any string comparison silently matches
+        # nothing (or, worse, everything).
+        err = df["error"]
+        failed = err.notna() & (err.astype(str).str.strip() != "")
+        df = df[~failed].drop(columns=["error"])
     if len(df) != n_all:
         print(f"dropped {n_all - len(df)} failed replicates")
     df = df.sort_values("seed", kind="mergesort").reset_index(drop=True)
