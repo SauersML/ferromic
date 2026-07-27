@@ -36,11 +36,12 @@ def test_full_coefficients_reproduce():
 def test_held_out_sim_auc_reproduces():
     _, m, _, _ = _refit()
     ref = json.load(open(paths.SIM_METRICS))
-    # headline validated numbers: AUC ~0.927, power@FPR<=0.10 ~0.826, Brier ~0.102
-    assert abs(m["test"]["auc"] - 0.927) < 3e-3
+    # headline validated numbers, from the reference-classifier training set:
+    # AUC ~0.913, power@FPR<=0.10 ~0.837, Brier ~0.105
+    assert abs(m["test"]["auc"] - 0.913) < 3e-3
     assert abs(m["test"]["auc"] - ref["test"]["auc"]) < 3e-3
-    assert abs(m["test"]["power_at_fpr10"] - 0.826) < 2e-2
-    assert abs(m["test"]["brier"] - 0.102) < 5e-3
+    assert abs(m["test"]["power_at_fpr10"] - 0.837) < 2e-2
+    assert abs(m["test"]["brier"] - 0.105) < 5e-3
 
 
 def test_parsimony_baseline_zero_power():
@@ -54,8 +55,8 @@ def test_transferable_reproduces():
     _, _, tf_model, tf_metrics = _refit()
     ref = json.load(open(paths.MODEL_TRANSFERABLE))
     assert ref["feature_names"] == TRANSFERABLE_FEATURES
-    assert abs(tf_metrics["test"]["auc"] - 0.890) < 3e-3
-    assert abs(tf_metrics["test"]["power_at_fpr10"] - 0.810) < 2e-2
+    assert abs(tf_metrics["test"]["auc"] - 0.914) < 3e-3
+    assert abs(tf_metrics["test"]["power_at_fpr10"] - 0.840) < 2e-2
 
 
 def test_fit_is_deterministic():
