@@ -65,3 +65,7 @@ data/models/*.snps.json
 
 # Large LFS artifact staged locally for pipeline runs; never commit (1.3GB)
 data/phy_outputs.zip
+
+# Downloaded AGES selection summary statistics (1.8 GB); fetched on demand
+# by scripts/extract_best_tagging_snp.py::ensure_selection_data
+data/selection_data/

@@ -22,8 +22,9 @@ Inputs
   data/tagging_snps.tsv                          per-locus tagging SNP table
   data/selection_data/Selection_Summary_Statistics_01OCT2025.tsv
                                                  AGES summary statistics (hg19)
-The selection file is ~1.8 GB; it is streamed and pre-filtered to the
-chromosomes actually needed before anything is loaded into memory.
+The 1.8 GB selection file is read through ``batch_best_tagging_snps.load_selection_subset``,
+the same chunked streaming loader the single-best-SNP script uses, so only the
+requested positions are ever materialised.
 
 Output
   data/ages_multi_tag_snps.tsv
@@ -31,10 +32,7 @@ Output
 from __future__ import annotations
 
 import argparse
-import os
-import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 import pandas as pd
@@ -44,9 +42,13 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 import scripts.extract_best_tagging_snp as ebts  # noqa: E402
-from scripts.extract_best_tagging_snp import (parse_region,  # noqa: E402
+from scripts.extract_best_tagging_snp import (ensure_selection_data,  # noqa: E402
                                               select_segment_bests,
                                               select_top_tags)
+# The chunked streaming loader already used by the single-best-SNP batch script.
+# Reused rather than reimplemented: it filters to the exact (chrom, pos) keys
+# requested, so the 1.8 GB AGES table is never held in memory.
+from stats.batch_best_tagging_snps import load_selection_subset  # noqa: E402
 
 ebts.OUTPUT_DIR = Path("data")
 ebts.SELECTION_DIR = ebts.OUTPUT_DIR / "selection_data"
@@ -64,86 +66,62 @@ DEFAULT_REGIONS = [
     "chr7:54234014-54308393",     # 7p11.2
 ]
 
-SEL_COLS = ["CHROM", "POS", "REF", "ALT", "ANC", "RSID", "AF", "S", "SE",
-            "X", "P_X", "POSTERIOR", "FDR", "FILTER"]
 
-
-def load_selection_subset(chroms, path=None):
-    """Stream the AGES table, keeping only the chromosomes we need."""
-    path = Path(path or ebts.SELECTION_TSV_PATH)
-    if not path.exists():
-        raise SystemExit(
-            f"AGES selection statistics not found at {path}. Run "
-            "scripts/extract_best_tagging_snp.py once to download them.")
-    wanted = {str(c).removeprefix("chr") for c in chroms}
-    pattern = "|".join(sorted(wanted))
-    with tempfile.NamedTemporaryFile("w", suffix=".tsv", delete=False) as tmp:
-        tmp_path = tmp.name
-    # Header line is the first non-'##' line; keep it plus matching CHROM rows.
-    awk = (r'BEGIN{FS=OFS="\t"} /^##/ {next} '
-           r'!hdr {print; hdr=1; next} '
-           r'{c=$1; sub(/^chr/,"",c); if (c ~ /^(' + pattern + r')$/) print}')
-    with open(tmp_path, "w") as out:
-        subprocess.run(["awk", awk, str(path)], stdout=out, check=True)
-    df = pd.read_csv(tmp_path, sep="\t", low_memory=False)
-    os.unlink(tmp_path)
-    df["CHROM_norm"] = df["CHROM"].astype(str).str.removeprefix("chr")
-    return df
-
-
-def _lookup(sel, chrom, pos):
-    hit = sel[(sel["CHROM_norm"] == str(chrom).removeprefix("chr"))
-              & (sel["POS"] == int(pos))]
-    return None if hit.empty else hit.iloc[0]
+def _pick_snps(regions, segments, top_n, tags):
+    """Best tagging SNP per segment across each locus, plus the top few overall."""
+    picks = []
+    for region in regions:
+        region_df = ebts._prepare_region_df(region, tags)
+        chosen = [("top_overall", r)
+                  for r in select_top_tags(region, tags, top_n=top_n)[0]]
+        for (seg_start, seg_end), res in select_segment_bests(
+                region, region_df, segments=segments):
+            if res is not None:
+                res.context = f"segment {seg_start}-{seg_end}"
+                chosen.append(("segment_best", res))
+        seen = set()
+        for kind, res in chosen:
+            key = (str(res.chromosome_hg37).lstrip("chr"), int(res.position_hg37))
+            if key in seen:
+                continue
+            seen.add(key)
+            picks.append((region, kind, res, key))
+    return picks
 
 
 def collect(regions, segments, top_n, tagging_tsv=TAGGING_TSV):
     if not tagging_tsv.exists():
         raise SystemExit(f"tagging SNP table not found at {tagging_tsv}")
     tags = ebts.load_tagging_snps(tagging_tsv)
+    picks = _pick_snps(regions, segments, top_n, tags)
 
-    chroms = {parse_region(r)[0] for r in regions}
-    print(f"Loading AGES statistics for {sorted(chroms)} ...", flush=True)
-    sel = load_selection_subset(chroms)
-    print(f"  {len(sel):,} AGES rows on those chromosomes", flush=True)
+    keys = pd.DataFrame([{"chrom_norm": k[0], "position_hg37": k[1]}
+                         for *_rest, k in picks]).drop_duplicates()
+    subset = load_selection_subset(keys, ensure_selection_data())
+    lookup = {(row["CHROM_norm"], int(row["POS"])): row
+              for _, row in subset.iterrows()}
 
     rows = []
-    for region in regions:
-        region_df = ebts._prepare_region_df(region, tags)
-        picks = []
-        for res in select_top_tags(region, tags, top_n=top_n)[0]:
-            picks.append(("top_overall", res))
-        for (seg_start, seg_end), res in select_segment_bests(
-                region, region_df, segments=segments):
-            if res is not None:
-                res.context = f"segment {seg_start}-{seg_end}"
-                picks.append(("segment_best", res))
-
-        seen = set()
-        for kind, res in picks:
-            key = (res.chromosome_hg37, res.position_hg37)
-            if key in seen:
-                continue
-            seen.add(key)
-            srow = _lookup(sel, res.chromosome_hg37, res.position_hg37)
-            rows.append({
-                "region": region,
-                "selection_kind": kind,
-                "context": res.context or "",
-                "chrom_hg19": res.chromosome_hg37,
-                "pos_hg19": res.position_hg37,
-                "chrom_hg38": res.chromosome_hg38,
-                "pos_hg38": res.position_hg38,
-                "rsid": "" if srow is None else srow.get("RSID", ""),
-                "r_with_inversion": round(float(res.correlation), 6),
-                "abs_r": round(abs(float(res.correlation)), 6),
-                "ages_S": "" if srow is None else srow.get("S", ""),
-                "ages_SE": "" if srow is None else srow.get("SE", ""),
-                "ages_P_X": "" if srow is None else srow.get("P_X", ""),
-                "ages_FDR": "" if srow is None else srow.get("FDR", ""),
-                "ages_FILTER": "" if srow is None else srow.get("FILTER", ""),
-                "in_ages": "no" if srow is None else "yes",
-            })
+    for region, kind, res, key in picks:
+        srow = lookup.get(key)
+        rows.append({
+            "region": region,
+            "selection_kind": kind,
+            "context": res.context or "",
+            "chrom_hg19": res.chromosome_hg37,
+            "pos_hg19": res.position_hg37,
+            "chrom_hg38": res.chromosome_hg38,
+            "pos_hg38": res.position_hg38,
+            "rsid": "" if srow is None else srow.get("RSID", ""),
+            "r_with_inversion": round(float(res.correlation), 6),
+            "abs_r": round(abs(float(res.correlation)), 6),
+            "ages_S": "" if srow is None else srow.get("S", ""),
+            "ages_SE": "" if srow is None else srow.get("SE", ""),
+            "ages_P_X": "" if srow is None else srow.get("P_X", ""),
+            "ages_FDR": "" if srow is None else srow.get("FDR", ""),
+            "ages_FILTER": "" if srow is None else srow.get("FILTER", ""),
+            "in_ages": "no" if srow is None else "yes",
+        })
     return pd.DataFrame(rows)
 
 
