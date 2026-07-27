@@ -683,6 +683,105 @@ def _load_orientation_methods() -> pd.DataFrame:
     return _prune_columns(df, ORIENTATION_COLUMN_DEFS, "Orientation inference methods")
 
 
+# --------------------------------------------------------------------------- #
+# Revision tables: analysis-set provenance and per-locus power/identifiability
+# --------------------------------------------------------------------------- #
+
+def _load_tsv(path: Path, what: str) -> pd.DataFrame:
+    """Read a committed TSV, failing loudly if the generating script never ran."""
+    if not path.exists():
+        raise SupplementaryTablesError(
+            f"{what} table missing: {path}. Run the script that generates it."
+        )
+    return pd.read_csv(path, sep="\t")
+
+
+def _load_exclusion_reasons() -> pd.DataFrame:
+    return _load_tsv(DATA_DIR / "table_s5_exclusion_reasons.tsv",
+                     "Inversion exclusion-reason")
+
+
+def _load_cds_haplotype_counts() -> pd.DataFrame:
+    return _load_tsv(DATA_DIR / "cds_haplotype_counts.tsv",
+                     "CDS haplotype-count")
+
+
+def _load_sd_recurrence_calls() -> pd.DataFrame:
+    return _load_tsv(DATA_DIR / "recurrence_sd_calls.tsv",
+                     "SD-architecture recurrence")
+
+
+def _load_fourfold_correlations() -> pd.DataFrame:
+    return _load_tsv(DATA_DIR / "four_fold_pi_correlations.tsv",
+                     "4-fold diversity concordance")
+
+
+def _load_omega_identifiability() -> pd.DataFrame:
+    return _load_tsv(DATA_DIR / "paml_extreme_omega_check.tsv",
+                     "Clade-model omega identifiability")
+
+
+EXCLUSION_COLUMN_DEFS = {
+    "OrigID": "Inversion identifier from Porubsky et al. (2022).",
+    "Chromosome": "Chromosome of the inversion.",
+    "Start": "Start coordinate (GRCh38).",
+    "End": "End coordinate (GRCh38).",
+    "verdictRecurrence_hufsah": "Recurrence verdict from the first Porubsky et al. (2022) method.",
+    "verdictRecurrence_benson": "Recurrence verdict from the second Porubsky et al. (2022) method.",
+    "consensus_recurrence": "Consensus classification (single / recurrent), or NA when there is none.",
+    "analysed": "Whether the locus enters the analysis set (yes only when both methods agree).",
+    "exclusion_reason": "Why the locus is excluded: no call from one or both methods, or the two calls disagree.",
+}
+
+CDS_HAPLOTYPE_COLUMN_DEFS = {
+    "gene_name": "Gene symbol.",
+    "transcript_id": "Ensembl transcript identifier of the analysed CDS.",
+    "inversion": "Inversion locus (GRCh38) the gene falls within.",
+    "recurrence": "Consensus recurrence class of that inversion.",
+    "k_dir": "Number of direct-orientation haplotypes contributing this CDS.",
+    "k_inv": "Number of inverted-orientation haplotypes contributing this CDS.",
+    "both_orientations": "Whether the CDS has at least one haplotype in each orientation.",
+    "inv_underpowered_lt4": "Flag for k_inv < 4, where per-gene inverted estimates are poorly determined.",
+}
+
+SD_RECURRENCE_COLUMN_DEFS = {
+    "chr_std": "Chromosome (no 'chr' prefix).",
+    "Start": "Inversion start coordinate (GRCh38).",
+    "End": "Inversion end coordinate (GRCh38).",
+    "sd_size_kbp": "Flanking inverted-repeat (segmental duplication) size in kbp.",
+    "sd_identity_pct": "Flanking inverted-repeat sequence identity (%).",
+    "consensus": "Consensus recurrence label (0 = single-event, 1 = recurrent).",
+    "p_recurrent_insample": "Fitted probability of recurrence from the architecture-only logistic.",
+    "p_recurrent_loo": "Leave-one-out probability, from a model that never saw this locus's label.",
+    "sd_call_insample": "In-sample architecture-only recurrence call at p >= 0.5.",
+    "sd_call_loo": "Leave-one-out architecture-only recurrence call at p >= 0.5.",
+}
+
+FOURFOLD_CORR_COLUMN_DEFS = {
+    "subset": "Locus subset: all loci with 4-fold sites, or those with a consensus recurrence call.",
+    "measure_x": "First diversity measure in the comparison.",
+    "measure_y": "Second diversity measure in the comparison.",
+    "comparison": "Human-readable description of the compared orientation differences.",
+    "n_loci": "Number of loci contributing to the correlation.",
+    "spearman_rho": "Spearman rank correlation between the two orientation differences.",
+    "p_value": "Two-sided p-value for the correlation.",
+}
+
+OMEGA_IDENT_COLUMN_DEFS = {
+    "gene": "Gene symbol.",
+    "transcript": "Transcript identifier used in the PAML run.",
+    "region": "Inversion region containing the gene.",
+    "status": "Whether the PAML run produced complete data.",
+    "overall_p_value": "Clade-model C likelihood-ratio p-value.",
+    "overall_q_value": "Benjamini-Hochberg q-value across genes.",
+    "p2_divergent_class": "Proportion of codons assigned to the divergent site class.",
+    "omega2_direct": "Divergent-class omega for the pooled direct clade.",
+    "omega2_inverted": "Divergent-class omega for the pooled inverted clade.",
+    "clade_with_higher_omega2": "Which clade carries the larger divergent-class omega.",
+    "not_identifiable_flags": "Reasons the estimate is not identifiable (boundary omega, negligible site class).",
+}
+
+
 @dataclass
 class SheetInfo:
     name: str
@@ -1616,6 +1715,55 @@ def build_workbook(output_path: Path) -> None:
 
     register(
         SheetInfo(
+            name="Inversion analysis-set exclusion reasons",
+            description=(
+                "Why each of the 292 balanced inversions of Porubsky et al. (2022) does or does not enter the "
+                "93-locus analysis set. A locus is analysed only when both Porubsky et al. recurrence methods "
+                "returned a call and the two calls agree. Of the 199 excluded, 165 have no call from one method "
+                "(40 of those have no call from either) and 34 have two calls that disagree. Verdicts are given "
+                "under their source column names because the input table does not record which is the tagging-SNP "
+                "method and which the haplotype-based coalescent method."
+            ),
+            column_defs=EXCLUSION_COLUMN_DEFS,
+            loader=_load_exclusion_reasons,
+        )
+    )
+
+    register(
+        SheetInfo(
+            name="SD-architecture recurrence check",
+            description=(
+                "Non-circular recurrence classification from flanking segmental duplication architecture alone. "
+                "Recurrence is called from inverted-repeat size and identity -- structural properties measured from "
+                "assembly alignments, never from haplotype diversity -- so the resulting labels cannot inherit the "
+                "diversity signal they are used to test. Leave-one-out cross-validation means no locus's own "
+                "consensus label enters its own call. Agreement with the consensus is 74.2% in-sample and 73.1% "
+                "leave-one-out. Refitting the orientation-by-recurrence diversity interaction with these labels "
+                "gives fold-change 2.43 (p = 0.022) in-sample and 2.12 (p = 0.051) leave-one-out, against 4.15 "
+                "(p = 5.0e-05) with the consensus labels: the effect survives in direction but attenuates."
+            ),
+            column_defs=SD_RECURRENCE_COLUMN_DEFS,
+            loader=_load_sd_recurrence_calls,
+        )
+    )
+
+    register(
+        SheetInfo(
+            name="4-fold diversity concordance",
+            description=(
+                "Spearman correlations between per-locus orientation differences (inverted minus direct) in "
+                "nucleotide diversity measured three ways: across the whole locus, across whole coding sequence, "
+                "and restricted to 4-fold degenerate sites. A locus contributes only when both orientations "
+                "actually have 4-fold sites. Reported for all such loci and for the subset with a consensus "
+                "recurrence call, which is the subset the paired tests use."
+            ),
+            column_defs=FOURFOLD_CORR_COLUMN_DEFS,
+            loader=_load_fourfold_correlations,
+        )
+    )
+
+    register(
+        SheetInfo(
             name="Orientation inference methods",
             description=(
                 "Descriptive comparison of independent methods for inferring the ancestral vs derived orientation "
@@ -1648,6 +1796,22 @@ def build_workbook(output_path: Path) -> None:
 
     register(
         SheetInfo(
+            name="CDS haplotype counts by orientation",
+            description=(
+                "Number of haplotypes each orientation contributes to every analysed coding sequence. Per-gene "
+                "coding results rest on these counts, and in the single-event arm they are small and highly "
+                "clustered: of the 63 single-event gene entries that have both orientations, 55 have fewer than "
+                "four inverted haplotypes, and they come from only seven inversions -- 17:16823490-18384190 alone "
+                "contributes 24 genes at two inverted haplotypes. Gene counts in that arm are therefore not "
+                "independent replicates."
+            ),
+            column_defs=CDS_HAPLOTYPE_COLUMN_DEFS,
+            loader=_load_cds_haplotype_counts,
+        )
+    )
+
+    register(
+        SheetInfo(
             name="dN/dS (ω) results",
             description=(
                 "Results of the dN/dS (ω) analysis testing for genes with significantly different selective regimes between "
@@ -1656,6 +1820,23 @@ def build_workbook(output_path: Path) -> None:
             ),
             column_defs=PAML_COLUMN_DEFS,
             loader=_load_paml_results,
+        )
+    )
+
+    register(
+        SheetInfo(
+            name="Clade-model omega identifiability",
+            description=(
+                "Identifiability check for the genes with extreme clade-model omega. For each, the proportion of "
+                "codons in the divergent site class and whether either clade's omega sits on PAML's optimiser "
+                "boundary (999). All four fail multiple-testing correction and confine the divergent class to "
+                "roughly one percent of codons or less; MAPT and PRSS55 additionally pin the inverted omega to the "
+                "boundary. The clade carrying the larger value is stated explicitly, since the direction is easy "
+                "to reverse in prose: the pipeline marks pure direct branches #1 and maps PAML branch type 1 to "
+                "the direct column, so omega2_direct really is the direct clade."
+            ),
+            column_defs=OMEGA_IDENT_COLUMN_DEFS,
+            loader=_load_omega_identifiability,
         )
     )
 
