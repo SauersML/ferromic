@@ -23,6 +23,15 @@ on:
         description: 'Commit regenerated results back to main'
         type: boolean
         default: true
+      reps:
+        description: 'Replicates per grid cell. Leave blank for the real grid. Any
+          value here marks the run as a VALIDATION run: results are uploaded as
+          artifacts only, and aggregation and commit are skipped so a cheap smoke
+          test can never overwrite the committed full-grid tables.'
+        default: ''
+      nshards:
+        description: 'Shards to split across (default 20)'
+        default: '20'
   push:
     branches: [main]
     paths:
@@ -39,7 +48,8 @@ concurrency:
 
 env:
   IQTREE_VERSION: 2.2.2.7
-  NSHARDS: 20
+  NSHARDS: ${{ github.event.inputs.nshards || '20' }}
+  REPS: ${{ github.event.inputs.reps || '' }}
 
 jobs:
   plan:
@@ -51,10 +61,11 @@ jobs:
         run: |
           set -euo pipefail
           tasks="${{ github.event.inputs.tasks || 'flux,trainset,extreme' }}"
-          python3 - "$tasks" <<'PY' >> "$GITHUB_OUTPUT"
+          python3 - "$tasks" "${NSHARDS}" <<'PY' >> "$GITHUB_OUTPUT"
           import json, sys
           tasks = [t.strip() for t in sys.argv[1].split(",") if t.strip()]
-          include = [{"task": t, "shard": s} for t in tasks for s in range(20)]
+          n = int(sys.argv[2])
+          include = [{"task": t, "shard": s} for t in tasks for s in range(n)]
           print("matrix=" + json.dumps({"include": include}))
           PY
 
@@ -98,10 +109,15 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p out
+          reps_arg=""
+          if [ -n "${REPS}" ]; then
+            reps_arg="--reps ${REPS}"
+            echo "VALIDATION RUN: --reps ${REPS}; results will not be aggregated or committed"
+          fi
           python simulations/refsim/run_grid.py \
             --task "${{ matrix.task }}" \
             --shard "${{ matrix.shard }}" --nshards "${NSHARDS}" \
-            --procs "$(nproc)" \
+            --procs "$(nproc)" $reps_arg \
             --out "out/${{ matrix.task }}_shard${{ matrix.shard }}.csv"
 
       - uses: actions/upload-artifact@v4
@@ -144,6 +160,7 @@ jobs:
           done
 
       - name: Aggregate the flux and extreme sweeps
+        if: github.event.inputs.reps == ''
         working-directory: simulations/refsim
         run: |
           set -euo pipefail
@@ -161,6 +178,7 @@ jobs:
           fi
 
       - name: Rebuild the training set, then refit and rescore
+        if: github.event.inputs.reps == ''
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -183,7 +201,10 @@ jobs:
           echo "all tracked gzip files intact"
 
       - name: Commit regenerated simulation results
-        if: github.event_name != 'pull_request' && github.event.inputs.commit != 'false'
+        if: >-
+          github.event_name != 'pull_request'
+          && github.event.inputs.commit != 'false'
+          && github.event.inputs.reps == ''
         env:
           PUSH_TOKEN: ${{ secrets.WRITE_TOKEN }}
         run: |
