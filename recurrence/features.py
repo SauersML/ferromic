@@ -137,8 +137,15 @@ def _hudson_fst(G, labels):
     return float(num.sum() / ds)
 
 
-def extract_features(G, labels):
-    """Return dict of features. G:(n,s) 0/1, labels:(n,) {0,1}."""
+def extract_features(G, labels, tree_n_events=None):
+    """Return dict of features. G:(n,s) 0/1, labels:(n,) {0,1}.
+
+    ``tree_n_events`` supplies the orientation origin count when it has already
+    been scored by the reference pipeline (``simulations/refsim``: IQ-TREE ML
+    tree + Fitch parsimony). Leave it ``None`` to score it here from ``G`` via
+    ``parsimony.classify``, which runs the same tree-and-parsimony method on a
+    two-state alignment built from the genotype matrix.
+    """
     G = np.asarray(G, dtype=np.uint8)
     labels = np.asarray(labels, dtype=np.int64)
     n, s = G.shape
@@ -149,7 +156,7 @@ def extract_features(G, labels):
     f = {k: np.nan for k in FEATURE_NAMES}
 
     # tree #events (topology) -- always computable
-    ev = float(_tree_events(G, labels))
+    ev = float(_tree_events(G, labels) if tree_n_events is None else tree_n_events)
     f["tree_n_events"] = ev
     f["log_tree_events"] = float(np.log1p(ev))
     f["log_n_sites"] = float(np.log1p(s))

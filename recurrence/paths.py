@@ -6,11 +6,11 @@ those locations and writes a provenance sidecar next to every generated output, 
 each committed result is traceable to the exact inputs and library versions that
 produced it.
 
-The one genuinely external, optional input is the coalescent-simulation stack
-(``simulations/flux/flux_sim.py`` + msprime), used only by the ``simulate`` stage to
-regenerate the training set. The committed, gzip'd training set
-(``data/sim_features.csv.gz``) lets every downstream stage and every test run without
-msprime.
+The one genuinely external, optional input is the reference simulation pipeline
+(``simulations/refsim/`` + msprime + Biopython + IQ-TREE), used only by the
+``simulate`` stage to regenerate the training set. The committed, gzip'd training
+set (``data/sim_features.csv.gz``) lets every downstream stage and every test run
+without that stack.
 """
 from __future__ import annotations
 

@@ -62,33 +62,53 @@ jobs:
           -not -name "*.so" \
           -not -name "*.dylib" \
           -not -name "*.bin" \
-          -not -name "*.class" > files_to_check.txt
+          -not -name "*.class" \
+          -not -name "*.gz" \
+          -not -name "*.bgz" \
+          -not -name "*.bz2" \
+          -not -name "*.xz" \
+          -not -name "*.zst" \
+          -not -name "*.7z" \
+          -not -name "*.jar" \
+          -not -name "*.wasm" \
+          -not -name "*.parquet" \
+          -not -name "*.npy" \
+          -not -name "*.npz" \
+          -not -name "*.pkl" \
+          -not -name "*.db" \
+          -not -name "*.sqlite" \
+          -not -name "*.tbi" \
+          -not -name "*.csi" \
+          -not -name "*.bai" \
+          -not -name "*.bam" \
+          -not -name "*.cram" \
+          -not -name "*.bcf" \
+          -not -name "*.xlsx" \
+          -not -name "*.docx" \
+          -not -name "*.pptx" > files_to_check.txt
 
         while IFS= read -r file; do
           if [ ! -f "$file" ]; then
             continue
           fi
 
-          file_type_info=$(file "$file" 2>/dev/null)
-          process_this_file=false
-          if echo "$file_type_info" | grep -qiE "text|script|json|xml|html|css|javascript|python|shell|yaml|csv"; then
-            process_this_file=true
-          elif echo "$file_type_info" | grep -qiE "binary|archive|image|audio|video|font|executable.*binary"; then
-            process_this_file=false
-          else
-            if head -c 1024 "$file" 2>/dev/null | LC_ALL=C grep -q '[[:cntrl:]]' && \
-               ! head -c 1024 "$file" 2>/dev/null | LC_ALL=C grep -q $'[\t\n\r]'; then
-              process_this_file=false
-            else
-              process_this_file=true
-            fi
-          fi
-
-          if ! $process_this_file; then
-            echo "INFO: Skipping non-text or binary file: $file"
+          # Binary detection. `grep -I` applies grep's own binary heuristic and
+          # reports no match for a binary file, so this skips exactly what git
+          # would treat as binary. `file --mime-encoding` is a second, agreeing
+          # check.
+          #
+          # The previous `file`-output regex was unsafe: `file` prints a gzip
+          # member's embedded original filename, so `sim_features.csv.gz` was
+          # reported as `... was "sim_features.csv" ...`, matched the "csv"
+          # branch, was treated as text, and had every 0xC2A0 byte pair
+          # rewritten to 0x20 -- silently corrupting all three committed
+          # *.csv.gz files in the 2026-07-14 auto-fix commit (41cdbda0).
+          if ! LC_ALL=C grep -Iq . "$file" 2>/dev/null \
+             || [ "$(file --mime-encoding -b "$file" 2>/dev/null)" = "binary" ]; then
+            echo "INFO: Skipping binary file: $file"
             continue
           fi
-          
+
           # Check if file contains the UTF-8 NBSP byte sequence (c2 a0)
           if hexdump -C "$file" 2>/dev/null | grep -q "c2 a0"; then
             echo "INFO: Processing NBSPs in $file"
@@ -140,6 +160,34 @@ jobs:
           echo "changes_made=false" >> $GITHUB_OUTPUT
           echo "files_changed=" >> $GITHUB_OUTPUT
         fi
+
+    - name: Verify no tracked binary was modified
+      if: steps.fix-nbsp.outputs.changes_made == 'true'
+      run: |
+        set -eo pipefail
+        # Belt and braces: this job must never rewrite a binary. Fail loudly
+        # (before committing) if any modified file is binary, and re-check that
+        # every tracked gzip member still decompresses.
+        bad=0
+        while IFS= read -r f; do
+          [ -f "$f" ] || continue
+          if ! LC_ALL=C grep -Iq . "$f" 2>/dev/null; then
+            echo "FATAL: binary file was modified by the NBSP fixer: $f"
+            bad=1
+          fi
+        done < <(git diff --name-only)
+        while IFS= read -r f; do
+          if ! gzip -t "$f" 2>/dev/null; then
+            echo "FATAL: corrupt gzip in working tree: $f"
+            bad=1
+          fi
+        done < <(git ls-files '*.gz' '*.bgz')
+        if [ "$bad" -ne 0 ]; then
+          echo "Refusing to commit. Reverting all changes."
+          git checkout -- .
+          exit 1
+        fi
+        echo "OK: only text files modified; all tracked gzip files intact."
 
     - name: Configure Git
       if: steps.fix-nbsp.outputs.changes_made == 'true'
