@@ -32,6 +32,28 @@ decay of diversity against distance from the locus start (first 100 kb, loci
 produced by any committed script; n = 60 agrees, so the two are the same
 comparison computed differently.
 
+## CDS conservation — the GLM p-values should not be quoted at all
+
+Superseding the item below. `robust_cds_reanalysis.py` shows the weighted-binomial
+GLM overstates the information in the data by treating C(k,2) overlapping haplotype
+pairs as independent trials: nominal N is 486,275 where there are 26 inversions, and
+the single-event coefficient is identified off 7 of them. Treating the inversion as
+the independent unit, pairing within gene, and using exact randomisation:
+
+| contrast | GLM | corrected |
+|---|---|---|
+| orientation, single-event | p = 0.0078 | +8.26 pts, exact p = 0.094 |
+| orientation, recurrent | p = 0.44 | +3.36 pts, p = 0.426 |
+| **recurrence × orientation** | **p = 0.0045** | **+4.90 pts, p = 0.413** |
+| after background-diversity adjustment | — | −1.33 pts, p = 0.770 |
+
+The interaction — the claim the manuscript makes — does not survive. The single-event
+effect is marginal and fully accounted for by the lower background diversity of those
+haplotypes (observed and predicted differences correlate at Spearman ρ = 0.690).
+Power at the real unit count is 39.6% for the observed effect, ~14 points are needed
+for 80%, and the exact test cannot return p below 2/128 = 0.0156 whatever the effect
+size. Report this descriptively, with the power statement.
+
 ## CDS pairwise contrasts — the log, not the old table
 
 Resolved and regenerated: `data/cds_pairwise_adjusted.tsv` was stale and had the
@@ -72,6 +94,27 @@ r² > 0.3 and BH p < 0.05; the manuscript quotes 12 of 93 at r² > 0.5. These ar
 different thresholds over different denominators rather than a contradiction, but
 only one pair of numbers should appear in the paper, and it should be the pair
 the released tables support.
+
+## Recurrence simulation false-positive rate
+
+The manuscript's "< 5%" is not reproduced by the upstream pipeline itself. Scoring
+11,250 loci through `simulations/refsim/` — a step-for-step port of
+hsiehphLab/inversionSimulation — the single-origin false-positive rate of
+`minMutHomoplasy ≥ 2` is **0.155** overall and **0.149** at zero flux, which is
+upstream's own model. Replacing the previous NJ trees with the reference IQ-TREE
+pipeline moved this *up*, not toward 5%, so the tree method is not the explanation.
+The rate is also highest at ρ = 0 (0.266) and near zero at ρ = 10⁻⁶ (0.004), the
+opposite ordering to the manuscript's reported 4% at ρ = 10⁻⁶.
+
+What does hold, and is now measured with the manuscript's own classifier: across
+m_flux 0 → 10⁻⁶ the false-positive rate moves 0.149 → 0.156 and power 0.804 → 0.816.
+The extreme-flux extension locates the breakdown between 10⁻⁵ and 10⁻⁴, above the
+whole swept range, which is why the sweep is flat.
+
+The most likely explanation for the remaining gap is a rejection criterion applied on
+top of the event count in the original pipeline that is not present in its published
+code. Until that is identified, the flux result should be reported as a relative
+statement (flux does not degrade the classifier) rather than against a "< 5%" baseline.
 
 ## Not checked here
 
