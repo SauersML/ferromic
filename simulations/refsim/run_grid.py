@@ -131,7 +131,7 @@ def _run_one(job):
         mts, sample_ids, meta = refsim.simulate(
             job["scenario"], times["t01_23"], times["t0_1"], times["t2_3"],
             job["sample_size"], job["inv_freq"], job["rho"], M_WITHIN,
-            job["seed"], m_flux=job["m_flux"])
+            job["seed"], m_flux=job["m_flux"], t_inv_years=times.get("t_inv"))
         mapping = refsim.mapping_hap_SV(sample_ids)
         aln = os.path.join(workdir, "locus.fa")
         n_sites = refsim.write_fasta(aln, mts, sample_ids, _BACKBONE)
@@ -184,12 +184,18 @@ def main(argv=None):
     ap.add_argument("--nshards", type=int, default=1)
     ap.add_argument("--procs", type=int, default=int(os.environ.get("SLURM_CPUS_PER_TASK", 8)))
     ap.add_argument("--reps", type=int, default=None)
+    ap.add_argument("--scenarios", default=None,
+                    help="comma-separated subset of scenarios to run "
+                         "(the grid and its seeds are unchanged; other rows are skipped)")
     ap.add_argument("--scratch", default=os.environ.get("TMPDIR", "/tmp"))
     ap.add_argument("--out", required=True)
     args = ap.parse_args(argv)
 
     grid = build_grid(args.task, args.reps)
     mine = [j for i, j in enumerate(grid) if i % args.nshards == args.shard]
+    if args.scenarios:
+        want = set(args.scenarios.split(","))
+        mine = [j for j in mine if j["scenario"] in want]
     print(f"[shard {args.shard}/{args.nshards}] {len(mine)}/{len(grid)} jobs, "
           f"{args.procs} procs", flush=True)
 
