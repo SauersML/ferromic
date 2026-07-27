@@ -83,7 +83,18 @@ N_POWER = 500          # permutations per injected effect size for the power cur
 POWER_EFFECTS_LOGIT = (0.0, 0.25, 0.5, 0.75, 1.0, 1.5)  # logit shift on inverted
 ALPHA = 0.05
 
+# A matched stratum is one CDS's Direct/Inverted pair -- this is the unit the GLM
+# is fitted on and the unit the "both orientations present" filter produces.
 STRATUM_KEYS = ["inv_id", "cds_id", "consensus"]
+
+# ...but orientation is NOT independently assignable per CDS. Every CDS inside an
+# inversion sits on the same two haplotype sets, so one orientation label covers
+# all of them at once (17:16823490-18384190 alone contributes 24 genes sharing
+# one pair of haplotypes). Drawing an independent coin per CDS would break that
+# dependence and produce a null with far more effective replication than the data
+# have, which understates the true type I error. The permutation therefore draws
+# ONE coin per inversion block and applies it to every CDS pair in that block.
+BLOCK_KEYS = ["inv_id", "consensus"]
 
 OUT_TSV = "cds_conservation_calibration.tsv"
 OUT_PDF = "cds_conservation_calibration.pdf"
@@ -184,23 +195,33 @@ def assert_matched_design(df: pd.DataFrame) -> None:
 
 def permute_orientation(df: pd.DataFrame, rng: np.random.Generator) -> pd.DataFrame:
     """
-    Return a copy of df with phy_group shuffled WITHIN each matched stratum.
+    Return a copy of df with phy_group shuffled at the INVERSION-BLOCK level.
 
-    Because each stratum has exactly one Direct and one Inverted row, the only
-    randomization is whether to keep or swap the two labels. We draw an
-    independent fair coin per stratum and, when it lands on "swap", flip the two
-    phy_group labels in that stratum. Covariates (log_m, log_L, log_k) travel
-    with the row and are NOT shuffled -- only the orientation label moves, so any
-    real orientation effect is destroyed while everything else (clustering,
-    recurrence, diversity, per-CDS conservation) is preserved exactly.
+    Each matched stratum has exactly one Direct and one Inverted row, so the only
+    randomization available is whether to keep or swap that pair's two labels.
+    The coin is drawn once per inversion block (``BLOCK_KEYS``) and applied to
+    every CDS pair inside it, because orientation is a property of the haplotype,
+    not of the gene: all CDSs within one inversion share the same two haplotype
+    sets and therefore always carry the same orientation assignment together.
+    Drawing the coin per CDS instead would let genes in one inversion take
+    opposite labels -- an arrangement the data can never produce -- and would
+    make the null far too tight.
+
+    Covariates (log_m, log_L, log_k) travel with the row and are NOT shuffled --
+    only the orientation label moves, so any real orientation effect is destroyed
+    while everything else (clustering, recurrence, diversity, per-CDS
+    conservation) is preserved exactly.
     """
     out = df.copy()
-    # Stable ordering so the two rows of each stratum are adjacent and known.
-    out = out.sort_values(STRATUM_KEYS + ["phy_group"], kind="mergesort").reset_index(drop=True)
-    n_strata = len(out) // 2
-    swap = rng.integers(0, 2, size=n_strata).astype(bool)
+    # Stable ordering: blocks contiguous, and within a block the two rows of each
+    # CDS pair adjacent as (Direct=0, Inverted=1).
+    out = out.sort_values(BLOCK_KEYS + ["cds_id", "phy_group"],
+                          kind="mergesort").reset_index(drop=True)
+    block_of_row = out.groupby(BLOCK_KEYS, sort=False).ngroup().to_numpy()
+    # One coin per block, broadcast to every pair whose first row is in it.
+    coin = rng.integers(0, 2, size=int(block_of_row.max()) + 1).astype(bool)
+    swap = coin[block_of_row[0::2]]
     pg = out["phy_group"].to_numpy().copy()
-    # Rows come in (Direct=0, Inverted=1) pairs after the sort above.
     for i in np.nonzero(swap)[0]:
         pg[2 * i], pg[2 * i + 1] = pg[2 * i + 1], pg[2 * i]
     out["phy_group"] = pg
