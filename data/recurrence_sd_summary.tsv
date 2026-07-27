@@ -1,0 +1,16 @@
+quantity	value	p
+loci with consensus + SD architecture	93	
+SD-call agreement with consensus (in-sample)	0.7419	
+SD-call agreement with consensus (leave-one-out)	0.7312	
+[consensus] Single-event: Inverted vs Direct	0.262692	7.41629e-05
+[consensus] Recurrent: Inverted vs Direct	1.090004	0.372447
+[consensus] Interaction (difference between those two)	4.149356	5.01496e-05
+[consensus] Overall inversion effect (pooled Δ-logπ)	0.547526	0.00163123
+[SD architecture (in-sample)] Single-event: Inverted vs Direct	0.341486	0.00207379
+[SD architecture (in-sample)] Recurrent: Inverted vs Direct	0.829059	0.260731
+[SD architecture (in-sample)] Interaction (difference between those two)	2.427799	0.0217992
+[SD architecture (in-sample)] Overall inversion effect (pooled Δ-logπ)	0.547526	0.00163123
+[SD architecture (leave-one-out)] Single-event: Inverted vs Direct	0.371853	0.00445536
+[SD architecture (leave-one-out)] Recurrent: Inverted vs Direct	0.786932	0.141915
+[SD architecture (leave-one-out)] Interaction (difference between those two)	2.116247	0.0510368
+[SD architecture (leave-one-out)] Overall inversion effect (pooled Δ-logπ)	0.547526	0.00163123
