@@ -497,7 +497,7 @@ chr10:79542901-80217413		10	79559598	C	T	inverted	-1.0	AD_AM_EXMORE	Alzheimer’
 chr10:79542901-80217413		10	79559598	C	T	inverted	-1.0	AD_EO_EXMORE	Alzheimer’s disease (Early onset) (more control exclusions)							no
 chr10:79542901-80217413		10	79559598	C	T	inverted	-1.0	AD_LO_EXMORE	Alzheimer’s disease (Late onset) (more control exclusions)							no
 chr10:79542901-80217413		10	79559598	C	T	inverted	-1.0	AD_U_EXMORE	Alzheimer’s disease (undefined) (more control exclusions)							no
-chr10:79542901-80217413		10	79559598	C	T	inverted	-1.0	ALCODELIRIUM	Alcohol withdrawal state with delirium 							no
+chr10:79542901-80217413		10	79559598	C	T	inverted	-1.0	ALCODELIRIUM	Alcohol withdrawal state with delirium 							no
 chr10:79542901-80217413		10	79559598	C	T	inverted	-1.0	ALCOHOLACUTE10	Acute alcohol intoxication, ICD10							no
 chr10:79542901-80217413		10	79559598	C	T	inverted	-1.0	ALCOPANCACU	Alcohol-induced acute pancreatitis							no
 chr10:79542901-80217413		10	79559598	C	T	inverted	-1.0	ALCOPANCCHRON	Alcohol-induced chronic pancreatitis							no
@@ -2340,7 +2340,7 @@ chr10:79542901-80217413		10	79559598	C	T	inverted	-1.0	N14_GLOMEINOTH	Glomerular
 chr10:79542901-80217413		10	79559598	C	T	inverted	-1.0	N14_GLOMERULAR	Glomerular diseases							no
 chr10:79542901-80217413		10	79559598	C	T	inverted	-1.0	N14_GLOMER_NEPHRITIS	Glomerulonephritis							no
 chr10:79542901-80217413		10	79559598	C	T	inverted	-1.0	N14_HABITABORT	Habitual aborter							no
-chr10:79542901-80217413		10	79559598	C	T	inverted	-1.0	N14_HENOCHSCHONLEIN_NEPHRITIS	Henoch-Schönlein purpura nephritis (HSPN)							no
+chr10:79542901-80217413		10	79559598	C	T	inverted	-1.0	N14_HENOCHSCHONLEIN_NEPHRITIS	Henoch-Schönlein purpura nephritis (HSPN)							no
 chr10:79542901-80217413		10	79559598	C	T	inverted	-1.0	N14_HYDROCELE	Hydrocele							no
 chr10:79542901-80217413		10	79559598	C	T	inverted	-1.0	N14_HYDRONEPHR	Hydronephrosis							no
 chr10:79542901-80217413		10	79559598	C	T	inverted	-1.0	N14_HYPERTROPHYBREAST	Hypertrophy of breast							no
@@ -2451,9 +2451,9 @@ chr10:79542901-80217413		10	79559598	C	T	inverted	-1.0	O15_GESTAT_HYPERT	Gestati
 chr10:79542901-80217413		10	79559598	C	T	inverted	-1.0	O15_GESTAT_OEDEM_PREINUR	Gestational [pregnancy-induced] oedema and proteinuria without hypertension							no
 chr10:79542901-80217413		10	79559598	C	T	inverted	-1.0	O15_HAEMORRH_EARLY_PREG	Haemorrhage in early pregnancy							no
 chr10:79542901-80217413		10	79559598	C	T	inverted	-1.0	O15_HYPTENSPREG	Pregnancy hypertension							no
-chr10:79542901-80217413		10	79559598	C	T	inverted	-1.0	O15_ICP_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP)  (more control exclusions)							no
-chr10:79542901-80217413		10	79559598	C	T	inverted	-1.0	O15_ICP_WIDE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8							no
-chr10:79542901-80217413		10	79559598	C	T	inverted	-1.0	O15_ICP_WIDE_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8 (more control exclusions)							no
+chr10:79542901-80217413		10	79559598	C	T	inverted	-1.0	O15_ICP_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP)  (more control exclusions)							no
+chr10:79542901-80217413		10	79559598	C	T	inverted	-1.0	O15_ICP_WIDE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8							no
+chr10:79542901-80217413		10	79559598	C	T	inverted	-1.0	O15_ICP_WIDE_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8 (more control exclusions)							no
 chr10:79542901-80217413		10	79559598	C	T	inverted	-1.0	O15_LABOUR_ABNORM_FORCES	Abnormalities of forces of labour							no
 chr10:79542901-80217413		10	79559598	C	T	inverted	-1.0	O15_LABOUR_ANEST_COMPLIC	Complications of anaesthesia during labour and delivery							no
 chr10:79542901-80217413		10	79559598	C	T	inverted	-1.0	O15_LABOUR_FETAL_STRESS	Labour and delivery complicated by fetal stress [distress]							no
@@ -2844,7 +2844,7 @@ chr10:79542901-80217413		10	79559757	C	G	inverted	-1.0	AD_AM_EXMORE	Alzheimer’
 chr10:79542901-80217413		10	79559757	C	G	inverted	-1.0	AD_EO_EXMORE	Alzheimer’s disease (Early onset) (more control exclusions)							no
 chr10:79542901-80217413		10	79559757	C	G	inverted	-1.0	AD_LO_EXMORE	Alzheimer’s disease (Late onset) (more control exclusions)							no
 chr10:79542901-80217413		10	79559757	C	G	inverted	-1.0	AD_U_EXMORE	Alzheimer’s disease (undefined) (more control exclusions)							no
-chr10:79542901-80217413		10	79559757	C	G	inverted	-1.0	ALCODELIRIUM	Alcohol withdrawal state with delirium 							no
+chr10:79542901-80217413		10	79559757	C	G	inverted	-1.0	ALCODELIRIUM	Alcohol withdrawal state with delirium 							no
 chr10:79542901-80217413		10	79559757	C	G	inverted	-1.0	ALCOHOLACUTE10	Acute alcohol intoxication, ICD10							no
 chr10:79542901-80217413		10	79559757	C	G	inverted	-1.0	ALCOPANCACU	Alcohol-induced acute pancreatitis							no
 chr10:79542901-80217413		10	79559757	C	G	inverted	-1.0	ALCOPANCCHRON	Alcohol-induced chronic pancreatitis							no
@@ -4686,7 +4686,7 @@ chr10:79542901-80217413		10	79559757	C	G	inverted	-1.0	N14_GLOMEINOTH	Glomerular
 chr10:79542901-80217413		10	79559757	C	G	inverted	-1.0	N14_GLOMERULAR	Glomerular diseases							no
 chr10:79542901-80217413		10	79559757	C	G	inverted	-1.0	N14_GLOMER_NEPHRITIS	Glomerulonephritis							no
 chr10:79542901-80217413		10	79559757	C	G	inverted	-1.0	N14_HABITABORT	Habitual aborter							no
-chr10:79542901-80217413		10	79559757	C	G	inverted	-1.0	N14_HENOCHSCHONLEIN_NEPHRITIS	Henoch-Schönlein purpura nephritis (HSPN)							no
+chr10:79542901-80217413		10	79559757	C	G	inverted	-1.0	N14_HENOCHSCHONLEIN_NEPHRITIS	Henoch-Schönlein purpura nephritis (HSPN)							no
 chr10:79542901-80217413		10	79559757	C	G	inverted	-1.0	N14_HYDROCELE	Hydrocele							no
 chr10:79542901-80217413		10	79559757	C	G	inverted	-1.0	N14_HYDRONEPHR	Hydronephrosis							no
 chr10:79542901-80217413		10	79559757	C	G	inverted	-1.0	N14_HYPERTROPHYBREAST	Hypertrophy of breast							no
@@ -4797,9 +4797,9 @@ chr10:79542901-80217413		10	79559757	C	G	inverted	-1.0	O15_GESTAT_HYPERT	Gestati
 chr10:79542901-80217413		10	79559757	C	G	inverted	-1.0	O15_GESTAT_OEDEM_PREINUR	Gestational [pregnancy-induced] oedema and proteinuria without hypertension							no
 chr10:79542901-80217413		10	79559757	C	G	inverted	-1.0	O15_HAEMORRH_EARLY_PREG	Haemorrhage in early pregnancy							no
 chr10:79542901-80217413		10	79559757	C	G	inverted	-1.0	O15_HYPTENSPREG	Pregnancy hypertension							no
-chr10:79542901-80217413		10	79559757	C	G	inverted	-1.0	O15_ICP_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP)  (more control exclusions)							no
-chr10:79542901-80217413		10	79559757	C	G	inverted	-1.0	O15_ICP_WIDE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8							no
-chr10:79542901-80217413		10	79559757	C	G	inverted	-1.0	O15_ICP_WIDE_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8 (more control exclusions)							no
+chr10:79542901-80217413		10	79559757	C	G	inverted	-1.0	O15_ICP_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP)  (more control exclusions)							no
+chr10:79542901-80217413		10	79559757	C	G	inverted	-1.0	O15_ICP_WIDE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8							no
+chr10:79542901-80217413		10	79559757	C	G	inverted	-1.0	O15_ICP_WIDE_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8 (more control exclusions)							no
 chr10:79542901-80217413		10	79559757	C	G	inverted	-1.0	O15_LABOUR_ABNORM_FORCES	Abnormalities of forces of labour							no
 chr10:79542901-80217413		10	79559757	C	G	inverted	-1.0	O15_LABOUR_ANEST_COMPLIC	Complications of anaesthesia during labour and delivery							no
 chr10:79542901-80217413		10	79559757	C	G	inverted	-1.0	O15_LABOUR_FETAL_STRESS	Labour and delivery complicated by fetal stress [distress]							no
@@ -5183,7 +5183,7 @@ chr10:79542901-80217413		10	79569378	A	G	inverted	-1.0	AD_AM_EXMORE	Alzheimer’
 chr10:79542901-80217413		10	79569378	A	G	inverted	-1.0	AD_EO_EXMORE	Alzheimer’s disease (Early onset) (more control exclusions)							no
 chr10:79542901-80217413		10	79569378	A	G	inverted	-1.0	AD_LO_EXMORE	Alzheimer’s disease (Late onset) (more control exclusions)							no
 chr10:79542901-80217413		10	79569378	A	G	inverted	-1.0	AD_U_EXMORE	Alzheimer’s disease (undefined) (more control exclusions)							no
-chr10:79542901-80217413		10	79569378	A	G	inverted	-1.0	ALCODELIRIUM	Alcohol withdrawal state with delirium 							no
+chr10:79542901-80217413		10	79569378	A	G	inverted	-1.0	ALCODELIRIUM	Alcohol withdrawal state with delirium 							no
 chr10:79542901-80217413		10	79569378	A	G	inverted	-1.0	ALCOHOLACUTE10	Acute alcohol intoxication, ICD10							no
 chr10:79542901-80217413		10	79569378	A	G	inverted	-1.0	ALCOPANCACU	Alcohol-induced acute pancreatitis							no
 chr10:79542901-80217413		10	79569378	A	G	inverted	-1.0	ALCOPANCCHRON	Alcohol-induced chronic pancreatitis							no
@@ -7009,7 +7009,7 @@ chr10:79542901-80217413		10	79569378	A	G	inverted	-1.0	N14_GLOMEINOTH	Glomerular
 chr10:79542901-80217413		10	79569378	A	G	inverted	-1.0	N14_GLOMERULAR	Glomerular diseases							no
 chr10:79542901-80217413		10	79569378	A	G	inverted	-1.0	N14_GLOMER_NEPHRITIS	Glomerulonephritis							no
 chr10:79542901-80217413		10	79569378	A	G	inverted	-1.0	N14_HABITABORT	Habitual aborter							no
-chr10:79542901-80217413		10	79569378	A	G	inverted	-1.0	N14_HENOCHSCHONLEIN_NEPHRITIS	Henoch-Schönlein purpura nephritis (HSPN)							no
+chr10:79542901-80217413		10	79569378	A	G	inverted	-1.0	N14_HENOCHSCHONLEIN_NEPHRITIS	Henoch-Schönlein purpura nephritis (HSPN)							no
 chr10:79542901-80217413		10	79569378	A	G	inverted	-1.0	N14_HYDROCELE	Hydrocele							no
 chr10:79542901-80217413		10	79569378	A	G	inverted	-1.0	N14_HYDRONEPHR	Hydronephrosis							no
 chr10:79542901-80217413		10	79569378	A	G	inverted	-1.0	N14_HYPERTROPHYBREAST	Hypertrophy of breast							no
@@ -7121,9 +7121,9 @@ chr10:79542901-80217413		10	79569378	A	G	inverted	-1.0	O15_GESTAT_HYPERT	Gestati
 chr10:79542901-80217413		10	79569378	A	G	inverted	-1.0	O15_GESTAT_OEDEM_PREINUR	Gestational [pregnancy-induced] oedema and proteinuria without hypertension							no
 chr10:79542901-80217413		10	79569378	A	G	inverted	-1.0	O15_HAEMORRH_EARLY_PREG	Haemorrhage in early pregnancy							no
 chr10:79542901-80217413		10	79569378	A	G	inverted	-1.0	O15_HYPTENSPREG	Pregnancy hypertension							no
-chr10:79542901-80217413		10	79569378	A	G	inverted	-1.0	O15_ICP_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP)  (more control exclusions)							no
-chr10:79542901-80217413		10	79569378	A	G	inverted	-1.0	O15_ICP_WIDE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8							no
-chr10:79542901-80217413		10	79569378	A	G	inverted	-1.0	O15_ICP_WIDE_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8 (more control exclusions)							no
+chr10:79542901-80217413		10	79569378	A	G	inverted	-1.0	O15_ICP_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP)  (more control exclusions)							no
+chr10:79542901-80217413		10	79569378	A	G	inverted	-1.0	O15_ICP_WIDE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8							no
+chr10:79542901-80217413		10	79569378	A	G	inverted	-1.0	O15_ICP_WIDE_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8 (more control exclusions)							no
 chr10:79542901-80217413		10	79569378	A	G	inverted	-1.0	O15_LABOUR_ABNORM_FORCES	Abnormalities of forces of labour							no
 chr10:79542901-80217413		10	79569378	A	G	inverted	-1.0	O15_LABOUR_ANEST_COMPLIC	Complications of anaesthesia during labour and delivery							no
 chr10:79542901-80217413		10	79569378	A	G	inverted	-1.0	O15_LABOUR_FETAL_STRESS	Labour and delivery complicated by fetal stress [distress]							no
@@ -7990,7 +7990,7 @@ chr12:46896694-46915975		12	46901666	A	G	inverted	-1.0	AD_AM_EXMORE	Alzheimer’
 chr12:46896694-46915975		12	46901666	A	G	inverted	-1.0	AD_EO_EXMORE	Alzheimer’s disease (Early onset) (more control exclusions)							no
 chr12:46896694-46915975		12	46901666	A	G	inverted	-1.0	AD_LO_EXMORE	Alzheimer’s disease (Late onset) (more control exclusions)							no
 chr12:46896694-46915975		12	46901666	A	G	inverted	-1.0	AD_U_EXMORE	Alzheimer’s disease (undefined) (more control exclusions)							no
-chr12:46896694-46915975		12	46901666	A	G	inverted	-1.0	ALCODELIRIUM	Alcohol withdrawal state with delirium 							no
+chr12:46896694-46915975		12	46901666	A	G	inverted	-1.0	ALCODELIRIUM	Alcohol withdrawal state with delirium 							no
 chr12:46896694-46915975		12	46901666	A	G	inverted	-1.0	ALCOHOLACUTE10	Acute alcohol intoxication, ICD10							no
 chr12:46896694-46915975		12	46901666	A	G	inverted	-1.0	ALCOPANCACU	Alcohol-induced acute pancreatitis							no
 chr12:46896694-46915975		12	46901666	A	G	inverted	-1.0	ALCOPANCCHRON	Alcohol-induced chronic pancreatitis							no
@@ -9802,7 +9802,7 @@ chr12:46896694-46915975		12	46901666	A	G	inverted	-1.0	N14_GLOMEINOTH	Glomerular
 chr12:46896694-46915975		12	46901666	A	G	inverted	-1.0	N14_GLOMERULAR	Glomerular diseases							no
 chr12:46896694-46915975		12	46901666	A	G	inverted	-1.0	N14_GLOMER_NEPHRITIS	Glomerulonephritis							no
 chr12:46896694-46915975		12	46901666	A	G	inverted	-1.0	N14_HABITABORT	Habitual aborter							no
-chr12:46896694-46915975		12	46901666	A	G	inverted	-1.0	N14_HENOCHSCHONLEIN_NEPHRITIS	Henoch-Schönlein purpura nephritis (HSPN)							no
+chr12:46896694-46915975		12	46901666	A	G	inverted	-1.0	N14_HENOCHSCHONLEIN_NEPHRITIS	Henoch-Schönlein purpura nephritis (HSPN)							no
 chr12:46896694-46915975		12	46901666	A	G	inverted	-1.0	N14_HYDROCELE	Hydrocele							no
 chr12:46896694-46915975		12	46901666	A	G	inverted	-1.0	N14_HYDRONEPHR	Hydronephrosis							no
 chr12:46896694-46915975		12	46901666	A	G	inverted	-1.0	N14_HYPERTROPHYBREAST	Hypertrophy of breast							no
@@ -9913,9 +9913,9 @@ chr12:46896694-46915975		12	46901666	A	G	inverted	-1.0	O15_GESTAT_HYPERT	Gestati
 chr12:46896694-46915975		12	46901666	A	G	inverted	-1.0	O15_GESTAT_OEDEM_PREINUR	Gestational [pregnancy-induced] oedema and proteinuria without hypertension							no
 chr12:46896694-46915975		12	46901666	A	G	inverted	-1.0	O15_HAEMORRH_EARLY_PREG	Haemorrhage in early pregnancy							no
 chr12:46896694-46915975		12	46901666	A	G	inverted	-1.0	O15_HYPTENSPREG	Pregnancy hypertension							no
-chr12:46896694-46915975		12	46901666	A	G	inverted	-1.0	O15_ICP_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP)  (more control exclusions)							no
-chr12:46896694-46915975		12	46901666	A	G	inverted	-1.0	O15_ICP_WIDE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8							no
-chr12:46896694-46915975		12	46901666	A	G	inverted	-1.0	O15_ICP_WIDE_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8 (more control exclusions)							no
+chr12:46896694-46915975		12	46901666	A	G	inverted	-1.0	O15_ICP_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP)  (more control exclusions)							no
+chr12:46896694-46915975		12	46901666	A	G	inverted	-1.0	O15_ICP_WIDE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8							no
+chr12:46896694-46915975		12	46901666	A	G	inverted	-1.0	O15_ICP_WIDE_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8 (more control exclusions)							no
 chr12:46896694-46915975		12	46901666	A	G	inverted	-1.0	O15_LABOUR_ANEST_COMPLIC	Complications of anaesthesia during labour and delivery							no
 chr12:46896694-46915975		12	46901666	A	G	inverted	-1.0	O15_LABOUR_INTRAPART_HAEMORRH	Labour and delivery complicated by intrapartum haemorrhage, not elsewhere classified							no
 chr12:46896694-46915975		12	46901666	A	G	inverted	-1.0	O15_LABOUR_MALPOS	Obstructed labour due to malposition and malpresentation of fetus							no
@@ -10300,7 +10300,7 @@ chr12:46896694-46915975		12	46902335	A	G	inverted	-1.0	AD_AM_EXMORE	Alzheimer’
 chr12:46896694-46915975		12	46902335	A	G	inverted	-1.0	AD_EO_EXMORE	Alzheimer’s disease (Early onset) (more control exclusions)							no
 chr12:46896694-46915975		12	46902335	A	G	inverted	-1.0	AD_LO_EXMORE	Alzheimer’s disease (Late onset) (more control exclusions)							no
 chr12:46896694-46915975		12	46902335	A	G	inverted	-1.0	AD_U_EXMORE	Alzheimer’s disease (undefined) (more control exclusions)							no
-chr12:46896694-46915975		12	46902335	A	G	inverted	-1.0	ALCODELIRIUM	Alcohol withdrawal state with delirium 							no
+chr12:46896694-46915975		12	46902335	A	G	inverted	-1.0	ALCODELIRIUM	Alcohol withdrawal state with delirium 							no
 chr12:46896694-46915975		12	46902335	A	G	inverted	-1.0	ALCOHOLACUTE10	Acute alcohol intoxication, ICD10							no
 chr12:46896694-46915975		12	46902335	A	G	inverted	-1.0	ALCOPANCACU	Alcohol-induced acute pancreatitis							no
 chr12:46896694-46915975		12	46902335	A	G	inverted	-1.0	ALCOPANCCHRON	Alcohol-induced chronic pancreatitis							no
@@ -12115,7 +12115,7 @@ chr12:46896694-46915975		12	46902335	A	G	inverted	-1.0	N14_GLOMEINOTH	Glomerular
 chr12:46896694-46915975		12	46902335	A	G	inverted	-1.0	N14_GLOMERULAR	Glomerular diseases							no
 chr12:46896694-46915975		12	46902335	A	G	inverted	-1.0	N14_GLOMER_NEPHRITIS	Glomerulonephritis							no
 chr12:46896694-46915975		12	46902335	A	G	inverted	-1.0	N14_HABITABORT	Habitual aborter							no
-chr12:46896694-46915975		12	46902335	A	G	inverted	-1.0	N14_HENOCHSCHONLEIN_NEPHRITIS	Henoch-Schönlein purpura nephritis (HSPN)							no
+chr12:46896694-46915975		12	46902335	A	G	inverted	-1.0	N14_HENOCHSCHONLEIN_NEPHRITIS	Henoch-Schönlein purpura nephritis (HSPN)							no
 chr12:46896694-46915975		12	46902335	A	G	inverted	-1.0	N14_HYDROCELE	Hydrocele							no
 chr12:46896694-46915975		12	46902335	A	G	inverted	-1.0	N14_HYDRONEPHR	Hydronephrosis							no
 chr12:46896694-46915975		12	46902335	A	G	inverted	-1.0	N14_HYPERTROPHYBREAST	Hypertrophy of breast							no
@@ -12226,9 +12226,9 @@ chr12:46896694-46915975		12	46902335	A	G	inverted	-1.0	O15_GESTAT_HYPERT	Gestati
 chr12:46896694-46915975		12	46902335	A	G	inverted	-1.0	O15_GESTAT_OEDEM_PREINUR	Gestational [pregnancy-induced] oedema and proteinuria without hypertension							no
 chr12:46896694-46915975		12	46902335	A	G	inverted	-1.0	O15_HAEMORRH_EARLY_PREG	Haemorrhage in early pregnancy							no
 chr12:46896694-46915975		12	46902335	A	G	inverted	-1.0	O15_HYPTENSPREG	Pregnancy hypertension							no
-chr12:46896694-46915975		12	46902335	A	G	inverted	-1.0	O15_ICP_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP)  (more control exclusions)							no
-chr12:46896694-46915975		12	46902335	A	G	inverted	-1.0	O15_ICP_WIDE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8							no
-chr12:46896694-46915975		12	46902335	A	G	inverted	-1.0	O15_ICP_WIDE_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8 (more control exclusions)							no
+chr12:46896694-46915975		12	46902335	A	G	inverted	-1.0	O15_ICP_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP)  (more control exclusions)							no
+chr12:46896694-46915975		12	46902335	A	G	inverted	-1.0	O15_ICP_WIDE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8							no
+chr12:46896694-46915975		12	46902335	A	G	inverted	-1.0	O15_ICP_WIDE_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8 (more control exclusions)							no
 chr12:46896694-46915975		12	46902335	A	G	inverted	-1.0	O15_LABOUR_ANEST_COMPLIC	Complications of anaesthesia during labour and delivery							no
 chr12:46896694-46915975		12	46902335	A	G	inverted	-1.0	O15_LABOUR_INTRAPART_HAEMORRH	Labour and delivery complicated by intrapartum haemorrhage, not elsewhere classified							no
 chr12:46896694-46915975		12	46902335	A	G	inverted	-1.0	O15_LABOUR_MALPOS	Obstructed labour due to malposition and malpresentation of fetus							no
@@ -12612,7 +12612,7 @@ chr12:46896694-46915975		12	46906392	A	T	inverted	-1.0	AD_AM_EXMORE	Alzheimer’
 chr12:46896694-46915975		12	46906392	A	T	inverted	-1.0	AD_EO_EXMORE	Alzheimer’s disease (Early onset) (more control exclusions)							no
 chr12:46896694-46915975		12	46906392	A	T	inverted	-1.0	AD_LO_EXMORE	Alzheimer’s disease (Late onset) (more control exclusions)							no
 chr12:46896694-46915975		12	46906392	A	T	inverted	-1.0	AD_U_EXMORE	Alzheimer’s disease (undefined) (more control exclusions)							no
-chr12:46896694-46915975		12	46906392	A	T	inverted	-1.0	ALCODELIRIUM	Alcohol withdrawal state with delirium 							no
+chr12:46896694-46915975		12	46906392	A	T	inverted	-1.0	ALCODELIRIUM	Alcohol withdrawal state with delirium 							no
 chr12:46896694-46915975		12	46906392	A	T	inverted	-1.0	ALCOHOLACUTE10	Acute alcohol intoxication, ICD10							no
 chr12:46896694-46915975		12	46906392	A	T	inverted	-1.0	ALCOPANCACU	Alcohol-induced acute pancreatitis							no
 chr12:46896694-46915975		12	46906392	A	T	inverted	-1.0	ALCOPANCCHRON	Alcohol-induced chronic pancreatitis							no
@@ -14425,7 +14425,7 @@ chr12:46896694-46915975		12	46906392	A	T	inverted	-1.0	N14_GLOMEINOTH	Glomerular
 chr12:46896694-46915975		12	46906392	A	T	inverted	-1.0	N14_GLOMERULAR	Glomerular diseases							no
 chr12:46896694-46915975		12	46906392	A	T	inverted	-1.0	N14_GLOMER_NEPHRITIS	Glomerulonephritis							no
 chr12:46896694-46915975		12	46906392	A	T	inverted	-1.0	N14_HABITABORT	Habitual aborter							no
-chr12:46896694-46915975		12	46906392	A	T	inverted	-1.0	N14_HENOCHSCHONLEIN_NEPHRITIS	Henoch-Schönlein purpura nephritis (HSPN)							no
+chr12:46896694-46915975		12	46906392	A	T	inverted	-1.0	N14_HENOCHSCHONLEIN_NEPHRITIS	Henoch-Schönlein purpura nephritis (HSPN)							no
 chr12:46896694-46915975		12	46906392	A	T	inverted	-1.0	N14_HYDROCELE	Hydrocele							no
 chr12:46896694-46915975		12	46906392	A	T	inverted	-1.0	N14_HYDRONEPHR	Hydronephrosis							no
 chr12:46896694-46915975		12	46906392	A	T	inverted	-1.0	N14_HYPERTROPHYBREAST	Hypertrophy of breast							no
@@ -14537,9 +14537,9 @@ chr12:46896694-46915975		12	46906392	A	T	inverted	-1.0	O15_GESTAT_HYPERT	Gestati
 chr12:46896694-46915975		12	46906392	A	T	inverted	-1.0	O15_GESTAT_OEDEM_PREINUR	Gestational [pregnancy-induced] oedema and proteinuria without hypertension							no
 chr12:46896694-46915975		12	46906392	A	T	inverted	-1.0	O15_HAEMORRH_EARLY_PREG	Haemorrhage in early pregnancy							no
 chr12:46896694-46915975		12	46906392	A	T	inverted	-1.0	O15_HYPTENSPREG	Pregnancy hypertension							no
-chr12:46896694-46915975		12	46906392	A	T	inverted	-1.0	O15_ICP_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP)  (more control exclusions)							no
-chr12:46896694-46915975		12	46906392	A	T	inverted	-1.0	O15_ICP_WIDE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8							no
-chr12:46896694-46915975		12	46906392	A	T	inverted	-1.0	O15_ICP_WIDE_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8 (more control exclusions)							no
+chr12:46896694-46915975		12	46906392	A	T	inverted	-1.0	O15_ICP_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP)  (more control exclusions)							no
+chr12:46896694-46915975		12	46906392	A	T	inverted	-1.0	O15_ICP_WIDE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8							no
+chr12:46896694-46915975		12	46906392	A	T	inverted	-1.0	O15_ICP_WIDE_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8 (more control exclusions)							no
 chr12:46896694-46915975		12	46906392	A	T	inverted	-1.0	O15_LABOUR_ANEST_COMPLIC	Complications of anaesthesia during labour and delivery							no
 chr12:46896694-46915975		12	46906392	A	T	inverted	-1.0	O15_LABOUR_INTRAPART_HAEMORRH	Labour and delivery complicated by intrapartum haemorrhage, not elsewhere classified							no
 chr12:46896694-46915975		12	46906392	A	T	inverted	-1.0	O15_LABOUR_MALPOS	Obstructed labour due to malposition and malpresentation of fetus							no
@@ -14980,8 +14980,8 @@ chr17:45585159-46292045		17	45585881	C	A	inverted	-1.0	O15_DELIV_SPONT	Single sp
 chr17:45585159-46292045		17	45587612	A	G	inverted	-1.0	O15_PREG_OTHER_MAT_DISORD	Other maternal disorders predominantly related to pregnancy			0.0401208	0.040121	0.0138244	0.0037058684604224035	yes
 chr17:45585159-46292045		17	45585881	C	A	inverted	-1.0	O15_PREG_MATERN_CARE	Maternal care for other conditions predominantly related to pregnancy			0.0765962	0.076596	0.0264289	0.0037530988230901805	yes
 chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	C3_MELANOMA_EXALLC	Malignant melanoma, excluding all cancers (controls excluding all cancers)			-0.0958942	-0.095894	0.0330887	0.0037543953213849996	yes
-chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	O15_ICP_WIDE_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8 (more control exclusions)			0.12574	0.12574	0.0434365	0.003794023355328957	yes
-chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	O15_ICP_WIDE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8			0.124659	0.124659	0.043105	0.0038279829963374992	yes
+chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	O15_ICP_WIDE_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8 (more control exclusions)			0.12574	0.12574	0.0434365	0.003794023355328957	yes
+chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	O15_ICP_WIDE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8			0.124659	0.124659	0.043105	0.0038279829963374992	yes
 chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	M13_ARTHROSIS_KNEE	Gonarthrosis			0.036441	0.036441	0.0126214	0.0038863329075492607	yes
 chr17:45585159-46292045		17	45587612	A	G	inverted	-1.0	RX_ANTIHYP	Antihypertensive medication - note that there are other indications			-0.0254695	-0.025469	0.00882496	0.003900856730798364	yes
 chr17:45585159-46292045		17	45587612	A	G	inverted	-1.0	F5_VASCDEM	Vascular dementia			-0.131435	-0.131435	0.0456313	0.0039721898743732935	yes
@@ -14996,10 +14996,10 @@ chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	RX_ANTIHYP	Antihypertensi
 chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	M13_HALLUXRIGIDUS	Hallux rigidus			0.100255	0.100255	0.0351909	0.004387124912104735	yes
 chr17:45585159-46292045		17	45585881	C	A	inverted	-1.0	O15_GESTAT_OEDEM_PREINUR	Gestational [pregnancy-induced] oedema and proteinuria without hypertension			0.121621	0.121621	0.0427202	0.004414484537845733	yes
 chr17:45585159-46292045		17	45585881	C	A	inverted	-1.0	H7_GLAUCOMA	Glaucoma			0.0471102	0.04711	0.0165528	0.00442659714929201	yes
-chr17:45585159-46292045		17	45587612	A	G	inverted	-1.0	O15_ICP_WIDE_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8 (more control exclusions)			0.121668	0.121668	0.0427656	0.004441298877164414	yes
+chr17:45585159-46292045		17	45587612	A	G	inverted	-1.0	O15_ICP_WIDE_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8 (more control exclusions)			0.121668	0.121668	0.0427656	0.004441298877164414	yes
 chr17:45585159-46292045		17	45585881	C	A	inverted	-1.0	K11_MESIAL_BITE	Mesial bite			0.34383	0.34383	0.12093	0.00446611601064275	yes
 chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	CD2_BENIGN_BONE_CARTILAGE	Benign neoplasm of bone and articular cartilage			0.126849	0.126849	0.0446252	0.004475380858156682	yes
-chr17:45585159-46292045		17	45587612	A	G	inverted	-1.0	O15_ICP_WIDE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8			0.120539	0.120539	0.0424323	0.0045009065914561695	yes
+chr17:45585159-46292045		17	45587612	A	G	inverted	-1.0	O15_ICP_WIDE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8			0.120539	0.120539	0.0424323	0.0045009065914561695	yes
 chr17:45585159-46292045		17	45585881	C	A	inverted	-1.0	M13_ARTHTROSIS_COX_PRIM_HIPSURG	Coxarthrosis, primary, with hip surgery			0.0524148	0.052415	0.0185131	0.004637031007477049	yes
 chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	M13_PAGET	Paget disease			-0.634944	-0.634944	0.224265	0.004637031007477049	yes
 chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	K11_MESIAL_BITE	Mesial bite			0.351161	0.351161	0.124303	0.004727483263432028	yes
@@ -15045,13 +15045,13 @@ chr17:45585159-46292045		17	45587612	A	G	inverted	-1.0	D3_SCNDPOLYCYTHAEMIA	Seco
 chr17:45585159-46292045		17	45585881	C	A	inverted	-1.0	F5_DEMNAS	Unspecified dementia			-0.100089	-0.100089	0.0371535	0.007061386777273823	yes
 chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	O15_BIRTH_BREAT_INFECT	Infections of breast associated with childbirth			-0.199292	-0.199292	0.0739904	0.007070986368358872	yes
 chr17:45585159-46292045		17	45587612	A	G	inverted	-1.0	O15_BIRTH_BREAT_INFECT	Infections of breast associated with childbirth			-0.19563	-0.19563	0.0726377	0.007076361320962911	yes
-chr17:45585159-46292045		17	45585881	C	A	inverted	-1.0	O15_ICP_WIDE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8			0.113066	0.113066	0.0420003	0.007101989076794161	yes
+chr17:45585159-46292045		17	45585881	C	A	inverted	-1.0	O15_ICP_WIDE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8			0.113066	0.113066	0.0420003	0.007101989076794161	yes
 chr17:45585159-46292045		17	45587612	A	G	inverted	-1.0	G6_RADLES	Lesion of radial nerve			0.182312	0.182312	0.0677955	0.007163413152901358	yes
 chr17:45585159-46292045		17	45585881	C	A	inverted	-1.0	CD2_HODGKIN_LYMPHOMA_EXALLC	Hodgkin lymphoma, hilmo (controls excluding all cancers)			0.199137	0.199137	0.0742481	0.007317285494623261	yes
 chr17:45585159-46292045		17	45587612	A	G	inverted	-1.0	C3_BREAST_EXALLC	Malignant neoplasm of breast, excluding all cancers (controls excluding all cancers)			-0.0495404	-0.04954	0.0184817	0.007351229816246725	yes
 chr17:45585159-46292045		17	45587612	A	G	inverted	-1.0	VWXY20_SUICI_OTHER_INTENTI_SELF_H	Suicide or other Intentional self-harm			-0.0698788	-0.069879	0.0260852	0.007387202428859171	yes
 chr17:45585159-46292045		17	45585881	C	A	inverted	-1.0	CD2_BENIGN_LIPOMATOUS	Benign lipomatous neoplasm			0.0608901	0.06089	0.0227338	0.007397755950744067	yes
-chr17:45585159-46292045		17	45585881	C	A	inverted	-1.0	O15_ICP_WIDE_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8 (more control exclusions)			0.112962	0.112962	0.0423135	0.007593115394300121	yes
+chr17:45585159-46292045		17	45585881	C	A	inverted	-1.0	O15_ICP_WIDE_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8 (more control exclusions)			0.112962	0.112962	0.0423135	0.007593115394300121	yes
 chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	N14_FEMGENPROL	Female genital prolapse			0.0539843	0.053984	0.0202371	0.007639765002888819	yes
 chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	D3_SCNDPOLYCYTHAEMIA	Secondary polycythaemia			0.228474	0.228474	0.0858767	0.007802611796661086	yes
 chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	J10_CHRONSINUSITIS	Chronic sinusitis			0.0487692	0.048769	0.0183847	0.00798490953196976	yes
@@ -15117,7 +15117,7 @@ chr17:45585159-46292045		17	45587612	A	G	inverted	-1.0	H8_MIDDLEADDH	Adhesive mi
 chr17:45585159-46292045		17	45585881	C	A	inverted	-1.0	Q17_HYPOSPADIAS	Hypospadias			0.56548	0.56548	0.223951	0.011569377713015125	yes
 chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	C3_THYROID_PAPILLARY_ADENO_EXALLC	Papillary adenocarcinoma of thyroid gland, excluding all cancers (controls excluding all cancers)			-0.136724	-0.136724	0.0542029	0.011653865460060387	yes
 chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	G6_MONOOTHUNS	Other and unspecified mononeuropathies, also in other diseases			0.20341	0.20341	0.080644	0.011658428135878116	yes
-chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	O15_ICP_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP)  (more control exclusions)			0.125492	0.125492	0.0497649	0.01167938567809914	yes
+chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	O15_ICP_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP)  (more control exclusions)			0.125492	0.125492	0.0497649	0.01167938567809914	yes
 chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	H8_MIDDLEADDH	Adhesive middle ear disease			0.250558	0.250558	0.0994264	0.011734105808287931	yes
 chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	N14_UTER_POLYP	Uterine polyps			-0.108787	-0.108787	0.0431835	0.011762780691763735	yes
 chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	AUTOIMMUNE	Autoimmune diseases			0.0222303	0.02223	0.00883025	0.01181870792258287	yes
@@ -15138,7 +15138,7 @@ chr17:45585159-46292045		17	45587612	A	G	inverted	-1.0	E4_PCOS_CONCORTIUM	Polycy
 chr17:45585159-46292045		17	45585881	C	A	inverted	-1.0	AB1_SEXUAL_TRANSMISSION	Infections with a predominantly sexual mode of transmission			-0.0536702	-0.05367	0.0216063	0.012991221872575362	yes
 chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	D3_NONHEREDHYPOGAMMA	Nonhereditary hypogammaglobulinemia			-0.349239	-0.349239	0.140655	0.013030167544686527	yes
 chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	H7_AMBLYANOPSIA	Amblyopia ex anopsia			0.167776	0.167776	0.0675893	0.013054192120983733	yes
-chr17:45585159-46292045		17	45587612	A	G	inverted	-1.0	O15_ICP_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP)  (more control exclusions)			0.121433	0.121433	0.0489333	0.013079164438438932	yes
+chr17:45585159-46292045		17	45587612	A	G	inverted	-1.0	O15_ICP_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP)  (more control exclusions)			0.121433	0.121433	0.0489333	0.013079164438438932	yes
 chr17:45585159-46292045		17	45587612	A	G	inverted	-1.0	H7_GLAUCSUSP	Glaucoma suspect			0.0539833	0.053983	0.0217657	0.013130764126911826	yes
 chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	E4_AMYL_SCNDSYST	Secondary systemic amyloidosis			0.653397	0.653397	0.26395	0.013306688791768391	yes
 chr17:45585159-46292045		17	45587612	A	G	inverted	-1.0	AB1_MUMPS	Mumps			0.205258	0.205258	0.082937	0.013328460829875544	yes
@@ -15256,7 +15256,7 @@ chr17:45585159-46292045		17	45587612	A	G	inverted	-1.0	MIGRAINE_UNSPE	Migraine, 
 chr17:45585159-46292045		17	45585881	C	A	inverted	-1.0	M13_VARUS	Varus deformity, not elsewhere classified			-0.304189	-0.304189	0.132412	0.02160180294212649	yes
 chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	L12_PAPULOSQUONAS	Other and unspecified papulosquamous disorders			-0.438862	-0.438862	0.191046	0.021610260395513194	yes
 chr17:45585159-46292045		17	45587612	A	G	inverted	-1.0	G6_ADEM	Acute disseminated encephalitis/encephalomyelitis			-0.734816	-0.734816	0.319901	0.0216182233764092	yes
-chr17:45585159-46292045		17	45585881	C	A	inverted	-1.0	O15_ICP_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP)  (more control exclusions)			0.110922	0.110922	0.0482899	0.021618721160128966	yes
+chr17:45585159-46292045		17	45585881	C	A	inverted	-1.0	O15_ICP_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP)  (more control exclusions)			0.110922	0.110922	0.0482899	0.021618721160128966	yes
 chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	O15_MATERN_HYPERT_UNS	Unspecified maternal hypertension			-0.326026	-0.326026	0.141951	0.021633161875054898	yes
 chr17:45585159-46292045		17	45585881	C	A	inverted	-1.0	M13_LATERALEPICOND	Lateral epicondylitis			0.0791064	0.079106	0.0344663	0.02172300989376012	yes
 chr17:45585159-46292045		17	45587612	A	G	inverted	-1.0	I9_NONISCHCARDMYOP_STRICT	Nonischemic cardiomyopathy			-0.1317	-0.1317	0.0574599	0.021903322617519597	yes
@@ -15660,7 +15660,7 @@ chr17:45585159-46292045		17	45585881	C	A	inverted	-1.0	ABPA	Allergic bronchopulm
 chr17:45585159-46292045		17	45585881	C	A	inverted	-1.0	ACUTE_DRUGADVERS_INTERSTITIAL_LUNG_DISORD	Acute drug-induced interstitial lung disorder							no
 chr17:45585159-46292045		17	45585881	C	A	inverted	-1.0	AD_AM_EXMORE	Alzheimer’s disease (Atypical or mixed) (more control exclusions)							no
 chr17:45585159-46292045		17	45585881	C	A	inverted	-1.0	AD_EO_EXMORE	Alzheimer’s disease (Early onset) (more control exclusions)							no
-chr17:45585159-46292045		17	45585881	C	A	inverted	-1.0	ALCODELIRIUM	Alcohol withdrawal state with delirium 							no
+chr17:45585159-46292045		17	45585881	C	A	inverted	-1.0	ALCODELIRIUM	Alcohol withdrawal state with delirium 							no
 chr17:45585159-46292045		17	45585881	C	A	inverted	-1.0	ALCOHOLACUTE10	Acute alcohol intoxication, ICD10							no
 chr17:45585159-46292045		17	45585881	C	A	inverted	-1.0	ALCOPANCACU	Alcohol-induced acute pancreatitis							no
 chr17:45585159-46292045		17	45585881	C	A	inverted	-1.0	ALCOPANCCHRON	Alcohol-induced chronic pancreatitis							no
@@ -17402,7 +17402,7 @@ chr17:45585159-46292045		17	45585881	C	A	inverted	-1.0	N14_GENITOUROTH	Other dis
 chr17:45585159-46292045		17	45585881	C	A	inverted	-1.0	N14_GLOMEINOTH	Glomerular disorders in diseases classified elsewhere							no
 chr17:45585159-46292045		17	45585881	C	A	inverted	-1.0	N14_GLOMER_NEPHRITIS	Glomerulonephritis							no
 chr17:45585159-46292045		17	45585881	C	A	inverted	-1.0	N14_HABITABORT	Habitual aborter							no
-chr17:45585159-46292045		17	45585881	C	A	inverted	-1.0	N14_HENOCHSCHONLEIN_NEPHRITIS	Henoch-Schönlein purpura nephritis (HSPN)							no
+chr17:45585159-46292045		17	45585881	C	A	inverted	-1.0	N14_HENOCHSCHONLEIN_NEPHRITIS	Henoch-Schönlein purpura nephritis (HSPN)							no
 chr17:45585159-46292045		17	45585881	C	A	inverted	-1.0	N14_HYDROCELE	Hydrocele							no
 chr17:45585159-46292045		17	45585881	C	A	inverted	-1.0	N14_HYDRONEPHR	Hydronephrosis							no
 chr17:45585159-46292045		17	45585881	C	A	inverted	-1.0	N14_HYPERTROPHYBREAST	Hypertrophy of breast							no
@@ -17882,7 +17882,7 @@ chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	ABPA	Allergic bronchopulm
 chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	ACUTE_DRUGADVERS_INTERSTITIAL_LUNG_DISORD	Acute drug-induced interstitial lung disorder							no
 chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	AD_AM_EXMORE	Alzheimer’s disease (Atypical or mixed) (more control exclusions)							no
 chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	AD_EO_EXMORE	Alzheimer’s disease (Early onset) (more control exclusions)							no
-chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	ALCODELIRIUM	Alcohol withdrawal state with delirium 							no
+chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	ALCODELIRIUM	Alcohol withdrawal state with delirium 							no
 chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	ALCOHOLACUTE10	Acute alcohol intoxication, ICD10							no
 chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	ALCOPANCACU	Alcohol-induced acute pancreatitis							no
 chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	ALCOPANCCHRON	Alcohol-induced chronic pancreatitis							no
@@ -19624,7 +19624,7 @@ chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	N14_GLOMEINOTH	Glomerular
 chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	N14_GLOMERULAR	Glomerular diseases							no
 chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	N14_GLOMER_NEPHRITIS	Glomerulonephritis							no
 chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	N14_HABITABORT	Habitual aborter							no
-chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	N14_HENOCHSCHONLEIN_NEPHRITIS	Henoch-Schönlein purpura nephritis (HSPN)							no
+chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	N14_HENOCHSCHONLEIN_NEPHRITIS	Henoch-Schönlein purpura nephritis (HSPN)							no
 chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	N14_HYDROCELE	Hydrocele							no
 chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	N14_HYDRONEPHR	Hydronephrosis							no
 chr17:45585159-46292045		17	45586900	G	A	inverted	-1.0	N14_HYPERTROPHYBREAST	Hypertrophy of breast							no
@@ -20106,7 +20106,7 @@ chr17:45585159-46292045		17	45587612	A	G	inverted	-1.0	ABPA	Allergic bronchopulm
 chr17:45585159-46292045		17	45587612	A	G	inverted	-1.0	ACUTE_DRUGADVERS_INTERSTITIAL_LUNG_DISORD	Acute drug-induced interstitial lung disorder							no
 chr17:45585159-46292045		17	45587612	A	G	inverted	-1.0	AD_AM_EXMORE	Alzheimer’s disease (Atypical or mixed) (more control exclusions)							no
 chr17:45585159-46292045		17	45587612	A	G	inverted	-1.0	AD_EO_EXMORE	Alzheimer’s disease (Early onset) (more control exclusions)							no
-chr17:45585159-46292045		17	45587612	A	G	inverted	-1.0	ALCODELIRIUM	Alcohol withdrawal state with delirium 							no
+chr17:45585159-46292045		17	45587612	A	G	inverted	-1.0	ALCODELIRIUM	Alcohol withdrawal state with delirium 							no
 chr17:45585159-46292045		17	45587612	A	G	inverted	-1.0	ALCOHOLACUTE10	Acute alcohol intoxication, ICD10							no
 chr17:45585159-46292045		17	45587612	A	G	inverted	-1.0	ALCOPANCACU	Alcohol-induced acute pancreatitis							no
 chr17:45585159-46292045		17	45587612	A	G	inverted	-1.0	ALCOPANCCHRON	Alcohol-induced chronic pancreatitis							no
@@ -21849,7 +21849,7 @@ chr17:45585159-46292045		17	45587612	A	G	inverted	-1.0	N14_GLOMEINOTH	Glomerular
 chr17:45585159-46292045		17	45587612	A	G	inverted	-1.0	N14_GLOMERULAR	Glomerular diseases							no
 chr17:45585159-46292045		17	45587612	A	G	inverted	-1.0	N14_GLOMER_NEPHRITIS	Glomerulonephritis							no
 chr17:45585159-46292045		17	45587612	A	G	inverted	-1.0	N14_HABITABORT	Habitual aborter							no
-chr17:45585159-46292045		17	45587612	A	G	inverted	-1.0	N14_HENOCHSCHONLEIN_NEPHRITIS	Henoch-Schönlein purpura nephritis (HSPN)							no
+chr17:45585159-46292045		17	45587612	A	G	inverted	-1.0	N14_HENOCHSCHONLEIN_NEPHRITIS	Henoch-Schönlein purpura nephritis (HSPN)							no
 chr17:45585159-46292045		17	45587612	A	G	inverted	-1.0	N14_HYDROCELE	Hydrocele							no
 chr17:45585159-46292045		17	45587612	A	G	inverted	-1.0	N14_HYDRONEPHR	Hydronephrosis							no
 chr17:45585159-46292045		17	45587612	A	G	inverted	-1.0	N14_HYPERTROPHYBREAST	Hypertrophy of breast							no
@@ -22685,7 +22685,7 @@ chr8:7301024-12598379		8	9403846	T	A	direct	0.759722	F5_MOOD	Mood [affective] di
 chr8:7301024-12598379		8	10298515	T	C	inverted	-0.759722	M13_TROCHANTERICBURSITIS	Trochanteric bursitis			-0.0443811	-0.044381	0.0193296	0.021675044610874585	yes
 chr8:7301024-12598379		8	9448489	G	C	direct	0.742611	G6_CRAINOTH	Other cranial nerve disorders in other disorders			0.339966	-0.339966	0.148126	0.021727011788637444	yes
 chr8:7301024-12598379		8	9448489	G	C	direct	0.742611	J10_PNEUMONISOLLIQ	Pneumonitis due to solids and liquids			0.0590538	-0.059054	0.0257336	0.021743527399403398	yes
-chr8:7301024-12598379		8	10298515	T	C	inverted	-0.759722	O15_ICP_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP)  (more control exclusions)			0.0625177	0.062518	0.0272524	0.021789135518331715	yes
+chr8:7301024-12598379		8	10298515	T	C	inverted	-0.759722	O15_ICP_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP)  (more control exclusions)			0.0625177	0.062518	0.0272524	0.021789135518331715	yes
 chr8:7301024-12598379		8	9448489	G	C	direct	0.742611	F5_EMOPER	Emotionally unstable personality disorder			0.0460382	-0.046038	0.0200758	0.021835844857197577	yes
 chr8:7301024-12598379		8	9448489	G	C	direct	0.742611	CD2_BENIGN_CRANIAL_NERVE	Benign neoplasm: Cranial nerves			-0.105279	0.105279	0.0459326	0.021903826965967554	yes
 chr8:7301024-12598379		8	10298515	T	C	inverted	-0.759722	G6_SLEEPAPNO	Sleep apnoea			-0.0148025	-0.014802	0.00646311	0.02200341044329213	yes
@@ -22830,7 +22830,7 @@ chr8:7301024-12598379		8	9403846	T	A	direct	0.759722	H7_EXOPTHALMUS	Exophthalmic
 chr8:7301024-12598379		8	10298515	T	C	inverted	-0.759722	L12_PEMPHIGUS_VULG	Pemphigus vulgaris			-0.348582	-0.348582	0.163415	0.03291546539470678	yes
 chr8:7301024-12598379		8	10298515	T	C	inverted	-0.759722	N14_BENIGNMAMDYSP	Benign mammary dysplasia			0.0410735	0.041073	0.0192581	0.03294200281756986	yes
 chr8:7301024-12598379		8	9448489	G	C	direct	0.742611	DM_NEUROPATHY	Diabetic neuropathy			-0.0508868	0.050887	0.0238846	0.03312836481172814	yes
-chr8:7301024-12598379		8	10298515	T	C	inverted	-0.759722	O15_ICP_WIDE_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8 (more control exclusions)			0.0524264	0.052426	0.0246271	0.03326978543451707	yes
+chr8:7301024-12598379		8	10298515	T	C	inverted	-0.759722	O15_ICP_WIDE_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8 (more control exclusions)			0.0524264	0.052426	0.0246271	0.03326978543451707	yes
 chr8:7301024-12598379		8	9448489	G	C	direct	0.742611	AB1_MYSOSIS_NOS	Other mycoses, not elsewhere classified/unspecified			0.306397	-0.306397	0.143967	0.03331654824012061	yes
 chr8:7301024-12598379		8	9448489	G	C	direct	0.742611	F5_AGORAPHOBIA	Agoraphobia			0.0855129	-0.085513	0.0401925	0.0333718282656417	yes
 chr8:7301024-12598379		8	10298515	T	C	inverted	-0.759722	K11_GULC	Gastric ulcer			-0.0350065	-0.035007	0.0164648	0.03349191651687828	yes
@@ -23085,7 +23085,7 @@ chr8:7301024-12598379		8	9403846	T	A	direct	0.759722	AD_AM_EXMORE	Alzheimer’s 
 chr8:7301024-12598379		8	9403846	T	A	direct	0.759722	AD_EO_EXMORE	Alzheimer’s disease (Early onset) (more control exclusions)							no
 chr8:7301024-12598379		8	9403846	T	A	direct	0.759722	AD_LO_EXMORE	Alzheimer’s disease (Late onset) (more control exclusions)							no
 chr8:7301024-12598379		8	9403846	T	A	direct	0.759722	AD_U_EXMORE	Alzheimer’s disease (undefined) (more control exclusions)							no
-chr8:7301024-12598379		8	9403846	T	A	direct	0.759722	ALCODELIRIUM	Alcohol withdrawal state with delirium 							no
+chr8:7301024-12598379		8	9403846	T	A	direct	0.759722	ALCODELIRIUM	Alcohol withdrawal state with delirium 							no
 chr8:7301024-12598379		8	9403846	T	A	direct	0.759722	ALCOHOLACUTE10	Acute alcohol intoxication, ICD10							no
 chr8:7301024-12598379		8	9403846	T	A	direct	0.759722	ALCOPANCACU	Alcohol-induced acute pancreatitis							no
 chr8:7301024-12598379		8	9403846	T	A	direct	0.759722	ALCOPANCCHRON	Alcohol-induced chronic pancreatitis							no
@@ -24826,7 +24826,7 @@ chr8:7301024-12598379		8	9403846	T	A	direct	0.759722	N14_GLOMEINOTH	Glomerular d
 chr8:7301024-12598379		8	9403846	T	A	direct	0.759722	N14_GLOMERULAR	Glomerular diseases							no
 chr8:7301024-12598379		8	9403846	T	A	direct	0.759722	N14_GLOMER_NEPHRITIS	Glomerulonephritis							no
 chr8:7301024-12598379		8	9403846	T	A	direct	0.759722	N14_HABITABORT	Habitual aborter							no
-chr8:7301024-12598379		8	9403846	T	A	direct	0.759722	N14_HENOCHSCHONLEIN_NEPHRITIS	Henoch-Schönlein purpura nephritis (HSPN)							no
+chr8:7301024-12598379		8	9403846	T	A	direct	0.759722	N14_HENOCHSCHONLEIN_NEPHRITIS	Henoch-Schönlein purpura nephritis (HSPN)							no
 chr8:7301024-12598379		8	9403846	T	A	direct	0.759722	N14_HYDROCELE	Hydrocele							no
 chr8:7301024-12598379		8	9403846	T	A	direct	0.759722	N14_HYDRONEPHR	Hydronephrosis							no
 chr8:7301024-12598379		8	9403846	T	A	direct	0.759722	N14_IGA_NEPHROPATHY	IgA nephropathy (IgA glomerulonephritis)							no
@@ -24933,9 +24933,9 @@ chr8:7301024-12598379		8	9403846	T	A	direct	0.759722	O15_GESTAT_HYPERT	Gestation
 chr8:7301024-12598379		8	9403846	T	A	direct	0.759722	O15_GESTAT_OEDEM_PREINUR	Gestational [pregnancy-induced] oedema and proteinuria without hypertension							no
 chr8:7301024-12598379		8	9403846	T	A	direct	0.759722	O15_HAEMORRH_EARLY_PREG	Haemorrhage in early pregnancy							no
 chr8:7301024-12598379		8	9403846	T	A	direct	0.759722	O15_HYPTENSPREG	Pregnancy hypertension							no
-chr8:7301024-12598379		8	9403846	T	A	direct	0.759722	O15_ICP_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP)  (more control exclusions)							no
-chr8:7301024-12598379		8	9403846	T	A	direct	0.759722	O15_ICP_WIDE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8							no
-chr8:7301024-12598379		8	9403846	T	A	direct	0.759722	O15_ICP_WIDE_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8 (more control exclusions)							no
+chr8:7301024-12598379		8	9403846	T	A	direct	0.759722	O15_ICP_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP)  (more control exclusions)							no
+chr8:7301024-12598379		8	9403846	T	A	direct	0.759722	O15_ICP_WIDE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8							no
+chr8:7301024-12598379		8	9403846	T	A	direct	0.759722	O15_ICP_WIDE_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8 (more control exclusions)							no
 chr8:7301024-12598379		8	9403846	T	A	direct	0.759722	O15_LABOUR_ABNORM_FORCES	Abnormalities of forces of labour							no
 chr8:7301024-12598379		8	9403846	T	A	direct	0.759722	O15_LABOUR_ANEST_COMPLIC	Complications of anaesthesia during labour and delivery							no
 chr8:7301024-12598379		8	9403846	T	A	direct	0.759722	O15_LABOUR_FETAL_STRESS	Labour and delivery complicated by fetal stress [distress]							no
@@ -25308,7 +25308,7 @@ chr8:7301024-12598379		8	10298515	T	C	inverted	-0.759722	AD_AM_EXMORE	Alzheimer�
 chr8:7301024-12598379		8	10298515	T	C	inverted	-0.759722	AD_EO_EXMORE	Alzheimer’s disease (Early onset) (more control exclusions)							no
 chr8:7301024-12598379		8	10298515	T	C	inverted	-0.759722	AD_LO_EXMORE	Alzheimer’s disease (Late onset) (more control exclusions)							no
 chr8:7301024-12598379		8	10298515	T	C	inverted	-0.759722	AD_U_EXMORE	Alzheimer’s disease (undefined) (more control exclusions)							no
-chr8:7301024-12598379		8	10298515	T	C	inverted	-0.759722	ALCODELIRIUM	Alcohol withdrawal state with delirium 							no
+chr8:7301024-12598379		8	10298515	T	C	inverted	-0.759722	ALCODELIRIUM	Alcohol withdrawal state with delirium 							no
 chr8:7301024-12598379		8	10298515	T	C	inverted	-0.759722	ALCOPANCACU	Alcohol-induced acute pancreatitis							no
 chr8:7301024-12598379		8	10298515	T	C	inverted	-0.759722	ALCO_PRESCRIPTION	Use of disulfiram, acamprosate or naltrexone							no
 chr8:7301024-12598379		8	10298515	T	C	inverted	-0.759722	ALLERGIC_CONTACT_DERMA_DRUGS_CONTACT_W_SKIN	Allergic contact dermatitis due to drugs in contact with skin							no
@@ -27012,7 +27012,7 @@ chr8:7301024-12598379		8	10298515	T	C	inverted	-0.759722	N14_GLOMEINOTH	Glomerul
 chr8:7301024-12598379		8	10298515	T	C	inverted	-0.759722	N14_GLOMERULAR	Glomerular diseases							no
 chr8:7301024-12598379		8	10298515	T	C	inverted	-0.759722	N14_GLOMER_NEPHRITIS	Glomerulonephritis							no
 chr8:7301024-12598379		8	10298515	T	C	inverted	-0.759722	N14_HABITABORT	Habitual aborter							no
-chr8:7301024-12598379		8	10298515	T	C	inverted	-0.759722	N14_HENOCHSCHONLEIN_NEPHRITIS	Henoch-Schönlein purpura nephritis (HSPN)							no
+chr8:7301024-12598379		8	10298515	T	C	inverted	-0.759722	N14_HENOCHSCHONLEIN_NEPHRITIS	Henoch-Schönlein purpura nephritis (HSPN)							no
 chr8:7301024-12598379		8	10298515	T	C	inverted	-0.759722	N14_IGA_NEPHROPATHY	IgA nephropathy (IgA glomerulonephritis)							no
 chr8:7301024-12598379		8	10298515	T	C	inverted	-0.759722	N14_IMPOTENCE	Impotence							no
 chr8:7301024-12598379		8	10298515	T	C	inverted	-0.759722	N14_INFCERVIX	Inflammatory disease of cervix uteri							no
@@ -27110,7 +27110,7 @@ chr8:7301024-12598379		8	10298515	T	C	inverted	-0.759722	O15_FAILED_INDUCT	Faile
 chr8:7301024-12598379		8	10298515	T	C	inverted	-0.759722	O15_FALSE_LAB	False labour							no
 chr8:7301024-12598379		8	10298515	T	C	inverted	-0.759722	O15_GESTAT_OEDEM_PREINUR	Gestational [pregnancy-induced] oedema and proteinuria without hypertension							no
 chr8:7301024-12598379		8	10298515	T	C	inverted	-0.759722	O15_HAEMORRH_EARLY_PREG	Haemorrhage in early pregnancy							no
-chr8:7301024-12598379		8	10298515	T	C	inverted	-0.759722	O15_ICP_WIDE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8							no
+chr8:7301024-12598379		8	10298515	T	C	inverted	-0.759722	O15_ICP_WIDE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8							no
 chr8:7301024-12598379		8	10298515	T	C	inverted	-0.759722	O15_LABOUR_ABNORM_FORCES	Abnormalities of forces of labour							no
 chr8:7301024-12598379		8	10298515	T	C	inverted	-0.759722	O15_LABOUR_ANEST_COMPLIC	Complications of anaesthesia during labour and delivery							no
 chr8:7301024-12598379		8	10298515	T	C	inverted	-0.759722	O15_LABOUR_FETAL_STRESS	Labour and delivery complicated by fetal stress [distress]							no
@@ -27485,7 +27485,7 @@ chr8:7301024-12598379		8	9448489	G	C	direct	0.742611	AD_AM_EXMORE	Alzheimer’s 
 chr8:7301024-12598379		8	9448489	G	C	direct	0.742611	AD_EO_EXMORE	Alzheimer’s disease (Early onset) (more control exclusions)							no
 chr8:7301024-12598379		8	9448489	G	C	direct	0.742611	AD_LO_EXMORE	Alzheimer’s disease (Late onset) (more control exclusions)							no
 chr8:7301024-12598379		8	9448489	G	C	direct	0.742611	AD_U_EXMORE	Alzheimer’s disease (undefined) (more control exclusions)							no
-chr8:7301024-12598379		8	9448489	G	C	direct	0.742611	ALCODELIRIUM	Alcohol withdrawal state with delirium 							no
+chr8:7301024-12598379		8	9448489	G	C	direct	0.742611	ALCODELIRIUM	Alcohol withdrawal state with delirium 							no
 chr8:7301024-12598379		8	9448489	G	C	direct	0.742611	ALCOHOLACUTE10	Acute alcohol intoxication, ICD10							no
 chr8:7301024-12598379		8	9448489	G	C	direct	0.742611	ALCOPANCACU	Alcohol-induced acute pancreatitis							no
 chr8:7301024-12598379		8	9448489	G	C	direct	0.742611	ALCOPANCCHRON	Alcohol-induced chronic pancreatitis							no
@@ -29256,7 +29256,7 @@ chr8:7301024-12598379		8	9448489	G	C	direct	0.742611	N14_GENITOUROTH	Other disor
 chr8:7301024-12598379		8	9448489	G	C	direct	0.742611	N14_GLOMEINOTH	Glomerular disorders in diseases classified elsewhere							no
 chr8:7301024-12598379		8	9448489	G	C	direct	0.742611	N14_GLOMERULAR	Glomerular diseases							no
 chr8:7301024-12598379		8	9448489	G	C	direct	0.742611	N14_GLOMER_NEPHRITIS	Glomerulonephritis							no
-chr8:7301024-12598379		8	9448489	G	C	direct	0.742611	N14_HENOCHSCHONLEIN_NEPHRITIS	Henoch-Schönlein purpura nephritis (HSPN)							no
+chr8:7301024-12598379		8	9448489	G	C	direct	0.742611	N14_HENOCHSCHONLEIN_NEPHRITIS	Henoch-Schönlein purpura nephritis (HSPN)							no
 chr8:7301024-12598379		8	9448489	G	C	direct	0.742611	N14_HYDRONEPHR	Hydronephrosis							no
 chr8:7301024-12598379		8	9448489	G	C	direct	0.742611	N14_HYPERTROPHYBREAST	Hypertrophy of breast							no
 chr8:7301024-12598379		8	9448489	G	C	direct	0.742611	N14_HYPERTROPHYBREAST_BOTH	Hypertrophy of breast in women and men							no
@@ -29364,9 +29364,9 @@ chr8:7301024-12598379		8	9448489	G	C	direct	0.742611	O15_GESTAT_HYPERT	Gestation
 chr8:7301024-12598379		8	9448489	G	C	direct	0.742611	O15_GESTAT_OEDEM_PREINUR	Gestational [pregnancy-induced] oedema and proteinuria without hypertension							no
 chr8:7301024-12598379		8	9448489	G	C	direct	0.742611	O15_HAEMORRH_EARLY_PREG	Haemorrhage in early pregnancy							no
 chr8:7301024-12598379		8	9448489	G	C	direct	0.742611	O15_HYPTENSPREG	Pregnancy hypertension							no
-chr8:7301024-12598379		8	9448489	G	C	direct	0.742611	O15_ICP_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP)  (more control exclusions)							no
-chr8:7301024-12598379		8	9448489	G	C	direct	0.742611	O15_ICP_WIDE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8							no
-chr8:7301024-12598379		8	9448489	G	C	direct	0.742611	O15_ICP_WIDE_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8 (more control exclusions)							no
+chr8:7301024-12598379		8	9448489	G	C	direct	0.742611	O15_ICP_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP)  (more control exclusions)							no
+chr8:7301024-12598379		8	9448489	G	C	direct	0.742611	O15_ICP_WIDE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8							no
+chr8:7301024-12598379		8	9448489	G	C	direct	0.742611	O15_ICP_WIDE_EXMORE	Intrahepatic Cholestasis of Pregnancy (ICP) , incl. ICD-8 (more control exclusions)							no
 chr8:7301024-12598379		8	9448489	G	C	direct	0.742611	O15_LABOUR_ABNORM_FORCES	Abnormalities of forces of labour							no
 chr8:7301024-12598379		8	9448489	G	C	direct	0.742611	O15_LABOUR_ANEST_COMPLIC	Complications of anaesthesia during labour and delivery							no
 chr8:7301024-12598379		8	9448489	G	C	direct	0.742611	O15_LABOUR_FETAL_STRESS	Labour and delivery complicated by fetal stress [distress]							no

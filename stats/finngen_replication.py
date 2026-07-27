@@ -172,6 +172,11 @@ def main(argv=None):
     if df.empty:
         raise SystemExit("no FinnGen associations retrieved")
     df = df.sort_values(["inversion", "p_value"], kind="mergesort")
+    # FinnGen's phenotype strings contain non-breaking spaces (U+00A0). Writing
+    # them through would leave a committed table that the repository's NBSP fixer
+    # then rewrites on every push, so normalise here instead of letting a bot
+    # edit committed data after the fact.
+    df = df.map(lambda v: v.replace("\u00a0", " ") if isinstance(v, str) else v)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(args.out, sep="\t", index=False)
     print(f"\n{len(df)} (variant x endpoint) rows -> {args.out}\n")
