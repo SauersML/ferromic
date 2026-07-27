@@ -69,13 +69,50 @@ See `PI_ADJUSTMENT_NOTE.md`. Report the covariate-adjusted row of
 `recurrence_controls_summary.tsv`; Model C conditions on the exposure itself and
 is not an adjusted estimate of the same effect.
 
-## PAML ω direction — FDFT1 and BLK are reversed in the text
+## PAML ω direction — the manuscript is right; the table was stale
 
-See the commit adding `stats/paml_extreme_omega_check.py`. The pipeline is
-self-consistent (`cds/pipeline_lib.py` marks pure direct branches `#1`, and the
-parser maps PAML branch type 1 → `cmc_omega2_direct`), so
-`winner_omega2_direct = 59.2` for FDFT1 really is the direct clade. The draft
-states the opposite for both named genes.
+**An earlier version of this note said FDFT1 and BLK were reversed in the text.
+That was wrong.** The manuscript is in the raw GRCh38 reference frame and always
+matched the original PAML output.
+
+`data/GRAND_PAML_RESULTS.tsv` had been rewritten into the *ancestral/derived*
+frame by the chimp-polarization cutover of 2026-06-22 (`b4506bca`) and its
+successors, which swapped the two ω columns for every gene at a locus whose
+reference orientation is derived — including all of chr8:7301024-12598379, hence
+FDFT1 and BLK. The cutover was reverted on 2026-07-01 (`202e6af3`), but this file
+is a CI-regenerated output and was left stale in the polarized frame.
+
+The swap is provable and purely mechanical: across all 194 genes, the polarized
+and pre-polarization tables are identical except for 44 exactly-swapped ω pairs,
+and **every** likelihood, p-value, q-value, proportion and κ is byte-identical.
+The clade-model LRT is symmetric in the two clades, so a label swap cannot move
+them. The table has been restored to the raw frame, and it now reads FDFT1
+ω_direct = 0 / ω_inverted = 59.2 and BLK ω_direct = 156.4 / ω_inverted = 0.0001 —
+the manuscript's values.
+
+## 4-fold correlations — same root cause, numbers change
+
+`data/four_fold_pi_by_inversion.tsv` was stale in the same way (58 rows, 30
+identical, 28 exactly swapped) and has also been restored. The drafted ρ = 0.560
+and ρ = 0.759 were computed in the polarized frame. In the raw frame the same
+comparisons give:
+
+| comparison (n = 26, consensus-classified) | polarized (drafted) | raw (correct) |
+|---|---|---|
+| whole-locus vs 4-fold | ρ = 0.560, p = 0.003 | **ρ = 0.542, p = 0.0042** |
+| 4-fold vs whole-CDS | ρ = 0.759, p = 7.1e-06 | **ρ = 0.689, p = 9.9e-05** |
+
+Same direction and conclusion, but the quoted values need updating.
+
+## Still stale elsewhere?
+
+`data/pin_pis_by_inversion.tsv` was in the same state and has been restored.
+Everything else the revert flagged has either been regenerated on raw orientation
+(`recurrence_controls`, `cds_conservation_calibration`) or was restored by the
+revert itself (`callset.tsv`, `inv_properties.tsv`,
+`balanced_recurrence_results.tsv`). `data/cds_identical_proportions.tsv` predates
+the whole polarization episode (last touched 2025-11-23), so the CDS analyses are
+unaffected.
 
 ## Flux rate units — per lineage per generation
 

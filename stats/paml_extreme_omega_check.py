@@ -7,18 +7,34 @@ table with the two quantities that decide whether an extreme omega means
 anything: the proportion of codons assigned to the divergent site class (p2) and
 whether either clade's omega sits on PAML's optimiser boundary (999).
 
-It also reports, per gene, which clade carries the extreme value **as recorded in
-the table**, because the orientation direction is easy to get backwards in prose.
+It also reports, per gene, which clade carries the extreme value.
 
-Where the labels come from
---------------------------
-In cds/pipeline_lib.py the H1 clade-model-C tree marks every pure *direct*
-internal branch ``#1`` and every pure *inverted* branch ``#2``
-(``node.add_feature("paml_mark", "#1")`` under ``status == "direct"``), and the
-parser assigns PAML's ``branch type 1`` row to ``cmc_omega2_direct`` and
-``branch type 2`` to ``cmc_omega2_inverted``. The pipeline is therefore internally
-consistent: ``winner_omega2_direct`` really is the direct clade. Any disagreement
-with the manuscript text is a text error, not a column-naming error.
+Orientation frame -- read this before comparing to anything
+-----------------------------------------------------------
+The input table is in the **raw GRCh38 reference orientation**: group 0 /
+``direct`` is the hg38 reference arrangement, exactly as published by Porubsky et
+al. (2022). That is the project's standard, and it is the frame the manuscript
+quotes.
+
+The label chain is internally consistent within that frame. ``cds/pipeline_lib.py``
+assigns ``group_status`` from the leaf-name prefix (``0`` = direct, ``1`` =
+inverted), marks every pure direct internal branch ``#1`` and every pure inverted
+branch ``#2``, and the parser maps PAML's ``branch type 1`` row to
+``cmc_omega2_direct``. So ``winner_omega2_direct`` is the direct clade *of
+whatever orientation frame the PHYLIP inputs were built in*.
+
+That last clause is the trap. Between 2026-06-22 and 2026-06-23 a chimp-polarization
+cutover rewrote this table into the *ancestral/derived* frame, swapping the two
+omega columns for the 44 gene-rows at loci whose reference orientation is derived
+-- including all of chr8:7301024-12598379 (8p23.1), hence FDFT1 and BLK. The
+cutover was reverted on 2026-07-01, but this table is a CI-regenerated output and
+was left stale in the polarized frame for a month. It has now been restored to the
+pre-polarization content, which is provably the raw frame: across all 194 genes the
+polarized and raw tables are identical except for 44 exactly-swapped omega pairs,
+with every likelihood, p-value, q-value and proportion byte-identical (the
+clade-model LRT is symmetric in the two clades, so a label swap cannot move them).
+
+Consequence: the manuscript's FDFT1 and BLK directions are correct and always were.
 
 Input : data/GRAND_PAML_RESULTS.tsv
 Output: data/paml_extreme_omega_check.tsv

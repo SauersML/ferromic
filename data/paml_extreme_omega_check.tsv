@@ -1,5 +1,5 @@
 gene	transcript	region	status	overall_p_value	overall_q_value	p2_divergent_class	omega2_direct	omega2_inverted	clade_with_higher_omega2	not_identifiable_flags
-FDFT1	FDFT1_ENST00000220584.9	chr8_7301024_12598379	Usable: complete data	0.0013448	0.0632056	0.0025	59.2218	0	direct	divergent site class holds 0.25% of codons
-BLK	BLK_ENST00000259089.9	chr8_7301024_12598379	Usable: complete data	0.0175552	0.231248	0.00213	0.0001	156.364	inverted	divergent site class holds 0.21% of codons
-MAPT	MAPT_ENST00000262410.10	chr17_45585159_46292045	Usable: complete data	0.0338949	0.318612	0.00168	0.0001	999	inverted	omega at PAML boundary (999) in inverted; divergent site class holds 0.17% of codons
-PRSS55	PRSS55_ENST00000328655.8	chr8_7301024_12598379	Usable: complete data	0.00297947	0.0700175	0.01171	252.345	999	inverted	omega at PAML boundary (999) in inverted
+FDFT1	FDFT1_ENST00000220584.9	chr8_7301024_12598379	Usable: complete data	0.0013448	0.0632056	0.0025	0	59.2218	inverted	divergent site class holds 0.25% of codons
+BLK	BLK_ENST00000259089.9	chr8_7301024_12598379	Usable: complete data	0.0175552	0.231248	0.00213	156.364	0.0001	direct	divergent site class holds 0.21% of codons
+MAPT	MAPT_ENST00000262410.10	chr17_45585159_46292045	Usable: complete data	0.0338949	0.318612	0.00168	999	0.0001	direct	omega at PAML boundary (999) in direct; divergent site class holds 0.17% of codons
+PRSS55	PRSS55_ENST00000328655.8	chr8_7301024_12598379	Usable: complete data	0.00297947	0.0700175	0.01171	999	252.345	direct	omega at PAML boundary (999) in direct

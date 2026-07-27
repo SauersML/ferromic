@@ -1,7 +1,7 @@
 subset	measure_x	measure_y	comparison	n_loci	spearman_rho	p_value
-all_with_fourfold	wholeLocus	fourfold	whole-locus vs 4-fold orientation difference	46	0.538708	0.000112354
-all_with_fourfold	fourfold	wholeCDS	4-fold vs whole-CDS orientation difference	46	0.781458	1.46506e-10
-all_with_fourfold	wholeLocus	wholeCDS	whole-locus vs whole-CDS orientation difference	46	0.503722	0.000358723
-recurrence_classified	wholeLocus	fourfold	whole-locus vs 4-fold orientation difference	26	0.559642	0.00295175
-recurrence_classified	fourfold	wholeCDS	4-fold vs whole-CDS orientation difference	26	0.758576	7.09599e-06
-recurrence_classified	wholeLocus	wholeCDS	whole-locus vs whole-CDS orientation difference	26	0.593082	0.00140691
+all_with_fourfold	wholeLocus	fourfold	whole-locus vs 4-fold orientation difference	46	0.534278	0.000131072
+all_with_fourfold	fourfold	wholeCDS	4-fold vs whole-CDS orientation difference	46	0.744425	3.02264e-09
+all_with_fourfold	wholeLocus	wholeCDS	whole-locus vs whole-CDS orientation difference	46	0.446412	0.00187252
+recurrence_classified	wholeLocus	fourfold	whole-locus vs 4-fold orientation difference	26	0.541947	0.00423923
+recurrence_classified	fourfold	wholeCDS	4-fold vs whole-CDS orientation difference	26	0.689077	9.90219e-05
+recurrence_classified	wholeLocus	wholeCDS	whole-locus vs whole-CDS orientation difference	26	0.502998	0.00881458
