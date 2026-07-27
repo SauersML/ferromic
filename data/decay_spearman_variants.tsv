@@ -1,0 +1,5 @@
+within_locus	across_locus	rho	p_value	n_bins	n_series	matches
+mean	median	0.500324	0.00021564	50	60	replication log (0.500)
+mean	mean	0.554478	2.93944e-05	50	60	
+median	median	nan	nan	50	60	
+median	mean	nan	nan	50	60	

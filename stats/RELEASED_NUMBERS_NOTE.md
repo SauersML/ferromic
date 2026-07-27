@@ -23,14 +23,29 @@ The draft's 41 / 82 is not reproducible from the committed callset.
 `data/phewas_results.tsv` contains 1,090 unique values of `Phenotype`, matching
 the replication log. The manuscript's 1,089 is off by one.
 
-## Internal decay Spearman — ρ = 0.500, p = 2.156e-04, n = 60
+## Internal decay Spearman — ρ = 0.500, and the reported n is wrong in both
 
-`replicate_manuscript_statistics.txt` records ρ = 0.500 for the overall internal
-decay of diversity against distance from the locus start (first 100 kb, loci
-≥ 100 kb, n = 60), with the per-locus values in
-`data/spearman_decay_points.tsv`. The manuscript's ρ = 0.451, p = 0.001 is not
-produced by any committed script; n = 60 agrees, so the two are the same
-comparison computed differently.
+Resolved by `stats/decay_spearman_variants.py`, which recomputes the decay
+independently from the committed per-site tracks.
+
+**The released value reproduces exactly**: within-locus mean, across-locus median,
+restricted to consensus-classified loci > 100 kbp gives **ρ = 0.5003, p = 2.16e-04**
+over 60 contributing series — matching the log's 0.500, p = 2.156e-04 to four
+significant figures.
+
+**The quoted `n = 60` is a mislabel, in the manuscript as well as the log.** In
+`_calc_spearman`, `n` is `len(window_data)`, the number of contributing
+inversion × orientation series; the correlation itself runs over the 2 kbp bins
+spanning 0–100 kbp, i.e. 50 points. Both published ρ values are consistent with 50
+bins and neither with 60 (ρ = 0.500 at 50 bins → p = 2.2e-04; ρ = 0.451 → p = 1.0e-03,
+which is exactly the manuscript's stated p). Report the bin count, or drop n.
+
+**ρ = 0.451 is not reproducible.** Across all four combinations of within-locus
+(mean/median) × across-locus (mean/median) aggregation the values are 0.500, 0.554,
+and NaN twice — the two median-within variants are undefined because per-site π is
+mostly zero, which is also why the log's "median within 2kb bins" line reads NA.
+Nothing on the current data yields 0.451, so it is from an earlier data state.
+Quote ρ = 0.500 with its rule stated.
 
 ## CDS conservation — the GLM p-values should not be quoted at all
 
