@@ -52,6 +52,26 @@ and the repository disagreed, which one the committed code produces and why.
   A CI text-fixer once rewrote three committed `.csv.gz` files as if they were
   text; `fixer.yml` now refuses to touch binaries and verifies afterwards.
 
+## Verification standard
+
+Regeneration is deterministic, but not bit-identical across platforms: the linear
+algebra underneath the GLMs differs at roughly 1e-9 between BLAS implementations
+(macOS ARM vs the Linux CI runners). Measured over a full regeneration of every
+table, the largest relative change in any number is **8.2e-12**, with no
+non-numeric differences — so a diff larger than that is real drift, not noise.
+
+Six tables regenerate **byte-identical** (`table_s5_exclusion_reasons`,
+`cds_haplotype_counts`, `paml_extreme_omega_check`, `four_fold_pi_correlations`,
+`imputation_threshold_summary`, `decay_spearman_variants`); they do no floating-point
+model fitting.
+
+The one place that noise ever mattered was exact permutation tests, where "at
+least as extreme" is a threshold comparison and a statistic on the boundary can
+fall either side. That produced a genuine 7/128 → 8/128 disagreement between
+platforms. Tolerances in `robust_cds_reanalysis.py` are now scaled to the
+statistic rather than absolute, so ties resolve identically everywhere — and
+resolve inclusively, which is the conservative choice for an exact test.
+
 ## What is not reproducible here
 
 * **The All of Us PheWAS.** Individual-level data live in the AoU Researcher
