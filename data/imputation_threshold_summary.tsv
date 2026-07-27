@@ -1,0 +1,7 @@
+subset	n_models	r2_threshold	n_passing_r2	n_passing_r2_and_bh
+all_models_fit	158	0.3	35	21
+all_models_fit	158	0.5	18	16
+all_models_fit	158	0.7	12	12
+consensus_93_locus_set	75	0.3	20	14
+consensus_93_locus_set	75	0.5	12	11
+consensus_93_locus_set	75	0.7	9	9
