@@ -110,6 +110,9 @@ jobs:
         working-directory: data
         run: python ../stats/recurrence_sd_architecture.py
 
+      - name: Breakpoint-decay Spearman variants
+        run: python stats/decay_spearman_variants.py
+
       - name: Rebuild supplementary tables workbook
         run: python stats/generate_tables.py
 
@@ -185,6 +188,7 @@ jobs:
             data/robust_cds_reanalysis_inversion_effects.tsv
             data/robust_cds_reanalysis_power.tsv
             data/robust_cds_reanalysis_report.md
+            data/decay_spearman_variants.tsv
             data/recurrence_sd_calls.tsv
             data/recurrence_sd_summary.tsv
           )
