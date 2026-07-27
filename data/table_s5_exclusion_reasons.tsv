@@ -1,0 +1,293 @@
+OrigID	Chromosome	Start	End	verdictRecurrence_hufsah	verdictRecurrence_benson	consensus_recurrence	analysed	exclusion_reason
+chr1-13084312-INV-62181	chr1	13104252	13122521	TRUE	TRUE	recurrent	yes	
+chr1-145160435-INV-994087	chr1	145160434	146154520	FALSE	TRUE	NA	no	methods disagree (verdictRecurrence_hufsah = FALSE, verdictRecurrence_benson = TRUE)
+chr1-146298110-INV-2374764	chr1	146298109	148672872	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr1-248128774-INV-300084	chr1	248128773	248428856	FALSE	FALSE	single	yes	
+chr1-25338356-INV-24067	chr1	25324280	25369060	FALSE	FALSE	single	yes	
+chr1-81642914-INV-66617	chr1	81650508	81707447	FALSE	FALSE	single	yes	
+chr10-15742645-INV-17942	chr10	15742803	15760427	FALSE	FALSE	single	yes	
+chr10-46983452-INV-484782	chr10	46983451	47468232	TRUE	TRUE	recurrent	yes	
+chr10-79542902-INV-674513	chr10	79542901	80217413	FALSE	FALSE	single	yes	
+chr11-18246600-INV-21672	chr11	18249084	18265819	FALSE	FALSE	single	yes	
+chr11-50136371-INV-206505	chr11	50154999	50324102	TRUE	TRUE	recurrent	yes	
+chr12-131312082-INV-332759	chr12	131312081	131644839	FALSE	FALSE	single	yes	
+chr12-131333944-INV-289865	chr12	131333943	131623807	FALSE	TRUE	NA	no	methods disagree (verdictRecurrence_hufsah = FALSE, verdictRecurrence_benson = TRUE)
+chr12-46897663-INV-16289	chr12	46896694	46915975	FALSE	FALSE	single	yes	
+chr12-75713181-INV-18615	chr12	75713180	75731794	FALSE	FALSE	single	yes	
+chr13-52344011-INV-158247	chr13	52344010	52502256	FALSE	TRUE	NA	no	methods disagree (verdictRecurrence_hufsah = FALSE, verdictRecurrence_benson = TRUE)
+chr13-53902574-INV-190801	chr13	53902573	54093373	FALSE	FALSE	single	yes	
+chr13-64598738-INV-17482	chr13	64598737	64616218	FALSE	FALSE	single	yes	
+chr13-79822252-INV-17591	chr13	79823210	79839670	FALSE	TRUE	NA	no	methods disagree (verdictRecurrence_hufsah = FALSE, verdictRecurrence_benson = TRUE)
+chr14-85872201-INV-17070	chr14	85872200	85889269	FALSE	FALSE	single	yes	
+chr15-22701128-INV-512754	chr15	22701127	23213881	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr15-30618104-INV-1535102	chr15	30618103	32153204	TRUE	TRUE	recurrent	yes	
+chr15-84373376-INV-43322	chr15	84373375	84416696	TRUE	TRUE	recurrent	yes	
+chr16-15384483-INV-891665	chr16	15384482	16276146	FALSE	FALSE	single	yes	
+chr16-16721274-INV-1352270	chr16	16721273	18073542	TRUE	TRUE	recurrent	yes	
+chr16-21583512-INV-848871	chr16	21583511	22432381	FALSE	TRUE	NA	no	methods disagree (verdictRecurrence_hufsah = FALSE, verdictRecurrence_benson = TRUE)
+chr16-21864965-INV-567418	chr16	21864964	22432381	FALSE	TRUE	NA	no	methods disagree (verdictRecurrence_hufsah = FALSE, verdictRecurrence_benson = TRUE)
+chr16-28471894-INV-165758	chr16	28471892	28637651	TRUE	TRUE	recurrent	yes	
+chr16-75204855-INV-19244	chr16	75206214	75222748	FALSE	FALSE	single	yes	
+chr17-45585160-INV-706887	chr17	45585159	46292045	FALSE	FALSE	single	yes	
+chr17-60019740-INV-107140	chr17	60035640	60110888	FALSE	TRUE	NA	no	methods disagree (verdictRecurrence_hufsah = FALSE, verdictRecurrence_benson = TRUE)
+chr19-47959661-INV-2131536	chr19	47959660	50091195	FALSE	TRUE	NA	no	methods disagree (verdictRecurrence_hufsah = FALSE, verdictRecurrence_benson = TRUE)
+chr2-108527822-INV-1205216	chr2	108527821	109733036	FALSE	TRUE	NA	no	methods disagree (verdictRecurrence_hufsah = FALSE, verdictRecurrence_benson = TRUE)
+chr2-130138213-INV-1062391	chr2	130138212	131200602	FALSE	FALSE	single	yes	
+chr2-130138213-INV-1392323	chr2	130138212	131530534	FALSE	FALSE	single	yes	
+chr2-45062769-INV-12977	chr2	45065588	45081777	FALSE	FALSE	single	yes	
+chr2-87995842-INV-184695	chr2	87995841	88180536	FALSE	FALSE	single	yes	
+chr2-91832041-INV-180624	chr2	91832040	92012663	TRUE	TRUE	recurrent	yes	
+chr2-95496991-INV-82806	chr2	95496989	95579796	FALSE	TRUE	NA	no	methods disagree (verdictRecurrence_hufsah = FALSE, verdictRecurrence_benson = TRUE)
+chr2-95800192-INV-224213	chr2	95800191	96024403	TRUE	TRUE	recurrent	yes	
+chr20-25846149-INV-163496	chr20	25846148	26009643	FALSE	TRUE	NA	no	methods disagree (verdictRecurrence_hufsah = FALSE, verdictRecurrence_benson = TRUE)
+chr20-47827034-INV-77611	chr20	47841016	47888238	FALSE	FALSE	single	yes	
+chr21-13992018-INV-65632	chr21	13987773	14056796	FALSE	FALSE	single	yes	
+chr21-19877735-INV-192437	chr21	19877734	20070170	FALSE	FALSE	single	yes	
+chr21-43821743-INV-13374	chr21	43821742	43835116	FALSE	FALSE	single	yes	
+chr22-21442678-INV-15944	chr22	21443089	21491761	TRUE	FALSE	NA	no	methods disagree (verdictRecurrence_hufsah = TRUE, verdictRecurrence_benson = FALSE)
+chr3-195680867-INV-272256	chr3	195692124	195956606	TRUE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = TRUE)
+chr3-195749464-INV-230745	chr3	195749463	195980207	TRUE	TRUE	recurrent	yes	
+chr4-87925789-INV-11799	chr4	87926011	87937547	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr5-112179912-INV-56689	chr5	112179911	112236600	FALSE	FALSE	single	yes	
+chr5-124425561-INV-121098	chr5	124425560	124546657	FALSE	FALSE	single	yes	
+chr5-177946130-INV-57824	chr5	177946129	178003952	FALSE	FALSE	single	yes	
+chr6-141867315-INV-29159	chr6	141866310	141898728	FALSE	FALSE	single	yes	
+chr6-167181003-INV-209976	chr6	167209001	167357782	FALSE	FALSE	single	yes	
+chr6-76111919-INV-44661	chr6	76109081	76158474	FALSE	FALSE	single	yes	
+chr7-143716563-INV-34437	chr7	143716562	143750998	FALSE	TRUE	NA	no	methods disagree (verdictRecurrence_hufsah = FALSE, verdictRecurrence_benson = TRUE)
+chr7-33990522-INV-19762	chr7	33990735	34010143	FALSE	FALSE	single	yes	
+chr7-54220528-INV-101153	chr7	54234014	54308393	FALSE	FALSE	single	yes	
+chr7-57641573-INV-197400	chr7	57641572	57838971	FALSE	TRUE	NA	no	methods disagree (verdictRecurrence_hufsah = FALSE, verdictRecurrence_benson = TRUE)
+chr7-57835189-INV-284465	chr7	57835188	58119653	FALSE	FALSE	single	yes	
+chr7-5989047-INV-746598	chr7	5989046	6735643	TRUE	TRUE	recurrent	yes	
+chr7-60911892-INV-666133	chr7	60911891	61578023	TRUE	TRUE	recurrent	yes	
+chr7-65219158-INV-312667	chr7	65219157	65531823	TRUE	TRUE	recurrent	yes	
+chr7-70955928-INV-18020	chr7	70961198	70973901	FALSE	FALSE	single	yes	
+chr7-73113990-INV-1685041	chr7	73113989	74799029	TRUE	TRUE	recurrent	yes	
+chr7-74799031-INV-480422	chr7	74869950	75058098	TRUE	TRUE	recurrent	yes	
+chr7-97445827-INV-13775	chr7	97445822	97459601	FALSE	FALSE	single	yes	
+chr8-2340295-INV-42058	chr8	2343351	2378385	TRUE	TRUE	recurrent	yes	
+chr8-7301025-INV-5297356	chr8	7301024	12598379	TRUE	TRUE	recurrent	yes	
+chr9-123976301-INV-18001	chr9	123979106	123991038	TRUE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = TRUE)
+chr9-87942698-INV-167577	chr9	87942696	88110274	FALSE	FALSE	single	yes	
+chrX-101597550-INV-18696	chrX	101602193	101611599	TRUE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = TRUE)
+chrX-103954976-INV-128112	chrX	103989434	104049428	TRUE	TRUE	recurrent	yes	
+chrX-120080219-INV-75364	chrX	120087101	120149199	FALSE	TRUE	NA	no	methods disagree (verdictRecurrence_hufsah = FALSE, verdictRecurrence_benson = TRUE)
+chrX-135116507-INV-139642	chrX	135165183	135207322	FALSE	TRUE	NA	no	methods disagree (verdictRecurrence_hufsah = FALSE, verdictRecurrence_benson = TRUE)
+chrX-135619381-INV-52316	chrX	135623647	135665679	FALSE	TRUE	NA	no	methods disagree (verdictRecurrence_hufsah = FALSE, verdictRecurrence_benson = TRUE)
+chrX-141110161-INV-122718	chrX	141110160	141232877	FALSE	TRUE	NA	no	methods disagree (verdictRecurrence_hufsah = FALSE, verdictRecurrence_benson = TRUE)
+chrX-149599491-INV-56477	chrX	149599490	149655967	TRUE	TRUE	recurrent	yes	
+chrX-149654273-INV-94882	chrX	149681035	149722249	TRUE	TRUE	recurrent	yes	
+chrX-149747303-INV-21480	chrX	149747302	149768782	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chrX-153067814-INV-226118	chrX	153149748	153250226	TRUE	TRUE	recurrent	yes	
+chrX-154339398-INV-53354	chrX	154347246	154384867	TRUE	TRUE	recurrent	yes	
+chrX-154555919-INV-93915	chrX	154591327	154613096	TRUE	TRUE	recurrent	yes	
+chrX-155366835-INV-100636	chrX	155386727	155453982	TRUE	TRUE	recurrent	yes	
+chrX-51667498-INV-58316	chrX	51692963	51700363	FALSE	TRUE	NA	no	methods disagree (verdictRecurrence_hufsah = FALSE, verdictRecurrence_benson = TRUE)
+chrX-52040360-INV-173922	chrX	52077120	52176974	TRUE	TRUE	recurrent	yes	
+chrX-71702807-INV-75580	chrX	71702806	71778386	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chrX-72996081-INV-91407	chrX	72997772	73077479	TRUE	TRUE	recurrent	yes	
+chrX-76141867-INV-11379	chrX	76146153	76148949	TRUE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = TRUE)
+chr1-21203898-INV-862	chr1	21203917	21204602	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr1-26639853-INV-8324	chr1	26641622	26646431	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr1-60775308-INV-5023	chr1	60776841	60778677	FALSE	TRUE	NA	no	methods disagree (verdictRecurrence_hufsah = FALSE, verdictRecurrence_benson = TRUE)
+chr1-91666258-INV-840	chr1	91666232	91667085	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr1-120299059-INV-301908	chr1	120299058	120600965	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr1-149842162-INV-9508	chr1	149843518	149850293	FALSE	FALSE	single	yes	
+chr1-197787661-INV-1197	chr1	197787659	197788856	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr10-4961364-INV-47135	chr10	4983056	4984361	FALSE	TRUE	NA	no	methods disagree (verdictRecurrence_hufsah = FALSE, verdictRecurrence_benson = TRUE)
+chr10-37102555-INV-11157	chr10	37105149	37111121	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr10-71065991-INV-2615	chr10	71066858	71067726	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr10-73657970-INV-2177	chr10	73657969	73660146	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr10-87308006-INV-117026	chr10	87308005	87425030	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr10-91440445-INV-8733	chr10	91443587	91446029	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr10-103197205-INV-9055	chr10	103205557	103205994	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr11-310146-INV-10302	chr11	311836	317944	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr11-738460-INV-2650	chr11	738649	740185	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr11-48880392-INV-19590	chr11	48888300	48892127	TRUE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = TRUE)
+chr11-71571191-INV-6980	chr11	71571819	71576724	FALSE	FALSE	single	yes	
+chr12-37705669-INV-31994	chr12	37705668	37737662	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr12-71546144-INV-1652	chr12	71546200	71547738	TRUE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = TRUE)
+chr13-37314466-INV-4035	chr13	37315207	37317760	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr13-48199211-INV-7451	chr13	48199250	48206639	FALSE	FALSE	single	yes	
+chr14-34540582-INV-21874	chr14	34547864	34555230	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr14-60604531-INV-8718	chr14	60606118	60611659	FALSE	FALSE	single	yes	
+chr14-65375818-INV-880	chr14	65375818	65376683	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr14-105692001-INV-7875	chr14	105693931	105698385	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr15-23345460-INV-5044410	chr15	23345459	28389868	FALSE	FALSE	single	yes	
+chr16-1226779-INV-28828	chr16	1245200	1247503	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr16-35945424-INV-12423	chr16	35946683	35952382	FALSE	FALSE	single	yes	
+chr16-48616946-INV-494	chr16	48616945	48617439	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr16-85155144-INV-1053	chr16	85155339	85156001	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr17-30616357-INV-14733	chr17	30621881	30625589	TRUE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = TRUE)
+chr17-76181651-INV-1551	chr17	76181937	76182932	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr18-12141485-INV-8631	chr18	12145103	12146503	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr19-43355096-INV-25294	chr19	43365871	43369065	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr2-87987172-INV-23268233	chr2	87987171	111255403	FALSE	FALSE	single	yes	
+chr2-97168745-INV-1492	chr2	97168744	97170236	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr2-138246733-INV-5010	chr2	138247429	138251774	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr2-215962719-INV-722	chr2	215962718	215963440	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr2-222147677-INV-3251	chr2	222149224	222149582	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr20-10807400-INV-1454	chr20	10807797	10808434	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr20-24397727-INV-8419	chr20	24397726	24406144	FALSE	FALSE	single	yes	
+chr20-28495292-INV-12996	chr20	28495291	28508286	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr21-26001839-INV-547	chr21	26001836	26002391	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr21-26648370-INV-1039	chr21	26648368	26649407	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr22-23968095-INV-5062	chr22	23969582	23971740	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr3-26315757-INV-2108	chr3	26316193	26317447	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr3-75454478-INV-1238	chr3	75454477	75455715	FALSE	FALSE	single	yes	
+chr3-131969892-INV-7927	chr3	131969227	131977820	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr4-33098029-INV-7075	chr4	33098066	33104924	FALSE	FALSE	single	yes	
+chr4-145693640-INV-908	chr4	145693552	145694748	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr5-16979045-INV-519	chr5	16978658	16979397	FALSE	TRUE	NA	no	methods disagree (verdictRecurrence_hufsah = FALSE, verdictRecurrence_benson = TRUE)
+chr5-46896907-INV-18922	chr5	46896906	46915828	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr5-64466170-INV-15635	chr5	64470920	64477089	TRUE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = TRUE)
+chr5-64470929-INV-4190	chr5	64470928	64475118	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr5-179633880-INV-24659	chr5	179643529	179651253	FALSE	FALSE	single	yes	
+chr6-26736773-INV-2849	chr6	26736772	26739621	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr6-89213913-INV-300	chr6	89213914	89214230	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr6-123106042-INV-3793	chr6	123106049	123109821	FALSE	FALSE	single	yes	
+chr6-130527042-INV-4267	chr6	130527041	130531150	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr7-40839738-INV-1134	chr7	40839776	40840871	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr7-47614229-INV-1139	chr7	47614508	47615262	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr7-60898865-INV-10087	chr7	60898864	60908951	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr7-63356276-INV-31891	chr7	63356275	63388165	TRUE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = TRUE)
+chr7-67019304-INV-851	chr7	67019303	67020338	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr7-143808753-INV-9661	chr7	143808752	143818413	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr8-102423262-INV-520	chr8	102423403	102423638	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr8-102880338-INV-757	chr8	102880337	102881094	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr9-30951702-INV-5595	chr9	30952354	30956484	FALSE	TRUE	NA	no	methods disagree (verdictRecurrence_hufsah = FALSE, verdictRecurrence_benson = TRUE)
+chr9-64028786-INV-39671	chr9	64028785	64068456	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr9-85796067-INV-6026	chr9	85797070	85801040	FALSE	FALSE	single	yes	
+chr9-91958952-INV-763	chr9	91958957	91959591	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr9-102565835-INV-4446	chr9	102565838	102570277	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr9-113105213-INV-14149	chr9	113111686	113112886	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chrX-6219014-INV-1337	chrX	6219005	6220343	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chrX-14711418-INV-1780	chrX	14711416	14713197	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chrX-45687777-INV-4877	chrX	45689038	45691227	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chrX-52492352-INV-19975	chrX	52502274	52510614	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chrX-55480174-INV-12894	chrX	55480141	55493063	TRUE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = TRUE)
+chrX-102317111-INV-52896	chrX	102338170	102348934	TRUE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = TRUE)
+chrX-135718085-INV-149049	chrX	135765135	135776630	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chrX-153066070-INV-17879	chrX	153074418	153075612	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chrY-6452943-INV-3310852	chrY	6452942	9763793	NA	NA	NA	no	no recurrence call from either method
+chrY-9797299-INV-19841	chrY	9797298	9817138	NA	NA	NA	no	no recurrence call from either method
+chrY-14014802-INV-12509	chrY	14019657	14023071	NA	NA	NA	no	no recurrence call from either method
+chrY-16256794-INV-67832	chrY	16269646	16315779	NA	NA	NA	no	no recurrence call from either method
+chrY-17949448-INV-6854	chrY	17949447	17956300	NA	NA	NA	no	no recurrence call from either method
+chrY-18632163-INV-54113	chrY	18640355	18667145	NA	NA	NA	no	no recurrence call from either method
+chrY-21013458-INV-38445	chrY	21021692	21063744	NA	NA	NA	no	no recurrence call from either method
+chrY-22204072-INV-180018	chrY	22204071	22384088	NA	NA	NA	no	no recurrence call from either method
+chr1-13190915-INV-133672	chr1	13190914	13324586	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr1-43593626-INV-710	chr1	43593641	43594291	NA	NA	NA	no	no recurrence call from either method
+chr1-108311808-INV-57118	chr1	108310642	108383736	TRUE	TRUE	recurrent	yes	
+chr1-144376210-INV-224591	chr1	144376209	144600799	FALSE	FALSE	single	yes	
+chr1-148893782-INV-371863	chr1	148893781	149265643	FALSE	TRUE	NA	no	methods disagree (verdictRecurrence_hufsah = FALSE, verdictRecurrence_benson = TRUE)
+chr1-227492704-INV-15726	chr1	227499209	227502113	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr1-248517894-INV-12881	chr1	248518572	248529489	FALSE	TRUE	NA	no	methods disagree (verdictRecurrence_hufsah = FALSE, verdictRecurrence_benson = TRUE)
+chr10-46135869-INV-77646	chr10	46144703	46204851	FALSE	FALSE	single	yes	
+chr10-46769329-INV-87814	chr10	46769328	46857141	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr10-47480264-INV-66161	chr10	47480263	47546423	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr10-47649266-INV-107520	chr10	47649265	47756785	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr10-47983094-INV-61350	chr10	47983093	48044442	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr10-55007454-INV-5370	chr10	55007431	55013434	FALSE	FALSE	single	yes	
+chr10-65465442-INV-4580	chr10	65465445	65470067	FALSE	FALSE	single	yes	
+chr10-113411929-INV-356	chr10	113411933	113412252	NA	NA	NA	no	no recurrence call from either method
+chr10-131619519-INV-1521	chr10	131619777	131620717	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr10-133657263-INV-130160	chr10	133657262	133787421	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr11-1661292-INV-24445	chr11	1667460	1683267	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr11-4271710-INV-17848	chr11	4271709	4289557	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr11-24263185-INV-392	chr11	24263179	24266246	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr11-55662740-INV-3952	chr11	55662739	55666690	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr11-62094124-INV-7773	chr11	62093043	62102999	FALSE	TRUE	NA	no	methods disagree (verdictRecurrence_hufsah = FALSE, verdictRecurrence_benson = TRUE)
+chr11-66251212-INV-1252	chr11	66251227	66252453	NA	NA	NA	no	no recurrence call from either method
+chr11-89920625-INV-3224	chr11	89920623	89923848	TRUE	TRUE	recurrent	yes	
+chr12-13392052-INV-6162	chr12	13392624	13397634	NA	NA	NA	no	no recurrence call from either method
+chr13-52310303-INV-10653	chr13	52310302	52320954	FALSE	FALSE	single	yes	
+chr13-63717417-INV-120779	chr13	63727377	63820968	FALSE	TRUE	NA	no	methods disagree (verdictRecurrence_hufsah = FALSE, verdictRecurrence_benson = TRUE)
+chr13-97456279-INV-437	chr13	97456283	97456722	NA	NA	NA	no	no recurrence call from either method
+chr14-18862646-INV-796362	chr14	18862645	19659006	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr14-105571550-INV-8996	chr14	105573622	105577544	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr15-23295577-INV-22616	chr15	23295576	23318191	FALSE	FALSE	single	yes	
+chr15-28298425-INV-325091	chr15	28298424	28623514	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr15-30434572-INV-97097	chr15	30436458	30529803	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr15-32475961-INV-97199	chr15	32477828	32571283	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr15-82330919-INV-26880	chr15	82330918	82357797	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr15-82360483-INV-154653	chr15	82360482	82515134	FALSE	TRUE	NA	no	methods disagree (verdictRecurrence_hufsah = FALSE, verdictRecurrence_benson = TRUE)
+chr16-14907776-INV-120705	chr16	14907775	15028479	TRUE	FALSE	NA	no	methods disagree (verdictRecurrence_hufsah = TRUE, verdictRecurrence_benson = FALSE)
+chr16-15028481-INV-133352	chr16	14954790	15100859	TRUE	TRUE	recurrent	yes	
+chr16-18337349-INV-19325	chr16	18337348	18356673	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr16-20506047-INV-15848	chr16	20506046	20521893	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr16-28709345-INV-67143	chr16	28709344	28776487	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr16-32364221-INV-164223	chr16	32364220	32528442	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr16-32755979-INV-123613	chr16	32755978	32879590	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr16-32991172-INV-111580	chr16	32991171	33102750	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr16-34507815-INV-13045	chr16	34507814	34520859	NA	NA	NA	no	no recurrence call from either method
+chr16-34577842-INV-2694	chr16	34577841	34580535	NA	NA	NA	no	no recurrence call from either method
+chr16-46383781-INV-325	chr16	46383780	46384105	NA	NA	NA	no	no recurrence call from either method
+chr17-3052058-INV-200164	chr17	3082008	3221835	FALSE	FALSE	single	yes	
+chr17-5982217-INV-1513	chr17	5982838	5983104	NA	NA	NA	no	no recurrence call from either method
+chr17-16823491-INV-1560701	chr17	16823490	18384190	FALSE	FALSE	single	yes	
+chr17-18677352-INV-146444	chr17	18622359	18823773	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr17-36109570-INV-114204	chr17	36109569	36223772	FALSE	TRUE	NA	no	methods disagree (verdictRecurrence_hufsah = FALSE, verdictRecurrence_benson = TRUE)
+chr17-37415091-INV-607	chr17	37415181	37415638	NA	NA	NA	no	no recurrence call from either method
+chr17-43231917-INV-93156	chr17	43232908	43321964	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr17-43263149-INV-59735	chr17	43263148	43322883	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr17-45573557-INV-11603	chr17	45573556	45585158	FALSE	FALSE	single	yes	
+chr18-29783948-INV-395	chr18	29783947	29784342	NA	NA	NA	no	no recurrence call from either method
+chr2-88859192-INV-39467	chr2	88861564	88886160	NA	NA	NA	no	no recurrence call from either method
+chr2-90060919-INV-155562	chr2	90060918	90216479	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr2-90286376-INV-93054	chr2	90286375	90379428	FALSE	TRUE	NA	no	methods disagree (verdictRecurrence_hufsah = FALSE, verdictRecurrence_benson = TRUE)
+chr2-94191334-INV-102714	chr2	94191333	94294046	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr2-97340523-INV-28715	chr2	97348052	97360454	TRUE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = TRUE)
+chr2-110095179-INV-181032	chr2	110095177	110276210	FALSE	TRUE	NA	no	methods disagree (verdictRecurrence_hufsah = FALSE, verdictRecurrence_benson = TRUE)
+chr2-236356297-INV-2677	chr2	236356880	236358489	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr2-240674170-INV-26389	chr2	240685789	240688966	TRUE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = TRUE)
+chr20-28751289-INV-1342	chr20	28751288	28752630	NA	NA	NA	no	no recurrence call from either method
+chr20-29257747-INV-162005	chr20	29257746	29419750	FALSE	FALSE	single	yes	
+chr21-13205468-INV-15566	chr21	13205437	13221054	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr22-21201772-INV-78695	chr22	21201771	21280466	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr3-28414484-INV-5621	chr3	28417060	28417483	NA	NA	NA	no	no recurrence call from either method
+chr3-162827167-INV-3077	chr3	162827574	162829855	NA	NA	NA	no	no recurrence call from either method
+chr3-195680055-INV-44153	chr3	195680054	195724206	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr4-40233409-INV-2010	chr4	40233406	40235439	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr4-49284665-INV-6354	chr4	49284664	49291017	NA	NA	NA	no	no recurrence call from either method
+chr4-49291020-INV-33986	chr4	49291019	49325004	TRUE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = TRUE)
+chr4-156904334-INV-8519	chr4	156905870	156912808	NA	NA	NA	no	no recurrence call from either method
+chr4-187948402-INV-8158	chr4	187950173	187954784	NA	NA	NA	no	no recurrence call from either method
+chr5-17580906-INV-11540	chr5	17580905	17592445	NA	NA	NA	no	no recurrence call from either method
+chr5-21479306-INV-21422	chr5	21479305	21500726	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr5-29069209-INV-308	chr5	29069229	29069523	NA	NA	NA	no	no recurrence call from either method
+chr5-47061569-INV-20494	chr5	47061568	47082062	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr5-47105116-INV-46253	chr5	47105115	47151367	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr5-70527774-INV-6139	chr5	70527773	70533912	NA	NA	NA	no	no recurrence call from either method
+chr5-71009587-INV-84412	chr5	71009586	71093997	FALSE	FALSE	single	yes	
+chr5-181095856-INV-7651	chr5	181098775	181100846	TRUE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = TRUE)
+chr6-94031361-INV-335	chr6	94031360	94031695	NA	NA	NA	no	no recurrence call from either method
+chr7-62290675-INV-72470	chr7	62290674	62363143	TRUE	TRUE	recurrent	yes	
+chr7-62408487-INV-47959	chr7	62408486	62456444	TRUE	TRUE	recurrent	yes	
+chr7-65565115-INV-74905	chr7	65572704	65581644	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr7-76603964-INV-16446	chr7	76603963	76620409	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr7-107418074-INV-5179	chr7	107418983	107422332	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr7-143779395-INV-19333	chr7	143779394	143798726	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr7-144254565-INV-2203	chr7	144254564	144256766	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr8-12369153-INV-24982	chr8	12369152	12394133	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr8-85728659-INV-13234	chr8	85728658	85741892	NA	NA	NA	no	no recurrence call from either method
+chr8-85741975-INV-20818	chr8	85741974	85762792	NA	NA	NA	no	no recurrence call from either method
+chr8-85769985-INV-51732	chr8	85769984	85821716	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chr9-12016541-INV-55306	chr9	12004038	12074552	FALSE	FALSE	single	yes	
+chr9-38773641-INV-4023105	chr9	38773640	42796744	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chrX-48395426-INV-4575	chrX	48396314	48399110	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chrX-52880292-INV-93962	chrX	52921572	52934581	FALSE	NA	NA	no	no call from verdictRecurrence_benson (only verdictRecurrence_hufsah = FALSE)
+chrX-63182245-INV-13735	chrX	63185600	63193343	NA	NA	NA	no	no recurrence call from either method
+chrX-106266349-INV-33658	chrX	106266279	106275333	NA	NA	NA	no	no recurrence call from either method
+chrX-112504687-INV-12274	chrX	112504686	112516959	FALSE	FALSE	single	yes	
+chrX-135733567-INV-16180	chrX	135734732	135748584	FALSE	TRUE	NA	no	methods disagree (verdictRecurrence_hufsah = FALSE, verdictRecurrence_benson = TRUE)
+chrX-135765868-INV-28891	chrX	135765867	135794758	NA	NA	NA	no	no recurrence call from either method
+chrX-141573056-INV-28779	chrX	141585256	141589189	FALSE	TRUE	NA	no	methods disagree (verdictRecurrence_hufsah = FALSE, verdictRecurrence_benson = TRUE)
+chrX-152678163-INV-111649	chrX	152729753	152738707	TRUE	TRUE	recurrent	yes	
+chrY-6243098-INV-97551	chrY	6243097	6340647	NA	NA	NA	no	no recurrence call from either method
+chrY-10367645-INV-52339	chrY	10367644	10419983	NA	NA	NA	no	no recurrence call from either method
+chrY-15874908-INV-30002	chrY	15883580	15896218	NA	NA	NA	no	no recurrence call from either method
+chrY-21052503-INV-12528	chrY	21053790	21063744	NA	NA	NA	no	no recurrence call from either method
+chrY-22207319-INV-117968	chrY	22207318	22325285	NA	NA	NA	no	no recurrence call from either method
