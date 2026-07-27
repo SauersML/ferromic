@@ -78,6 +78,17 @@ resolve inclusively, which is the conservative choice for an exact test.
   Workbench and cannot be exported. The imputation model, the tagging SNPs and
   every downstream summary are committed; the association step is not runnable
   outside the workbench.
+
+  Concretely, these nine scripts write committed `data/` files but are in no
+  workflow because each needs AoU or other uncommitted input — verified by running
+  every one of them from a clean checkout:
+  `PGS_control_plot.py`, `chr17_inversion_tag_correlation.py`, `family_forest.py`,
+  `forest.py`, `manhattan_phe.py`, `overall_AF_scatterplot.py`,
+  `phewas_ext_replicate.py`, `pop_dosage_plot.py`, `qq_plot.py`.
+  They are the complete list: an audit of all 94 scripts under `stats/` and `cds/`
+  found exactly eleven that produce committed data without a workflow, and the
+  other two (`divergence_da_dxy_by_type.py`, `divergence_edge_decay.py`) did run
+  from committed inputs and are now wired in.
 * **The per-CDS PHYLIP alignments** (`phy_outputs.zip`, 1.2 GB) were pruned from
   the tree. `four_fold_pi.py` and `pin_pis.py` recover them from the git-LFS object
   when it is present, and otherwise run with `--from-table`, which regenerates the
