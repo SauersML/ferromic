@@ -1,16 +1,16 @@
 {
   "n_consensus_scored": 60,
-  "auc_vs_consensus": 0.7098214285714285,
-  "kappa_call_vs_consensus": 0.4217687074829932,
-  "agreement": 0.7166666666666667,
-  "threshold_fpr_fmax": 0.4845501163112194,
+  "auc_vs_consensus": 0.8180803571428571,
+  "kappa_call_vs_consensus": 0.5291479820627802,
+  "agreement": 0.7666666666666667,
+  "threshold_fpr_fmax": 0.6451257414047371,
   "circularity_caveat": "Concordance is partly circular: the consensus labels are themselves derived from tag-SNP + parsimony signals that overlap several classifier features. This is a consistency check, not independent validation. The non-circular validation is the simulation ground truth (sim_metrics.json).",
-  "n_disagreements": 17,
+  "n_disagreements": 14,
   "coverage": {
     "n_total": 292,
     "n_usable": 180,
     "n_scored_nonconsensus": 120,
-    "n_called_recurrent": 133,
+    "n_called_recurrent": 56,
     "n_low_confidence": 158
   }
 }

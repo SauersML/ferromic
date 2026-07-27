@@ -94,7 +94,7 @@ binary call for all 292 balanced inversions (180 usable given ≥ 2 haplotypes p
 orientation; 120 non-consensus loci scored beyond the labelled set), each with a
 `low_confidence` flag when an orientation has < 4 informative haplotypes. Concordance
 with the manuscript's 60 usable consensus calls (`results/concordance.json`,
-AUC 0.71, κ 0.42) is recorded as a **consistency check, not independent validation** —
+AUC 0.82, κ 0.53) is recorded as a **consistency check, not independent validation** —
 the consensus labels share signals with several classifier features (the caveat is
 carried in the JSON). The non-circular validation is the simulation ground truth.
 
@@ -160,14 +160,15 @@ committed data only — no msprime, no network):
 
 - **coefficient recovery** — re-fitting from the committed training set recovers the
   recorded model coefficients (warm-logistic to 1e-4; pAUC-refined to 1e-2);
-- **held-out AUC** — the recorded 0.927 full / 0.890 transferable held-out simulation
-  AUC and 0.826 power @ FPR ≤ 0.10 reproduce;
+- **held-out AUC** — the recorded 0.913 full / 0.914 transferable held-out simulation
+  AUC and 0.837 power @ FPR ≤ 0.10 reproduce;
 - **calibration argument order** — the calibration table is computed as
   `_calibration(labels, scores)` (binned by the continuous scores, observed label
   frequency tracking predicted score), and the swapped `(scores, labels)` call is
   detectably wrong (collapses to ≤ 2 label bins); the committed calibration tables
   reproduce from the training set;
-- **parsimony baseline** — the parsimony-count rule reproduces at 0.000 power @ FPR ≤ 0.10;
+- **parsimony baseline** — the reference parsimony rule reproduces at 0.000 power
+  @ FPR ≤ 0.10 (its own FPR on these simulations is 0.155);
 - **determinism / order-invariance** — `classify()` returns the same origin count under
   arbitrary haplotype re-ordering (rows are canonicalized before the alignment is built,
   since IQ-TREE's search depends on sequence order). These tests are skipped where no
