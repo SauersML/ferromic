@@ -76,9 +76,10 @@ and across between-orientation flux:
 
 Two things follow.
 
-* **Flux does not degrade the classifier.** Across m from 0 to 10⁻⁶ the false-positive
-  rate moves 0.149 → 0.156 and power 0.804 → 0.816. This is the manuscript's claim, now
-  measured with the manuscript's own classifier rather than an approximation of it.
+* **Flux does not degrade the classifier.** On the corrected 5,400-locus sweep the
+  single-origin false-positive rate goes 0.113 → 0.106 (p = 0.70) and power 0.891 → 0.907
+  (p = 0.36) across m = 0 → 10⁻⁶ — neither moves detectably. This is the manuscript's
+  claim, measured with the manuscript's own classifier.
 * **The false-positive rates above are from a mis-specified single-event scenario and
   are being regenerated.** Constraining only the inverted-deme admixture proportion does
   not produce a single-origin sample: direct haplotypes could still be drawn from the
