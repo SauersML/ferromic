@@ -7,6 +7,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: nbsp-fixer-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   fix-non-breaking-spaces:
     runs-on: ubuntu-latest
@@ -206,15 +210,33 @@ jobs:
       env:
         FILES_CHANGED: ${{ steps.fix-nbsp.outputs.files_changed }}
       run: |
-        set -ex
+        set -eo pipefail
         git add .
-        if ! git diff --staged --quiet; then
-          echo "Committing NBSP fixes for files: $FILES_CHANGED"
-          git commit -m "[bot] Auto-fix non-breaking spaces in:$FILES_CHANGED [skip ci]"
-          git push
-        else
+        if git diff --staged --quiet; then
           echo "INFO: No changes to commit after NBSP fixing attempt."
+          exit 0
         fi
+        echo "Committing NBSP fixes for files: $FILES_CHANGED"
+        git commit -m "[bot] Auto-fix non-breaking spaces in:$FILES_CHANGED [skip ci]"
+
+        # This job races every other push to main, and previously had a bare
+        # `git push` with no rebase or retry -- so a concurrent commit rejected it
+        # with "fetch first" and the run went red while the fix itself was fine.
+        # Rebase onto the remote and retry, matching the other commit-back workflows.
+        for attempt in 1 2 3; do
+          if git push origin HEAD:main; then
+            echo "Push succeeded on attempt $attempt"
+            exit 0
+          fi
+          echo "Push rejected (attempt $attempt); rebasing onto origin/main and retrying"
+          git pull --rebase --autostash origin main || {
+            echo "Rebase failed; aborting rather than force-pushing"
+            git rebase --abort 2>/dev/null || true
+            exit 1
+          }
+        done
+        echo "Push failed after 3 attempts"
+        exit 1
 
     - name: Summary
       if: always()
