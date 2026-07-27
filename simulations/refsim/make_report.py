@@ -23,8 +23,13 @@ import os
 import statistics
 from collections import defaultdict
 
-FLUX = [0.0, 1e-9, 1e-8, 1e-7, 1e-6]
 DEPTH_ORDER = ["recent", "young", "old"]
+
+
+def flux_values(cs):
+    """The flux column, taken from the data rather than hard-coded, so the same
+    report builds the main sweep and the extreme-flux extension."""
+    return sorted({c["m_flux"] for c in cs})
 
 
 def load(patterns):
@@ -81,13 +86,14 @@ def write_csv(cs, path):
     print("wrote", path)
 
 
-def _grid(cs, sc, rho, depth):
+def _grid(cs, sc, rho, depth, FLUX):
     return [next((c for c in cs if c["scenario"] == sc and c["depth"] == depth
                   and c["rho"] == rho and abs(c["m_flux"] - m) < 1e-30), None)
             for m in FLUX]
 
 
 def write_md(cs, path):
+    FLUX = flux_values(cs)
     rhos = sorted({c["rho"] for c in cs})
     with open(path, "w") as fh:
         fh.write("# Between-orientation flux sweep — reference classifier\n\n")
@@ -103,7 +109,7 @@ def write_md(cs, path):
                 fh.write("| depth | " + " | ".join(f"m={m:.0e}" for m in FLUX) + " |\n")
                 fh.write("|" + "---|" * (len(FLUX) + 1) + "\n")
                 for depth in DEPTH_ORDER:
-                    row = _grid(cs, sc, rho, depth)
+                    row = _grid(cs, sc, rho, depth, FLUX)
                     if not any(row):
                         continue
                     fh.write(f"| {depth} | " + " | ".join(
@@ -124,6 +130,7 @@ def write_md(cs, path):
 
 
 def plot(cs, path):
+    FLUX = flux_values(cs)
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -138,7 +145,7 @@ def plot(cs, path):
             (axes[1], "recurrent", "Recurrent: detection rate", "power")):
         for depth in DEPTH_ORDER:
             for rho in sorted({c["rho"] for c in cs}):
-                row = _grid(cs, sc, rho, depth)
+                row = _grid(cs, sc, rho, depth, FLUX)
                 if not any(row):
                     continue
                 ax.plot(xticks,
@@ -166,6 +173,8 @@ def plot(cs, path):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("inputs", nargs="*", default=["out/flux_shard*.csv"])
+    ap.add_argument("--prefix", default="flux",
+                   help="output basename stem (use 'extreme' for the extension grid)")
     ap.add_argument("--outdir", default=".")
     args = ap.parse_args(argv)
 
@@ -174,12 +183,12 @@ def main(argv=None):
         raise SystemExit("no input rows found")
     cs = cells(rows)
     os.makedirs(args.outdir, exist_ok=True)
-    write_csv(cs, os.path.join(args.outdir, "flux_results.csv"))
-    write_md(cs, os.path.join(args.outdir, "flux_results.md"))
-    with open(os.path.join(args.outdir, "sweep_full.json"), "w") as fh:
+    write_csv(cs, os.path.join(args.outdir, f"{args.prefix}_results.csv"))
+    write_md(cs, os.path.join(args.outdir, f"{args.prefix}_results.md"))
+    with open(os.path.join(args.outdir, f"sweep_{args.prefix}.json"), "w") as fh:
         json.dump(cs, fh, indent=2)
     try:
-        plot(cs, os.path.join(args.outdir, "flux_fpr_power.png"))
+        plot(cs, os.path.join(args.outdir, f"{args.prefix}_fpr_power.png"))
     except ImportError:
         print("matplotlib unavailable; skipped figure")
     print(f"{len(rows)} replicates -> {len(cs)} cells")
