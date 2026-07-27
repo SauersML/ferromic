@@ -74,6 +74,17 @@ INTERACTION_TERM = "C(consensus)[T.1]:C(phy_group)[T.1]"
 RNG_SEED = 20260726
 
 
+# Exact permutation tests count how many rearrangements are "at least as extreme"
+# as the observed one. That is a threshold comparison, so a statistic sitting on
+# the boundary can fall either side of it depending on floating-point noise -- and
+# the GLM refits underneath differ at ~1e-9 between BLAS implementations, so the
+# same data gave p = 7/128 on one platform and 8/128 on another. An absolute 1e-12
+# tolerance is far tighter than that noise. Scale the tolerance to the statistic
+# instead, so a tie is resolved as a tie everywhere.
+def _tol(x: float, rel: float = 1e-9) -> float:
+    return rel * max(1.0, abs(float(x)))
+
+
 @dataclass(frozen=True)
 class ExactTest:
     estimate: float
@@ -162,7 +173,7 @@ def exact_glm_single_block_permutation(df: pd.DataFrame, adjusted: bool) -> Exac
         z_null.append(float(res.params[ORIENTATION_TERM] / res.bse[ORIENTATION_TERM]))
 
     z = np.asarray(z_null)
-    tol = 1e-12
+    tol = _tol(z_obs)
     return ExactTest(beta_obs, z_obs,
                      float(np.mean(np.abs(z) >= abs(z_obs) - tol)),
                      float(np.mean(z >= z_obs - tol)), len(z))
@@ -204,7 +215,7 @@ def exact_sign_flip(values: Sequence[float]) -> ExactTest:
     ses = perm.std(axis=1, ddof=1) / math.sqrt(len(x))
     t = np.divide(means, ses, out=np.sign(means) * np.full_like(means, np.inf),
                   where=ses > 0)
-    tol = 1e-12
+    tol = _tol(t_obs)
     return ExactTest(mean, t_obs, float(np.mean(np.abs(t) >= abs(t_obs) - tol)),
                      float(np.mean(t >= t_obs - tol)), len(t))
 
@@ -221,7 +232,7 @@ def exact_studentized_group_permutation(values, group, target_group=0) -> ExactT
 
     total, total_ss = float(x.sum()), float(np.dot(x, x))
     two = one = n_perm = 0
-    tol = 1e-12
+    tol = _tol(t_obs)
     for inds in itertools.combinations(range(len(x)), n_a):
         sel = x[list(inds)]
         sa, ssa = float(sel.sum()), float(np.dot(sel, sel))
@@ -253,7 +264,7 @@ def exact_nested_block_sign_flip(single_inv: pd.DataFrame) -> ExactTest:
         se = float(z.std(ddof=1) / math.sqrt(len(z)))
         t_null.append(float(z.mean() / se) if se > 0 else 0.0)
     arr = np.asarray(t_null)
-    tol = 1e-12
+    tol = _tol(t_obs)
     return ExactTest(mean, t_obs, float(np.mean(np.abs(arr) >= abs(t_obs) - tol)),
                      float(np.mean(arr >= t_obs - tol)), len(arr))
 
@@ -394,8 +405,8 @@ def restricted_wild_bootstrap_hc3(y, x, coefficient: int, n_boot=200_000,
         se_star = np.sqrt(np.sum((a_full[coefficient, :, None] * resid_star
                                   / (1.0 - lev)[:, None]) ** 2, axis=0))
         t_star = beta_star[coefficient, :] / se_star
-        two += int(np.sum(np.abs(t_star) >= abs(t_obs) - 1e-12))
-        one += int(np.sum(t_star >= t_obs - 1e-12))
+        two += int(np.sum(np.abs(t_star) >= abs(t_obs) - _tol(t_obs)))
+        one += int(np.sum(t_star >= t_obs - _tol(t_obs)))
         done += size
 
     return {"estimate": float(beta_obs[coefficient]), "se_hc3": se_obs,
@@ -422,9 +433,11 @@ def exact_signflip_power(n, sd, effects, n_sim=200_000, seed=RNG_SEED) -> pd.Dat
         for start in range(0, n_sim, 5_000):
             stop = min(start + 5_000, n_sim)
             pm = samples[start:stop] @ signs.T / n
-            rej_two += int(np.sum(np.mean(np.abs(pm) >= np.abs(observed[start:stop, None]) - 1e-12,
+            obs_chunk = observed[start:stop, None]
+            tol = 1e-9 * np.maximum(1.0, np.abs(obs_chunk))
+            rej_two += int(np.sum(np.mean(np.abs(pm) >= np.abs(obs_chunk) - tol,
                                           axis=1) <= 0.05))
-            rej_one += int(np.sum(np.mean(pm >= observed[start:stop, None] - 1e-12,
+            rej_one += int(np.sum(np.mean(pm >= obs_chunk - tol,
                                           axis=1) <= 0.05))
         rows.append({"true_effect_probability_points": effect,
                      "power_two_sided": rej_two / n_sim,
