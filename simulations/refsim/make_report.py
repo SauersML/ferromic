@@ -19,6 +19,7 @@ import argparse
 import csv
 import glob
 import json
+import math
 import os
 import statistics
 from collections import defaultdict
@@ -92,7 +93,26 @@ def _grid(cs, sc, rho, depth, FLUX):
             for m in FLUX]
 
 
-def write_md(cs, path):
+def endpoint_trend(rows, scenario):
+    """Two-proportion z test of the lowest against the highest flux level.
+
+    The per-cell rates are noisy at 60 replicates, so the marginal comparison
+    across all (depth x rho) cells is what carries any real trend.
+    """
+    fluxes = sorted({r["m_flux"] for r in rows})
+    lo = [r for r in rows if r["scenario"] == scenario and r["m_flux"] == fluxes[0]]
+    hi = [r for r in rows if r["scenario"] == scenario and r["m_flux"] == fluxes[-1]]
+    k1, n1 = sum(r["call"] for r in lo), len(lo)
+    k2, n2 = sum(r["call"] for r in hi), len(hi)
+    p_pool = (k1 + k2) / (n1 + n2)
+    se = math.sqrt(p_pool * (1 - p_pool) * (1 / n1 + 1 / n2)) if p_pool not in (0, 1) else 0.0
+    z = (k2 / n2 - k1 / n1) / se if se > 0 else 0.0
+    p = math.erfc(abs(z) / math.sqrt(2))
+    return dict(m_lo=fluxes[0], m_hi=fluxes[-1], rate_lo=k1 / n1, rate_hi=k2 / n2,
+                n_lo=n1, n_hi=n2, z=z, p=p)
+
+
+def write_md(cs, path, rows=None):
     FLUX = flux_values(cs)
     rhos = sorted({c["rho"] for c in cs})
     with open(path, "w") as fh:
@@ -126,6 +146,14 @@ def write_md(cs, path):
                 vals.append(f"{statistics.fmean([c['recurrent_call_rate'] for c in sel]):.3f}"
                             if sel else "—")
             fh.write(f"| {sc} | " + " | ".join(vals) + " |\n")
+
+        if rows:
+            fh.write("\n## Lowest against highest flux, pooled over all cells\n\n")
+            fh.write("| scenario | rate at m_lo | rate at m_hi | z | p |\n|---|---|---|---|---|\n")
+            for sc in ("single", "recurrent"):
+                t = endpoint_trend(rows, sc)
+                fh.write(f"| {sc} | {t['rate_lo']:.4f} (n={t['n_lo']}) | "
+                         f"{t['rate_hi']:.4f} (n={t['n_hi']}) | {t['z']:.2f} | {t['p']:.4f} |\n")
     print("wrote", path)
 
 
@@ -184,7 +212,7 @@ def main(argv=None):
     cs = cells(rows)
     os.makedirs(args.outdir, exist_ok=True)
     write_csv(cs, os.path.join(args.outdir, f"{args.prefix}_results.csv"))
-    write_md(cs, os.path.join(args.outdir, f"{args.prefix}_results.md"))
+    write_md(cs, os.path.join(args.outdir, f"{args.prefix}_results.md"), rows=rows)
     with open(os.path.join(args.outdir, f"sweep_{args.prefix}.json"), "w") as fh:
         json.dump(cs, fh, indent=2)
     try:

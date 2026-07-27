@@ -76,6 +76,50 @@ out/               per-replicate CSVs (one per shard)
 `trainset` is the labelled training set consumed by `recurrence/` and carries the
 reference origin count as its `tree_n_events` feature.
 
+## Results
+
+**Main sweep** (5,400 loci, 240 haplotypes, f<sub>inv</sub> = 0.1), marginal over the
+nine depth × ρ cells:
+
+| m_flux | 0 | 10⁻⁹ | 10⁻⁸ | 10⁻⁷ | 10⁻⁶ |
+|---|---|---|---|---|---|
+| single-origin FPR | 0.157 | 0.183 | 0.189 | 0.170 | 0.207 |
+| recurrent power | 0.891 | 0.889 | 0.857 | 0.874 | 0.907 |
+
+Pooled endpoints: FPR 0.157 → 0.207 (z = 2.13, **p = 0.033**); power 0.891 → 0.907
+(z = 0.91, p = 0.36).
+
+**Power is unaffected by flux across the swept range. The false-positive rate is
+not — it rises by about a third, and the rise is detectable.** This is a change
+from the previous NJ-based sweep, which showed no significant movement in either.
+
+**Recombination dominates the false-positive rate, in the opposite direction to the
+manuscript.** Single-origin FPR by depth × ρ, at m = 0:
+
+| depth | ρ = 0 | ρ = 10⁻⁸ | ρ = 10⁻⁶ |
+|---|---|---|---|
+| recent | 0.583 | 0.433 | 0.000 |
+| young | 0.233 | 0.117 | 0.000 |
+| old | 0.050 | 0.000 | 0.000 |
+
+At ρ = 10⁻⁶ the rate is essentially zero everywhere; at ρ = 0 and shallow depth it
+exceeds 0.5. The manuscript reports its *highest* false-positive rate (4%) at
+ρ = 10⁻⁶. Switching from NJ trees to this reference pipeline did not reconcile that —
+it raised the overall level. A bare `minMutHomoplasy ≥ 2` rule is not a < 5%-FPR rule
+on these simulations under any cell except the deep, recombining ones.
+
+**Extreme extension** (1,200 loci at ρ = 10⁻⁸), marginal over the two depths:
+
+| m_flux | 10⁻⁶ | 3×10⁻⁶ | 10⁻⁵ | 3×10⁻⁵ | 10⁻⁴ |
+|---|---|---|---|---|---|
+| single-origin FPR | 0.300 | 0.383 | 0.567 | 0.808 | 0.942 |
+| recurrent power | 0.900 | 0.883 | 0.883 | 0.900 | 0.942 |
+
+Detection holds at 0.88–0.94 while the false-positive rate climbs to 0.94: past
+m ≈ 10⁻⁵ the classifier calls nearly everything recurrent and the two scenarios stop
+being distinguishable. The breakdown sits between 10⁻⁶ and 10⁻⁵, above the entire
+range the manuscript sweeps.
+
 ## Reproduce
 
 Needs `msprime`, `biopython`, and an IQ-TREE binary (`iqtree2`, `iqtree3` or `iqtree` on
