@@ -79,19 +79,21 @@ reference origin count as its `tree_n_events` feature.
 ## Results
 
 **Main sweep** (5,400 loci, 240 haplotypes, f<sub>inv</sub> = 0.1), marginal over the
-nine depth × ρ cells:
+nine depth × ρ cells. The single-origin half is the corrected one-divergence model; the
+recurrent half is unchanged, since the single-event bug never touched it:
 
 | m_flux | 0 | 10⁻⁹ | 10⁻⁸ | 10⁻⁷ | 10⁻⁶ |
 |---|---|---|---|---|---|
-| single-origin FPR | 0.157 | 0.183 | 0.189 | 0.170 | 0.207 |
+| single-origin FPR | 0.113 | 0.102 | 0.115 | 0.094 | 0.106 |
 | recurrent power | 0.891 | 0.889 | 0.857 | 0.874 | 0.907 |
 
-Pooled endpoints: FPR 0.157 → 0.207 (z = 2.13, **p = 0.033**); power 0.891 → 0.907
+Pooled endpoints: FPR 0.113 → 0.106 (z = −0.39, **p = 0.70**); power 0.891 → 0.907
 (z = 0.91, p = 0.36).
 
-**Power is unaffected by flux across the swept range. The false-positive rate is
-not — it rises by about a third, and the rise is detectable.** This is a change
-from the previous NJ-based sweep, which showed no significant movement in either.
+**Neither the false-positive rate nor power moves detectably across the swept flux
+range.** This is the manuscript's claim, measured with the manuscript's own classifier.
+An earlier version of this file reported the FPR rising 0.157 → 0.207 at p = 0.033; that
+was produced by the mis-specified single-event scenario and is withdrawn.
 
 **Corrected single-event model — 2,700 loci.** The earlier single-event scenario was
 mis-specified (it let direct haplotypes come from the deme sister to the inverted one;

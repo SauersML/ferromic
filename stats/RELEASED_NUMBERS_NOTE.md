@@ -151,9 +151,16 @@ at ρ = 0 the locus is a single genealogy and ILS in a young, small inverted dem
 monophyly, whereas at ρ = 10⁻⁶ the ML tree averages over many genealogies and separates
 the orientations cleanly.
 
-Until this is understood, quote the flux result as a relative statement — flux does not
-degrade the classifier across the swept range — and do not anchor it to a "< 5%"
-baseline.
+**The flux claim itself is fully supported.** Over the corrected 5,400-locus sweep the
+single-origin FPR goes 0.113 → 0.106 (z = −0.39, p = 0.70) and power 0.891 → 0.907
+(z = 0.91, p = 0.36) across m = 0 → 10⁻⁶ — neither moves detectably. The response
+letter's wording ("the false positive rate under the single-event models did not
+increase, and the power to detect recurrent loci was not reduced") stands as written. An
+intermediate note here that the FPR rose at p = 0.033 came from the mis-specified
+single-event model and is withdrawn.
+
+Quote the flux result as a relative statement across flux levels; do not anchor it to a
+"< 5%" baseline until the ρ-ordering question above is resolved.
 
 ## AGES multiple-testing correction — say which one
 
