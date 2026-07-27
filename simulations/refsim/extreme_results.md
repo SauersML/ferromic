@@ -29,3 +29,10 @@ collapsed, Fitch parsimony on the orientation trait, recurrent iff
 |---|---|---|---|---|---|
 | single | 0.300 | 0.383 | 0.567 | 0.808 | 0.942 |
 | recurrent | 0.900 | 0.883 | 0.883 | 0.900 | 0.942 |
+
+## Lowest against highest flux, pooled over all cells
+
+| scenario | rate at m_lo | rate at m_hi | z | p |
+|---|---|---|---|---|
+| single | 0.3000 (n=120) | 0.9417 (n=120) | 10.24 | 0.0000 |
+| recurrent | 0.9000 (n=120) | 0.9417 (n=120) | 1.20 | 0.2319 |
