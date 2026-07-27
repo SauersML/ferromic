@@ -1,11 +1,13 @@
 """Unified stage entrypoint for the recurrence pipeline.
 
-    python -m recurrence.cli simulate [--reps N --procs P --out PATH]   # msprime training set
-    python -m recurrence.cli fit      [--sims PATH --outdir DIR]        # fit + validate on sims
-    python -m recurrence.cli score    [--model ... --outdir DIR]        # apply to real inversions
+    python -m recurrence.cli simulate --merge 'GLOB'   # fold sharded sim output into the training set
+    python -m recurrence.cli fit      [--sims PATH --outdir DIR]  # fit + validate on sims
+    python -m recurrence.cli score    [--model ... --outdir DIR]  # apply to real inversions
 
-``fit`` and ``score`` default to the committed inputs/results and run without msprime;
-``simulate`` regenerates the training set and needs the ``recurrence`` extra.
+``fit`` and ``score`` default to the committed inputs/results and need only the
+``recurrence`` extra. ``simulate`` regenerates the training set through the reference
+pipeline in ``simulations/refsim`` and additionally needs msprime, Biopython and an
+IQ-TREE binary; see that directory's README for the sharded cluster invocation.
 """
 from __future__ import annotations
 

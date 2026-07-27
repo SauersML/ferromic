@@ -23,10 +23,19 @@ Two feature sets / classifiers are fit from the same simulations and split:
 | **transferable** (8-feature) | the diversity/differentiation features computable identically on simulations and on ferromic `output.csv` (π, θ, Hudson F<sub>ST</sub>/d<sub>xy</sub>, segregating sites, inversion frequency) | the model applied to the real inversions (no domain shift in feature definitions) |
 
 The classifier objective maximizes a smooth surrogate of the partial AUC over the
-FPR ≤ 0.10 region, L2-anchored to a logistic warm start. The tree-origin-count feature
-is the Fitch small-parsimony minimum number of orientation state changes on an NJ
-haplotype tree (`parsimony.py`; the same logic as `simulations/flux/flux_sim.py`,
-kept dependency-light so the classifier imports without msprime).
+FPR ≤ 0.10 region, L2-anchored to a logistic warm start.
+
+The tree-origin-count feature is **the reference recurrence classifier itself**: the
+Fitch small-parsimony minimum number of orientation state changes on an IQ-TREE
+maximum-likelihood haplotype tree with the ancestral outgroup collapsed — i.e.
+`minMutHomoplasy` as computed by
+[`hsiehphLab/inversionSimulation`](https://github.com/hsiehphLab/inversionSimulation),
+the pipeline behind the manuscript's Fig. 1G. The pipeline lives in
+[`simulations/refsim/`](../simulations/refsim/), which documents the file-by-file
+correspondence with upstream; `parsimony.py` is the entry point for callers that hold a
+genotype matrix rather than a simulated tree sequence. Scoring a locus therefore needs
+Biopython and an IQ-TREE binary; the committed training set carries the counts already,
+so `fit` and `score` do not.
 
 ## Recorded results (committed, `results/`)
 
@@ -57,8 +66,8 @@ recurrence/
   classifier.py     deterministic logistic + partial-AUC-at-low-FPR refinement + metrics
   features.py       per-inversion pop-gen feature extractor (full 13-feature set + per-bp stats)
   transferable.py   the 8 sim/real-transferable features (from sim stats or output.csv)
-  parsimony.py      NJ tree + Fitch orientation-origin count (dependency-light, no msprime)
-  simulate.py       stage 1: msprime training-set generation (reuses simulations/flux/flux_sim.py)
+  parsimony.py      reference origin count (IQ-TREE ML tree + Fitch) for a genotype matrix
+  simulate.py       stage 1: training-set generation / shard merge (uses simulations/refsim)
   fit.py            stage 2: fit + validate both classifiers on the sims
   apply.py          stage 3: score the real inversions + consensus concordance
   cli.py            unified `python -m recurrence.cli {simulate,fit,score}` entrypoint
@@ -87,14 +96,18 @@ python -m recurrence.cli fit            # -> results/{model,transferable_model,s
 # stage 3 — score the real inversions + consensus concordance (no msprime):
 python -m recurrence.cli score          # -> results/{real_scores.csv, concordance.json, concordance_disagreements.csv}
 
-# stage 1 (optional) — regenerate the labelled training set (needs msprime):
+# stage 1 (optional) — regenerate the labelled training set.
+# Needs msprime, Biopython and an IQ-TREE binary; run the grid sharded on a cluster
+# (see simulations/refsim/README.md), then merge the shards:
 pip install -e ".[recurrence-sim]"
-python -m recurrence.cli simulate --reps 25 --procs 8   # -> data/sim_features.csv.gz
+python -m recurrence.cli simulate --merge 'simulations/refsim/out/trainset_shard*.csv'
 ```
 
 `fit` and `score` are deterministic (fixed split `seed % 10 ∈ {7,8,9}` = test;
 classifier `random_state=42`); the `simulate` stage seeds every grid cell from its grid
-index. Each generated output writes a provenance sidecar (`*_provenance.json`) recording
+index, and each locus's IQ-TREE search from that same seed.
+
+Each generated output writes a provenance sidecar (`*_provenance.json`) recording
 the resolved inputs and library versions.
 
 ## Verification
@@ -117,7 +130,9 @@ committed data only — no msprime, no network):
   reproduce from the training set;
 - **parsimony baseline** — the parsimony-count rule reproduces at 0.000 power @ FPR ≤ 0.10;
 - **determinism / order-invariance** — `classify()` returns the same origin count under
-  arbitrary haplotype re-ordering (canonicalized before tree building);
+  arbitrary haplotype re-ordering (rows are canonicalized before the alignment is built,
+  since IQ-TREE's search depends on sequence order). These tests are skipped where no
+  IQ-TREE binary or Biopython is available;
 - **feature reproduction** — the extractor reproduces pinned golden feature values on a fixture;
 - **score reproduction** — re-scoring the real inversions reproduces the recorded
   `real_scores.csv` (per-inversion score to 1e-6) and `concordance.json` summary.

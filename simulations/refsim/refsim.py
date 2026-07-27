@@ -1,0 +1,412 @@
+#!/usr/bin/env python
+"""Reference recurrence pipeline: a faithful port of hsiehphLab/inversionSimulation.
+
+This module reproduces, step for step, the recurrence inference of
+``hsiehphLab/inversionSimulation`` (the pipeline behind the manuscript's Fig. 1G),
+so that every recurrence number in this repository is produced by the *same*
+method rather than by an approximation of it.
+
+Correspondence to the upstream repository
+-----------------------------------------
+=========================================  ==================================
+upstream file                              function here
+=========================================  ==================================
+scripts/recurrentINV_m1.2pop.py            ``demography`` / ``simulate``
+scripts/ancestralstateInVCF.forINVsim.py   ``site_table`` / ``mapping_hap_SV``
+scripts/phasedVCF2Fasta.py                 ``write_fasta``
+scripts/rmFASTAseqs.py                     ``write_fasta`` (``seq2beRM`` filter)
+Snakefile.full.snake rule ``IQTree``       ``run_iqtree``
+scripts/computeMinMutations.py             ``min_mutations``
+=========================================  ==================================
+
+The classification is therefore, exactly as upstream:
+
+1. structured-coalescent simulation under the 9-deme model of
+   ``recurrentINV_m1.2pop.py`` (N_a = 6000, mu = 1.25e-8, 25 y/generation);
+2. VCF-equivalent site table with multiallelic sites dropped and the ancestral
+   allele set to REF (``AA=REF``, as upstream);
+3. a full-length nucleotide alignment built on the upstream reference backbone
+   (``inputFiles/temp.fa``, vendored here byte-for-byte), one sequence per
+   haplotype plus the ancestral/outgroup sequence ``CMP_CMP_0``;
+4. an IQ-TREE maximum-likelihood tree over that alignment, rooted on the
+   outgroup (``-m MFPMERGE -keep-ident -bb 1000 -o CMP_CMP_0``);
+5. the outgroup collapsed, orientation mapped onto the tips as a binary trait
+   (``A`` = direct, ``T`` = inverted), and the minimum number of orientation
+   state changes scored with Biopython's ``ParsimonyScorer`` (Fitch).
+
+``min_mutations`` returns that count -- upstream's ``minMutHomoplasy``. The
+recurrence call is ``count >= 2``.
+
+Deliberate deviations, all of which leave the ``.treefile`` and therefore the
+parsimony score unchanged:
+
+* ``--date/--date-options/--clock-sd/--date-tip/--date-ci`` are dropped. Upstream
+  those flags produce ``{locus}.timetree.nex``, which is consumed only by the
+  plotting rules; ``computeMinMutations.py`` reads ``{locus}.treefile``.
+* ``-nt 1`` and an explicit ``-seed``: replicates are parallelised one per core,
+  and a fixed seed makes each replicate's tree search reproducible.
+
+Single vs. recurrent origin
+---------------------------
+Upstream has one demography. Whether the sampled inverted haplotypes carry one
+or two independent inversion origins is decided by the admixture proportion
+``frac_admixI = random.randint(0, 10) / 10`` in ``recurrentINV_m1.2pop.py``:
+the final inverted deme ``P_I`` is drawn from the two independently derived
+inverted demes ``P1_I`` and ``P2_I`` in proportions ``[fI, 1 - fI]``. At
+``fI in {0, 1}`` every inverted lineage descends from a single inverted deme --
+a single-origin locus. At ``0 < fI < 1`` both origins contribute -- a recurrent
+locus. ``simulate(scenario=...)`` therefore only constrains ``fI``; the
+demography, the deme sizes, the split times and the sampling are untouched.
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import re
+import shutil
+import subprocess
+import tempfile
+
+# ---------------------------------------------------------------------------
+# Fixed parameters -- recurrentINV_m1.2pop.py, verbatim
+# ---------------------------------------------------------------------------
+CHROM_ID = "chr1"
+N_A = 6000
+MU = 1.25e-8
+GENERATION_TIME = 25
+SEQ_LENGTH = 200_000
+
+# config.yaml
+OUTGROUP = "CMP_CMP_0"
+SEQ2BERM = "CMP_CMP_1"
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+REF_FASTA = os.path.join(_HERE, "inputFiles", "temp.fa")
+
+def iqtree_binary():
+    """Resolve the IQ-TREE executable: ``$IQTREE_BIN``, else the first of
+    ``iqtree2`` / ``iqtree3`` / ``iqtree`` on ``PATH``."""
+    env = os.environ.get("IQTREE_BIN")
+    if env:
+        return env
+    for name in ("iqtree2", "iqtree3", "iqtree"):
+        found = shutil.which(name)
+        if found:
+            return found
+    raise RuntimeError(
+        "no IQ-TREE binary found; install iqtree2 or set IQTREE_BIN")
+
+
+def load_reference(path=REF_FASTA, length=SEQ_LENGTH):
+    """The upstream ``inputFiles/temp.fa`` backbone, as ``bytes``.
+
+    ``phasedVCF2Fasta.py`` slices ``reference_seq[chrom][pos_start-1:pos_end]``
+    for ``locus = chr1:1-200000``, i.e. the first ``SEQ_LENGTH`` bases. Held as
+    bytes rather than a list of characters so that the per-haplotype copies stay
+    at one byte per base -- at 240 haplotypes x 200 kbp the list-of-str form
+    costs ~400 MB per worker, which does not fit a full node of workers.
+    """
+    seq = []
+    with open(path) as fh:
+        for line in fh:
+            if line.startswith(">"):
+                continue
+            seq.append(line.strip())
+    return "".join(seq)[:length].encode("ascii")
+
+
+# ---------------------------------------------------------------------------
+# 1. Demography -- recurrentINV_m1.2pop.py
+# ---------------------------------------------------------------------------
+def demography(t01_23_years, t0_1_years, t2_3_years, m_const, frac_admix_i,
+               frac_admix_d, m_flux=0.0):
+    """The upstream 9-deme structured-coalescent model.
+
+    ``m_flux`` is this repository's *only* addition: symmetric migration between
+    opposite-orientation demes (the gene-conversion / double-crossover analogue).
+    At ``m_flux = 0`` the demography is upstream's, unchanged.
+    """
+    import msprime
+
+    Tsp_p01_p23 = t01_23_years / GENERATION_TIME
+    Tsp_p0_p1 = t0_1_years / GENERATION_TIME
+    Tsp_p2_p3 = t2_3_years / GENERATION_TIME
+
+    de = msprime.Demography()
+    de.add_population(name="P_I", description="Final INV group", initial_size=0.1 * N_A)
+    de.add_population(name="P_D", description="Final DIR group", initial_size=N_A)
+    de.add_population(name="P0_D", description="Pop1, DIR", initial_size=0.01 * N_A)
+    de.add_population(name="P1_I", description="Pop2, INV", initial_size=0.1 * N_A)
+    de.add_population(name="P2_I", description="Pop3, INV", initial_size=0.1 * N_A)
+    de.add_population(name="P3_D", description="Pop4, DIR", initial_size=N_A)
+    de.add_population(name="Pa_I", description="Ancestral INV group", initial_size=0.1 * N_A)
+    de.add_population(name="Pa_D", description="Ancestral DIR group", initial_size=N_A)
+    de.add_population(name="P00", description="Ancestral group", initial_size=N_A)
+
+    de.set_symmetric_migration_rate(["P0_D", "P3_D"], m_const)
+    de.set_symmetric_migration_rate(["P1_I", "P2_I"], m_const)
+
+    # --- this repository's flux extension (upstream has no between-orientation
+    # --- migration; m_flux = 0 reproduces upstream exactly) ---
+    if m_flux > 0:
+        for inv in ("P1_I", "P2_I"):
+            for dirp in ("P0_D", "P3_D"):
+                de.set_symmetric_migration_rate([inv, dirp], m_flux)
+        de.set_symmetric_migration_rate(["P_I", "P_D"], m_flux)
+
+    de.add_admixture(time=0.00001, derived="P_I", ancestral=["P1_I", "P2_I"],
+                     proportions=[frac_admix_i, 1 - frac_admix_i])
+    de.add_admixture(time=0.00001, derived="P_D", ancestral=["P0_D", "P3_D"],
+                     proportions=[frac_admix_d, 1 - frac_admix_d])
+    de.add_population_split(time=Tsp_p2_p3, derived=["P2_I", "P3_D"], ancestral="Pa_D")
+    de.add_population_split(time=Tsp_p0_p1, derived=["P0_D", "P1_I"], ancestral="Pa_I")
+    de.add_population_split(time=Tsp_p01_p23, derived=["Pa_I", "Pa_D"], ancestral="P00")
+    de.sort_events()
+    return de
+
+
+def draw_admixture(scenario, rng):
+    """``frac_admixI`` / ``frac_admixD`` as drawn upstream, constrained by scenario.
+
+    Upstream: ``random.randint(0, 10) / 10`` for both. ``fI in {0, 1}`` means all
+    inverted haplotypes descend from one inverted deme (single origin); any
+    interior value means both inverted origins are sampled (recurrent origin).
+    """
+    frac_d = rng.randint(0, 10) / 10
+    if scenario == "single":
+        frac_i = float(rng.randint(0, 1))          # 0.0 or 1.0 -- one origin
+    elif scenario == "recurrent":
+        frac_i = rng.randint(1, 9) / 10            # interior -- two origins
+    elif scenario == "upstream":
+        frac_i = rng.randint(0, 10) / 10           # upstream's unconstrained draw
+    else:
+        raise ValueError(f"unknown scenario {scenario!r}")
+    return frac_i, frac_d
+
+
+# ---------------------------------------------------------------------------
+# 2. Simulation -- recurrentINV_m1.2pop.py
+# ---------------------------------------------------------------------------
+def simulate(scenario, t01_23_years, t0_1_years, t2_3_years, sample_size,
+             inv_freq, rho, m_const, seed, m_flux=0.0, seq_length=SEQ_LENGTH):
+    """Return ``(tree_sequence, sample_ids, meta)``.
+
+    ``sample_size`` is a haplotype count (upstream ``sampleHaploSize``); the
+    inverted / direct split and the diploid rounding follow upstream exactly.
+    """
+    import random
+
+    import msprime
+
+    rng = random.Random(seed)
+
+    num_inv = int(sample_size * inv_freq)
+    num_inv_sample = round(num_inv / 2)
+    num_direct = sample_size - num_inv
+    num_direct_sample = round(num_direct / 2)
+
+    frac_i, frac_d = draw_admixture(scenario, rng)
+    de = demography(t01_23_years, t0_1_years, t2_3_years, m_const,
+                    frac_i, frac_d, m_flux=m_flux)
+
+    sample_ids = []
+    for i, v in enumerate([num_inv_sample, num_direct_sample]):
+        for ii in range(v):
+            if i not in [0]:
+                sample_ids.append("D%s%s_D%s%s" % (i, ii, i, ii))
+            else:
+                sample_ids.append("I%s%s_I%s%s" % (i, ii, i, ii))
+
+    ts = msprime.sim_ancestry(
+        samples=[msprime.SampleSet(round(num_inv_sample), population="P_I", ploidy=2),
+                 msprime.SampleSet(round(num_direct_sample), population="P_D", ploidy=2)],
+        demography=de, sequence_length=seq_length, recombination_rate=rho,
+        random_seed=seed)
+    mts = msprime.sim_mutations(ts, rate=MU, random_seed=seed)
+    meta = dict(frac_admix_i=frac_i, frac_admix_d=frac_d,
+                n_inv_sample=num_inv_sample, n_direct_sample=num_direct_sample)
+    return mts, sample_ids, meta
+
+
+# ---------------------------------------------------------------------------
+# 3. VCF-equivalent site table -- ancestralstateInVCF.forINVsim.test.py
+# ---------------------------------------------------------------------------
+def site_table(mts):
+    """Yield ``(pos_1based, ref_allele, [allele_per_haplotype])`` per retained site.
+
+    Mirrors ``ancestralstateInVCF.forINVsim.test.py``: multiallelic records
+    (``len(ALT) > 1`` in the VCF ALT field) are dropped and ``AA`` is set to
+    ``REF``, which for an msprime VCF is the site's ancestral state.
+    """
+    for var in mts.variants():
+        alleles = var.alleles
+        ref = alleles[0]
+        alt = [a for a in alleles[1:] if a is not None]
+        # VCF ALT field is the comma-joined ALT alleles; upstream drops the
+        # record when that field is longer than one character.
+        if len(",".join(alt)) > 1:
+            continue
+        if not alt:
+            continue
+        pos = int(var.site.position) + 1          # msprime write_vcf POS
+        yield pos, ref, [alleles[g] for g in var.genotypes]
+
+
+def mapping_hap_SV(sample_ids):
+    """``mapping_hap_SV.txt``: ``(hapID, SV, orig_hapID)`` rows.
+
+    Upstream reads the orientation off the first character of each half of the
+    sample name (``I...`` inverted, ``D...`` direct).
+    """
+    rows = []
+    for sample in sample_ids:
+        for i, hap in enumerate(sample.split("_")):
+            hap_id = "%s_%s" % (sample, i + 1)
+            rows.append((hap_id, "TRUE" if hap[0] == "I" else "FALSE", hap_id))
+    return rows
+
+
+# ---------------------------------------------------------------------------
+# 4. Alignment -- phasedVCF2Fasta.py + rmFASTAseqs.py
+# ---------------------------------------------------------------------------
+def write_fasta(path, mts, sample_ids, backbone, seq2berm=SEQ2BERM,
+                outgroup=OUTGROUP):
+    """Write the full-length alignment upstream feeds to IQ-TREE.
+
+    One sequence per haplotype, each the reference backbone with its own alleles
+    substituted at the retained sites, preceded by the ancestral (``AA``)
+    sequence named ``outgroup``. Sequences whose name matches ``seq2berm`` are
+    dropped, as ``rmFASTAseqs.py`` does.
+    """
+    n_hap = 2 * len(sample_ids)
+    aa_seq = bytearray(backbone)
+    hap_seqs = [bytearray(backbone) for _ in range(n_hap)]
+
+    n_sites = 0
+    for pos, ref, hap_alleles in site_table(mts):
+        idx = pos - 1                              # locus starts at position 1
+        aa_seq[idx] = ord(ref)                     # AA=REF, upstream
+        for h in range(n_hap):
+            hap_seqs[h][idx] = ord(hap_alleles[h])
+        n_sites += 1
+
+    hap_names = ["%s_%s" % (s, j) for s in sample_ids for j in (1, 2)]
+    records = [(outgroup, aa_seq)] + list(zip(hap_names, hap_seqs))
+    with open(path, "wb") as fh:
+        for name, seq in records:
+            if seq2berm and re.search(seq2berm, name):
+                continue                           # rmFASTAseqs.py
+            fh.write(b">" + name.encode("ascii") + b"\n" + bytes(seq) + b"\n")
+    return n_sites
+
+
+# ---------------------------------------------------------------------------
+# 5. ML tree -- Snakefile rule IQTree
+# ---------------------------------------------------------------------------
+def run_iqtree(aln_path, prefix, outgroup=OUTGROUP, seed=1, threads=1,
+               binary=None):
+    """Run IQ-TREE with the upstream flags and return the ``.treefile`` path."""
+    binary = binary or iqtree_binary()
+    cmd = [binary, "-safe", "-s", aln_path, "-keep-ident", "-bb", "1000",
+           "-redo", "-m", "MFPMERGE", "-pre", prefix, "-o", outgroup,
+           "-nt", str(threads), "-seed", str(seed), "-quiet"]
+    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL,
+                   stderr=subprocess.STDOUT)
+    return prefix + ".treefile"
+
+
+# ---------------------------------------------------------------------------
+# 6. Parsimony score -- computeMinMutations.py
+# ---------------------------------------------------------------------------
+def min_mutations(treefile, mapping_rows, outgroup=OUTGROUP):
+    """``minMutHomoplasy``: Fitch minimum number of orientation state changes.
+
+    A line-for-line port of ``computeMinMutations.py``: read the newick tree,
+    collapse the outgroup tip, build the binary orientation alignment
+    (``A`` = direct, ``T`` = inverted) over ``orig_hapID``, and score it with
+    Biopython's ``ParsimonyScorer``.
+    """
+    from Bio import Phylo
+    from Bio.Align import MultipleSeqAlignment
+    from Bio.Phylo.TreeConstruction import ParsimonyScorer
+    from Bio.Seq import Seq
+    from Bio.SeqRecord import SeqRecord
+
+    tree = Phylo.read(treefile, "newick")
+    for _i, v in enumerate(tree.get_terminals()):
+        if re.search(outgroup, str(v)):
+            tree.collapse(outgroup)
+
+    trait_aln = MultipleSeqAlignment([
+        SeqRecord(Seq("T" if sv == "TRUE" else "A"), id=orig_hap_id)
+        for _hap_id, sv, orig_hap_id in mapping_rows
+    ])
+    return ParsimonyScorer().get_score(tree, trait_aln)
+
+
+# ---------------------------------------------------------------------------
+# One locus, end to end
+# ---------------------------------------------------------------------------
+def classify_locus(scenario, times, sample_size, inv_freq, rho, m_const, seed,
+                   m_flux=0.0, workdir=None, backbone=None, keep=False,
+                   iqtree_binary=None):
+    """Simulate one locus and return the upstream recurrence result.
+
+    Returns a dict with ``n_events`` (``minMutHomoplasy``), ``call_recurrent``
+    (``n_events >= 2``), the realised admixture proportions and the number of
+    retained segregating sites.
+    """
+    backbone = backbone if backbone is not None else load_reference()
+    mts, sample_ids, meta = simulate(
+        scenario, times["t01_23"], times["t0_1"], times["t2_3"], sample_size,
+        inv_freq, rho, m_const, seed, m_flux=m_flux)
+    mapping = mapping_hap_SV(sample_ids)
+
+    tmp = workdir or tempfile.mkdtemp(prefix="refsim_")
+    try:
+        os.makedirs(tmp, exist_ok=True)
+        aln = os.path.join(tmp, "locus.fa")
+        n_sites = write_fasta(aln, mts, sample_ids, backbone)
+        treefile = run_iqtree(aln, os.path.join(tmp, "locus"), seed=seed,
+                              binary=iqtree_binary)
+        n_events = min_mutations(treefile, mapping)
+    finally:
+        if workdir is None and not keep:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    return dict(scenario=scenario, seed=seed, rho=rho, m_flux=m_flux,
+                inv_freq=inv_freq, n_sites=n_sites, n_events=int(n_events),
+                call_recurrent=bool(n_events >= 2), **meta)
+
+
+TIME_DEPTHS = {
+    # manifest columns Tsp_p01_p23 / Tsp_p0_p1 / Tsp_p2_p3, in years
+    "young":  dict(t01_23=250_000, t0_1=100_000, t2_3=50_000),
+    "recent": dict(t01_23=100_000, t0_1=50_000,  t2_3=25_000),
+    "old":    dict(t01_23=500_000, t0_1=250_000, t2_3=100_000),
+}
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--scenario", default="single",
+                    choices=["single", "recurrent", "upstream"])
+    ap.add_argument("--depth", default="young", choices=sorted(TIME_DEPTHS))
+    ap.add_argument("--sample-size", type=int, default=240)
+    ap.add_argument("--inv-freq", type=float, default=0.1)
+    ap.add_argument("--rho", type=float, default=0.0)
+    ap.add_argument("--m-const", type=float, default=1e-8)
+    ap.add_argument("--m-flux", type=float, default=0.0)
+    ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--keep", action="store_true")
+    args = ap.parse_args(argv)
+
+    res = classify_locus(args.scenario, TIME_DEPTHS[args.depth],
+                         args.sample_size, args.inv_freq, args.rho,
+                         args.m_const, args.seed, m_flux=args.m_flux,
+                         keep=args.keep)
+    print(res)
+
+
+if __name__ == "__main__":
+    main()

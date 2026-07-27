@@ -4,10 +4,12 @@ on:
   push:
     paths:
       - 'recurrence/**'
+      - 'simulations/refsim/**'
       - '.github/workflows/recurrence.yml'
   pull_request:
     paths:
       - 'recurrence/**'
+      - 'simulations/refsim/**'
       - '.github/workflows/recurrence.yml'
   workflow_dispatch:
 
@@ -25,6 +27,23 @@ jobs:
       - name: Install recurrence test dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install "numpy>=1.23" "scipy>=1.10" "scikit-learn>=1.2" "pandas>=2.0" pytest
+          pip install "numpy>=1.23" "scipy>=1.10" "scikit-learn>=1.2" "pandas>=2.0" \
+                      "biopython>=1.81" pytest
+      - name: Install IQ-TREE 2 (reference recurrence classifier)
+        run: |
+          set -euo pipefail
+          ver=2.2.2.7
+          url="https://github.com/iqtree/iqtree2/releases/download/v${ver}/iqtree-${ver}-Linux.tar.gz"
+          curl -fsSL "$url" -o /tmp/iqtree.tar.gz
+          tar -xzf /tmp/iqtree.tar.gz -C /tmp
+          sudo install -m 0755 "/tmp/iqtree-${ver}-Linux/bin/iqtree2" /usr/local/bin/iqtree2
+          iqtree2 --version | head -1
+      - name: Verify committed gzip inputs are intact
+        run: |
+          set -euo pipefail
+          for f in $(git ls-files '*.gz'); do
+            gzip -t "$f" || { echo "corrupt gzip: $f"; exit 1; }
+          done
+          echo "all tracked gzip files decompress"
       - name: Run reproduction / QC tests
         run: pytest recurrence/tests -q
