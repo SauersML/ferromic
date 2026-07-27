@@ -259,6 +259,9 @@ jobs:
       - name: FinnGen replication of the PheWAS signals (R2 #3)
         run: python stats/finngen_replication.py
 
+      - name: GTEx eQTL evidence at the tagging SNPs
+        run: python stats/inversion_eqtl_lookup.py
+
       - name: AGES selection stats across tagging SNPs
         run: python stats/ages_multi_tag_snps.py
 
@@ -293,7 +296,7 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -- data/ages_multi_tag_snps.tsv data/finngen_replication.tsv
+          git add -- data/ages_multi_tag_snps.tsv data/finngen_replication.tsv data/inversion_eqtl.tsv
           if git diff --staged --quiet; then echo "No changes."; exit 0; fi
           git commit -m "Regenerate AGES multi-tagging-SNP table [skip ci]"
           git pull https://${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git main \
@@ -307,4 +310,5 @@ jobs:
           path: |
             data/ages_multi_tag_snps.tsv
             data/finngen_replication.tsv
+            data/inversion_eqtl.tsv
           if-no-files-found: warn
