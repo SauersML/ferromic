@@ -93,26 +93,40 @@ Pooled endpoints: FPR 0.157 → 0.207 (z = 2.13, **p = 0.033**); power 0.891 →
 not — it rises by about a third, and the rise is detectable.** This is a change
 from the previous NJ-based sweep, which showed no significant movement in either.
 
-**The single-origin false-positive rate is < 5%, and the earlier claim that it was
-not is withdrawn.** The first version of this port built its single-event scenario by
-constraining only `frac_admixI`, which does *not* give a single-origin sample — the
-direct haplotypes could still be drawn from the deme sister to the inverted one, and
-those lineages force extra orientation state changes. Splitting the committed
-single-origin replicates by how much weight `fD` placed on that sister deme:
+**Corrected single-event model — 2,700 loci.** The earlier single-event scenario was
+mis-specified (it let direct haplotypes come from the deme sister to the inverted one;
+see `refsim.py`). `single` is now the Methods' own one-divergence model at
+t_inv ∈ {50, 100, 250} kya for recent/young/old. Overall false-positive rate **0.106**.
 
-| weight on the sister direct deme | 0.0 | 0.1–0.9 | 1.0 |
+By depth × ρ, at m = 0 (upstream's own model, no flux):
+
+| depth (t_inv) | ρ = 0 | ρ = 10⁻⁸ | ρ = 10⁻⁶ |
 |---|---|---|---|
-| false-positive rate | **0.016** | ~0.20 | 0.132 |
+| recent (50 kya) | 0.533 | 0.333 | 0.000 |
+| young (100 kya) | 0.133 | 0.017 | 0.000 |
+| old (250 kya) | 0.000 | 0.000 | 0.000 |
 
-At zero weight — a genuine single-origin sample — the rate is **1.6%** (n = 254),
-under the manuscript's < 5%. By depth × ρ in that clean subset, the only cell with any
-false positives is `recent`/ρ = 0 (0.120, n = 25); everything else is 0.000 except
-recent/ρ = 10⁻⁸ at 0.032. `recent` is the 50-kya model the manuscript calls "very
-recent", which is exactly where it reports its highest rate. The 0.157 figure this
-README previously carried was an artefact of the mis-specified scenario.
+Two things match the manuscript and two do not.
 
-`single` is now the manuscript's own one-divergence model (see `refsim.py`); the
-tables above are from the superseded run and are being regenerated.
+*Matches:* the false-positive rate is driven by inversion age in the direction the
+manuscript reports — it is worst at the shallowest depth and zero at the oldest, and
+the manuscript likewise puts its highest rate at the 50-kya model. Deep or recombining
+loci are at or below 5%.
+
+*Does not match:* at 50 kya with no recombination the rate here is 0.53, not 0.04; and
+the ordering in ρ is inverted — we get 0.000 at ρ = 10⁻⁶ where the manuscript reports
+its *maximum* of 4%. The mechanism for our direction is straightforward: at ρ = 0 the
+whole 200 kbp is a single genealogy, so incomplete lineage sorting in a 600-individual
+inverted deme only 2,000 generations old frequently breaks inverted monophyly, while at
+ρ = 10⁻⁶ the alignment averages over many genealogies and the ML tree separates the
+orientations cleanly. That is expected coalescent behaviour, so the residual gap is not
+explained by the tree method or by the single-event model, and remains open.
+
+**An earlier version of this section claimed 1.6%, "under < 5%".** That was inferred
+from the subset of the *old* 9-deme run with no sister-deme admixture, which is not the
+same model: in that subset the inverted lineages sit in a small deme for the full
+100 kya to the P00 split, giving far more time to coalesce than the clean 50-kya model
+allows. Not comparable, and the claim is withdrawn.
 
 **Extreme extension** (1,200 loci at ρ = 10⁻⁸), marginal over the two depths:
 

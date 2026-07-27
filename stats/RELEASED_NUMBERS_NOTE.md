@@ -132,26 +132,28 @@ different thresholds over different denominators rather than a contradiction, bu
 only one pair of numbers should appear in the paper, and it should be the pair
 the released tables support.
 
-## Recurrence simulation false-positive rate — the manuscript is reproducible
+## Recurrence simulation false-positive rate — still unresolved
 
-**This entry previously said the manuscript's "< 5%" could not be reproduced. That was
-wrong, and the cause was a bug in our port, not in the manuscript.**
+Two successive claims here were wrong and are both withdrawn: first that the
+manuscript's "< 5%" was unreproducible (that was our mis-specified single-event
+model), then that a corrected model put it at 1.6% (that was a non-comparable
+subset with an effectively older inversion).
 
-The single-event scenario had been built by constraining only the inverted-deme
-admixture proportion, which still allowed direct haplotypes to be drawn from the deme
-*sister* to the inverted one. Those lineages enter the inverted clade's ancestor and
-force extra parsimony steps — false positives manufactured by the sampling scheme.
-Splitting the committed single-origin replicates by the weight placed on that sister
-deme: 0.016 at zero weight, ~0.20 at any positive weight.
+The corrected single-event model — the Methods' own one-divergence model at
+t_inv ∈ {50, 100, 250} kya — over 2,700 loci gives an overall false-positive rate of
+**0.106**. At m = 0 the rate is 0.533 / 0.333 / 0.000 across ρ = 0 / 10⁻⁸ / 10⁻⁶ at
+50 kya, 0.133 / 0.017 / 0.000 at 100 kya, and 0.000 throughout at 250 kya.
 
-At zero weight — a genuine single-origin sample — the false-positive rate is **1.6%**
-(n = 254), under the manuscript's < 5%, and the only depth showing any false positives
-is the 50-kya "very recent" model, which is where the manuscript reports its highest
-rate. The single-event model is now the manuscript's own one-divergence model and the
-full grid is being regenerated; the corrected numbers will replace these.
+The age ordering matches the manuscript (worst at 50 kya, its stated maximum). The
+magnitude at 50 kya (0.53 vs 0.04) and the ordering in ρ (we get zero at 10⁻⁶, where
+the manuscript reports its maximum) do not. Our direction follows from the coalescent:
+at ρ = 0 the locus is a single genealogy and ILS in a young, small inverted deme breaks
+monophyly, whereas at ρ = 10⁻⁶ the ML tree averages over many genealogies and separates
+the orientations cleanly.
 
-The flux conclusion is unaffected either way, since it is a comparison across flux
-levels within the same scenario.
+Until this is understood, quote the flux result as a relative statement — flux does not
+degrade the classifier across the swept range — and do not anchor it to a "< 5%"
+baseline.
 
 ## AGES multiple-testing correction — say which one
 
