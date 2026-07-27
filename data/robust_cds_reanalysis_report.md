@@ -11,7 +11,7 @@
 ## Results
 
 1. **Original adjusted GLM reproduced:** single-event orientation Wald p = **0.0078**; interaction p = **0.0045**.
-2. **Same GLM, exact inversion-block calibration:** two-sided p = **0.1484** (directional 0.0781); unadjusted 0.0547.
+2. **Same GLM, exact inversion-block calibration:** two-sided p = **0.1562** (directional 0.0781); unadjusted 0.0625.
 3. **Primary paired inversion-level analysis:** single-event mean difference = **8.26 percentage points**, exact two-sided p = **0.0938** (directional 0.0469), 95% t CI **-1.34 to 17.87**.
 4. **Recurrent inversions:** **3.36 points**, p = **0.4263**.
 5. **Recurrence interaction:** **4.90 points**, exact studentised permutation p = **0.4131**.
