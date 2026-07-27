@@ -124,7 +124,8 @@ def bh_qvalues(pvals: pd.Series) -> pd.Series:
 
 def load_selection_subset(keys_df: pd.DataFrame, selection_path: Path, *, chunksize: int = 500_000) -> pd.DataFrame:
     """Stream the selection file and keep only rows matching requested keys."""
-    cols = ["CHROM_norm", "POS", "P_X", "S", "REF", "ALT", "AF"]
+    cols = ["CHROM_norm", "POS", "P_X", "S", "SE", "FDR", "RSID", "FILTER",
+            "REF", "ALT", "AF"]
     if keys_df.empty:
         return pd.DataFrame(columns=cols)
 
@@ -138,7 +139,8 @@ def load_selection_subset(keys_df: pd.DataFrame, selection_path: Path, *, chunks
             selection_path,
             sep="\t",
             comment="#",
-            usecols=["CHROM", "POS", "P_X", "S", "REF", "ALT", "AF"],
+            usecols=["CHROM", "POS", "P_X", "S", "SE", "FDR", "RSID", "FILTER",
+                     "REF", "ALT", "AF"],
             chunksize=chunksize,
         )
     ):
@@ -165,23 +167,6 @@ def load_selection_subset(keys_df: pd.DataFrame, selection_path: Path, *, chunks
     out = out.drop_duplicates(subset=["CHROM_norm", "POS"], keep="first")
     log(f"[selection] Finished streaming; matched {len(out)} rows for {len(keys_df)} requested positions")
     return out
-
-
-def iter_regions(inv_path: Path) -> list[tuple[str, float]]:
-    log(f"[regions] Loading inversion properties from {inv_path}")
-    df = pd.read_csv(inv_path, sep="\t")
-    log(f"[regions] Loaded {len(df)} rows total")
-    mask = df["0_single_1_recur_consensus"].isin([0, 1])
-    filtered = df[mask]
-    log(f"[regions] Filtered to {len(filtered)} rows with consensus in {{0,1}}")
-    regions: list[tuple[str, float]] = []
-    for _, row in filtered.iterrows():
-        chrom = str(row["Chromosome"])
-        start = int(row["Start"])
-        end = int(row["End"])
-        consensus = float(row["0_single_1_recur_consensus"])
-        regions.append((f"{chrom}:{start}-{end}", consensus))
-    return regions
 
 
 def iter_regions(inv_path: Path) -> list[tuple[str, float]]:
