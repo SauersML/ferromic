@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
 """
+NOTE: this script diagnoses the existing GLM; it does not fix it. The block-level
+permutation here shows the Wald p-values are badly anti-conservative (realized
+type I error 0.354 adjusted, 0.204 unadjusted, against a nominal 0.05), but the
+GLM has two further problems this cannot repair: freq_weights = C(k,2) counts
+overlapping haplotype pairs as independent trials, and log_k is adjusted for
+across groups whose support does not overlap. The analysis that replaces it is
+stats/robust_cds_reanalysis.py -- pair within gene, treat the inversion as the
+independent unit, and use exact randomisation inference. Quote that one.
+
 Reviewer 2 #1 -- Calibration of the CDS-conservation GLM.
 
 The reviewer's concern: the CDS-conservation test (proportion of identical
