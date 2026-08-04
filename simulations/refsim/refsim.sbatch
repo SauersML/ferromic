@@ -9,6 +9,10 @@
 #SBATCH --output=logs/refsim_%A_%a.out
 # Reference recurrence pipeline (simulations/refsim) over a sharded grid.
 # Submit with:  sbatch --array=0-7 --export=TASK=flux refsim.sbatch
+#
+# FLUX_SCOPE (leaves|all) selects where between-orientation flux acts; TAG names
+# the output files, so a second scope can be run without overwriting the first:
+#   sbatch --array=0-7 --export=ALL,TASK=flux,FLUX_SCOPE=all,TAG=fluxall refsim.sbatch
 set -euo pipefail
 
 ROOT=/projects/standard/hsiehph/sauer354/refsim
@@ -23,9 +27,12 @@ export OMP_NUM_THREADS=1
 
 NSHARDS=${SLURM_ARRAY_TASK_COUNT:-1}
 SHARD=${SLURM_ARRAY_TASK_ID:-0}
+FLUX_SCOPE=${FLUX_SCOPE:-leaves}
+TAG=${TAG:-$TASK}
 
 srun ./env/bin/python run_grid.py \
     --task "$TASK" \
     --shard "$SHARD" --nshards "$NSHARDS" \
     --procs "${SLURM_CPUS_PER_TASK}" \
-    --out "out/${TASK}_shard${SHARD}.csv"
+    --flux-scope "$FLUX_SCOPE" \
+    --out "out/${TAG}_shard${SHARD}.csv"

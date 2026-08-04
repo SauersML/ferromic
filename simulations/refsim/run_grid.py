@@ -131,7 +131,8 @@ def _run_one(job):
         mts, sample_ids, meta = refsim.simulate(
             job["scenario"], times["t01_23"], times["t0_1"], times["t2_3"],
             job["sample_size"], job["inv_freq"], job["rho"], M_WITHIN,
-            job["seed"], m_flux=job["m_flux"], t_inv_years=times.get("t_inv"))
+            job["seed"], m_flux=job["m_flux"], t_inv_years=times.get("t_inv"),
+            flux_scope=job.get("flux_scope", "leaves"))
         mapping = refsim.mapping_hap_SV(sample_ids)
         aln = os.path.join(workdir, "locus.fa")
         n_sites = refsim.write_fasta(aln, mts, sample_ids, _BACKBONE)
@@ -184,6 +185,11 @@ def main(argv=None):
     ap.add_argument("--nshards", type=int, default=1)
     ap.add_argument("--procs", type=int, default=int(os.environ.get("SLURM_CPUS_PER_TASK", 8)))
     ap.add_argument("--reps", type=int, default=None)
+    ap.add_argument("--flux-scope", default="leaves", choices=["leaves", "all"],
+                    help="where between-orientation flux acts (see "
+                         "refsim.demography). The grid and its seeds are "
+                         "unchanged, so a 'leaves' and an 'all' run are paired "
+                         "locus for locus.")
     ap.add_argument("--scenarios", default=None,
                     help="comma-separated subset of scenarios to run "
                          "(the grid and its seeds are unchanged; other rows are skipped)")
@@ -192,6 +198,8 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     grid = build_grid(args.task, args.reps)
+    for j in grid:
+        j["flux_scope"] = args.flux_scope
     mine = [j for i, j in enumerate(grid) if i % args.nshards == args.shard]
     if args.scenarios:
         want = set(args.scenarios.split(","))
@@ -213,7 +221,8 @@ def main(argv=None):
                       f"({el / (i + 1):.1f}s/job)", flush=True)
 
     fields = sorted({k for r in rows for k in r})
-    lead = [f for f in ("scenario", "label", "depth", "rho", "m_flux", "inv_freq",
+    lead = [f for f in ("scenario", "label", "depth", "rho", "m_flux",
+                        "flux_scope", "inv_freq",
                         "sample_size", "seed", "tree_n_events", "call_recurrent",
                         "n_sites") if f in fields]
     fields = lead + [f for f in fields if f not in lead]

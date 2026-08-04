@@ -95,6 +95,38 @@ range.** This is the manuscript's claim, measured with the manuscript's own clas
 An earlier version of this file reported the FPR rising 0.157 → 0.207 at p = 0.033; that
 was produced by the mis-specified single-event scenario and is withdrawn.
 
+### Where the flux acts
+
+`m_flux` is applied with `refsim.demography(..., flux_scope=...)`. Under
+`"leaves"` it reaches only the four sampled demes, and msprime zeroes a deme's
+migration rates when it merges into its ancestor, so flux switches off as the
+splits are passed: at the `young` depths it acts on all four pairs for 0–50 kya,
+on `P0_D`–`P1_I` alone for 50–100 kya, and **not at all** from 100 kya back to
+the root at 250 kya, where only `Pa_I` and `Pa_D` remain. Under `"all"` it acts
+between every opposite-orientation pair for as long as both demes exist, so the
+orientations are partially connected over the model's whole history.
+
+Both were run over the full 5,400-locus grid at identical seeds, so the two are
+paired locus for locus:
+
+| m_flux | 0 | 10⁻⁹ | 10⁻⁸ | 10⁻⁷ | 10⁻⁶ |
+|---|---|---|---|---|---|
+| single-origin FPR — `leaves` | 0.113 | 0.102 | 0.115 | 0.094 | 0.106 |
+| single-origin FPR — `all` | 0.113 | 0.102 | 0.115 | 0.094 | 0.106 |
+| recurrent power — `leaves` | 0.891 | 0.889 | 0.857 | 0.874 | 0.907 |
+| recurrent power — `all` | 0.891 | 0.883 | 0.863 | 0.870 | 0.900 |
+
+Pooled endpoints under `"all"`: FPR 0.113 → 0.106 (z = −0.39, p = 0.70); power
+0.891 → 0.900 (z = 0.50, p = 0.62). **Extending flux across the entire history
+changes nothing detectable** — power moves by at most 0.007 against a standard
+error of ~0.013 at n = 540.
+
+The single-origin row is *identical* in every cell, which is structural rather
+than lucky: `demography_single` has two demes and one split, so flux already
+acted everywhere both orientations coexist and `flux_scope` cannot touch it.
+Recurrent power at `m_flux = 0` matches for the same reason — there is no flux
+to place.
+
 **Corrected single-event model — 2,700 loci.** The earlier single-event scenario was
 mis-specified (it let direct haplotypes come from the deme sister to the inverted one;
 see `refsim.py`). `single` is now the Methods' own one-divergence model at
@@ -155,6 +187,11 @@ to be sharded:
 sbatch --array=0-7 --export=ALL,TASK=flux     refsim.sbatch
 sbatch --array=0-7 --export=ALL,TASK=trainset refsim.sbatch
 sbatch --array=0-3 --export=ALL,TASK=extreme  refsim.sbatch
+
+# the same grid with flux acting wherever both orientations exist
+sbatch --array=0-95 --cpus-per-task=32 --mem=80g \
+       --export=ALL,TASK=flux,FLUX_SCOPE=all,TAG=fluxall refsim.sbatch
+python make_report.py 'out/fluxall*_shard*.csv' --prefix fluxall
 
 # aggregate the flux sweep
 python make_report.py 'out/flux_shard*.csv'
