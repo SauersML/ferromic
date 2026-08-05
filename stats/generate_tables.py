@@ -2264,74 +2264,6 @@ def build_workbook(output_path: Path) -> None:
 
     register(
         SheetInfo(
-            name="Inversion analysis-set exclusion reasons",
-            description=(
-                "Why each of the 292 balanced inversions of Porubsky et al. (2022) does or does not enter the "
-                "93-locus analysis set. A locus is analysed only when both Porubsky et al. recurrence methods "
-                "returned a call and the two calls agree. Of the 199 excluded, 165 have no call from one method "
-                "(40 of those have no call from either) and 34 have two calls that disagree. Verdicts are given "
-                "under their source column names because the input table does not record which is the tagging-SNP "
-                "method and which the haplotype-based coalescent method."
-            ),
-            column_defs=EXCLUSION_COLUMN_DEFS,
-            loader=_load_exclusion_reasons,
-        )
-    )
-
-    register(
-        SheetInfo(
-            name="SD-architecture recurrence check",
-            description=(
-                "Non-circular recurrence classification from flanking segmental duplication architecture alone. "
-                "Recurrence is called from inverted-repeat size and identity -- structural properties measured from "
-                "assembly alignments, never from haplotype diversity -- so the resulting labels cannot inherit the "
-                "diversity signal they are used to test. Leave-one-out cross-validation means no locus's own "
-                "consensus label enters its own call. Agreement with the consensus is 74.2% in-sample and 73.1% "
-                "leave-one-out. Refitting the orientation-by-recurrence diversity interaction with these labels "
-                "gives fold-change 2.43 (p = 0.022) in-sample and 2.12 (p = 0.051) leave-one-out, against 4.15 "
-                "(p = 5.0e-05) with the consensus labels: the effect survives in direction but attenuates."
-            ),
-            column_defs=SD_RECURRENCE_COLUMN_DEFS,
-            loader=_load_sd_recurrence_calls,
-        )
-    )
-
-    register(
-        SheetInfo(
-            name="4-fold diversity concordance",
-            description=(
-                "Spearman correlations between per-locus orientation differences (inverted minus direct) in "
-                "nucleotide diversity measured three ways: across the whole locus, across whole coding sequence, "
-                "and restricted to 4-fold degenerate sites. A locus contributes only when both orientations "
-                "actually have 4-fold sites. Reported for all such loci and for the subset with a consensus "
-                "recurrence call, which is the subset the paired tests use."
-            ),
-            column_defs=FOURFOLD_CORR_COLUMN_DEFS,
-            loader=_load_fourfold_correlations,
-        )
-    )
-
-    register(
-        SheetInfo(
-            name="Orientation inference methods",
-            description=(
-                "Descriptive comparison of independent methods for inferring the ancestral vs derived orientation "
-                "of each inversion, reported in the GRCh38 reference frame. Inversions are analysed in their published "
-                "(Porubsky et al. 2022) reference orientation throughout this study; this table is provided only to "
-                "document the extent of agreement and disagreement across orientation-inference methods, and does not "
-                "feed into any analysis. Each method column states whether that method infers the reference arrangement "
-                "to be ancestral or derived (blank = uninformative). Methods: chain synteny against "
-                "chimpanzee/gorilla/orangutan/macaque; the Yoo et al. (2025) telomere-to-telomere ape assemblies "
-                "(SYRI/PAV); Porubsky et al. (2020) Strand-seq great-ape genotypes; and multi-SNP chimpanzee "
-                "ancestral-allele voting. The consensus column summarises cross-method agreement."
-            ),
-            column_defs=ORIENTATION_COLUMN_DEFS,
-            loader=_load_orientation_methods,
-        )
-    )
-
-    register(
-        SheetInfo(
             name="CDS conservation genes",
             description=(
                 "Analysis of protein-coding gene conservation within inversion loci. Tests quantify differences in the "
@@ -2345,22 +2277,6 @@ def build_workbook(output_path: Path) -> None:
 
     register(
         SheetInfo(
-            name="CDS haplotype counts by orientation",
-            description=(
-                "Number of haplotypes each orientation contributes to every analysed coding sequence. Per-gene "
-                "coding results rest on these counts, and in the single-event arm they are small and highly "
-                "clustered: of the 63 single-event gene entries that have both orientations, 55 have fewer than "
-                "four inverted haplotypes, and they come from only seven inversions -- 17:16823490-18384190 alone "
-                "contributes 24 genes at two inverted haplotypes. Gene counts in that arm are therefore not "
-                "independent replicates."
-            ),
-            column_defs=CDS_HAPLOTYPE_COLUMN_DEFS,
-            loader=_load_cds_haplotype_counts,
-        )
-    )
-
-    register(
-        SheetInfo(
             name="dN/dS (ω) results",
             description=(
                 "Results of the dN/dS (ω) analysis testing for genes with significantly different selective regimes between "
@@ -2369,23 +2285,6 @@ def build_workbook(output_path: Path) -> None:
             ),
             column_defs=PAML_COLUMN_DEFS,
             loader=_load_paml_results,
-        )
-    )
-
-    register(
-        SheetInfo(
-            name="Clade-model omega identifiability",
-            description=(
-                "Identifiability check for the genes with extreme clade-model omega. For each, the proportion of "
-                "codons in the divergent site class and whether either clade's omega sits on PAML's optimiser "
-                "boundary (999). All four fail multiple-testing correction and confine the divergent class to "
-                "roughly one percent of codons or less; MAPT and PRSS55 additionally pin the inverted omega to the "
-                "boundary. The clade carrying the larger value is stated explicitly, since the direction is easy "
-                "to reverse in prose: the pipeline marks pure direct branches #1 and maps PAML branch type 1 to "
-                "the direct column, so omega2_direct really is the direct clade."
-            ),
-            column_defs=OMEGA_IDENT_COLUMN_DEFS,
-            loader=_load_omega_identifiability,
         )
     )
 
@@ -2459,6 +2358,40 @@ def build_workbook(output_path: Path) -> None:
             ),
             column_defs=TAG_PHEWAS_COLUMN_DEFS,
             loader=_load_phewas_tagging,
+        )
+    )
+
+    register(
+        SheetInfo(
+            name="4-fold diversity concordance",
+            description=(
+                "Spearman correlations between per-locus orientation differences (inverted minus direct) in "
+                "nucleotide diversity measured three ways: across the whole locus, across whole coding sequence, "
+                "and restricted to 4-fold degenerate sites. A locus contributes only when both orientations "
+                "actually have 4-fold sites. Reported for all such loci and for the subset with a consensus "
+                "recurrence call, which is the subset the paired tests use."
+            ),
+            column_defs=FOURFOLD_CORR_COLUMN_DEFS,
+            loader=_load_fourfold_correlations,
+        )
+    )
+
+    register(
+        SheetInfo(
+            name="Orientation inference methods",
+            description=(
+                "Descriptive comparison of independent methods for inferring the ancestral vs derived orientation "
+                "of each inversion, reported in the GRCh38 reference frame. Inversions are analysed in their published "
+                "(Porubsky et al. 2022) reference orientation throughout this study; this table is provided only to "
+                "document the extent of agreement and disagreement across orientation-inference methods, and does not "
+                "feed into any analysis. Each method column states whether that method infers the reference arrangement "
+                "to be ancestral or derived (blank = uninformative). Methods: chain synteny against "
+                "chimpanzee/gorilla/orangutan/macaque; the Yoo et al. (2025) telomere-to-telomere ape assemblies "
+                "(SYRI/PAV); Porubsky et al. (2020) Strand-seq great-ape genotypes; and multi-SNP chimpanzee "
+                "ancestral-allele voting. The consensus column summarises cross-method agreement."
+            ),
+            column_defs=ORIENTATION_COLUMN_DEFS,
+            loader=_load_orientation_methods,
         )
     )
 
@@ -2553,18 +2486,6 @@ def build_workbook(output_path: Path) -> None:
             ),
             column_defs=IMPUTATION_BENCHMARK_COLUMN_DEFS,
             loader=_load_imputation_benchmarks,
-        )
-    )
-
-    register(
-        SheetInfo(
-            name="FinnGen replication",
-            description=(
-                "FinnGen release 12 association results for inversion tagging SNPs, keeping the strongest SNP per endpoint "
-                "at p < 1e-5. Effects are signed to the inverted allele."
-            ),
-            column_defs=FINNGEN_COLUMN_DEFS,
-            loader=_load_finngen,
         )
     )
 
