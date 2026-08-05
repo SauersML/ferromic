@@ -214,7 +214,7 @@ def plot(cs, path):
     fig, axes = plt.subplots(1, 2, figsize=(9.5, 4.7), sharey=True)
     for ax, sc, title, ylab in (
             (axes[0], "single", "Single-origin: false-positive rate", "rate"),
-            (axes[1], "recurrent", "Recurrent: detection rate", "")):
+            (axes[1], "recurrent", "Recurrent: power", "")):
         for depth in DEPTH_ORDER:
             for rho in rhos:
                 row = _grid(cs, sc, rho, depth, FLUX)
