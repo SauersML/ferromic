@@ -72,10 +72,13 @@ POS_RECURRENT = {"direct_1": 0, "ancestral_inverted": 0.5 * GAP,
                  "inverted_1": GAP, "ancestral_unoriented": 1.5 * GAP,
                  "inverted_2": 2 * GAP, "ancestral_direct": 2.5 * GAP,
                  "direct_2": 3 * GAP}
-# The single-event panel is the SAME demography, drawn without the inverted deme
-# that contributes nothing to the sample when fI is 0 or 1 -- which is why
-# manuscript Fig. 1A shows three demes where Fig. 1B shows four. Keeping the
-# shared demes at their recurrent-panel x positions makes the two comparable.
+# The single-event panel drops exactly one deme -- the inverted deme no sampled
+# lineage ever enters when the inverted draw is pinned. That is the whole of the
+# simplification that is actually valid. The direct draw is left free, as
+# upstream leaves it, so direct_1 IS sampled and must be drawn: its lineages
+# descend from the ancestral inverted group, and that is a real feature of the
+# model, not scaffolding. Reducing this to two populations would draw a
+# demography the simulation does not run.
 POS_SINGLE = {k: v for k, v in POS_RECURRENT.items() if k != "inverted_2"}
 
 
@@ -136,8 +139,6 @@ def graphs(depth_name, flux_scope="leaves"):
     # demes rejects migration over the pulse demes' 1e-5-generation lifetime.
     de.set_symmetric_migration_rate(["P_I", "P_D"], 0)
     recurrent = _relabel(_drop(de.to_demes(), {"P_I", "P_D"}))
-    # Same demography, same flux; only the sampling differs, and an unsampled
-    # inverted deme leaves no trace in the sampled genealogy.
     single = _relabel(_drop(de.to_demes(), {"P_I", "P_D", "P2_I"}))
     return recurrent, single
 

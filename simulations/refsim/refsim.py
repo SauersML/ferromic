@@ -394,7 +394,12 @@ def site_table(mts):
             continue
         if not alt:
             continue
-        pos = int(var.site.position) + 1          # msprime write_vcf POS
+        # msprime's own write_vcf rounds the position and does NOT add one, so
+        # POS 612 is written for a site at 612.0. Adding one put every variant a
+        # base to the right of where upstream's VCF-fed pipeline puts it. Every
+        # sequence shifted together so the tree was unaffected, but the alignment
+        # was not the one upstream builds.
+        pos = int(round(var.site.position))       # msprime write_vcf POS
         yield pos, ref, [alleles[g] for g in var.genotypes]
 
 
@@ -551,10 +556,17 @@ TIME_DEPTHS = {
     # exists only in the row upstream omits.
     #
     # ``t_inv`` belongs to the two-deme ``single`` sensitivity model only.
-    "old":         dict(t01_23=500_000, t0_1=250_000, t2_3=100_000, t_inv=250_000),
-    "young":       dict(t01_23=250_000, t0_1=100_000, t2_3=50_000,  t_inv=100_000),
-    "recent":      dict(t01_23=100_000, t0_1=50_000,  t2_3=25_000,  t_inv=50_000),
-    "very_recent": dict(t01_23=50_000,  t0_1=25_000,  t2_3=10_000,  t_inv=25_000),
+    # t_inv is the single-event divergence, and it is the FIRST event of the
+    # triple, not the second. A single-origin sample never visits the demes below
+    # that split, so its history is one divergence at Tsp_p01_p23 -- which is why
+    # the Methods list single-event models at 500 / 250 / 100 / 50 kya, exactly
+    # this column. Running them at t0_1 makes every single-event locus about half
+    # its proper age, and a younger inverted deme has less time to coalesce, so
+    # inverted monophyly breaks more often and the false-positive rate inflates.
+    "old":         dict(t01_23=500_000, t0_1=250_000, t2_3=100_000, t_inv=500_000),
+    "young":       dict(t01_23=250_000, t0_1=100_000, t2_3=50_000,  t_inv=250_000),
+    "recent":      dict(t01_23=100_000, t0_1=50_000,  t2_3=25_000,  t_inv=100_000),
+    "very_recent": dict(t01_23=50_000,  t0_1=25_000,  t2_3=10_000,  t_inv=50_000),
 }
 
 
