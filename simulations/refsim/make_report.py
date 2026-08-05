@@ -45,6 +45,18 @@ def wilson_ci(k, n, z=1.96):
     return (max(0.0, centre - half), min(1.0, centre + half))
 
 
+def scenario_names(cs):
+    """(single-origin scenario, recurrent scenario) as they appear in the data.
+
+    The single-origin arm has been called ``single`` and ``single_upstream`` at
+    different times; hard-coding either silently empties half the report, so take
+    the name from the rows rather than assuming it.
+    """
+    present = {c["scenario"] for c in cs}
+    single = sorted(present - {"recurrent"})
+    return (single[0] if single else "single"), "recurrent"
+
+
 def flux_values(cs):
     """The flux column, taken from the data rather than hard-coded, so the same
     report builds the main sweep and the extreme-flux extension."""
@@ -144,8 +156,9 @@ def write_md(cs, path, rows=None):
                  "IQ-TREE ML tree over the full-length haplotype alignment, outgroup\n"
                  "collapsed, Fitch parsimony on the orientation trait, recurrent iff\n"
                  "`minMutHomoplasy >= 2`. The `m=0` column is the upstream model itself.\n")
-        for sc, metric in (("single", "false-positive rate"),
-                           ("recurrent", "detection rate")):
+        sc_single, sc_recur = scenario_names(cs)
+        for sc, metric in ((sc_single, "false-positive rate"),
+                           (sc_recur, "detection rate")):
             fh.write(f"\n## {sc} scenario — {metric}\n")
             for rho in rhos:
                 fh.write(f"\n**rho = {rho:.0e}**\n\n")
@@ -162,7 +175,7 @@ def write_md(cs, path, rows=None):
         fh.write("\n## Marginal over the nine (depth x rho) cells\n\n")
         fh.write("| scenario | " + " | ".join(f"m={m:.0e}" for m in FLUX) + " |\n")
         fh.write("|" + "---|" * (len(FLUX) + 1) + "\n")
-        for sc in ("single", "recurrent"):
+        for sc in (sc_single, sc_recur):
             vals = []
             for m in FLUX:
                 sel = [c for c in cs if c["scenario"] == sc
@@ -179,7 +192,7 @@ def write_md(cs, path, rows=None):
         if rows:
             fh.write("\n## Lowest against highest flux, pooled over all cells\n\n")
             fh.write("| scenario | rate at m_lo | rate at m_hi | z | p |\n|---|---|---|---|---|\n")
-            for sc in ("single", "recurrent"):
+            for sc in (sc_single, sc_recur):
                 t = endpoint_trend(rows, sc)
                 fh.write(f"| {sc} | {t['rate_lo']:.4f} (n={t['n_lo']}) | "
                          f"{t['rate_hi']:.4f} (n={t['n_hi']}) | {t['z']:.2f} | {t['p']:.4f} |\n")
@@ -240,9 +253,10 @@ def plot(cs, path):
     xlabels = [_pow10(m) for m in FLUX]
 
     fig, axes = plt.subplots(1, 2, figsize=(9.5, 4.7), sharey=True)
+    sc_single, sc_recur = scenario_names(cs)
     for ax, sc, title, ylab in (
-            (axes[0], "single", "Single-origin false-positive rate", "rate"),
-            (axes[1], "recurrent", "Recurrent power", "")):
+            (axes[0], sc_single, "Single-origin false-positive rate", "rate"),
+            (axes[1], sc_recur, "Recurrent power", "")):
         for depth in DEPTH_ORDER:
             for rho in rhos:
                 row = _grid(cs, sc, rho, depth, FLUX)

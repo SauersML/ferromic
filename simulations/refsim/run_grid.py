@@ -39,7 +39,9 @@ RHOS = [0.0, 1e-8, 1e-6]
 FLUX = [0.0, 1e-9, 1e-8, 1e-7, 1e-6]
 # Upstream has one demography; a locus is single-event when the inverted
 # admixture draw lands on 0 or 1. "single_upstream" is that locus.
-SCENARIOS = ["single_upstream", "recurrent"]
+# single_repo constrains the direct draw to the non-sister clade, which is
+# what Fig. 1A depicts; single_upstream leaves it free, as the script does.
+SCENARIOS = ["single_upstream", "single_repo", "recurrent"]
 M_WITHIN = 1e-8
 
 FLUX_SAMPLE_HAP = 240
