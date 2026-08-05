@@ -28,7 +28,7 @@ import warnings
 import zipfile
 import re
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional
 from urllib.error import HTTPError, URLError
@@ -913,6 +913,9 @@ class SheetInfo:
     description: str
     column_defs: Dict[str, str]
     loader: Callable[[], pd.DataFrame]
+    # Optional raw-column -> printed-header overrides. Anything not listed here
+    # is prettified by ``_pretty_label``.
+    column_labels: Dict[str, str] = field(default_factory=dict)
 
 
 class SupplementaryTablesError(RuntimeError):
@@ -1008,7 +1011,140 @@ def _download_github_artifact(
     return destination
 
 
-def _prune_columns(df: pd.DataFrame, column_defs: Dict[str, str], sheet_name: str) -> pd.DataFrame:
+# Printed headers. Supplementary tables are read by people, so no column may
+# reach the page as a variable name. Most of the raw names are systematic -- the
+# PheWAS sheets repeat one suffix set across six ancestry prefixes -- so the
+# labelling is rules plus a short override list, not 200 hand-written strings.
+_ANCESTRY = {
+    "AFR": "African", "AMR": "Admixed American", "EAS": "East Asian",
+    "EUR": "European", "MID": "Middle Eastern", "SAS": "South Asian",
+}
+
+# Suffixes shared by the per-ancestry PheWAS blocks.
+_SUFFIX_LABELS = {
+    "OR": "odds ratio",
+    "CI_HI_OR": "odds ratio upper 95% CI",
+    "CI_LO_OR": "odds ratio lower 95% CI",
+    "CI_Method": "confidence interval method",
+    "Inference_Type": "inference type",
+    "N": "samples",
+    "N_Cases": "cases",
+    "N_Controls": "controls",
+    "P": "p-value",
+    "P_Source": "p-value source",
+}
+
+_EXPLICIT_LABELS = {
+    "0_single_1_recur_consensus": "Consensus recurrence (0 = single-event, 1 = recurrent)",
+    "AF": "Allele frequency",
+    "ALT": "Alternate allele",
+    "ALT_freq_direct": "Alternate allele frequency, direct haplotypes",
+    "ALT_freq_inverted": "Alternate allele frequency, inverted haplotypes",
+    "REF": "Reference allele",
+    "REF_freq_direct": "Reference allele frequency, direct haplotypes",
+    "REF_freq_inverted": "Reference allele frequency, inverted haplotypes",
+    "abs_r": "Absolute correlation with orientation",
+    "ancestral_allele": "Ancestral allele",
+    "ancestral_allele_confidence": "Confidence in the ancestral allele call",
+    "ancestral_allele_n_tag": "Tagging SNPs supporting the ancestral allele",
+    "bh_p_value": "Benjamini-Hochberg adjusted p-value",
+    "both_orientations": "Both orientations observed",
+    "chr_std": "Chromosome",
+    "clade_with_higher_omega2": "Orientation with the higher omega",
+    "consensus": "Consensus recurrence label",
+    "consensus_recurrence": "Consensus recurrence label",
+    "correlation_r": "Correlation with orientation",
+    "exclusion_reason": "Reason for exclusion",
+    "exclusion_reasons": "Reasons for exclusion",
+    "gene": "Gene",
+    "gene_name": "Gene",
+    "hg37_coordinate": "Coordinate (GRCh37)",
+    "hg38_coordinate": "Coordinate (GRCh38)",
+    "inv_id": "Inversion",
+    "inv_underpowered_lt4": "Fewer than four inverted haplotypes",
+    "inversion": "Inversion",
+    "inversion_region": "Inversion region",
+    "k_dir": "Direct haplotypes compared",
+    "k_inv": "Inverted haplotypes compared",
+    "measure_x": "First diversity measure",
+    "measure_y": "Second diversity measure",
+    "n_call_ancestral": "Loci called ancestral",
+    "n_call_derived": "Loci called derived",
+    "n_components": "Partial least squares components",
+    "n_leaves_pruned": "Tree tips pruned",
+    "n_loci": "Loci",
+    "n_methods_informative": "Informative methods",
+    "not_identifiable_flags": "Identifiability warnings",
+    "omega2_direct": "Omega, direct haplotypes",
+    "omega2_inverted": "Omega, inverted haplotypes",
+    "orig_id": "Original identifier",
+    "overall_p_value": "Overall p-value",
+    "overall_q_value": "Overall q-value",
+    "p-value": "p-value",
+    "p_value": "p-value",
+    "p_x": "p-value",
+    "p2_divergent_class": "Proportion of codons in the divergent site class",
+    "p_fdr_bh": "Benjamini-Hochberg adjusted p-value",
+    "p_recurrent_insample": "Probability of recurrence (in-sample)",
+    "p_recurrent_loo": "Probability of recurrence (leave-one-out)",
+    "recurrence": "Recurrence",
+    "recurrence_class": "Recurrence class",
+    "reference_inverted_AF": "Inverted allele frequency (reference panel)",
+    "region": "Region",
+    "s": "Selection coefficient",
+    "sd_call_insample": "Architecture-based recurrence call (in-sample)",
+    "sd_call_loo": "Architecture-based recurrence call (leave-one-out)",
+    "sd_identity_pct": "Flanking repeat identity (%)",
+    "sd_size_kbp": "Flanking repeat size (kbp)",
+    "spearman_rho": "Spearman correlation",
+    "status": "Status",
+    "strandseq": "Strand-seq orientation",
+    "strandseq_confidence": "Confidence in the Strand-seq orientation",
+    "strandseq_species": "Species used for the Strand-seq orientation",
+    "subset": "Locus subset",
+    "synteny": "Synteny orientation",
+    "t2t_apes": "Great-ape T2T orientation",
+    "t2t_apes_confidence": "Confidence in the great-ape T2T orientation",
+    "t2t_apes_species": "Species used for the great-ape T2T orientation",
+    "taxa_used": "Taxa used",
+    "transcript": "Transcript",
+    "transcript_id": "Transcript",
+    "unbiased_pearson_r2": "Cross-validated imputation r2",
+    "comparison": "Comparison",
+    "analysed": "Analysed",
+    "Use": "Used in the analysis set",
+}
+for _sp in ("chimp", "gorilla", "macaque", "orangutan"):
+    _EXPLICIT_LABELS[f"synteny_{_sp}"] = f"Synteny orientation vs {_sp}"
+for _pop in ("overall", "afr", "amr", "eas", "eur", "mid", "sas"):
+    _EXPLICIT_LABELS[f"{_pop}_allele_frequency_AoU"] = (
+        "Imputed inverted allele frequency, All of Us"
+        + ("" if _pop == "overall" else f" ({_ANCESTRY[_pop.upper()]})"))
+for _who in ("benson", "hufsah"):
+    _EXPLICIT_LABELS[f"verdictRecurrence_{_who}"] = f"Recurrence verdict, reviewer {_who.title()}"
+for _k in ("kappa", "lnl_h0", "lnl_h1", "lrt_stat", "omega0", "omega2_direct",
+           "omega2_inverted", "p0", "p1", "p2", "p_value", "bh_p_value"):
+    _EXPLICIT_LABELS.setdefault(f"cmc_{_k}", "Clade model C " + _k.replace("_", " "))
+
+
+def _pretty_label(col: str) -> str:
+    """A printed header, not a variable name."""
+    raw = str(col)
+    if raw in _EXPLICIT_LABELS:
+        return _EXPLICIT_LABELS[raw]
+    head, _, rest = raw.partition("_")
+    if head in _ANCESTRY and rest in _SUFFIX_LABELS:
+        return f"{_ANCESTRY[head]} {_SUFFIX_LABELS[rest]}"
+    if raw in _SUFFIX_LABELS:
+        return _SUFFIX_LABELS[raw][0].upper() + _SUFFIX_LABELS[raw][1:]
+    if "_" not in raw and not raw.islower():
+        return raw                       # already a printed header
+    words = raw.replace("_", " ").strip()
+    return words[0].upper() + words[1:] if words else raw
+
+
+def _prune_columns(df: pd.DataFrame, column_defs: Dict[str, str], sheet_name: str,
+                   column_labels: Optional[Dict[str, str]] = None) -> pd.DataFrame:
     expected_cols = list(column_defs.keys())
     available_cols = [col for col in expected_cols if col in df.columns]
     missing = [col for col in expected_cols if col not in df.columns]
@@ -2074,7 +2210,11 @@ def build_workbook(output_path: Path) -> None:
             row += 1
 
             for col_name, definition in sheet_info.column_defs.items():
-                readme_ws.write(row, 0, col_name, col_name_fmt)
+                readme_ws.write(
+                    row, 0,
+                    sheet_info.column_labels.get(col_name, _pretty_label(col_name)),
+                    col_name_fmt,
+                )
                 readme_ws.write(row, 1, definition, col_def_fmt)
                 row += 1
 
@@ -2101,7 +2241,11 @@ def build_workbook(output_path: Path) -> None:
             )
 
             for col_idx, col_name in enumerate(df.columns):
-                worksheet.write(1, col_idx, col_name, table_header_fmt)
+                worksheet.write(
+                    1, col_idx,
+                    sheet_info.column_labels.get(col_name, _pretty_label(col_name)),
+                    table_header_fmt,
+                )
 
     print(f"Supplementary tables written to {output_path}")
 
