@@ -187,9 +187,18 @@ def plot(cs, path):
         _apply_style()
     except Exception:
         pass
-    # One-hue ordinal ramp, light to dark with increasing age. Steps 250/450/650
-    # of the blue ramp; the light end clears the surface at 2.06:1.
-    depth_color = {"recent": "#86b6ef", "young": "#2a78d6", "old": "#104281"}
+    # Fig. 1G's own palette, so a reader moving between the two figures maps the
+    # depth classes without relearning them: Old blue, Young gold, Recent gray.
+    # The gold is darkened from the manuscript's to clear 3:1 against white --
+    # the original sits at 1.99:1 and washes out in print. Gray carries no
+    # chroma, which a categorical palette normally forbids, but it is the
+    # manuscript's own encoding for this class and the three stay separable
+    # (worst adjacent pair dE 16.2 under protanopia, 17.8 normal vision).
+    depth_color = {"old": "#2f5f9f", "young": "#b98a1e", "recent": "#6e6e6e"}
+    # The names are Fig. 1G's, and so are the split times behind them.
+    depth_label = {"old": "Old (500,250,100 kya)",
+                   "young": "Young (250,100,50 kya)",
+                   "recent": "Recent (100,50,25 kya)"}
 
     def _pow10(v):
         """`1e-08` is machine notation; a figure should say 10^-8."""
@@ -202,7 +211,7 @@ def plot(cs, path):
     xticks = [max(m, 3e-10) for m in FLUX]
     xlabels = [_pow10(m) for m in FLUX]
 
-    fig, axes = plt.subplots(1, 2, figsize=(9.5, 4.0), sharey=True)
+    fig, axes = plt.subplots(1, 2, figsize=(9.5, 4.7), sharey=True)
     for ax, sc, title, ylab in (
             (axes[0], "single", "Single-origin: false-positive rate", "rate"),
             (axes[1], "recurrent", "Recurrent: detection rate", "")):
@@ -229,22 +238,27 @@ def plot(cs, path):
     axes[0].annotate("5%", xy=(xticks[0], 0.05), xytext=(0, 4),
                      textcoords="offset points", fontsize=7, color="#666666")
 
-    age = [Line2D([], [], color=depth_color[d], lw=2,
-                  label={"recent": "50 kya", "young": "100 kya",
-                         "old": "250 kya"}.get(d, d))
-           for d in DEPTH_ORDER if d in depth_color]
+    # Both keys apply to both panels, so they go in one box centred under the
+    # figure. Split into two legends sitting left and right they read as though
+    # each belonged to the panel above it.
+    def _header(text):
+        return Line2D([], [], ls="", marker="", label=text)
+
+    age = [Line2D([], [], color=depth_color[d], lw=2, label=depth_label[d])
+           for d in ("old", "young", "recent") if d in depth_color]
     rec = [Line2D([], [], color="#444444", lw=1.6, ls=rho_style[r],
                   label=_pow10(r))
            for r in rhos]
-    fig.legend(handles=age, title="inversion age", loc="lower left",
-               bbox_to_anchor=(0.10, -0.03), ncol=3, frameon=False,
-               columnspacing=1.2, handlelength=2.2)
-    fig.legend(handles=rec, title="recombination rate (per bp per generation)",
-               loc="lower right", bbox_to_anchor=(0.95, -0.03), ncol=3,
-               frameon=False, columnspacing=1.2, handlelength=2.6)
+    # Column-major fill, so column one is the age key and column two the rate.
+    handles = ([_header("Inversion age")] + age
+               + [_header("Recombination rate\n(per bp per generation)")] + rec)
+    fig.legend(handles=handles, loc="lower center", ncol=2,
+               bbox_to_anchor=(0.5, 0.01), frameon=True, framealpha=1.0,
+               edgecolor="#CCCCCC", columnspacing=2.4, handlelength=2.4,
+               borderpad=0.8, labelspacing=0.5)
     fig.suptitle("Between-orientation flux and the reference recurrence classifier",
                  y=1.0)
-    fig.tight_layout(rect=(0, 0.07, 1, 0.97))
+    fig.tight_layout(rect=(0, 0.23, 1, 0.97))
     fig.savefig(path)
     plt.close(fig)
     print("wrote", path)
