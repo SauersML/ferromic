@@ -722,6 +722,220 @@ def _load_omega_identifiability() -> pd.DataFrame:
                      "Clade-model omega identifiability")
 
 
+# --- revision tables -------------------------------------------------------
+# Added for the reviewer response. Each reads a committed artefact so the
+# workbook stays reproducible from the repository alone.
+
+REFSIM_DIR = REPO_ROOT / "simulations" / "refsim"
+
+
+def _load_coding_site_diversity() -> pd.DataFrame:
+    """4-fold pi and piN/piS per locus, from the two scripts that compute them."""
+    ff = _load_tsv(DATA_DIR / "four_fold_pi_by_inversion.tsv", "4-fold diversity")
+    pn = _load_tsv(DATA_DIR / "pin_pis_by_inversion.tsv", "piN/piS")
+    key = ["chr", "region_start", "region_end"]
+    dup = [c for c in pn.columns if c in ff.columns and c not in key]
+    return ff.merge(pn.drop(columns=dup), on=key, how="outer")
+
+
+def _load_divergence() -> pd.DataFrame:
+    return _load_tsv(DATA_DIR / "divergence_da_dxy_by_type.tsv",
+                     "Dxy / da divergence")
+
+
+def _load_ages_all_tags() -> pd.DataFrame:
+    return _load_tsv(DATA_DIR / "ages_multi_tag_snps.tsv",
+                     "AGES all tagging SNPs")
+
+
+def _load_architecture_controls() -> pd.DataFrame:
+    return _load_tsv(DATA_DIR / "recurrence_controls_summary.tsv",
+                     "Genomic-architecture controls")
+
+
+def _load_chimp_polarity() -> pd.DataFrame:
+    return _load_tsv(
+        REPO_ROOT / "results" / "figure2a_repolarized" / "figure2a_locus_audit.tsv",
+        "Chimpanzee polarity audit")
+
+
+def _load_imputation_benchmarks() -> pd.DataFrame:
+    """External checks on imputed dosage: ScoreInvHap, plus experimental 6q24.1."""
+    sih = _load_tsv(DATA_DIR / "scoreinvhap_concordance.tsv",
+                    "ScoreInvHap concordance")
+    sih = sih.rename(columns={"n_samples": "n", "r2": "agreement_r2",
+                              "hardcall_concordance": "hard_call_concordance",
+                              "our_inv_allele_freq": "inverted_allele_freq_imputed",
+                              "sih_inv_allele_freq": "inverted_allele_freq_external"})
+    sih["comparison"] = "ScoreInvHap (Ruiz-Arenas et al. 2019)"
+
+    per_sample = _load_tsv(DATA_DIR / "imputation_benchmark_HsInv0284.tsv",
+                           "HsInv0284 benchmark")
+    summary = _load_tsv(DATA_DIR / "imputation_benchmark_HsInv0284_summary.tsv",
+                        "HsInv0284 benchmark summary")
+    overall = summary[summary["group"] == "ALL"].iloc[0]
+    hsi = pd.DataFrame([{
+        "inversion": "6q24.1 (HsInv0284)",
+        "comparison": "Experimental genotypes (Giner-Delgado et al. 2019)",
+        "n": int(overall["n"]),
+        "agreement_r2": float(overall["r2"]),
+        "hard_call_concordance": float(overall["concordance"]),
+        "inverted_allele_freq_imputed": per_sample["imputed_dosage"].mean() / 2,
+        "inverted_allele_freq_external": per_sample["experimental_dosage"].mean() / 2,
+    }])
+    cols = ["inversion", "comparison", "n", "agreement_r2", "hard_call_concordance",
+            "inverted_allele_freq_imputed", "inverted_allele_freq_external"]
+    out = pd.concat([hsi[cols], sih[cols]], ignore_index=True)
+    order = ["6q24.1 (HsInv0284)", "17q21.31", "8p23.1"]
+    out["_o"] = out["inversion"].apply(
+        lambda x: order.index(x) if x in order else len(order))
+    return out.sort_values("_o").drop(columns="_o").reset_index(drop=True)
+
+
+def _load_finngen() -> pd.DataFrame:
+    """Best tagging SNP per inversion and endpoint. The raw sweep is ~30,000
+    SNP-by-endpoint rows; only the per-endpoint best is interpretable."""
+    df = _load_tsv(DATA_DIR / "finngen_replication.tsv", "FinnGen replication")
+    df = df[df["direction_usable"] == "yes"]
+    df = (df.sort_values("p_value")
+            .groupby(["inversion", "finngen_endpoint"], as_index=False).first())
+    df = df[df["p_value"] < 1e-5].sort_values("p_value")
+    return df[["inversion", "finngen_endpoint", "finngen_phenotype", "chrom_hg38",
+               "pos_hg38", "ref", "alt", "alt_enriched_on", "r_with_inversion",
+               "beta_inverted_allele", "sebeta", "p_value"]].reset_index(drop=True)
+
+
+def _load_flux_sweep() -> pd.DataFrame:
+    return pd.read_csv(REFSIM_DIR / "upstream_results.csv")
+
+
+CODING_DIVERSITY_COLUMN_DEFS = {
+    "chr": "Chromosome.",
+    "region_start": "Inversion start coordinate (GRCh38).",
+    "region_end": "Inversion end coordinate (GRCh38).",
+    "recurrence": "Consensus recurrence label (0 = single-event, 1 = recurrent).",
+    "n_cds": "Coding sequences overlapping the locus.",
+    "n_cds_with_fourfold": "Coding sequences contributing 4-fold-degenerate sites.",
+    "fourfold_sites_direct": "4-fold-degenerate sites compared, direct haplotypes.",
+    "fourfold_sites_inverted": "4-fold-degenerate sites compared, inverted haplotypes.",
+    "pi_fourfold_direct": "Nucleotide diversity at 4-fold sites, direct haplotypes.",
+    "pi_fourfold_inverted": "Nucleotide diversity at 4-fold sites, inverted haplotypes.",
+    "pi_wholeCDS_direct": "Nucleotide diversity across whole coding sequence, direct.",
+    "pi_wholeCDS_inverted": "Nucleotide diversity across whole coding sequence, inverted.",
+    "pi_wholeLocus_direct": "Nucleotide diversity across the whole locus, direct.",
+    "pi_wholeLocus_inverted": "Nucleotide diversity across the whole locus, inverted.",
+    "zerofold_sites_direct": "0-fold-degenerate sites compared, direct haplotypes.",
+    "zerofold_sites_inverted": "0-fold-degenerate sites compared, inverted haplotypes.",
+    "piN_direct": "Nonsynonymous diversity (0-fold sites), direct haplotypes.",
+    "piN_inverted": "Nonsynonymous diversity (0-fold sites), inverted haplotypes.",
+    "piS_direct": "Synonymous diversity (4-fold sites), direct haplotypes.",
+    "piS_inverted": "Synonymous diversity (4-fold sites), inverted haplotypes.",
+    "piN_piS_direct": "Ratio of nonsynonymous to synonymous diversity, direct.",
+    "piN_piS_inverted": "Ratio of nonsynonymous to synonymous diversity, inverted.",
+}
+
+DIVERGENCE_COLUMN_DEFS = {
+    "chr": "Chromosome.",
+    "region_start": "Inversion start coordinate (GRCh38).",
+    "region_end": "Inversion end coordinate (GRCh38).",
+    "category": "Recurrence category of the locus.",
+    "hudson_pi_hap_group_0": "Nucleotide diversity within direct haplotypes.",
+    "hudson_pi_hap_group_1": "Nucleotide diversity within inverted haplotypes.",
+    "hudson_fst_hap_group_0v1": "Hudson's FST between orientations.",
+    "dxy": "Absolute divergence between orientations.",
+    "da": "Net divergence between orientations (Dxy minus mean within-orientation diversity).",
+}
+
+AGES_ALL_TAGS_COLUMN_DEFS = {
+    "region": "Inversion locus.",
+    "rsid": "Tagging SNP identifier.",
+    "chrom_hg38": "Chromosome (GRCh38).",
+    "pos_hg38": "Position (GRCh38).",
+    "chrom_hg19": "Chromosome (GRCh37), as queried in AGES.",
+    "pos_hg19": "Position (GRCh37), as queried in AGES.",
+    "r_with_inversion": "Correlation between the SNP and inversion orientation.",
+    "abs_r": "Absolute correlation with orientation.",
+    "alt_enriched_on": "Orientation on which the alternate allele is enriched.",
+    "ages_S": "Selection coefficient reported by AGES for the tested allele.",
+    "ages_S_inverted_allele": "Selection coefficient signed to the inverted allele.",
+    "ages_S_ci_lo": "Lower bound of the selection coefficient interval.",
+    "ages_S_ci_hi": "Upper bound of the selection coefficient interval.",
+    "ages_SE": "Standard error of the selection coefficient.",
+    "ages_P_X": "AGES selection p-value.",
+    "ages_FDR": "Benjamini-Hochberg adjusted AGES p-value.",
+    "ages_FILTER": "AGES quality filter status.",
+}
+
+ARCHITECTURE_CONTROLS_COLUMN_DEFS = {
+    "outcome": "Quantity being compared between recurrence classes.",
+    "control": "How genomic architecture was controlled: unadjusted, covariate-adjusted, or matched.",
+    "effect": "Estimated effect on the stated scale.",
+    "ci_lo": "Lower bound of the 95% confidence interval.",
+    "ci_hi": "Upper bound of the 95% confidence interval.",
+    "p": "Two-sided p-value.",
+    "n": "Loci contributing to the estimate.",
+    "n_recur": "Recurrent loci contributing.",
+    "n_single": "Single-event loci contributing.",
+    "scale": "Scale on which the effect is expressed.",
+}
+
+CHIMP_POLARITY_COLUMN_DEFS = {
+    "inv_id": "Inversion locus.",
+    "chrom": "Chromosome.",
+    "start": "Inversion start coordinate (GRCh38).",
+    "end": "Inversion end coordinate (GRCh38).",
+    "recurrence": "Consensus recurrence label.",
+    "chimp_call": "Which human arrangement is shared with the chimpanzee, from manual review.",
+    "flip_ref_polarity": "Whether the reference orientation had to be flipped to become ancestral.",
+    "included_in_plot": "Whether the locus enters the diversity figure.",
+    "included_in_model": "Whether the locus enters the statistical model.",
+    "plot_exclusion_reason": "Why the locus was excluded from the figure, if it was.",
+    "model_exclusion_reason": "Why the locus was excluded from the model, if it was.",
+    "pi_ancestral": "Nucleotide diversity among ancestral-orientation haplotypes.",
+    "pi_derived": "Nucleotide diversity among derived-orientation haplotypes.",
+}
+
+IMPUTATION_BENCHMARK_COLUMN_DEFS = {
+    "inversion": "Inversion locus.",
+    "comparison": "External genotype source compared against.",
+    "n": "Samples compared.",
+    "agreement_r2": "Squared Pearson correlation between imputed and external dosage.",
+    "hard_call_concordance": "Fraction of samples agreeing after rounding to 0/1/2.",
+    "inverted_allele_freq_imputed": "Inverted allele frequency from the imputed dosage.",
+    "inverted_allele_freq_external": "Inverted allele frequency from the external genotypes.",
+}
+
+FINNGEN_COLUMN_DEFS = {
+    "inversion": "Inversion locus.",
+    "finngen_endpoint": "FinnGen endpoint identifier.",
+    "finngen_phenotype": "FinnGen endpoint description.",
+    "chrom_hg38": "Chromosome of the tagging SNP (GRCh38).",
+    "pos_hg38": "Position of the tagging SNP (GRCh38).",
+    "ref": "Reference allele.",
+    "alt": "Alternate allele.",
+    "alt_enriched_on": "Orientation on which the alternate allele is enriched.",
+    "r_with_inversion": "Correlation between the tagging SNP and orientation.",
+    "beta_inverted_allele": "Effect size signed to the inverted allele.",
+    "sebeta": "Standard error of the effect size.",
+    "p_value": "Association p-value in FinnGen.",
+}
+
+FLUX_SWEEP_COLUMN_DEFS = {
+    "scenario": "Sampling regime: single-event or recurrent locus.",
+    "depth": "Time-depth scenario of the simulated inversion events.",
+    "rho": "Recombination rate per base pair per generation.",
+    "m_flux": "Between-orientation gene flux, per lineage per generation.",
+    "reps": "Simulated loci in the cell.",
+    "n_called": "Loci called recurrent by the reference classifier.",
+    "recurrent_call_rate": "Proportion called recurrent: the false-positive rate for single-event loci, the power for recurrent loci.",
+    "ci_low": "Lower bound of the Wilson 95% interval.",
+    "ci_high": "Upper bound of the Wilson 95% interval.",
+    "mean_events": "Mean inferred number of inversion events.",
+    "median_events": "Median inferred number of inversion events.",
+    "mean_n_sites": "Mean segregating sites retained per locus.",
+}
+
+
 EXCLUSION_COLUMN_DEFS = {
     "OrigID": "Inversion identifier from Porubsky et al. (2022).",
     "Chromosome": "Chromosome of the inversion.",
@@ -1125,6 +1339,78 @@ for _who in ("benson", "hufsah"):
 for _k in ("kappa", "lnl_h0", "lnl_h1", "lrt_stat", "omega0", "omega2_direct",
            "omega2_inverted", "p0", "p1", "p2", "p_value", "bh_p_value"):
     _EXPLICIT_LABELS.setdefault(f"cmc_{_k}", "Clade model C " + _k.replace("_", " "))
+
+
+_EXPLICIT_LABELS.update({
+    # revision tables
+    "region_start": "Start (GRCh38)", "region_end": "End (GRCh38)",
+    "n_cds": "Coding sequences", "n_cds_used": "Coding sequences used",
+    "n_cds_with_fourfold": "Coding sequences with 4-fold sites",
+    "fourfold_sites_direct": "4-fold sites, direct",
+    "fourfold_sites_inverted": "4-fold sites, inverted",
+    "zerofold_sites_direct": "0-fold sites, direct",
+    "zerofold_sites_inverted": "0-fold sites, inverted",
+    "pi_fourfold_direct": "pi at 4-fold sites, direct",
+    "pi_fourfold_inverted": "pi at 4-fold sites, inverted",
+    "pi_wholeCDS_direct": "pi across coding sequence, direct",
+    "pi_wholeCDS_inverted": "pi across coding sequence, inverted",
+    "pi_wholeLocus_direct": "pi across locus, direct",
+    "pi_wholeLocus_inverted": "pi across locus, inverted",
+    "piN_direct": "piN, direct", "piN_inverted": "piN, inverted",
+    "piS_direct": "piS, direct", "piS_inverted": "piS, inverted",
+    "piN_piS_direct": "piN/piS, direct", "piN_piS_inverted": "piN/piS, inverted",
+    "category": "Recurrence category",
+    "hudson_pi_hap_group_0": "pi within direct haplotypes",
+    "hudson_pi_hap_group_1": "pi within inverted haplotypes",
+    "hudson_fst_hap_group_0v1": "Hudson's FST between orientations",
+    "hudson_dxy_hap_group_0v1": "Dxy between orientations",
+    "dxy": "Absolute divergence (Dxy)", "da": "Net divergence (da)",
+    "outcome": "Outcome", "control": "Control strategy", "effect": "Effect",
+    "ci_lo": "Lower 95% CI", "ci_hi": "Upper 95% CI",
+    "ci_low": "Lower 95% CI", "ci_high": "Upper 95% CI",
+    "p": "p-value", "n_recur": "Recurrent loci", "n_single": "Single-event loci",
+    "scale": "Effect scale",
+    "chrom": "Chromosome", "start": "Start (GRCh38)", "end": "End (GRCh38)",
+    "chimp_call": "Arrangement shared with chimpanzee",
+    "flip_ref_polarity": "Reference orientation flipped to ancestral",
+    "included_in_plot": "Included in the figure",
+    "included_in_model": "Included in the model",
+    "plot_exclusion_reason": "Reason excluded from the figure",
+    "model_exclusion_reason": "Reason excluded from the model",
+    "pi_ancestral": "pi, ancestral orientation",
+    "pi_derived": "pi, derived orientation",
+    "selection_kind": "Selection inference type", "context": "Context",
+    "chrom_hg19": "Chromosome (GRCh37)", "pos_hg19": "Position (GRCh37)",
+    "chrom_hg38": "Chromosome (GRCh38)", "pos_hg38": "Position (GRCh38)",
+    "rsid": "Tagging SNP", "r_with_inversion": "Correlation with orientation",
+    "alt_enriched_on": "Alternate allele enriched on",
+    "ages_ref": "Reference allele (AGES)", "ages_alt": "Alternate allele (AGES)",
+    "ages_S": "Selection coefficient",
+    "ages_S_inverted_allele": "Selection coefficient, inverted allele",
+    "ages_S_ci_lo": "Selection coefficient lower CI",
+    "ages_S_ci_hi": "Selection coefficient upper CI",
+    "ages_SE": "Selection coefficient standard error",
+    "ages_P_X": "Selection p-value",
+    "ages_FDR": "Benjamini-Hochberg adjusted selection p-value",
+    "ages_FILTER": "AGES quality filter", "in_ages": "Present in AGES",
+    "n": "Samples", "agreement_r2": "Imputed vs external r2",
+    "hard_call_concordance": "Hard-call concordance",
+    "inverted_allele_freq_imputed": "Inverted allele frequency, imputed",
+    "inverted_allele_freq_external": "Inverted allele frequency, external",
+    "finngen_endpoint": "FinnGen endpoint",
+    "finngen_phenotype": "FinnGen phenotype",
+    "ref": "Reference allele", "alt": "Alternate allele",
+    "beta_inverted_allele": "Effect size, inverted allele",
+    "sebeta": "Effect size standard error",
+    "scenario": "Sampling regime", "depth": "Time-depth scenario",
+    "rho": "Recombination rate (per bp per generation)",
+    "m_flux": "Gene flux (per lineage per generation)",
+    "reps": "Simulated loci", "n_called": "Loci called recurrent",
+    "recurrent_call_rate": "Proportion called recurrent",
+    "mean_events": "Mean inferred events",
+    "median_events": "Median inferred events",
+    "mean_n_sites": "Mean segregating sites",
+})
 
 
 def _pretty_label(col: str) -> str:
@@ -2173,6 +2459,112 @@ def build_workbook(output_path: Path) -> None:
             ),
             column_defs=TAG_PHEWAS_COLUMN_DEFS,
             loader=_load_phewas_tagging,
+        )
+    )
+
+    # --- revision additions, in the order the response letter cites them ----
+    if (REFSIM_DIR / "upstream_results.csv").exists():
+        register(
+            SheetInfo(
+                name="Gene-flux simulation sweep",
+                description=(
+                    "False-positive rate and power of the recurrence classifier across between-orientation gene flux, "
+                    "under the upstream structured-coalescent model. A locus is single-event when every sampled inverted "
+                    "haplotype descends from one inverted deme and recurrent when both contribute; the demography is the "
+                    "same either way. Rates carry Wilson 95% intervals, because several cells sit at zero."
+                ),
+                column_defs=FLUX_SWEEP_COLUMN_DEFS,
+                loader=_load_flux_sweep,
+            )
+        )
+
+    register(
+        SheetInfo(
+            name="Coding-site diversity",
+            description=(
+                "Nucleotide diversity restricted to 4-fold-degenerate sites, and piN/piS at 0-fold and 4-fold sites, "
+                "per orientation, for inversion loci containing coding sequence. NA marks a quantity that is not defined "
+                "for that locus, usually because it has no coding sequence or no variation in one orientation."
+            ),
+            column_defs=CODING_DIVERSITY_COLUMN_DEFS,
+            loader=_load_coding_site_diversity,
+        )
+    )
+
+    register(
+        SheetInfo(
+            name="Divergence between orientations",
+            description=(
+                "Absolute (Dxy) and net (da) divergence between orientations at each locus, alongside Hudson's FST and the "
+                "within-orientation diversities it is built from. FST depends on within-group diversity, so a difference in "
+                "FST between recurrence classes need not reflect a difference in divergence."
+            ),
+            column_defs=DIVERGENCE_COLUMN_DEFS,
+            loader=_load_divergence,
+        )
+    )
+
+    register(
+        SheetInfo(
+            name="Genomic-architecture controls",
+            description=(
+                "The orientation-by-recurrence diversity interaction and the FST comparison, unadjusted, adjusted for "
+                "inversion length, inverted allele frequency, local SNP density and CDS density, and on subsets matched "
+                "on inversion length and allele frequency."
+            ),
+            column_defs=ARCHITECTURE_CONTROLS_COLUMN_DEFS,
+            loader=_load_architecture_controls,
+        )
+    )
+
+    register(
+        SheetInfo(
+            name="Chimpanzee polarity per locus",
+            description=(
+                "Manual review of panTro6-GRCh38 alignments deciding, for each locus, which human arrangement is ancestral, "
+                "and the diversity recomputed with haplotypes grouped as ancestral or derived. Loci excluded from the figure "
+                "or the model carry the reason for exclusion."
+            ),
+            column_defs=CHIMP_POLARITY_COLUMN_DEFS,
+            column_labels={"inv_id": "Inversion locus"},
+            loader=_load_chimp_polarity,
+        )
+    )
+
+    register(
+        SheetInfo(
+            name="Ancient DNA, all tagging SNPs",
+            description=(
+                "Every tagging SNP at the four loci with an AGES selection result, not only the best one, so that the "
+                "selection signal can be judged against the whole set rather than a single marker. Coefficients are also "
+                "given signed to the inverted allele."
+            ),
+            column_defs=AGES_ALL_TAGS_COLUMN_DEFS,
+            loader=_load_ages_all_tags,
+        )
+    )
+
+    register(
+        SheetInfo(
+            name="Imputation external benchmarks",
+            description=(
+                "Agreement between imputed inversion dosage and genotypes that were never used in training: experimental "
+                "calls at 6q24.1 (HsInv0284) and ScoreInvHap at 17q21.31 and 8p23.1."
+            ),
+            column_defs=IMPUTATION_BENCHMARK_COLUMN_DEFS,
+            loader=_load_imputation_benchmarks,
+        )
+    )
+
+    register(
+        SheetInfo(
+            name="FinnGen replication",
+            description=(
+                "FinnGen release 12 association results for inversion tagging SNPs, keeping the strongest SNP per endpoint "
+                "at p < 1e-5. Effects are signed to the inverted allele."
+            ),
+            column_defs=FINNGEN_COLUMN_DEFS,
+            loader=_load_finngen,
         )
     )
 
