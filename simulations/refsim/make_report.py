@@ -162,8 +162,13 @@ def plot(cs, path):
 
     Colour encodes inversion age and line style encodes recombination rate, so
     the two factors are separable at a glance rather than nine indistinguishable
-    series. One shared legend, split into its two parts, sits below the panels;
-    the 5% reference line appears only on the false-positive panel, where it
+    series. Age is an ordered quantity, so it gets a one-hue light-to-dark ramp
+    (older = darker) rather than three unrelated hues, which would also collide
+    with the recurrence/orientation colours used elsewhere in the paper. Both
+    legends name their variable in words -- a bare rho reads as "p" to anyone who
+    has not just read the Methods.
+
+    The 5% reference line appears only on the false-positive panel, where it
     means something.
     """
     FLUX = flux_values(cs)
@@ -178,18 +183,24 @@ def plot(cs, path):
     sys.path.insert(0, os.path.dirname(os.path.dirname(
         os.path.dirname(os.path.abspath(__file__)))))
     try:
-        from stats._figstyle import CATEGORICAL
         from stats._figstyle import apply as _apply_style
         _apply_style()
-        depth_color = {"recent": CATEGORICAL[0], "young": CATEGORICAL[1],
-                       "old": CATEGORICAL[2]}
     except Exception:
-        depth_color = {"recent": "tab:green", "young": "tab:orange", "old": "tab:blue"}
+        pass
+    # One-hue ordinal ramp, light to dark with increasing age. Steps 250/450/650
+    # of the blue ramp; the light end clears the surface at 2.06:1.
+    depth_color = {"recent": "#86b6ef", "young": "#2a78d6", "old": "#104281"}
+
+    def _pow10(v):
+        """`1e-08` is machine notation; a figure should say 10^-8."""
+        if v == 0:
+            return "0"
+        return f"$10^{{{round(math.log10(v))}}}$"
 
     rhos = sorted({c["rho"] for c in cs})
     rho_style = {r: st for r, st in zip(rhos, ["-", "--", ":"])}
     xticks = [max(m, 3e-10) for m in FLUX]
-    xlabels = ["0"] + [f"{m:.0e}".replace("e-0", "e-") for m in FLUX[1:]]
+    xlabels = [_pow10(m) for m in FLUX]
 
     fig, axes = plt.subplots(1, 2, figsize=(9.5, 4.0), sharey=True)
     for ax, sc, title, ylab in (
@@ -202,7 +213,8 @@ def plot(cs, path):
                     continue
                 ax.plot(xticks,
                         [c["recurrent_call_rate"] if c else float("nan") for c in row],
-                        marker="o", ls=rho_style.get(rho, "-"),
+                        marker="o", ms=3.5, lw=1.6,
+                        ls=rho_style.get(rho, "-"),
                         color=depth_color.get(depth, "#666666"))
         ax.set_xscale("log")
         ax.set_xticks(xticks)
@@ -217,15 +229,19 @@ def plot(cs, path):
     axes[0].annotate("5%", xy=(xticks[0], 0.05), xytext=(0, 4),
                      textcoords="offset points", fontsize=7, color="#666666")
 
-    handles = [Line2D([], [], color=depth_color[d], lw=2,
-                      label={"recent": "50 kya", "young": "100 kya",
-                             "old": "250 kya"}.get(d, d))
-               for d in DEPTH_ORDER if d in depth_color]
-    handles += [Line2D([], [], color="#444444", lw=1.6, ls=rho_style[r],
-                       label=f"$\\rho$ = {'0' if r == 0 else f'{r:.0e}'}")
-                for r in rhos]
-    fig.legend(handles=handles, loc="lower center", ncol=len(handles),
-               bbox_to_anchor=(0.5, -0.02), columnspacing=1.4, handlelength=2.2)
+    age = [Line2D([], [], color=depth_color[d], lw=2,
+                  label={"recent": "50 kya", "young": "100 kya",
+                         "old": "250 kya"}.get(d, d))
+           for d in DEPTH_ORDER if d in depth_color]
+    rec = [Line2D([], [], color="#444444", lw=1.6, ls=rho_style[r],
+                  label=_pow10(r))
+           for r in rhos]
+    fig.legend(handles=age, title="inversion age", loc="lower left",
+               bbox_to_anchor=(0.10, -0.03), ncol=3, frameon=False,
+               columnspacing=1.2, handlelength=2.2)
+    fig.legend(handles=rec, title="recombination rate (per bp per generation)",
+               loc="lower right", bbox_to_anchor=(0.95, -0.03), ncol=3,
+               frameon=False, columnspacing=1.2, handlelength=2.6)
     fig.suptitle("Between-orientation flux and the reference recurrence classifier",
                  y=1.0)
     fig.tight_layout(rect=(0, 0.07, 1, 0.97))
