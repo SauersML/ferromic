@@ -24,7 +24,25 @@ import os
 import statistics
 from collections import defaultdict
 
-DEPTH_ORDER = ["recent", "young", "old"]
+DEPTH_ORDER = ["very_recent", "recent", "young", "old"]
+
+
+def wilson_ci(k, n, z=1.96):
+    """Wilson score interval for a binomial proportion.
+
+    The normal approximation is useless here -- several cells are at 0/60, where
+    it gives a zero-width interval. Wilson stays inside [0, 1] and keeps a
+    sensible width at the boundaries, which is where these rates live. The
+    manuscript quotes its own false-positive rate as "4%, 95% C.I.: 0-8%", so a
+    point estimate alone cannot be compared with it.
+    """
+    if n == 0:
+        return (float("nan"), float("nan"))
+    p = k / n
+    d = 1 + z * z / n
+    centre = (p + z * z / (2 * n)) / d
+    half = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / d
+    return (max(0.0, centre - half), min(1.0, centre + half))
 
 
 def flux_values(cs):
@@ -62,9 +80,13 @@ def cells(rows):
         hist = defaultdict(int)
         for e in ev:
             hist[e] += 1
+        k = sum(r["call"] for r in rs)
+        lo, hi = wilson_ci(k, len(rs))
         out.append(dict(
             scenario=sc, depth=depth, rho=rho, m_flux=m, reps=len(rs),
-            recurrent_call_rate=sum(r["call"] for r in rs) / len(rs),
+            n_called=k,
+            recurrent_call_rate=k / len(rs),
+            ci_low=lo, ci_high=hi,
             mean_events=statistics.fmean(ev),
             median_events=statistics.median(ev),
             mean_n_sites=statistics.fmean([r["n_sites"] for r in rs]),
@@ -76,7 +98,8 @@ def cells(rows):
 
 
 def write_csv(cs, path):
-    cols = ["scenario", "depth", "rho", "m_flux", "reps", "recurrent_call_rate",
+    cols = ["scenario", "depth", "rho", "m_flux", "reps", "n_called",
+            "recurrent_call_rate", "ci_low", "ci_high",
             "mean_events", "median_events", "mean_n_sites"]
     with open(path, "w", newline="") as fh:
         w = csv.writer(fh)
@@ -133,7 +156,8 @@ def write_md(cs, path, rows=None):
                     if not any(row):
                         continue
                     fh.write(f"| {depth} | " + " | ".join(
-                        f"{c['recurrent_call_rate']:.3f}" if c else "—"
+                        (f"{c['recurrent_call_rate']:.3f} "
+                         f"({c['ci_low']:.2f}-{c['ci_high']:.2f})") if c else "—"
                         for c in row) + " |\n")
         fh.write("\n## Marginal over the nine (depth x rho) cells\n\n")
         fh.write("| scenario | " + " | ".join(f"m={m:.0e}" for m in FLUX) + " |\n")
@@ -143,8 +167,13 @@ def write_md(cs, path, rows=None):
             for m in FLUX:
                 sel = [c for c in cs if c["scenario"] == sc
                        and abs(c["m_flux"] - m) < 1e-30]
-                vals.append(f"{statistics.fmean([c['recurrent_call_rate'] for c in sel]):.3f}"
-                            if sel else "—")
+                if not sel:
+                    vals.append("—")
+                    continue
+                k = sum(c["n_called"] for c in sel)
+                n = sum(c["reps"] for c in sel)
+                lo, hi = wilson_ci(k, n)
+                vals.append(f"{k / n:.3f} ({lo:.3f}-{hi:.3f})")
             fh.write(f"| {sc} | " + " | ".join(vals) + " |\n")
 
         if rows:
@@ -190,11 +219,14 @@ def plot(cs, path):
     # Fig. 1G's own palette, unaltered, so a reader moving between the two
     # figures maps the depth classes without relearning them: Old blue, Young
     # gold, Recent gray.
-    depth_color = {"old": "#2f5f9f", "young": "#d9b13c", "recent": "#8c8c8c"}
+    depth_color = {"old": "#2f5f9f", "young": "#d9b13c", "recent": "#8c8c8c",
+                   "very_recent": "#a4413a"}
     # The names are Fig. 1G's, and so are the split times behind them.
-    depth_label = {"old": "Old (500,250,100 kya)",
-                   "young": "Young (250,100,50 kya)",
-                   "recent": "Recent (100,50,25 kya)"}
+    # Bare names, no times: the recurrent panel has three split times per class
+    # and the single-origin panel has one, so any number here is wrong for one
+    # of the two panels. Both parameterisations belong in the caption.
+    depth_label = {"old": "Old", "young": "Young", "recent": "Recent",
+                   "very_recent": "VeryRecent"}
 
     def _pow10(v):
         """`1e-08` is machine notation; a figure should say 10^-8."""
@@ -209,18 +241,24 @@ def plot(cs, path):
 
     fig, axes = plt.subplots(1, 2, figsize=(9.5, 4.7), sharey=True)
     for ax, sc, title, ylab in (
-            (axes[0], "single", "Single-origin: false-positive rate", "rate"),
-            (axes[1], "recurrent", "Recurrent: power", "")):
+            (axes[0], "single", "Single-origin false-positive rate", "rate"),
+            (axes[1], "recurrent", "Recurrent power", "")):
         for depth in DEPTH_ORDER:
             for rho in rhos:
                 row = _grid(cs, sc, rho, depth, FLUX)
                 if not any(row):
                     continue
-                ax.plot(xticks,
-                        [c["recurrent_call_rate"] if c else float("nan") for c in row],
-                        marker="o", ms=3.5, lw=1.6,
-                        ls=rho_style.get(rho, "-"),
-                        color=depth_color.get(depth, "#666666"))
+                y = [c["recurrent_call_rate"] if c else float("nan")
+                     for c in row]
+                lo = [(c["recurrent_call_rate"] - c["ci_low"]) if c else 0.0
+                      for c in row]
+                hi = [(c["ci_high"] - c["recurrent_call_rate"]) if c else 0.0
+                      for c in row]
+                ax.errorbar(xticks, y, yerr=[lo, hi],
+                            marker="o", ms=3.5, lw=1.6,
+                            elinewidth=0.8, capsize=2, alpha=0.9,
+                            ls=rho_style.get(rho, "-"),
+                            color=depth_color.get(depth, "#666666"))
         ax.set_xscale("log")
         ax.set_xticks(xticks)
         ax.set_xticklabels(xlabels)
@@ -241,7 +279,8 @@ def plot(cs, path):
         return Line2D([], [], ls="", marker="", label=text)
 
     age = [Line2D([], [], color=depth_color[d], lw=2, label=depth_label[d])
-           for d in ("old", "young", "recent") if d in depth_color]
+           for d in ("old", "young", "recent", "very_recent")
+           if any(c["depth"] == d for c in cs)]
     rec = [Line2D([], [], color="#444444", lw=1.6, ls=rho_style[r],
                   label=_pow10(r))
            for r in rhos]
@@ -252,9 +291,7 @@ def plot(cs, path):
                bbox_to_anchor=(0.5, 0.01), frameon=True, framealpha=1.0,
                edgecolor="#CCCCCC", columnspacing=2.4, handlelength=2.4,
                borderpad=0.8, labelspacing=0.5)
-    fig.suptitle("Between-orientation flux and the reference recurrence classifier",
-                 y=1.0)
-    fig.tight_layout(rect=(0, 0.23, 1, 0.97))
+    fig.tight_layout(rect=(0, 0.23, 1, 1.0))
     fig.savefig(path)
     plt.close(fig)
     print("wrote", path)
