@@ -187,14 +187,10 @@ def plot(cs, path):
         _apply_style()
     except Exception:
         pass
-    # Fig. 1G's own palette, so a reader moving between the two figures maps the
-    # depth classes without relearning them: Old blue, Young gold, Recent gray.
-    # The gold is darkened from the manuscript's to clear 3:1 against white --
-    # the original sits at 1.99:1 and washes out in print. Gray carries no
-    # chroma, which a categorical palette normally forbids, but it is the
-    # manuscript's own encoding for this class and the three stay separable
-    # (worst adjacent pair dE 16.2 under protanopia, 17.8 normal vision).
-    depth_color = {"old": "#2f5f9f", "young": "#b98a1e", "recent": "#6e6e6e"}
+    # Fig. 1G's own palette, unaltered, so a reader moving between the two
+    # figures maps the depth classes without relearning them: Old blue, Young
+    # gold, Recent gray.
+    depth_color = {"old": "#2f5f9f", "young": "#d9b13c", "recent": "#8c8c8c"}
     # The names are Fig. 1G's, and so are the split times behind them.
     depth_label = {"old": "Old (500,250,100 kya)",
                    "young": "Young (250,100,50 kya)",
