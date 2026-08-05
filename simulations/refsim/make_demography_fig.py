@@ -72,7 +72,11 @@ POS_RECURRENT = {"direct_1": 0, "ancestral_inverted": 0.5 * GAP,
                  "inverted_1": GAP, "ancestral_unoriented": 1.5 * GAP,
                  "inverted_2": 2 * GAP, "ancestral_direct": 2.5 * GAP,
                  "direct_2": 3 * GAP}
-POS_SINGLE = {"inverted": 0, "ancestral_unoriented": 0.5 * GAP, "direct": GAP}
+# The single-event panel is the SAME demography, drawn without the inverted deme
+# that contributes nothing to the sample when fI is 0 or 1 -- which is why
+# manuscript Fig. 1A shows three demes where Fig. 1B shows four. Keeping the
+# shared demes at their recurrent-panel x positions makes the two comparable.
+POS_SINGLE = {k: v for k, v in POS_RECURRENT.items() if k != "inverted_2"}
 
 
 def _colours(graph):
@@ -132,8 +136,9 @@ def graphs(depth_name, flux_scope="leaves"):
     # demes rejects migration over the pulse demes' 1e-5-generation lifetime.
     de.set_symmetric_migration_rate(["P_I", "P_D"], 0)
     recurrent = _relabel(_drop(de.to_demes(), {"P_I", "P_D"}))
-    single = _relabel(
-        refsim.demography_single(depth["t_inv"], m_flux=M_FLUX).to_demes())
+    # Same demography, same flux; only the sampling differs, and an unsampled
+    # inverted deme leaves no trace in the sampled genealogy.
+    single = _relabel(_drop(de.to_demes(), {"P_I", "P_D", "P2_I"}))
     return recurrent, single
 
 
@@ -142,7 +147,7 @@ def make_figure(path, depth_name="young", flux_scope="leaves"):
     recurrent, single = graphs(depth_name, flux_scope)
 
     fig, (ax_a, ax_b) = plt.subplots(
-        1, 2, figsize=(9.0, 4.6), width_ratios=[3.0, 1.0], sharey=True)
+        1, 2, figsize=(11.0, 4.6), width_ratios=[3.0, 2.2], sharey=True)
     max_time = 1.3 * max(d.start_time for d in recurrent.demes
                          if d.start_time != float("inf"))
     for ax, graph, pos, title in (

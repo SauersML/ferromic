@@ -37,7 +37,9 @@ import refsim  # noqa: E402
 TIME_DEPTHS = refsim.TIME_DEPTHS
 RHOS = [0.0, 1e-8, 1e-6]
 FLUX = [0.0, 1e-9, 1e-8, 1e-7, 1e-6]
-SCENARIOS = ["single", "recurrent"]
+# Upstream has one demography; a locus is single-event when the inverted
+# admixture draw lands on 0 or 1. "single_upstream" is that locus.
+SCENARIOS = ["single_upstream", "recurrent"]
 M_WITHIN = 1e-8
 
 FLUX_SAMPLE_HAP = 240
@@ -190,6 +192,10 @@ def main(argv=None):
                          "refsim.demography). The grid and its seeds are "
                          "unchanged, so a 'leaves' and an 'all' run are paired "
                          "locus for locus.")
+    ap.add_argument("--flux", default=None,
+                    help="comma-separated subset of m_flux values to run (the "
+                         "grid and its seeds are unchanged; other rows are "
+                         "skipped). Use to get the no-flux baseline first.")
     ap.add_argument("--scenarios", default=None,
                     help="comma-separated subset of scenarios to run "
                          "(the grid and its seeds are unchanged; other rows are skipped)")
@@ -204,6 +210,10 @@ def main(argv=None):
     if args.scenarios:
         want = set(args.scenarios.split(","))
         mine = [j for j in mine if j["scenario"] in want]
+    if args.flux:
+        keep = [float(x) for x in args.flux.split(",")]
+        mine = [j for j in mine
+                if any(abs(j["m_flux"] - m) < 1e-30 for m in keep)]
     print(f"[shard {args.shard}/{args.nshards}] {len(mine)}/{len(grid)} jobs, "
           f"{args.procs} procs", flush=True)
 

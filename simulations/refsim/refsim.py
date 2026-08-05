@@ -48,35 +48,40 @@ parsimony score unchanged:
 
 Single vs. recurrent origin
 ---------------------------
-The upstream repository only ships recurrent manifests: every model in
-``inputFiles/*.tbl`` is the 9-deme model with both inverted demes present. The
-recurrent scenario here is that model with ``frac_admixI`` constrained to the
-interior so both inverted origins are actually sampled.
+Upstream has **one** demography and one script. Whether a replicate is a
+single-event or a recurrent locus is not a property of the model but of the
+sample, decided by a single line of ``recurrentINV_m1.2pop.py``::
 
-The single-event model is not in the upstream repository and has to be built
-from the Methods, which describe it as one divergence: "an inversion event
-creates a subpopulation (e.g., inverted haplotypes) diverged from the ancestral
-population ... Each divergence introduces a bottleneck (90% reduction)", run at
-t_inv in {500, 250, 100, 50} kya. ``demography_single`` is exactly that -- two
-demes and one split, nothing else.
+    frac_admixI = random.randint(0,10)/10
 
-It is tempting to instead reuse the 9-deme model with ``fI in {0, 1}``, so that
-all inverted lineages descend from one inverted deme. **That is not a
-single-event sample**, and getting it wrong inflates the false-positive rate by
-more than an order of magnitude. The inverted and direct demes are paired by
-ancestry: ``P1_I`` is sister to ``P0_D`` (both split from ``Pa_I``) and ``P2_I``
-is sister to ``P3_D`` (both from ``Pa_D``). The direct sample is drawn from
-``P0_D`` and ``P3_D`` in proportions ``[fD, 1 - fD]``, so unless ``fD`` is also
-constrained, some direct haplotypes come from the deme sister to the inverted
-one. Those lineages enter the inverted clade's ancestor and force extra
-orientation state changes -- homoplasy manufactured by the sampling scheme, not
-by the inversion arising twice. Measured on the committed sweep: at zero weight
-on the sister deme the false-positive rate is 0.016; at any positive weight it is
-about 0.20.
+The sampled inverted deme ``P_I`` is admixed from ``P1_I`` and ``P2_I`` in
+proportions ``[fI, 1 - fI]``. When that draw lands on 0 or 1 -- two of its eleven
+values -- every sampled inverted haplotype descends from one inverted deme, which
+is one inversion origin. Otherwise both origins contribute. So a single-event
+locus is an upstream replicate whose draw came up 0 or 1, and no separate
+demography is needed. Manuscript Fig. 1A draws exactly that: three demes, two
+direct and one inverted, because the unsampled inverted deme contributes nothing.
 
-``scenario="single_repo"`` keeps the upstream demography and constrains both
-draws (``fI = 1`` with ``fD = 0``, or ``fI = 0`` with ``fD = 1``), giving a clean
-split at ``Tsp_p01_p23``. It exists as a cross-check on ``demography_single``.
+``scenario`` therefore selects a sampling regime, not a model:
+
+``single_upstream``
+    ``fI`` in {0, 1}, ``fD`` left free -- the manuscript's single-event locus.
+``recurrent``
+    ``fI`` in the interior, so both origins are sampled.
+``upstream``
+    both draws untouched; the mixture upstream actually produces.
+``single_repo``
+    ``fI`` in {0, 1} *and* ``fD = 1 - fI``. Keeping the direct sample out of the
+    inverted clade's ancestral group lowers the false-positive rate, but upstream
+    does not do this, so it is a sensitivity rather than the reference.
+
+``demography_single`` is a two-deme, one-split model read literally off the
+Methods paragraph. It is **not** what Fig. 1G scored, and it behaves differently:
+a 50-kya divergence gives inverted lineages only 2,000 generations to coalesce,
+so incomplete lineage sorting scatters them across the tree and the
+false-positive rate rises far above the upstream model's, where the inverted
+sample has sat in a small deme since the first event. It is kept, as
+``scenario="single"``, only as a sensitivity on that reading.
 """
 from __future__ import annotations
 
@@ -250,25 +255,29 @@ def draw_admixture(scenario, rng):
     ``recurrent`` constrains ``fI`` to the interior so both inverted origins are
     sampled. ``upstream`` leaves both draws alone.
 
-    ``single_repo`` is a single *origin* inside the upstream demography, and it
-    needs both draws constrained -- ``fI`` alone is not enough. The inverted demes
-    are paired with direct demes by ancestry: ``P1_I`` is sister to ``P0_D``
-    (both split from ``Pa_I``), and ``P2_I`` is sister to ``P3_D`` (both from
-    ``Pa_D``). If any direct haplotype is drawn from the deme sister to the
-    inverted one, its lineage enters the inverted clade's ancestor and forces
-    extra orientation state changes that have nothing to do with the inversion
-    arising more than once. So the direct sample must come entirely from the
-    *other* ancestral clade: ``fI = 1`` (inverted from ``P1_I``) pairs with
-    ``fD = 0`` (direct all from ``P3_D``), and ``fI = 0`` with ``fD = 1``. The
-    resulting split is at ``Tsp_p01_p23``.
+    ``single_upstream`` is the manuscript's single-event locus. Upstream has one
+    demography and one script; whether a replicate is single-event or recurrent
+    is decided by ``frac_admixI`` alone. When that draw lands on 0 or 1 -- two of
+    its eleven values -- every sampled inverted haplotype descends from a single
+    inverted deme, which is a single inversion origin. Conditioning on those two
+    values is the same thing as running upstream and keeping those replicates.
+
+    Crucially the direct draw is left alone, because upstream leaves it alone.
+    Constraining it to the non-sister clade (``fD = 1 - fI``) keeps direct
+    lineages out of the inverted clade's ancestor and lowers the false-positive
+    rate, but that is our idea, not upstream's, and a locus simulated that way is
+    not the locus Fig. 1G scored. ``single_repo`` keeps that constrained variant
+    available as a sensitivity.
     """
     frac_d = rng.randint(0, 10) / 10
     if scenario == "recurrent":
         frac_i = rng.randint(1, 9) / 10            # interior -- two origins
     elif scenario == "upstream":
         frac_i = rng.randint(0, 10) / 10           # upstream's unconstrained draw
-    elif scenario == "single_repo":
+    elif scenario == "single_upstream":
         frac_i = float(rng.randint(0, 1))          # 0.0 or 1.0 -- one origin
+    elif scenario == "single_repo":
+        frac_i = float(rng.randint(0, 1))
         frac_d = 1.0 - frac_i                      # direct from the non-sister deme
     else:
         raise ValueError(f"unknown scenario {scenario!r}")
@@ -533,20 +542,27 @@ def classify_locus(scenario, times, sample_size, inv_freq, rho, m_const, seed,
 
 
 TIME_DEPTHS = {
-    # Recurrent model: manifest columns Tsp_p01_p23 / Tsp_p0_p1 / Tsp_p2_p3, in years.
-    # Single-event model: t_inv, the one divergence. Methods run single-event models
-    # at 500 / 250 / 100 / 50 kya; the shallowest of these ("very recent", 50 kya) is
-    # where the manuscript reports its highest false-positive rate.
-    "young":  dict(t01_23=250_000, t0_1=100_000, t2_3=50_000,  t_inv=100_000),
-    "recent": dict(t01_23=100_000, t0_1=50_000,  t2_3=25_000,  t_inv=50_000),
-    "old":    dict(t01_23=500_000, t0_1=250_000, t2_3=100_000, t_inv=250_000),
+    # The manifest columns Tsp_p01_p23 / Tsp_p0_p1 / Tsp_p2_p3, in years. Upstream
+    # ships the first three; the Methods describe a fourth, "very recent", which
+    # the repository does not include. It matters: a single-event locus dates from
+    # the *first* event (Tsp_p01_p23), so the four single-event depths the Methods
+    # list -- 500 / 250 / 100 / 50 kya -- are the first columns of these four rows,
+    # and 50 kya, where the manuscript reports its highest false-positive rate,
+    # exists only in the row upstream omits.
+    #
+    # ``t_inv`` belongs to the two-deme ``single`` sensitivity model only.
+    "old":         dict(t01_23=500_000, t0_1=250_000, t2_3=100_000, t_inv=250_000),
+    "young":       dict(t01_23=250_000, t0_1=100_000, t2_3=50_000,  t_inv=100_000),
+    "recent":      dict(t01_23=100_000, t0_1=50_000,  t2_3=25_000,  t_inv=50_000),
+    "very_recent": dict(t01_23=50_000,  t0_1=25_000,  t2_3=10_000,  t_inv=25_000),
 }
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--scenario", default="single",
-                    choices=["single", "single_repo", "recurrent", "upstream"])
+    ap.add_argument("--scenario", default="single_upstream",
+                    choices=["single_upstream", "single", "single_repo",
+                             "recurrent", "upstream"])
     ap.add_argument("--depth", default="young", choices=sorted(TIME_DEPTHS))
     ap.add_argument("--sample-size", type=int, default=240)
     ap.add_argument("--inv-freq", type=float, default=0.1)
