@@ -1,4 +1,5 @@
 import os
+import re
 import math
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -612,7 +613,8 @@ Low imputation:
 # tag-span id as a feature name.
 
 PHENOTYPE_DEFINITIONS_URL = "https://github.com/SauersML/ferromic/raw/refs/heads/main/data/significant_heritability_diseases.tsv"
-MASTER_RESULTS_CSV = f"phewas_results_{datetime.now().strftime('%Y%m%d%H%M%S')}.tsv"
+_RUN_STAMP = datetime.now().strftime('%Y%m%d%H%M%S')
+MASTER_RESULTS_CSV = f"phewas_results_{_RUN_STAMP}.tsv"
 
 # --- Performance & Memory Tuning ---
 MIN_AVAILABLE_MEMORY_GB = 4.0
@@ -627,6 +629,13 @@ INVERSION_DOSAGES_FILE = "imputed_inversion_dosages.tsv"
 PCS_URI = "gs://fc-aou-datasets-controlled/v8/wgs/short_read/snpindel/aux/ancestry/ancestry_preds.tsv"
 SEX_URI = "gs://fc-aou-datasets-controlled/v8/wgs/short_read/snpindel/aux/qc/genomic_metrics.tsv"
 RELATEDNESS_URI = "gs://fc-aou-datasets-controlled/v8/wgs/short_read/snpindel/aux/relatedness/relatedness_flagged_samples.tsv"
+
+# Ancestry-specific ("fine-scale") principal components, fit separately inside each
+# genetic ancestry group rather than projected onto a cross-ancestry reference. One
+# file per group; "{pop}" is substituted with the lower-case population label. These
+# are produced by phewas/extra/within_ancestry_pca.py and are only consumed when
+# PC_SOURCE is "within-ancestry".
+WITHIN_ANCESTRY_PCS_URI = "within_ancestry_pcs/within_ancestry_pcs_{pop}.tsv"
 
 CACHE_VERSION_TAG = io.CACHE_VERSION_TAG
 
@@ -654,12 +663,36 @@ _pheno_filter_env = os.getenv("FERROMIC_PHENOTYPE_FILTER")
 if _pheno_filter_env is not None:
     PHENOTYPE_FILTER = _pheno_filter_env.strip() or None
 
+# --- Genetic principal-component source ---
+# "global"          : AoU's reference-projected PCs read from PCS_URI. This is the
+#                     default and the source behind every published result. It is the
+#                     correct instrument for between-ancestry structure.
+# "within-ancestry" : PCs fit separately inside a single genetic ancestry group, which
+#                     resolves fine-scale (within-continent) structure that projected
+#                     global PCs cannot see. The axes are defined per group and are NOT
+#                     comparable across groups, so this source is only valid together
+#                     with POPULATION_FILTER != "all". It is an additional sensitivity
+#                     analysis, never a replacement for the pooled model.
+PC_SOURCE_GLOBAL = "global"
+PC_SOURCE_WITHIN_ANCESTRY = "within-ancestry"
+VALID_PC_SOURCES = (PC_SOURCE_GLOBAL, PC_SOURCE_WITHIN_ANCESTRY)
+PC_SOURCE = PC_SOURCE_GLOBAL
+
+_pc_source_env = os.getenv("FERROMIC_PC_SOURCE")
+if _pc_source_env is not None:
+    PC_SOURCE = _pc_source_env.strip() or PC_SOURCE_GLOBAL
+
+_within_pcs_uri_env = os.getenv("FERROMIC_WITHIN_ANCESTRY_PCS_URI")
+if _within_pcs_uri_env is not None:
+    WITHIN_ANCESTRY_PCS_URI = _within_pcs_uri_env.strip() or WITHIN_ANCESTRY_PCS_URI
+
 
 def _apply_pipeline_config(pipeline_config: Optional[dict[str, object]] = None) -> None:
     """Synchronize module globals and environment variables with the pipeline config."""
 
     global CLI_MIN_CASES_CONTROLS_OVERRIDE, MIN_CASES_FILTER, MIN_CONTROLS_FILTER
     global POPULATION_FILTER, PHENOTYPE_FILTER
+    global PC_SOURCE, MASTER_RESULTS_CSV
 
     config = pipeline_config or {}
 
@@ -691,6 +724,25 @@ def _apply_pipeline_config(pipeline_config: Optional[dict[str, object]] = None) 
     else:
         os.environ["FERROMIC_PHENOTYPE_FILTER"] = PHENOTYPE_FILTER
 
+    # The pipeline body runs in a spawned subprocess (see supervisor_main), which does
+    # not inherit module globals. Every setting therefore has to be mirrored into the
+    # environment so the child re-derives it at import time.
+    PC_SOURCE = _normalize_pc_source(config.get("pc_source", PC_SOURCE))
+    if PC_SOURCE == PC_SOURCE_GLOBAL:
+        os.environ.pop("FERROMIC_PC_SOURCE", None)
+    else:
+        os.environ["FERROMIC_PC_SOURCE"] = PC_SOURCE
+
+    if PC_SOURCE == PC_SOURCE_WITHIN_ANCESTRY and POPULATION_FILTER == "all":
+        raise ValueError(
+            "pc_source='within-ancestry' requires a single-population run. Ancestry-specific "
+            "principal components are fit separately inside each genetic ancestry group, so the "
+            "axes are not comparable across groups and cannot enter a pooled multi-ancestry "
+            "model. Pass a population label (--pop-label) alongside --pc-source within-ancestry."
+        )
+
+    MASTER_RESULTS_CSV = _master_results_filename()
+
 
 def _normalize_population_label(label: Optional[str]) -> str:
     """Return a canonical, lower-case population label suitable for comparisons."""
@@ -698,6 +750,117 @@ def _normalize_population_label(label: Optional[str]) -> str:
         return ""
     normalized = str(label).strip().lower()
     return normalized
+
+
+def _normalize_pc_source(source: Optional[str]) -> str:
+    """Return a validated principal-component source label."""
+    if source is None:
+        return PC_SOURCE_GLOBAL
+    normalized = str(source).strip().lower() or PC_SOURCE_GLOBAL
+    # Accept the underscore spelling so environment variables and shell callers do not
+    # have to quote a hyphen.
+    normalized = normalized.replace("_", "-")
+    if normalized not in VALID_PC_SOURCES:
+        raise ValueError(
+            f"Unknown principal-component source {source!r}. "
+            f"Expected one of: {', '.join(VALID_PC_SOURCES)}."
+        )
+    return normalized
+
+
+def _master_results_filename() -> str:
+    """Build a results filename that identifies the cohort and PC source it came from.
+
+    Runs differing only in principal-component source are otherwise indistinguishable on
+    disk, and the whole point of the within-ancestry analysis is to compare against the
+    matched global-PC run, so both labels belong in the name.
+    """
+    parts = ["phewas_results", _RUN_STAMP]
+    population = _normalize_population_label(POPULATION_FILTER)
+    if population and population != "all":
+        parts.append(f"pop-{population}")
+    if PC_SOURCE != PC_SOURCE_GLOBAL:
+        parts.append(f"pcs-{PC_SOURCE}")
+    return "_".join(parts) + ".tsv"
+
+
+def _resolve_within_ancestry_pcs_uri(population_label: str) -> str:
+    """Substitute the population label into the within-ancestry PC URI template."""
+    normalized = _normalize_population_label(population_label)
+    if not normalized or normalized == "all":
+        raise ValueError(
+            "Within-ancestry principal components require a specific population label."
+        )
+    template = WITHIN_ANCESTRY_PCS_URI
+    if "{pop}" not in template:
+        raise ValueError(
+            "WITHIN_ANCESTRY_PCS_URI must contain a '{pop}' placeholder so each ancestry "
+            f"group resolves to its own file; got {template!r}."
+        )
+    return template.format(pop=normalized)
+
+
+def _apply_within_ancestry_pcs(
+    covariates_df: pd.DataFrame,
+    within_pcs_df: pd.DataFrame,
+    population_label: str,
+) -> Tuple[pd.DataFrame, int]:
+    """Replace the global PC columns with ancestry-specific ones for this stratum.
+
+    The design matrices are assembled by column *name* (``PC1``..``PC{NUM_PCS}``) in
+    both run.py and models.py, so swapping the values here propagates to every model
+    without touching the fitting code. The number of components is returned because it
+    varies by group: it is scaled to the group's sample size when the PCs are fit.
+    """
+    prefix = f"[PCs] Population '{population_label}':"
+
+    within_cols = [c for c in within_pcs_df.columns if re.fullmatch(r"WPC\d+", str(c))]
+    if not within_cols:
+        raise ValueError(
+            f"{prefix} within-ancestry PC table has no WPC* columns "
+            f"(found: {list(within_pcs_df.columns)[:8]})."
+        )
+    k = len(within_cols)
+    ordered = [f"WPC{i}" for i in range(1, k + 1)]
+    missing_seq = [c for c in ordered if c not in within_pcs_df.columns]
+    if missing_seq:
+        raise ValueError(
+            f"{prefix} within-ancestry PC columns are not a contiguous 1..{k} run; "
+            f"missing {missing_seq}."
+        )
+
+    aligned = within_pcs_df.reindex(covariates_df.index.astype(str))
+    unmatched = int(aligned[ordered[0]].isna().sum())
+    if unmatched:
+        # The covariate merge upstream is an inner join, so quietly dropping these
+        # participants would silently redefine the analysis cohort. Fail instead.
+        examples = ", ".join(map(str, aligned.index[aligned[ordered[0]].isna()][:5]))
+        raise ValueError(
+            f"{prefix} {unmatched} of {len(aligned)} participants have no ancestry-specific "
+            f"principal components (e.g. {examples}). Refusing to continue, because dropping "
+            "them would change the cohort relative to the matched global-PC run."
+        )
+
+    degenerate = [c for c in ordered if not np.isfinite(aligned[c].to_numpy()).all()]
+    if degenerate:
+        raise ValueError(f"{prefix} non-finite values in {degenerate}.")
+
+    updated = covariates_df.copy()
+    stale = [c for c in updated.columns if re.fullmatch(r"PC\d+", str(c))]
+    if stale:
+        updated = updated.drop(columns=stale)
+    for i, col in enumerate(ordered, start=1):
+        updated[f"PC{i}"] = aligned[col].astype(np.float32).to_numpy()
+
+    variances = {f"PC{i}": float(np.var(aligned[c].to_numpy())) for i, c in enumerate(ordered, start=1)}
+    print(
+        f"{prefix} using {k} ancestry-specific PCs "
+        f"(replaced {len(stale)} projected global PCs; "
+        f"variance PC1={variances.get('PC1', float('nan')):.4g}, "
+        f"PC{k}={variances.get(f'PC{k}', float('nan')):.4g}).",
+        flush=True,
+    )
+    return updated, k
 
 
 def _apply_population_filter(
@@ -916,13 +1079,14 @@ def _pipeline_once(pipeline_config: Optional[dict[str, object]] = None):
 
     allow_ancestry_followups = True
     population_filter_label = "all"
+    within_ancestry_pcs_uri = None
 
 
     print("=" * 70)
     print(" Starting Robust, Parallel PheWAS Pipeline")
     print("=" * 70)
 
-    global TARGET_INVERSIONS
+    global TARGET_INVERSIONS, NUM_PCS
     if isinstance(TARGET_INVERSIONS, str):
         TARGET_INVERSIONS = {TARGET_INVERSIONS}
 
@@ -1029,6 +1193,44 @@ def _pipeline_once(pipeline_config: Optional[dict[str, object]] = None):
                 )
             )
 
+            # Ancestry-specific principal components replace the projected global ones for
+            # single-population runs. This is the only place the swap happens: both design
+            # matrix builders below read from shared_covariates_df, and every model worker
+            # rebuilds its PC column list by name from CTX["NUM_PCS"], so the substitution
+            # propagates without touching any fitting code.
+            if PC_SOURCE == PC_SOURCE_WITHIN_ANCESTRY:
+                if population_filter_label == "all":
+                    raise RuntimeError(
+                        "Within-ancestry principal components were requested without a "
+                        "population filter; ancestry-specific axes are not comparable across "
+                        "groups and cannot enter a pooled model."
+                    )
+                within_ancestry_pcs_uri = _resolve_within_ancestry_pcs_uri(population_filter_label)
+                within_pcs_cache = os.path.join(
+                    CACHE_DIR,
+                    "wpcs_"
+                    + _normalize_population_label(population_filter_label)
+                    + f"_{_source_key(gcp_project, within_ancestry_pcs_uri)}.parquet",
+                )
+                within_pcs_df = io.get_cached_or_generate(
+                    within_pcs_cache,
+                    io.load_within_ancestry_pcs,
+                    gcp_project,
+                    within_ancestry_pcs_uri,
+                    lock_dir=LOCK_DIR,
+                )
+                shared_covariates_df, NUM_PCS = _apply_within_ancestry_pcs(
+                    shared_covariates_df,
+                    within_pcs_df,
+                    population_filter_label,
+                )
+            else:
+                print(
+                    f"[PCs] Using {NUM_PCS} projected global principal components "
+                    f"(population='{population_filter_label}').",
+                    flush=True,
+                )
+
             # Build ancestry dummies on a Series so the participant-id index is preserved.
             # The previous pd.Categorical(...) dropped the index, so get_dummies produced a
             # RangeIndex that was coerced to "0","1",...; the per-inversion reindex-by-
@@ -1122,6 +1324,11 @@ def _pipeline_once(pipeline_config: Optional[dict[str, object]] = None):
             PCS_URI,
             SEX_URI,
             RELATEDNESS_URI,
+            # Without these two, an EUR run with ancestry-specific PCs would silently
+            # reuse the covariate cache built by the matched EUR run with global PCs.
+            PC_SOURCE,
+            within_ancestry_pcs_uri,
+            NUM_PCS,
         )
         data_keys = {
             "dosages": dosages_key,
@@ -1944,6 +2151,13 @@ def _pipeline_once(pipeline_config: Optional[dict[str, object]] = None):
 
 def supervisor_main(max_restarts=100, backoff_sec=10, *, pipeline_config=None):
     import multiprocessing as mp, time, signal, os
+
+    # Apply the configuration in the parent before spawning anything. Two reasons: an
+    # invalid combination raises here instead of inside the child, where the supervisor
+    # would treat a deterministic configuration error as a crash and retry it a hundred
+    # times; and the environment mirror is in place before the spawn, so the child sees
+    # the settings even though it inherits no module globals.
+    _apply_pipeline_config(pipeline_config)
 
     ctx = mp.get_context("spawn")
     should_stop = {"flag": False}

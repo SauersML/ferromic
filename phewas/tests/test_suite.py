@@ -94,11 +94,17 @@ def preserve_run_globals():
         "INVERSION_DOSAGES_FILE",
         "CLI_MIN_CASES_CONTROLS_OVERRIDE",
         "POPULATION_FILTER",
+        "PC_SOURCE",
+        "WITHIN_ANCESTRY_PCS_URI",
+        "NUM_PCS",
+        "MASTER_RESULTS_CSV",
     ]
     snapshot = {k: getattr(run, k) for k in keys if hasattr(run, k)}
     env_keys = [
         "FERROMIC_POPULATION_FILTER",
         "FERROMIC_PHENOTYPE_FILTER",
+        "FERROMIC_PC_SOURCE",
+        "FERROMIC_WITHIN_ANCESTRY_PCS_URI",
     ]
     env_snapshot = {k: os.environ.get(k) for k in env_keys}
     try:
@@ -202,12 +208,18 @@ def test_drop_rank_deficient_respects_uniform_scaling():
         }
     )
 
-    kept_base = models._drop_rank_deficient(base, keep_cols=('const',), always_keep=('target',))
+    kept_base, dropped_base = models._drop_rank_deficient(
+        base, keep_cols=('const',), always_keep=('target',)
+    )
     assert list(kept_base.columns) == list(base.columns)
+    assert dropped_base == []
 
     scaled = base * 1e-3
-    kept_scaled = models._drop_rank_deficient(scaled, keep_cols=('const',), always_keep=('target',))
+    kept_scaled, dropped_scaled = models._drop_rank_deficient(
+        scaled, keep_cols=('const',), always_keep=('target',)
+    )
     assert list(kept_scaled.columns) == list(base.columns)
+    assert dropped_scaled == []
 
 
 def test_drop_rank_deficient_drops_near_duplicates_even_after_scaling():
@@ -224,12 +236,18 @@ def test_drop_rank_deficient_drops_near_duplicates_even_after_scaling():
     # keeps the matrix full rank before pruning but should be removed.
     base['dup_target'] = base['target'] + 1e-8 * rng.normal(0.0, 1.0, size=n)
 
-    kept = models._drop_rank_deficient(base, keep_cols=('const',), always_keep=('target',))
+    kept, dropped = models._drop_rank_deficient(
+        base, keep_cols=('const',), always_keep=('target',)
+    )
     assert 'dup_target' not in kept.columns
+    assert dropped == ['dup_target']
 
     scaled = base * 1e-3
-    kept_scaled = models._drop_rank_deficient(scaled, keep_cols=('const',), always_keep=('target',))
+    kept_scaled, dropped_scaled = models._drop_rank_deficient(
+        scaled, keep_cols=('const',), always_keep=('target',)
+    )
     assert 'dup_target' not in kept_scaled.columns
+    assert dropped_scaled == ['dup_target']
 
 def make_synth_cohort(N=200, NUM_PCS=10, seed=42):
     rng = np.random.default_rng(seed)
@@ -524,6 +542,9 @@ def test_run_main_applies_cli_overrides():
             "min_cases_controls": None,
             "population_filter": "eur",
             "phenotype_filter": None,
+            # The PC source is always recorded explicitly so a stale environment
+            # variable cannot decide it for the spawned child.
+            "pc_source": run.PC_SOURCE_GLOBAL,
         })
 
 
@@ -912,7 +933,7 @@ def test_apply_population_filter_allows_full_cohort():
     anc = pd.Series(["eur", "amr"], index=cov.index, name="ANCESTRY")
     filtered_cov, filtered_anc, label, followups = run._apply_population_filter(cov, anc, "all")
     pd.testing.assert_frame_equal(filtered_cov, cov)
-    pd.testing.assert_series_equal(filtered_anc, anc)
+    pd.testing.assert_series_equal(filtered_anc, anc, check_dtype=False)
     assert label == "all"
     assert followups is True
 
@@ -924,7 +945,7 @@ def test_apply_population_filter_restricts_to_label():
     expected_cov = cov.loc[["p1", "p3"]]
     expected_anc = pd.Series(["eur", "eur"], index=expected_cov.index, name="ANCESTRY")
     pd.testing.assert_frame_equal(filtered_cov, expected_cov)
-    pd.testing.assert_series_equal(filtered_anc, expected_anc)
+    pd.testing.assert_series_equal(filtered_anc, expected_anc, check_dtype=False)
     assert label == "eur"
     assert followups is False
 
@@ -3337,3 +3358,104 @@ def test_consolidate_uses_payload_phenotype(tmp_path):
 
     assert pd.notna(result.loc[0, "P_LRT_Overall"])
     assert bool(result.loc[0, "P_Overall_Valid"])
+
+
+def test_within_ancestry_pcs_propagate_through_the_whole_pipeline(tmp_path):
+    """End-to-end: ancestry-specific components reach the fitted models.
+
+    The substitution happens once in shared setup, and every design matrix is assembled
+    by column name from CTX["NUM_PCS"]. This checks that the whole chain holds by using a
+    component count deliberately different from the global default, then reading the
+    count and the column list back out of the metadata the workers wrote.
+    """
+    with temp_workspace() as tmpdir, preserve_run_globals():
+        core_data, phenos = make_realistic_followup_dataset()
+
+        cache_root = Path(tmpdir) / "phewas_cache"
+        run.CACHE_DIR = str(cache_root)
+        run.LOCK_DIR = os.path.join(run.CACHE_DIR, "locks")
+        run.TARGET_INVERSIONS = [TEST_TARGET_INVERSION]
+        run.NUM_PCS = core_data["pcs"].shape[1]
+        run.MIN_NEFF_FILTER = 0
+        run.MLE_REFIT_MIN_NEFF = 0
+        run.FDR_ALPHA = 1.0
+        run.LRT_SELECT_ALPHA = 1.0
+        run.MASTER_RESULTS_CSV = str(Path(tmpdir) / "master_results.tsv")
+        run.INVERSION_DOSAGES_FILE = str(Path(tmpdir) / "dosages.tsv")
+
+        defs_df = prime_all_caches_for_run(
+            core_data, phenos, TEST_CDR_CODENAME, TEST_TARGET_INVERSION,
+            cache_dir=run.CACHE_DIR,
+        )
+        run.PHENOTYPE_DEFINITIONS_URL = str(make_local_pheno_defs_tsv(defs_df, tmpdir))
+        write_tsv(
+            run.INVERSION_DOSAGES_FILE,
+            core_data["inversion_main"].reset_index().rename(columns={"person_id": "SampleID"}),
+        )
+
+        # Four components rather than the sixteen the global table carries, so a stale
+        # count anywhere in the chain shows up as a mismatch rather than passing silently.
+        n_within = 4
+        anc = core_data["ancestry"]
+        eur_ids = anc.index[anc["ANCESTRY"].astype(str).str.lower() == "eur"]
+        assert len(eur_ids) > 0, "fixture must contain EUR participants"
+        rng = np.random.default_rng(20260819)
+        within = pd.DataFrame(
+            rng.normal(0.0, 1.0, size=(len(eur_ids), n_within)),
+            index=pd.Index([str(v) for v in eur_ids], name="person_id"),
+            columns=[f"WPC{i}" for i in range(1, n_within + 1)],
+        )
+        within_path = Path(tmpdir) / "within_ancestry_pcs_eur.tsv"
+        within.reset_index().to_csv(within_path, sep="\t", index=False)
+        # The component location is a data source, configured like PCS_URI and the rest.
+        run.WITHIN_ANCESTRY_PCS_URI = str(Path(tmpdir) / "within_ancestry_pcs_{pop}.tsv")
+
+        def _load_pcs_stub(gcp_project, PCS_URI, NUM_PCS, *_, **__):
+            return core_data["pcs"].iloc[:, :NUM_PCS]
+
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch("phewas.run.bigquery.Client", MagicMock()))
+            stack.enter_context(patch("phewas.run.io.load_related_to_remove", return_value=set()))
+            stack.enter_context(patch("phewas.run.io.load_pcs", _load_pcs_stub))
+            stack.enter_context(
+                patch("phewas.run.io.load_genetic_sex", lambda *a, **k: core_data["sex"])
+            )
+            stack.enter_context(
+                patch("phewas.run.io.load_ancestry_labels", lambda *a, **k: core_data["ancestry"])
+            )
+            stack.enter_context(
+                patch(
+                    "phewas.run.io.load_demographics_with_stable_age",
+                    lambda *a, **k: core_data["demographics"],
+                )
+            )
+            stack.enter_context(patch("phewas.pheno.populate_caches_prepass", lambda *_, **__: None))
+            stack.enter_context(
+                patch(
+                    "phewas.run.supervisor_main",
+                    lambda *_, **kwargs: run._pipeline_once(kwargs.get("pipeline_config")),
+                )
+            )
+
+            cli.main(["--pop-label", "eur", "--pc-source", "within-ancestry"])
+
+        assert run.NUM_PCS == n_within
+
+        safe_inv = models.safe_basename(TEST_TARGET_INVERSION)
+        results_dir = Path(run.CACHE_DIR) / safe_inv / "results_atomic"
+        metas = sorted(results_dir.glob("*.meta.json"))
+        assert metas, "pipeline produced no worker metadata"
+        for meta_path in metas:
+            with open(meta_path) as handle:
+                meta = json.load(handle)
+            assert meta["num_pcs"] == n_within, meta_path
+            columns = set(meta["model_columns"])
+            assert {f"PC{i}" for i in range(1, n_within + 1)} <= columns
+            # The global table had more components; none of them may survive.
+            assert not any(f"PC{i}" in columns for i in range(n_within + 1, 17))
+
+        for sanitized in defs_df["sanitized_name"]:
+            result_path = results_dir / f"{sanitized}.json"
+            assert result_path.exists(), f"missing Stage-1 result for {sanitized}"
+            with open(result_path) as handle:
+                assert np.isfinite(float(json.load(handle).get("OR", np.nan)))

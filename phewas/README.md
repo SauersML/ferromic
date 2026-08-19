@@ -102,7 +102,18 @@ python3 -m phewas.cli --pop-label "eur"
 
 # Debug a single phenotype
 python3 -m phewas.cli --pheno "Type_2_diabetes"
+
+# Adjust for ancestry-specific principal components instead of the projected
+# global ones. Requires --pop-label: the components are fit separately within
+# each ancestry group, so their axes are not comparable across groups.
+# See phewas/extra/README.md for how the components are produced.
+python3 -m phewas.cli --pop-label "eur" --pc-source within-ancestry
 ```
+
+`--pc-source` defaults to `global`, which is what every published result uses. The
+population label and the PC source are both recorded in the output filename and in the
+covariate cache key, so runs differing only in PC source stay distinguishable and cannot
+share cached covariates.
 
 ### Outputs
 Results are saved to `phewas_results_<timestamp>.tsv` containing:

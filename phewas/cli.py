@@ -47,6 +47,19 @@ def build_parser() -> argparse.ArgumentParser:
             "All other phenotypes will be excluded from the analysis."
         ),
     )
+    parser.add_argument(
+        "--pc-source",
+        type=str,
+        choices=list(run.VALID_PC_SOURCES),
+        default=run.PC_SOURCE_GLOBAL,
+        help=(
+            "Which genetic principal components to adjust for. 'global' (default) uses the "
+            "reference-projected components published with the callset, and is what every "
+            "pooled result uses. 'within-ancestry' uses components fit separately inside a "
+            "single ancestry group, resolving fine-scale structure that projected global "
+            "components cannot; it requires --pop-label because the axes differ by group."
+        ),
+    )
     return parser
 
 
@@ -93,6 +106,25 @@ def apply_cli_configuration(args: argparse.Namespace) -> dict[str, object]:
     else:
         run.PHENOTYPE_FILTER = None
         os.environ.pop("FERROMIC_PHENOTYPE_FILTER", None)
+
+    pc_source = run._normalize_pc_source(
+        getattr(args, "pc_source", None) or run.PC_SOURCE_GLOBAL
+    )
+    if (
+        pc_source == run.PC_SOURCE_WITHIN_ANCESTRY
+        and pipeline_config["population_filter"] == "all"
+    ):
+        raise SystemExit(
+            "--pc-source within-ancestry requires --pop-label. Ancestry-specific principal "
+            "components are fit separately inside each genetic ancestry group, so they are "
+            "not comparable across groups and cannot be used in a pooled multi-ancestry run."
+        )
+    pipeline_config["pc_source"] = pc_source
+    run.PC_SOURCE = pc_source
+    if pc_source == run.PC_SOURCE_GLOBAL:
+        os.environ.pop("FERROMIC_PC_SOURCE", None)
+    else:
+        os.environ["FERROMIC_PC_SOURCE"] = pc_source
 
     return pipeline_config
 
