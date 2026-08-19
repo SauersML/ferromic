@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import tempfile
 import time
@@ -249,6 +250,23 @@ def get_cached_or_generate(
             return False
         return all(is_numeric_dtype(df[c]) and df[c].notna().any() for c in expected)
 
+    def _valid_within_ancestry_pcs(df: pd.DataFrame) -> bool:
+        cols = [c for c in df.columns if re.fullmatch(r"WPC\d+", str(c))]
+        if not cols:
+            return False
+        expected = {f"WPC{i}" for i in range(1, len(cols) + 1)}
+        if set(cols) != expected:
+            return False
+        for c in cols:
+            series = pd.to_numeric(df[c], errors="coerce")
+            if not is_numeric_dtype(series) or not np.isfinite(series.to_numpy()).all():
+                return False
+            # A component with no variance carries no information and would be dropped
+            # downstream anyway; treat it as a corrupt cache rather than a valid table.
+            if float(np.var(series.to_numpy())) <= 0.0:
+                return False
+        return True
+
     def _valid_sex(df: pd.DataFrame) -> bool:
         if list(df.columns) != ["sex"]:
             return False
@@ -263,6 +281,7 @@ def get_cached_or_generate(
             bn.startswith("demographics_")
             or bn.startswith("inversion_")
             or bn.startswith("pcs_")
+            or bn.startswith("wpcs_")
             or bn.startswith("genetic_sex_")
         )
 
@@ -272,6 +291,8 @@ def get_cached_or_generate(
             return _valid_demographics(df)
         if bn.startswith("inversion_"):
             return _valid_inversion(df)
+        if bn.startswith("wpcs_"):
+            return _valid_within_ancestry_pcs(df)
         if bn.startswith("pcs_"):
             return _valid_pcs(df)
         if bn.startswith("genetic_sex_"):
@@ -824,6 +845,70 @@ def load_pcs(gcp_project: str, PCS_URI: str, NUM_PCS: int) -> pd.DataFrame:
         return pc_df
     except Exception as e:
         raise RuntimeError(f"Failed to load PCs: {e}") from e
+
+
+def load_within_ancestry_pcs(gcp_project: str, WITHIN_ANCESTRY_PCS_URI: str) -> pd.DataFrame:
+    """Load ancestry-specific principal components for a single population.
+
+    Unlike the cross-ancestry table at PCS_URI -- which packs its components into a
+    list-like ``pca_features`` string -- these are written as a plain wide TSV by
+    phewas/extra/within_ancestry_pca.py: one ``person_id`` column plus ``WPC1``..``WPCk``.
+    The component count varies by group because it is scaled to the group's sample size,
+    so it is inferred here rather than requested.
+    """
+    print(f"    -> Loading ancestry-specific PCs from '{WITHIN_ANCESTRY_PCS_URI}'...")
+    read_kwargs = {"sep": "\t"}
+    if str(WITHIN_ANCESTRY_PCS_URI).startswith("gs://"):
+        read_kwargs["storage_options"] = {"project": gcp_project, "requester_pays": True}
+
+    raw = pd.read_csv(WITHIN_ANCESTRY_PCS_URI, **read_kwargs)
+
+    id_candidates = ("person_id", "research_id", "IID", "sample_id", "s")
+    id_col = next((c for c in id_candidates if c in raw.columns), None)
+    if id_col is None:
+        raise ValueError(
+            "Ancestry-specific PC table needs a participant id column "
+            f"(one of {id_candidates}); found {list(raw.columns)[:8]}."
+        )
+
+    pc_cols = sorted(
+        (c for c in raw.columns if re.fullmatch(r"WPC\d+", str(c))),
+        key=lambda c: int(str(c)[3:]),
+    )
+    if not pc_cols:
+        raise ValueError(
+            "Ancestry-specific PC table has no WPC* columns; found "
+            f"{list(raw.columns)[:8]}."
+        )
+    expected = [f"WPC{i}" for i in range(1, len(pc_cols) + 1)]
+    if pc_cols != expected:
+        raise ValueError(
+            f"Ancestry-specific PC columns must be a contiguous run WPC1..WPC{len(pc_cols)}; "
+            f"got {pc_cols}."
+        )
+
+    person_ids = raw[id_col].astype(str)
+    dup_mask = person_ids.duplicated(keep=False)
+    if dup_mask.any():
+        duplicates = sorted({pid for pid in person_ids[dup_mask]})
+        sample = ", ".join(duplicates[:5])
+        if len(duplicates) > 5:
+            sample += ", ..."
+        raise ValueError(
+            f"Duplicate person_id values encountered in ancestry-specific PCs: {sample}"
+        )
+
+    out = raw[pc_cols].apply(pd.to_numeric, errors="coerce")
+    if not np.isfinite(out.to_numpy()).all():
+        bad = int((~np.isfinite(out.to_numpy())).sum())
+        raise ValueError(
+            f"Ancestry-specific PC table contains {bad} non-finite values; the fitting step "
+            "should emit complete components for every retained participant."
+        )
+
+    out = out.assign(person_id=person_ids).set_index("person_id")
+    print(f"    -> Loaded {out.shape[1]} ancestry-specific PCs for {out.shape[0]} participants.")
+    return out
 
 
 def load_genetic_sex(gcp_project: str, SEX_URI: str) -> pd.DataFrame:
