@@ -55,28 +55,114 @@ jobs:
           python -m pip install --upgrade pip
           pip install numpy pandas scipy statsmodels matplotlib xlsxwriter openpyxl
 
-      # --- provenance guards -------------------------------------------------
-      # The June 2026 chimp-polarization cutover rewrote several committed
-      # outputs into the ancestral/derived frame and was reverted on 2026-07-01
-      # without regenerating them. Fail loudly if any analysis input is left in
-      # that state rather than silently producing polarized results.
-      - name: Guard against chimp-polarized inputs
+      # --- upstream guard ----------------------------------------------------
+      # data/callset.tsv is a committed copy of the freeze-4 inversion genotype
+      # table, which is the ground truth for which haplotypes are inverted and
+      # which are direct. run_vcf downloads that table fresh from MSI shared
+      # space on every run; the committed copy exists so the stats scripts can
+      # read genotypes without a network call. A copy that nothing checks can
+      # drift from what the alignments were actually built with, so compare them.
+      - name: Check the committed callset against the upstream genotype table
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          # The URL is owned by manual_run_vcf.yml, which is what actually feeds
+          # run_vcf. Read it from there rather than keeping a second copy that
+          # could drift from the one the alignments were really built with.
+          URL=$(grep -oE 'https://[^"]*simpleINV\.mod\.tsv' \
+                  .github/workflows/manual_run_vcf.yml | head -1)
+          if [ -z "$URL" ]; then
+            echo "::warning::could not find the genotype-table URL in manual_run_vcf.yml"
+            exit 0
+          fi
+          if ! curl -fsSL --retry 3 --max-time 300 -o /tmp/upstream_callset.tsv "$URL"; then
+            echo "::warning::could not reach the upstream genotype table; skipping the callset check"
+            exit 0
+          fi
+          python - <<'PY'
+          import csv, sys
+          def load(path):
+              with open(path, newline="") as fh:
+                  rows = list(csv.DictReader(fh, delimiter="\t"))
+              out = {}
+              for r in rows:
+                  key = (r.get("seqnames"), r.get("start"), r.get("end"))
+                  gts = {k: (v or "").split("_")[0] for k, v in r.items()
+                         if k and k[:2] in ("HG", "NA")}
+                  out[key] = gts
+              return out
+          up = load("/tmp/upstream_callset.tsv")
+          loc = load("data/callset.tsv")
+          shared = set(up) & set(loc)
+          bad = [k for k in shared
+                 if any(up[k].get(s) != loc[k].get(s)
+                        for s in set(up[k]) & set(loc[k]))]
+          print(f"loci compared: {len(shared)}  genotype mismatches: {len(bad)}")
+          if bad:
+              print("::error::data/callset.tsv disagrees with the upstream genotype table")
+              for k in bad[:10]:
+                  print("  ", k)
+              sys.exit(1)
+          print("data/callset.tsv matches the upstream genotype table")
+          PY
+
+      # --- ground-truth guard ------------------------------------------------
+      # data/four_fold_pi_by_inversion.tsv and data/pin_pis_by_inversion.tsv are
+      # DERIVED from the per-CDS haplotype alignments, which are in turn derived
+      # by run_vcf from the freeze-4 inversion genotype table. They are committed
+      # only as a cache, because recomputing them needs the alignments.
+      #
+      # A cache that nothing verifies is a cache that silently rots: the June 2026
+      # polarization cutover transposed the direct and inverted columns in place,
+      # the July restore fixed only part of it, and every downstream artifact was
+      # rebuilt from the broken cache for weeks. The guard that was supposed to
+      # catch this asked "which commit last touched the file" -- a provenance
+      # question -- so the partial-restore commit disarmed it permanently.
+      #
+      # This step asks the only question that cannot be fooled: recompute both
+      # tables from the alignments and compare. If they differ, the cache is
+      # stale and the run fails rather than propagating it.
+      - name: Fetch the alignments the tables must derive from
+        id: alignments
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          RUN_ID=$(gh run list --workflow manual_run_vcf.yml --status success \
+                     --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null || true)
+          if [ -z "${RUN_ID:-}" ] || [ "$RUN_ID" = "null" ]; then
+            echo "have=0" >> "$GITHUB_OUTPUT"
+            echo "::warning::No successful manual_run_vcf.yml run to take alignments from; the derived-table check cannot run."
+            exit 0
+          fi
+          if gh run download "$RUN_ID" -n run-vcf-phy-outputs --dir . ; then
+            echo "have=1" >> "$GITHUB_OUTPUT"
+            echo "alignments from manual_run_vcf.yml run $RUN_ID"
+          else
+            echo "have=0" >> "$GITHUB_OUTPUT"
+            echo "::warning::run $RUN_ID has no run-vcf-phy-outputs artifact (artifacts expire); the derived-table check cannot run."
+          fi
+
+      - name: Rebuild the derived tables from the alignments and compare
+        if: steps.alignments.outputs.have == '1'
         run: |
           set -euo pipefail
-          POL='b4506bca|076b4d63|2174bf44|7b42282e|078bbe38|c346e3fc'
-          bad=0
-          for f in data/GRAND_PAML_RESULTS.tsv data/four_fold_pi_by_inversion.tsv \
-                   data/pin_pis_by_inversion.tsv data/inv_properties.tsv \
-                   data/cds_identical_proportions.tsv data/output.csv; do
-            [ -f "$f" ] || continue
-            c=$(git log -1 --format=%h -- "$f")
-            if echo "$c" | grep -qE "^($POL)"; then
-              echo "FATAL: $f is still in the chimp-polarized frame (last commit $c)"
-              bad=1
+          mkdir -p /tmp/cached
+          cp data/four_fold_pi_by_inversion.tsv data/pin_pis_by_inversion.tsv /tmp/cached/
+          python -s stats/four_fold_pi.py
+          python -s stats/pin_pis.py
+          status=0
+          for n in four_fold_pi_by_inversion.tsv pin_pis_by_inversion.tsv; do
+            if diff -q "/tmp/cached/$n" "data/$n" >/dev/null; then
+              echo "data/$n matches the alignments"
+            else
+              echo "::error::data/$n does not match what the alignments produce."
+              echo "The committed table is a stale cache. Commit the regenerated file."
+              diff "/tmp/cached/$n" "data/$n" | head -40 || true
+              status=1
             fi
           done
-          [ "$bad" -eq 0 ] && echo "OK: all analysis inputs are in the raw hg38 reference frame"
-          exit $bad
+          exit $status
 
       # --- analyses that answer specific reviewer comments -------------------
       - name: Table S5 exclusion reasons (R2 #5)
@@ -91,6 +177,10 @@ jobs:
       - name: 4-fold diversity concordance (R1)
         run: python stats/four_fold_pi_correlations.py
 
+      # --from-table reuses the per-inversion table rather than recomputing it
+      # from the alignments. That is correct ONLY because the step above has just
+      # proved the table matches the alignments; without that proof it is what let
+      # the transposed-column cache survive.
       - name: 4-fold and piN/piS test tables
         working-directory: data
         run: |
