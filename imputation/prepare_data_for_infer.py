@@ -1,397 +1,346 @@
-import os
+"""Extract PheWAS imputation predictors from chromosome-sharded PLINK1 data."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
 import json
-import glob
-from collections import defaultdict, namedtuple
-from typing import Dict, List, Tuple, Optional, Iterable
+import os
+import re
+import shutil
+from collections import defaultdict
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Sequence
+from urllib.request import Request, urlopen
 
 import numpy as np
 import pandas as pd
-from tqdm import tqdm
+from bed_reader import open_bed
 from numpy.lib.format import open_memmap
 
-# Fast PLINK reader (Rust backend)
-# pip install bed_reader
-from bed_reader import open_bed
+from imputation.targets import PHEWAS_TARGET_INVERSIONS
 
-# Remote fetch
-import requests
-from urllib.parse import urlparse
 
-# ------------------------------------------------------------
-# CONFIG
-# ------------------------------------------------------------
-PLINK_PREFIX = os.getenv("PLINK_PREFIX", "subset")
-OUTPUT_DIR   = os.getenv("OUTPUT_DIR", "genotype_matrices")
-
-BLOCK_SNPS   = int(os.getenv("BLOCK_SNPS", "4096"))   # SNP columns to read per block
-NUM_THREADS  = os.getenv("NUM_THREADS", "auto")      # "auto" or integer string
-
-_DEFAULT_MODEL_SOURCE = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "data", "models")
+MODEL_MANIFEST_URL = (
+    "https://github.com/SauersML/ferromic/releases/download/"
+    "imputation-models-v1/models.manifest.txt"
 )
-MODEL_SOURCE_DIR = os.getenv(
-    "MODEL_SOURCE_DIR",
-    _DEFAULT_MODEL_SOURCE if os.path.isdir(_DEFAULT_MODEL_SOURCE) else "",
-)
-
-# --- MODEL SOURCE CONFIGURATION ---
-# Set MODEL_SOURCE to "release", "github", or "s3" to switch between remote sources.
-# Default "release": models are hosted as GitHub Release assets (keeps the repo small);
-# a plain-text manifest lists every .model.joblib / .snps.json download URL.
-MODEL_SOURCE = "release"
-
-print(f"MODEL_SOURCE: {MODEL_SOURCE}")
-
-_MANIFEST_URLS = {
-    "release": "https://github.com/SauersML/ferromic/releases/download/imputation-models-v1/models.manifest.txt",
-    "github": "https://api.github.com/repos/SauersML/ferromic/contents/data/models",
-    "s3": "https://sharedspace.s3.msi.umn.edu/public_internet/final_imputation_models.manifest.txt",
-}
-
-if MODEL_SOURCE not in _MANIFEST_URLS:
-    print(f"[WARN] Invalid MODEL_SOURCE '{MODEL_SOURCE}'. Valid options: {list(_MANIFEST_URLS.keys())}")
-    print(f"[WARN] Defaulting to 's3'")
-    MODEL_SOURCE = "s3"
-
-MANIFEST_URL = os.getenv("MANIFEST_URL", _MANIFEST_URLS[MODEL_SOURCE])
-
-print(f"[CONFIG] Model source: {MODEL_SOURCE.upper()} → {MANIFEST_URL}")
-# ------------------------------------------------------------
-
-# Write int8 missing in PLINK .bed
 MISSING_INT8 = np.int8(-127)
-
-# A small record for the models we keep
-ModelSpec = namedtuple("ModelSpec", ["name", "ncols", "col_ids", "col_effects"])
-
-def parse_num_threads(val: str) -> Optional[int]:
-    if val is None or val == "" or val.lower() == "auto":
-        return None
-    try:
-        n = int(val)
-        return n if n > 0 else None
-    except Exception:
-        return None
-
-def chrom_aliases(ch: str) -> Iterable[str]:
-    """Return chromosome aliases: with/without 'chr', numeric/sex synonyms."""
-    s = str(ch).strip()
-    if s == "":
-        return [s]
-
-    if s.lower().startswith("chr"):
-        base = s[3:]
-        prefixed = s
-    else:
-        base = s
-        prefixed = "chr" + s
-
-    base_up = base.upper()
-    out = {base, prefixed}
-
-    if base_up in {"X", "23"}:
-        out.update({"X", "23", "chrX", "chr23"})
-    elif base_up in {"Y", "24"}:
-        out.update({"Y", "24", "chrY", "chr24"})
-    elif base_up in {"XY", "25"}:
-        out.update({"XY", "25", "chrXY", "chr25"})
-    elif base_up in {"MT", "M", "26"}:
-        out.update({"MT", "M", "26", "chrMT", "chrM", "chr26"})
-    else:
-        try:
-            n = int(base_up)
-            out.update({str(n), "chr" + str(n)})
-        except ValueError:
-            out.update({base_up, "chr" + base_up})
-    return out
-
-def load_bed_meta(prefix: str):
-    bed_path = prefix + ".bed"
-    # Open once and keep open for all reads
-    bed = open_bed(bed_path)
-
-    n_samples, n_snps = bed.shape
-    chrom = np.asarray(bed.chromosome, dtype=str)
-    pos   = np.asarray(bed.bp_position, dtype=np.int64)
-    a1    = np.asarray(bed.allele_1, dtype=str)  # dosage counts A1 (default)
-    a2    = np.asarray(bed.allele_2, dtype=str)
-
-    # Uppercase alleles for robust matching
-    a1 = np.char.upper(a1)
-    a2 = np.char.upper(a2)
-
-    print(f"BED: samples={n_samples:,}, variants={n_snps:,}")
-    print(f"BLOCK_SNPS={BLOCK_SNPS}, NUM_THREADS={NUM_THREADS}")
-
-    # Build ID -> list of indices (fixes multi-allelic duplicates)
-    id_to_idxs: Dict[str, List[int]] = defaultdict(list)
-    for v in range(n_snps):
-        c = chrom[v]
-        p = pos[v]
-        for c_alias in chrom_aliases(c):
-            key = f"{c_alias}:{p}"
-            id_to_idxs[key].append(v)
-
-    return bed, n_samples, n_snps, chrom, pos, a1, a2, id_to_idxs
-
-def _list_snps_json_sources(manifest_url: str, source_dir: str) -> List[str]:
-    """Return filesystem paths or URLs to all available .snps.json files."""
-
-    if source_dir and os.path.isdir(source_dir):
-        local_files = sorted(
-            os.path.abspath(p) for p in glob.glob(os.path.join(source_dir, "*.snps.json"))
-        )
-        if local_files:
-            print(f"Found {len(local_files)} local SNP specs in {source_dir}.")
-            return local_files
-
-    if not manifest_url:
-        return []
-
-    try:
-        resp = requests.get(manifest_url, timeout=60)
-        resp.raise_for_status()
-    except Exception as exc:
-        raise RuntimeError(f"Unable to fetch manifest from {manifest_url}: {exc}") from exc
-
-    sources: List[str] = []
-    text = resp.text
-    payload: Optional[List[Dict[str, str]]] = None
-    try:
-        payload = resp.json()
-    except ValueError:
-        payload = None
-
-    if isinstance(payload, list):
-        for entry in payload:
-            name = entry.get("name", "")
-            download_url = entry.get("download_url")
-            if name.endswith(".snps.json") and download_url:
-                sources.append(download_url)
-        if sources:
-            sources.sort(key=lambda u: os.path.basename(urlparse(u).path))
-            print(f"Found {len(sources)} GitHub SNP specs via API.")
-            return sources
-
-    for line in text.splitlines():
-        s = line.strip()
-        if not s or s.startswith("#"):
-            continue
-        if s.endswith(".snps.json"):
-            sources.append(s)
-
-    sources.sort(key=lambda u: os.path.basename(urlparse(u).path))
-    print(f"Found {len(sources)} SNP specs via manifest text.")
-    return sources
+_TARGET_RE = re.compile(r"^chr([0-9XY]+)-\d+-INV-\d+$")
 
 
-def _load_snps_json(source: str):
-    try:
-        if source.startswith("http://") or source.startswith("https://"):
-            resp = requests.get(source, timeout=120)
-            resp.raise_for_status()
-            return resp.json()
-        with open(source, "r", encoding="utf-8") as fh:
-            return json.load(fh)
-    except Exception as exc:
-        raise RuntimeError(f"cannot fetch/parse JSON from {source}: {exc}") from exc
+@dataclass(frozen=True)
+class Predictor:
+    chrom: str
+    position: int
+    effect_allele: str
 
-def load_models_and_build_router_from_manifest(manifest_url: str,
-                                               id_to_idxs: Dict[str, List[int]],
-                                               a1: np.ndarray,
-                                               a2: np.ndarray) -> Tuple[List[ModelSpec], Dict[int, List[Tuple[int,int,bool]]], int, int]:
-    """
-    Returns:
-      - models: list of ModelSpec
-      - routes_for_variant: dict v -> list of (model_index, dest_col, flip)
-      - skipped_models: count with fetch/schema/JSON problems
-      - total_requested_cols: sum of cols across usable models
-    """
-    sources = _list_snps_json_sources(manifest_url, MODEL_SOURCE_DIR)
 
-    models: List[ModelSpec] = []
-    skipped = 0
-    total_cols = 0
+@dataclass(frozen=True)
+class ModelSpec:
+    name: str
+    predictors: tuple[Predictor, ...]
 
-    # Temporary per-model selected mapping: col_j -> (v_idx, flip) or (None, False) if missing
-    selected_per_model: List[List[Tuple[Optional[int], bool]]] = []
 
-    for source in tqdm(sources, desc="Indexing models", unit="model", leave=False):
-        if source.startswith("http://") or source.startswith("https://"):
-            base = os.path.basename(urlparse(source).path)
-        else:
-            base = os.path.basename(source)
-        if not base.endswith(".snps.json"):
-            continue
-        name = base[:-10]
+def _normalize_chrom(value: str) -> str:
+    text = str(value).strip()
+    if text.lower().startswith("chr"):
+        text = text[3:]
+    return f"chr{text.upper()}"
 
-        try:
-            rows = _load_snps_json(source)
-            df = pd.DataFrame(rows)
-        except Exception as e:
-            print(f"[WARN] skip {name}: cannot fetch/parse JSON ({e})")
-            skipped += 1
-            continue
 
-        # Validate schema
-        if not {"id", "effect_allele"}.issubset(df.columns):
-            print(f"[WARN] skip {name}: requires columns ['id','effect_allele']")
-            skipped += 1
-            continue
+def _fetch_bytes(url: str) -> bytes:
+    request = Request(url, headers={"User-Agent": "ferromic-imputation/2"})
+    with urlopen(request, timeout=300) as response:
+        return response.read()
 
-        # Normalize
-        df["id"] = df["id"].astype(str).str.strip()
-        df["effect_allele"] = df["effect_allele"].astype(str).str.strip().str.upper()
-        col_ids = df["id"].tolist()
-        col_eff = df["effect_allele"].tolist()
 
-        ncols = len(col_ids)
-        total_cols += ncols
+def _manifest() -> dict[str, str]:
+    entries: dict[str, str] = {}
+    for line in _fetch_bytes(MODEL_MANIFEST_URL).decode("utf-8").splitlines():
+        url = line.strip()
+        if url:
+            entries[Path(url).name] = url
+    return entries
 
-        # Resolve each column to a BIM index with duplicate-aware matching
-        chosen: List[Tuple[Optional[int], bool]] = []
-        for id_str, eff in zip(col_ids, col_eff):
-            cand_idxs: List[int] = []
+
+def _load_specs(targets: Sequence[str]) -> list[ModelSpec]:
+    manifest = _manifest()
+    specs: list[ModelSpec] = []
+    for target in targets:
+        filename = f"{target}.snps.json"
+        url = manifest.get(filename)
+        if url is None:
+            raise RuntimeError(f"Model manifest has no predictor specification for {target}.")
+        rows = json.loads(_fetch_bytes(url))
+        predictors: list[Predictor] = []
+        for index, row in enumerate(rows):
             try:
-                chrom_str, pos_str = id_str.split(":")
-            except ValueError:
-                print(f"[WARN] {name}: malformed id '{id_str}'")
-                chosen.append((None, False))
-                continue
+                locus = str(row["id"]).strip()
+                chrom, position = locus.rsplit(":", 1)
+                effect = str(row["effect_allele"]).strip().upper()
+                predictors.append(
+                    Predictor(_normalize_chrom(chrom), int(position), effect)
+                )
+            except (KeyError, TypeError, ValueError) as error:
+                raise RuntimeError(
+                    f"Malformed predictor {index} for {target}: {row!r}."
+                ) from error
+        if not predictors:
+            raise RuntimeError(f"Predictor specification for {target} is empty.")
+        specs.append(ModelSpec(target, tuple(predictors)))
+    return specs
 
-            for alias in chrom_aliases(chrom_str):
-                key = f"{alias}:{pos_str}"
-                lst = id_to_idxs.get(key)
-                if lst:
-                    cand_idxs.extend(lst)
 
-            # Deduplicate to avoid redundant matches across aliases (e.g., "1" vs "chr1")
-            cand_idxs = sorted(set(cand_idxs))
+def _target_chrom(target: str) -> str:
+    match = _TARGET_RE.match(target)
+    if match is None:
+        raise ValueError(f"Malformed inversion id: {target!r}.")
+    return _normalize_chrom(match.group(1))
 
-            if not cand_idxs:
-                chosen.append((None, False))
-                continue
 
-            matches: List[Tuple[int, bool]] = []
-            for v in cand_idxs:
-                if a1[v] == eff:
-                    matches.append((v, False))
-                if a2[v] == eff:
-                    matches.append((v, True))
-
-            if len(matches) == 1:
-                chosen.append(matches[0])
-            elif len(matches) == 0:
-                v0 = cand_idxs[0]
-                print(f"[WARN] {name}: effect '{eff}' not in {{A1='{a1[v0]}', A2='{a2[v0]}'}} at '{id_str}', dropping variant")
-                chosen.append((None, False))
-            else:
-                print(f"[WARN ambiguous] {name}: {len(matches)} matches for effect '{eff}' at '{id_str}', dropping variant")
-                chosen.append((None, False))
-
-        models.append(ModelSpec(name=name, ncols=ncols, col_ids=col_ids, col_effects=col_eff))
-        selected_per_model.append(chosen)
-
-    usable_models = len(models)
-    if skipped:
-        print(f"[INFO] skipped {skipped} model files (fetch/schema/JSON problems)")
-    print(f"Usable models: {usable_models}")
-    print(f"Total requested columns (across usable models): {total_cols:,}")
-
-    # Build global router: v -> list of (model_idx, dest_col, flip)
-    routes_for_variant: Dict[int, List[Tuple[int, int, bool]]] = defaultdict(list)
-    for m_idx, chosen in enumerate(selected_per_model):
-        for j, (v_idx, flip) in enumerate(chosen):
-            if v_idx is not None:
-                routes_for_variant[v_idx].append((m_idx, j, flip))
-
-    return models, routes_for_variant, skipped, total_cols
-
-def safe_flip_int8(col: np.ndarray) -> np.ndarray:
-    """Flip counts (2 - x) where x>=0; keep missing (-127) as-is."""
-    out = col.copy()
-    mask = out >= 0
-    out[mask] = np.int8(2 - out[mask].astype(np.int16))  # widen then back to avoid overflow
-    return out
-
-def main():
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-    # ---- BED metadata & ID index (duplicate-aware) ----
-    bed, n_samples, n_snps, chrom, pos, a1, a2, id_to_idxs = load_bed_meta(PLINK_PREFIX)
-
-    # ---- Models & router (REMOTE manifest) ----
-    models, routes_for_variant, skipped, total_cols = load_models_and_build_router_from_manifest(
-        MANIFEST_URL, id_to_idxs, a1, a2
+def _read_sample_ids(fam_path: Path) -> list[str]:
+    fam = pd.read_csv(
+        fam_path,
+        sep=r"\s+",
+        header=None,
+        usecols=[1],
+        dtype=str,
     )
-    if not models:
-        print("No usable models. Exiting.")
-        return
+    sample_ids = fam.iloc[:, 0].astype(str).tolist()
+    if not sample_ids:
+        raise RuntimeError(f"No samples in {fam_path}.")
+    if len(sample_ids) != len(set(sample_ids)):
+        raise RuntimeError(f"Duplicate participant ids in {fam_path}.")
+    return sample_ids
 
-    # Unique SNP indices we actually need to read
-    needed_variants = sorted(routes_for_variant.keys())
-    print(f"Unique SNPs to read (drives I/O): {len(needed_variants):,}")
 
-    # ---- Prepare outputs (memmaps prefilled with missing) ----
-    model_memmaps: List[np.memmap] = []
-    for ms in models:
-        out_path = os.path.join(OUTPUT_DIR, f"{ms.name}.genotypes.npy")
-        mm = open_memmap(out_path, mode="w+", dtype=np.int8, shape=(n_samples, ms.ncols), fortran_order=True)
-        mm[:] = MISSING_INT8  # prefill as missing
-        model_memmaps.append(mm)
+def _sample_digest(sample_ids: Sequence[str]) -> str:
+    digest = hashlib.sha256()
+    for sample_id in sample_ids:
+        digest.update(sample_id.encode("utf-8"))
+        digest.update(b"\n")
+    return digest.hexdigest()
 
-    # ---- Stream the BED once in SNP blocks ----
-    num_threads = parse_num_threads(NUM_THREADS)
-    needed_set = set(needed_variants)
-    processed_needed = 0
 
-    pbar = tqdm(total=len(needed_variants), desc="Scanning BED", unit="snp", dynamic_ncols=True)
+def _read_bim(prefix: Path) -> pd.DataFrame:
+    bim = pd.read_csv(
+        prefix.with_suffix(".bim"),
+        sep=r"\s+",
+        header=None,
+        names=["chrom", "id", "cm", "position", "a1", "a2"],
+        dtype={
+            "chrom": str,
+            "id": str,
+            "position": np.int64,
+            "a1": str,
+            "a2": str,
+        },
+    )
+    bim["chrom"] = bim["chrom"].map(_normalize_chrom)
+    bim["a1"] = bim["a1"].str.upper()
+    bim["a2"] = bim["a2"].str.upper()
+    return bim
 
-    for start in range(0, n_snps, BLOCK_SNPS):
-        end = min(start + BLOCK_SNPS, n_snps)
-        block_width = end - start
 
-        # Read block: rows=samples, cols=SNPs in [start:end)
-        block = bed.read(index=np.s_[:, start:end], dtype="int8", order="F", num_threads=num_threads)
+def _build_routes(
+    bim: pd.DataFrame,
+    specs: Sequence[ModelSpec],
+    model_indices: Sequence[int],
+) -> tuple[dict[int, list[tuple[int, int, bool]]], dict[str, int]]:
+    by_position: dict[tuple[str, int], list[int]] = defaultdict(list)
+    for source_index, row in enumerate(bim.itertuples(index=False)):
+        by_position[(row.chrom, int(row.position))].append(source_index)
 
-        # Determine which local columns are needed
-        needed_local: List[int] = [j for j in range(block_width) if (start + j) in needed_set]
-        if not needed_local:
-            continue
+    routes: dict[int, list[tuple[int, int, bool]]] = defaultdict(list)
+    missing: dict[str, int] = {}
+    for model_index in model_indices:
+        spec = specs[model_index]
+        unresolved = 0
+        for destination, predictor in enumerate(spec.predictors):
+            candidates = by_position.get((predictor.chrom, predictor.position), [])
+            matches: list[tuple[int, bool]] = []
+            for source_index in candidates:
+                row = bim.iloc[source_index]
+                if row.a1 == predictor.effect_allele:
+                    matches.append((source_index, False))
+                if row.a2 == predictor.effect_allele:
+                    matches.append((source_index, True))
+            if len(matches) != 1:
+                unresolved += 1
+                continue
+            source_index, flip = matches[0]
+            routes[source_index].append((model_index, destination, flip))
+        missing[spec.name] = unresolved
+    return routes, missing
 
-        # Precompute flip need per column
-        flip_need = {}
-        for j in needed_local:
-            v_idx = start + j
-            flip_needed = any(flip for (_m, _c, flip) in routes_for_variant[v_idx])
-            flip_need[j] = flip_needed
 
-        # Route columns
-        for j in needed_local:
-            v_idx = start + j
-            assignments = routes_for_variant[v_idx]
+def _flip(column: np.ndarray) -> np.ndarray:
+    flipped = column.copy()
+    called = flipped >= 0
+    flipped[called] = 2 - flipped[called]
+    return flipped
 
-            col = block[:, j]  # int8 column
-            col_flip = None
-            if flip_need[j]:
-                col_flip = safe_flip_int8(col)
 
-            for (m_idx, dest_col, flip) in assignments:
-                if flip:
-                    model_memmaps[m_idx][:, dest_col] = col_flip
-                else:
-                    model_memmaps[m_idx][:, dest_col] = col
+def prepare(
+    plink_dir: Path,
+    output_dir: Path,
+    targets: Sequence[str],
+    threads: int,
+    chunk_variants: int,
+) -> None:
+    specs = _load_specs(targets)
+    output_dir.parent.mkdir(parents=True, exist_ok=True)
+    chromosomes = sorted({_target_chrom(spec.name) for spec in specs})
+    by_chrom = {
+        chrom: [i for i, spec in enumerate(specs) if _target_chrom(spec.name) == chrom]
+        for chrom in chromosomes
+    }
 
-            processed_needed += 1
-            pbar.update(1)
+    first_prefix = plink_dir / chromosomes[0]
+    sample_ids = _read_sample_ids(first_prefix.with_suffix(".fam"))
+    sample_hash = _sample_digest(sample_ids)
+    n_samples = len(sample_ids)
+    matrix_bytes = sum(n_samples * len(spec.predictors) for spec in specs)
+    required_bytes = int(matrix_bytes * 1.10) + 512 * 1024**2
+    free_bytes = shutil.disk_usage(output_dir.parent).free
+    print(f"[prepare] {n_samples:,} samples; {len(specs)} models")
+    print(f"[prepare] predictor matrices: {matrix_bytes / 1024**3:.2f} GiB")
+    if free_bytes < required_bytes:
+        raise RuntimeError(
+            f"Need {required_bytes / 1024**3:.2f} GiB free in {output_dir.parent}; "
+            f"only {free_bytes / 1024**3:.2f} GiB is available."
+        )
+    if output_dir.exists():
+        raise FileExistsError(
+            f"{output_dir} already exists; move it aside before preparing a new cohort."
+        )
 
-    pbar.close()
+    staging = output_dir.with_name(f".{output_dir.name}.incomplete.{os.getpid()}")
+    staging.mkdir(parents=True, exist_ok=False)
+    matrices = [
+        open_memmap(
+            staging / f"{spec.name}.genotypes.npy",
+            mode="w+",
+            dtype=np.int8,
+            shape=(n_samples, len(spec.predictors)),
+            fortran_order=True,
+        )
+        for spec in specs
+    ]
+    for matrix in matrices:
+        matrix[:] = MISSING_INT8
 
-    # ---- Finalize ----
-    for mm in model_memmaps:
-        mm.flush()
+    unresolved: dict[str, int] = {}
+    source_counts: dict[str, int] = {}
+    try:
+        for chrom in chromosomes:
+            prefix = plink_dir / chrom
+            for suffix in (".bed", ".bim", ".fam"):
+                path = prefix.with_suffix(suffix)
+                if not path.is_file():
+                    raise FileNotFoundError(path)
+            shard_ids = _read_sample_ids(prefix.with_suffix(".fam"))
+            if _sample_digest(shard_ids) != sample_hash:
+                raise RuntimeError(f"Sample order differs in {prefix.with_suffix('.fam')}.")
 
-    print("Done.")
+            bim = _read_bim(prefix)
+            routes, shard_missing = _build_routes(bim, specs, by_chrom[chrom])
+            unresolved.update(shard_missing)
+            selected = sorted(routes)
+            source_counts[chrom] = len(selected)
+            print(
+                f"[prepare] {chrom}: reading {len(selected):,} required variants "
+                f"from {len(bim):,} available"
+            )
+            bed = open_bed(str(prefix.with_suffix(".bed")))
+            for start in range(0, len(selected), chunk_variants):
+                source_indices = selected[start : start + chunk_variants]
+                block = bed.read(
+                    index=np.s_[:, source_indices],
+                    dtype="int8",
+                    order="F",
+                    num_threads=threads,
+                )
+                for local_index, source_index in enumerate(source_indices):
+                    column = block[:, local_index]
+                    flipped: np.ndarray | None = None
+                    for model_index, destination, needs_flip in routes[source_index]:
+                        if needs_flip:
+                            if flipped is None:
+                                flipped = _flip(column)
+                            matrices[model_index][:, destination] = flipped
+                        else:
+                            matrices[model_index][:, destination] = column
+
+        for matrix in matrices:
+            matrix.flush()
+        pd.DataFrame({"sample_id": sample_ids}).to_csv(
+            staging / "sample_ids.tsv",
+            sep="\t",
+            index=False,
+        )
+        report = {
+            "sample_count": n_samples,
+            "sample_sha256": sample_hash,
+            "targets": list(targets),
+            "predictor_columns": {
+                spec.name: len(spec.predictors) for spec in specs
+            },
+            "unresolved_predictors": unresolved,
+            "source_variants_read": source_counts,
+            "plink_directory": str(plink_dir.resolve()),
+        }
+        with open(staging / "preparation.json", "w", encoding="utf-8") as handle:
+            json.dump(report, handle, indent=2, sort_keys=True)
+        staging.rename(output_dir)
+    except Exception:
+        print(f"[prepare] incomplete files retained at {staging}")
+        raise
+
+    for spec in specs:
+        total = len(spec.predictors)
+        missing = unresolved[spec.name]
+        print(f"[prepare] {spec.name}: {total - missing:,}/{total:,} predictors matched")
+    print(f"[prepare] wrote {output_dir}")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--plink-dir",
+        required=True,
+        type=Path,
+        help="Directory containing chromosome-sharded PLINK1 files.",
+    )
+    parser.add_argument("--output-dir", required=True, type=Path)
+    parser.add_argument(
+        "--target",
+        action="append",
+        dest="targets",
+        help="Inversion id to prepare; repeat for multiple models.",
+    )
+    parser.add_argument("--threads", type=int, default=4)
+    parser.add_argument("--chunk-variants", type=int, default=512)
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> None:
+    args = build_parser().parse_args(argv)
+    targets = tuple(args.targets or PHEWAS_TARGET_INVERSIONS)
+    if len(targets) != len(set(targets)):
+        raise SystemExit("Target inversion ids must be unique.")
+    if args.threads < 1 or args.chunk_variants < 1:
+        raise SystemExit("--threads and --chunk-variants must be positive.")
+    prepare(
+        args.plink_dir.resolve(),
+        args.output_dir.resolve(),
+        targets,
+        args.threads,
+        args.chunk_variants,
+    )
+
 
 if __name__ == "__main__":
     main()

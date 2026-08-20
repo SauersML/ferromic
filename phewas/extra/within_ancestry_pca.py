@@ -11,15 +11,17 @@ writes ``within_ancestry_pcs_{pop}.tsv`` (``person_id`` plus ``WPC1..WPCk``) tog
 with a JSON sidecar recording exactly what was fit, which the analysis reads back and
 which doubles as the provenance record for the methods.
 
-Typical use inside the workbench, after staging the microarray PLINK trio locally::
-
-    gsutil -u "$GOOGLE_PROJECT" -m cp -r gs://vwb-aou-datasets-controlled/v8/microarray/plink/* .
+Typical use inside the workbench::
 
     python -m phewas.extra.within_ancestry_pca sites \\
-        --bim arrays.bim --out sites/include_sites.tsv
+        --bim /mounted/arrays.bim --out local/sites/include_sites.tsv
+
+    python -m phewas.extra.within_ancestry_pca stage \\
+        --genotypes /mounted/arrays --sites local/sites/include_sites.tsv \\
+        --out local/pca/arrays_pca
 
     python -m phewas.extra.within_ancestry_pca fit \\
-        --genotypes ./arrays --sites sites/include_sites.tsv \\
+        --genotypes local/pca/arrays_pca --sites local/sites/include_sites.tsv \\
         --ancestry ancestry_preds.tsv --cohort cohort_person_ids.txt \\
         --group eur --out-dir within_ancestry_pcs
 
@@ -39,6 +41,7 @@ import shlex
 import shutil
 import subprocess
 from dataclasses import dataclass, asdict
+from pathlib import Path
 from typing import Iterable, Optional, Sequence
 
 import numpy as np
@@ -171,6 +174,108 @@ def build_site_list(
         print(f"[sites] dropped {count:>8,}  {reason}")
     print(f"[sites] retained {len(sites):,} -> {out_path}")
     return sites
+
+
+def stage_genotypes(
+    genotype_prefix: str,
+    sites_path: str,
+    output_prefix: str,
+    plink2: str,
+    markers: int,
+    threads: int,
+    memory_mb: int,
+) -> None:
+    """Create the exact marker-budgeted PLINK input once on local storage."""
+    source_bim = f"{genotype_prefix}.bim"
+    bim = pd.read_csv(
+        source_bim,
+        sep=r"\s+",
+        header=None,
+        names=["chrom", "variant_id", "cm", "pos", "a1", "a2"],
+        dtype={"chrom": str, "variant_id": str, "pos": np.int64},
+    )
+    requested = pd.read_csv(
+        sites_path,
+        sep=r"\s+",
+        header=None,
+        names=["chrom", "pos"],
+        dtype={"chrom": str, "pos": np.int64},
+    )
+    requested_keys = set(
+        zip(requested["chrom"].map(_normalise_chrom), requested["pos"])
+    )
+
+    eligible_ids: list[str] = []
+    seen: set[tuple[str, int]] = set()
+    for row in bim.itertuples(index=False):
+        key = (_normalise_chrom(row.chrom), int(row.pos))
+        if key in requested_keys and key not in seen:
+            eligible_ids.append(str(row.variant_id))
+            seen.add(key)
+    if len(eligible_ids) < markers:
+        raise SystemExit(
+            f"Only {len(eligible_ids):,} unique requested sites occur in {source_bim}; "
+            f"cannot stage {markers:,}."
+        )
+    slots = [slot * len(eligible_ids) // markers for slot in range(markers)]
+    selected_ids = [eligible_ids[slot] for slot in slots]
+    source_id_counts = bim["variant_id"].value_counts()
+    duplicated_selected = [
+        variant_id
+        for variant_id in selected_ids
+        if int(source_id_counts.get(variant_id, 0)) != 1
+    ]
+    if len(selected_ids) != len(set(selected_ids)) or duplicated_selected:
+        raise SystemExit(
+            "A selected marker id is not unique in the source BIM; PLINK extraction "
+            "would not reproduce Gnomon's indexed selection exactly."
+        )
+
+    output = Path(output_prefix).resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    ids_path = output.with_name(f"{output.name}.selected_ids.txt")
+    with open(ids_path, "w", encoding="utf-8") as handle:
+        handle.write("\n".join(selected_ids) + "\n")
+    command = [
+        plink2,
+        "--bfile",
+        os.path.abspath(genotype_prefix),
+        "--extract",
+        str(ids_path),
+        "--make-bed",
+        "--threads",
+        str(threads),
+        "--memory",
+        str(memory_mb),
+        "--out",
+        str(output),
+    ]
+    print("[stage] " + shlex.join(command), flush=True)
+    completed = subprocess.run(command, check=False)
+    if completed.returncode != 0:
+        raise SystemExit(f"PLINK staging failed with exit code {completed.returncode}.")
+    staged_bim = pd.read_csv(
+        f"{output}.bim",
+        sep=r"\s+",
+        header=None,
+    )
+    if len(staged_bim) != markers:
+        raise SystemExit(
+            f"Staged BIM has {len(staged_bim):,} variants; expected {markers:,}."
+        )
+    report = {
+        "source_prefix": os.path.abspath(genotype_prefix),
+        "source_bim_sha256": _full_digest(source_bim),
+        "sites": os.path.abspath(sites_path),
+        "sites_sha256": _full_digest(sites_path),
+        "eligible_markers": len(eligible_ids),
+        "staged_markers": markers,
+        "selection": "gnomon evenly spaced logical stride",
+        "command": command,
+    }
+    with open(f"{output}.stage.json", "w", encoding="utf-8") as handle:
+        json.dump(report, handle, indent=2, sort_keys=True)
+    print(f"[stage] wrote {output} with {markers:,} variants")
 
 
 def _digest(path: str) -> str:
@@ -692,6 +797,18 @@ def build_parser() -> argparse.ArgumentParser:
     sites.add_argument("--bim", required=True, help="PLINK .bim describing the genotypes.")
     sites.add_argument("--out", required=True, help="Destination for the include-list.")
 
+    stage = sub.add_parser(
+        "stage",
+        help="Stage Gnomon's exact marker-budgeted PLINK input on local disk.",
+    )
+    stage.add_argument("--genotypes", required=True, help="Source PLINK1 prefix.")
+    stage.add_argument("--sites", required=True, help="Include-list from 'sites'.")
+    stage.add_argument("--out", required=True, help="Local PLINK1 output prefix.")
+    stage.add_argument("--plink2", default=shutil.which("plink2") or "plink2")
+    stage.add_argument("--markers", type=int, default=GNOMON_LD_DEFAULT_MARKERS)
+    stage.add_argument("--threads", type=int, default=DEFAULT_THREADS)
+    stage.add_argument("--memory-mb", type=int, default=16_000)
+
     fit = sub.add_parser("fit", help="Fit components for one ancestry group.")
     fit.add_argument("--genotypes", required=True, help="PLINK1 BED/BIM/FAM prefix.")
     fit.add_argument("--sites", required=True, help="Include-list from the 'sites' step.")
@@ -716,6 +833,18 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     args = build_parser().parse_args(argv)
     if args.command == "sites":
         build_site_list(args.bim, args.out)
+    elif args.command == "stage":
+        if args.markers < 1 or args.threads < 1 or args.memory_mb < 1:
+            raise SystemExit("--markers, --threads, and --memory-mb must be positive.")
+        stage_genotypes(
+            args.genotypes,
+            args.sites,
+            args.out,
+            args.plink2,
+            args.markers,
+            args.threads,
+            args.memory_mb,
+        )
     elif args.command == "fit":
         if args.keep is None and not args.ancestry:
             raise SystemExit("fit needs either --keep or --ancestry.")

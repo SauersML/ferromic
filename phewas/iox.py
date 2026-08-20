@@ -755,6 +755,18 @@ def rss_gb() -> float:
 # ---------------------------------------------------------------------------
 # Domain-specific loaders
 # ---------------------------------------------------------------------------
+def _remote_read_kwargs(path: str, gcp_project: str) -> dict[str, object]:
+    """Requester-pays options for GCS; local mounted files need no options."""
+    if str(path).startswith("gs://"):
+        return {
+            "storage_options": {
+                "project": gcp_project,
+                "requester_pays": True,
+            }
+        }
+    return {}
+
+
 def load_inversions(TARGET_INVERSION: str, INVERSION_DOSAGES_FILE: str) -> pd.DataFrame:
     """Load target inversion dosage; autodetect the identifier column."""
     try:
@@ -806,7 +818,11 @@ def load_inversions(TARGET_INVERSION: str, INVERSION_DOSAGES_FILE: str) -> pd.Da
 def load_pcs(gcp_project: str, PCS_URI: str, NUM_PCS: int) -> pd.DataFrame:
     """Load genetic PCs from a tsv with columns research_id, pca_features (list-like)."""
     try:
-        raw_pcs = pd.read_csv(PCS_URI, sep="\t", storage_options={"project": gcp_project, "requester_pays": True})
+        raw_pcs = pd.read_csv(
+            PCS_URI,
+            sep="\t",
+            **_remote_read_kwargs(PCS_URI, gcp_project),
+        )
 
         def _parse_and_pad_fast(s) -> list[float]:
             if pd.isna(s):
@@ -917,8 +933,8 @@ def load_genetic_sex(gcp_project: str, SEX_URI: str) -> pd.DataFrame:
     sex_df = pd.read_csv(
         SEX_URI,
         sep="\t",
-        storage_options={"project": gcp_project, "requester_pays": True},
         usecols=["research_id", "dragen_sex_ploidy"],
+        **_remote_read_kwargs(SEX_URI, gcp_project),
     )
 
     sex_df["sex"] = np.nan
@@ -948,8 +964,8 @@ def load_ancestry_labels(gcp_project: str, LABELS_URI: str) -> pd.DataFrame:
     raw = pd.read_csv(
         LABELS_URI,
         sep="\t",
-        storage_options={"project": gcp_project, "requester_pays": True},
         usecols=["research_id", "ancestry_pred"],
+        **_remote_read_kwargs(LABELS_URI, gcp_project),
     )
     df = raw.rename(columns={"research_id": "person_id", "ancestry_pred": "ANCESTRY"})
     df["person_id"] = df["person_id"].astype(str)
@@ -973,11 +989,23 @@ def load_related_to_remove(gcp_project: str, RELATEDNESS_URI: str) -> set[str]:
     related_df = pd.read_csv(
         RELATEDNESS_URI,
         sep="\t",
-        header=None,
-        names=["person_id"],
-        storage_options={"project": gcp_project, "requester_pays": True},
+        dtype=str,
+        **_remote_read_kwargs(RELATEDNESS_URI, gcp_project),
     )
-    return set(related_df["person_id"].astype(str))
+    id_col = next(
+        (
+            column
+            for column in ("sample_id", "research_id", "person_id")
+            if column in related_df.columns
+        ),
+        None,
+    )
+    if id_col is None:
+        raise ValueError(
+            "Relatedness table needs sample_id, research_id, or person_id; "
+            f"found {list(related_df.columns)[:8]}."
+        )
+    return set(related_df[id_col].dropna().astype(str))
 
 
 def load_demographics_with_stable_age(bq_client, cdr_id: str) -> pd.DataFrame:

@@ -49,29 +49,45 @@ set, with a separate variant set and its own component count. `WPC3` in one grou
 one coefficient to describe a covariate whose meaning changes by row, so
 `--pc-source within-ancestry` requires `--pop-label` and fails without it.
 
-### Stage 1 — fit the components
+### Stage 1 — stage markers and fit the components
 
-Stage the microarray PLINK trio locally first; streaming genotypes over the network
-dominates the runtime of everything else.
+The controlled dataset and workspace mounts are GCSFuse-backed. Build the eligible site
+list from the mounted BIM, then make one compact 100,000-marker PLINK dataset on the
+VM's local disk. Every ancestry fit reuses that local dataset.
 
 ```bash
-gsutil -u "$GOOGLE_PROJECT" -m cp -r gs://vwb-aou-datasets-controlled/v8/microarray/plink/* .
+LOCAL=/home/jupyter/aou-phewas
+ARRAYS=/home/jupyter/workspace/
+ARRAYS+=vwb-aou-datasets-controlled/v8/microarray/plink/arrays
+
+AUX=/home/jupyter/workspace/
+AUX+=vwb-aou-datasets-controlled/v8/wgs/short_read/snpindel/aux
+
+ANCESTRY="$AUX/ancestry/echo_v4_r2.ancestry_preds.tsv"
+RELATED="$AUX/relatedness/samples_relatedness_flagged_samples.tsv"
 
 # Autosomes minus every long-range LD region and every tested inversion (+/- 1 Mb).
 python -m phewas.extra.within_ancestry_pca sites \
-    --bim arrays.bim --out sites/include_sites.tsv
+    --bim "$ARRAYS.bim" \
+    --out "$LOCAL/sites/include_sites.tsv"
+
+# Match Gnomon's deterministic marker budget and materialize it once locally.
+python -m phewas.extra.within_ancestry_pca stage \
+    --genotypes "$ARRAYS" \
+    --sites "$LOCAL/sites/include_sites.tsv" \
+    --out "$LOCAL/pca/arrays_pca"
 
 # One group at a time. Defaults are the production settings shown below.
 python -m phewas.extra.within_ancestry_pca fit \
-    --genotypes ./arrays \
-    --sites sites/include_sites.tsv \
-    --ancestry ancestry_preds.tsv \
-    --cohort imputed_inversion_dosages.tsv \
-    --related relatedness_flagged_samples.tsv \
+    --genotypes "$LOCAL/pca/arrays_pca" \
+    --sites "$LOCAL/sites/include_sites.tsv" \
+    --ancestry "$ANCESTRY" \
+    --cohort "$PWD/imputed_inversion_dosages.tsv" \
+    --related "$RELATED" \
     --group eur \
-    --out-dir within_ancestry_pcs \
-    --gnomon /path/to/gnomon/target/release/gnomon \
-    --dosages imputed_inversion_dosages.tsv
+    --out-dir "$PWD/within_ancestry_pcs" \
+    --gnomon gnomon \
+    --dosages "$PWD/imputed_inversion_dosages.tsv"
 ```
 
 The producer calls current `gnomon main` as a single indexed PLINK fit with 16
@@ -114,10 +130,21 @@ There is no global-PC fallback for a requested within-ancestry run.
 
 ### Stage 2 — run both arms
 
+This reruns only the 37 phenotypes that were significant in the uploaded pooled
+analysis, not all 1,089 phenotypes.
+
 ```bash
-for pop in eur afr amr eas sas; do
-    python3 -m phewas.cli --pop-label "$pop"                                # control arm
-    python3 -m phewas.cli --pop-label "$pop" --pc-source within-ancestry    # treatment arm
+for pop in afr amr eas eur mid sas; do
+    python3 -m phewas.cli \
+        --pop-label "$pop" \
+        --pheno-file data/phewas_significant_phenotypes.txt \
+        --min-cases-controls 100
+
+    python3 -m phewas.cli \
+        --pop-label "$pop" \
+        --pc-source within-ancestry \
+        --pheno-file data/phewas_significant_phenotypes.txt \
+        --min-cases-controls 100
 done
 ```
 

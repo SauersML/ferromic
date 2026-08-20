@@ -9,16 +9,14 @@ GitHub Release:
 
 ## How they are consumed
 
-`imputation/infer_dosage.py` and `imputation/prepare_data_for_infer.py` default to
-`MODEL_SOURCE = "release"` and download each required model/SNP file on demand via
-the plain-text manifest:
+`imputation/infer_dosage.py` and `imputation/prepare_data_for_infer.py` download only
+the requested model/SNP files through the plain-text manifest:
 
 > https://github.com/SauersML/ferromic/releases/download/imputation-models-v1/models.manifest.txt
 
-The manifest lists one download URL per line for every `.model.joblib` and
-`.snps.json`. Fallback sources remain available by setting `MODEL_SOURCE` to
-`"github"` or `"s3"`, or by overriding `MODEL_MANIFEST_URL` / `MANIFEST_URL`.
-If a local `data/models/` directory is populated, it is used directly (no download).
+The manifest lists one immutable release URL per `.model.joblib` and `.snps.json`.
+Downloaded model files are cached in the directory passed to `infer_dosage.py` as
+`--model-dir`.
 
 ## Regenerating / republishing
 
@@ -30,4 +28,4 @@ gh release upload imputation-models-vN data/models/*.model.joblib data/models/*.
 # regenerate the manifest of asset URLs and upload it as models.manifest.txt
 ```
 
-Then bump the `release` URL in the two `_MANIFEST_URLS` dicts.
+Then update `MODEL_MANIFEST_URL` in both inference scripts.

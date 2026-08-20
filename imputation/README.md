@@ -1,136 +1,90 @@
-# Imputation Pipeline
+# Inversion dosage imputation
 
-This directory contains the implementation of an imputation pipeline designed to predict inversion genotype dosages from local SNP dosages. The pipeline uses Partial Least Squares (PLS) regression trained on a combination of real and synthetic diploid genomes to robustly infer inversion states without requiring phased data during inference.
+The inference pipeline applies published partial-least-squares models to SNP dosages.
+It preserves each model's predictor order, aligns effect alleles, fills missing calls
+with ancestry-specific means, and constrains predictions to the biological range 0–2.
 
-## Overview
+## AoU v8 PheWAS cohort
 
-The goal of this pipeline is to impute the genotype dosage (0, 1, or 2 copies) of specific inversion alleles based on the dosage patterns of surrounding SNPs. This is particularly useful for large cohorts where direct inversion genotyping is difficult or expensive, but SNP data is readily available (e.g., from array genotyping or short-read sequencing).
+Run from the repository root inside an All of Us Workbench runtime. Keep generated
+matrices on the VM's local disk; the controlled dataset mount is GCSFuse-backed.
 
-## Quick start on AoU: imputed dosage retrieval workflow
-
-Use the following sequence to download the required variant lists, prepare inputs, and infer dosages from trained models. These commands can be executed in a clean working directory.
-
-1. **Download the variant list from All of Us:**
-   
-```
-curl -s https://raw.githubusercontent.com/sauersml/ferromic/main/imputation/snv_list_acaf_download.py | python3
-```
-
-2. **Prepare PLINK-derived inputs for inference:**
-
-```
-pip install bed_reader && curl -s https://raw.githubusercontent.com/sauersml/ferromic/main/imputation/prepare_data_for_infer.py | python3
-```
-
-4. **Fetch the PLS regression helper used by the inference script:**
-
-```
-curl -O https://raw.githubusercontent.com/SauersML/ferromic/refs/heads/main/imputation/pls_patch.py
-```
-
-4. **Run dosage inference with the trained models:**
-
-```
-curl -s https://raw.githubusercontent.com/sauersml/ferromic/main/imputation/infer_dosage.py | python3
-```
-
-After dosages are inferred, navigate to the `phewas/` directory for guidance on running association analyses against the predicted inversion genotypes.
-
-## Methodology
-
-### Model Training (`linked.py`)
-For each inversion locus, we train a specific imputation model:
-
-1.  **Input Data**:
-    -   **Inversion Dosages**: "Ground truth" inversion dosages from a reference phased dataset (e.g., Porubsky et al. 2022).
-    -   **SNP Dosages**: Genotypes of SNPs within 50 kbp of the inversion breakpoints and within the inversion itself. Only SNPs with low missingness are used.
-
-2.  **Synthetic Data Augmentation**:
-    -   To improve model robustness and coverage of the haplotype space, we generate **synthetic diploid genomes**.
-    -   Any two samples in the reference set contribute four haplotypes total, but only two observed diploid genomes. We construct the other eight possible diploid combinations to augment the training data.
-    -   This allows the model to learn from haplotype combinations that may not be present in the limited reference set but could exist in the broader population.
-
-3.  **Partial Least Squares (PLS) Regression**:
-    -   We use PLS regression to model the relationship between the high-dimensional SNP data and the inversion dosage.
-    -   The model predicts: `Inversion Dosage = Intercept + Σ (Component_k_Contribution)`
-    -   This effectively reduces to a linear model: `Dosage = Intercept + Σ (SNP_Weight_i * SNP_Count_i)`.
-
-4.  **Validation & Selection**:
-    -   **Nested Cross-Validation**: Used to evaluate performance and select the optimal number of PLS components. Crucially, test genomes are never used to construct synthetic training genomes for the same fold to prevent data leakage.
-    -   **Significance Testing**: Per-inversion models are tested against a dummy intercept-only model using a Wilcoxon signed-rank test to ensure they are learning real signal.
-    -   **Component Selection**: The number of components is chosen to minimize mean squared error (MSE) via cross-validation.
-
-5.  **Final Model**:
-    -   The final model is refit using all available data (real + synthetic).
-    -   The trained model (`.model.joblib`) and the list of SNPs used (`.snps.json`) are saved for inference.
-
-### Inference
-Inference is performed on target datasets (e.g., PLINK bed files) using the trained models. It does not require phased data.
-
-## Workflow
-
-The pipeline consists of three main stages: Training, Data Preparation, and Inference.
-
-### 1. Training
-Run `linked.py` to train models for all configured inversion loci. This script handles:
--   Loading VCF data.
--   Generating synthetic training data.
--   Running the nested cross-validation and PLS regression.
--   Saving the best models to `final_imputation_models/`.
+Create a small inference environment once. `--no-deps` deliberately preserves the
+Workbench's coherent NumPy/SciPy stack while replacing its older scikit-learn and
+adding the PLINK reader required here.
 
 ```bash
-python3 linked.py
-```
+python3 -m venv --system-site-packages \
+  /home/jupyter/aou-phewas/venv
 
-### 2. Packaging (Optional)
-Use `pack_models.py` to zip the trained models and metadata for easy distribution or transfer to an inference environment.
+/home/jupyter/aou-phewas/venv/bin/pip install \
+  --only-binary=:all: \
+  --no-deps \
+  'scikit-learn==1.7.2' \
+  'threadpoolctl==3.6.0' \
+  bed-reader
+
+source /home/jupyter/aou-phewas/venv/bin/activate
+```
 
 ```bash
-python3 pack_models.py -i final_imputation_models -o imputation_models_package.zip
+LOCAL=/home/jupyter/aou-phewas
+
+V8=/home/jupyter/workspace/
+V8+=vwb-aou-datasets-controlled/v8
+
+ACAF="$V8/wgs/short_read/snpindel/"
+ACAF+=acaf_threshold/plink_bed
+
+ANCESTRY="$V8/wgs/short_read/snpindel/aux/"
+ANCESTRY+=ancestry/echo_v4_r2.ancestry_preds.tsv
+
+mkdir -p "$LOCAL"
+
+python3 -m imputation.prepare_data_for_infer \
+  --plink-dir "$ACAF" \
+  --output-dir "$LOCAL/genotype_matrices" \
+  --threads 4
+
+python3 -m imputation.infer_dosage \
+  --genotype-dir "$LOCAL/genotype_matrices" \
+  --ancestry "$ANCESTRY" \
+  --model-dir "$LOCAL/models" \
+  --output "$PWD/imputed_inversion_dosages.tsv" \
+  --threads 4
 ```
 
-### 3. Inference Preparation
-Run `prepare_data_for_infer.py` to convert a target PLINK dataset into the specific genotype matrix format required by the inference script. This script:
--   Reads a PLINK `.bed` file.
--   Fetches the model manifest and SNP lists.
--   Extracts only the required SNPs for the models.
--   Handles allele flipping to match the training data reference.
--   Outputs memory-mapped numpy arrays (`.genotypes.npy`).
+With no `--target` arguments, both commands use the canonical seven-inversion PheWAS
+set in `imputation/targets.py`. Predictor preparation reads only the required variants
+from chromosomes 4, 6, 8, 10, 12, and 17. It does not scan every genotype in each BED
+and does not copy the chromosome shards.
 
-```bash
-# Set environment variables for configuration
-export PLINK_PREFIX="path/to/target_dataset"
-export OUTPUT_DIR="genotype_matrices"
-python3 prepare_data_for_infer.py
-```
+Preparation writes one Fortran-order int8 matrix per model, `sample_ids.tsv`, and a
+provenance report. It verifies identical participant order across all six chromosome
+shards and estimates disk use before allocation. Inference requires at least 90% of a
+model's predictors to have a call rate of at least 1%; lower coverage fails closed.
 
-### 4. Inference
-Run `infer_dosage.py` to generate inversion dosage predictions.
--   Loads the prepared genotype matrices and trained models.
--   Imputes missing SNP values (using column means).
--   Predicts inversion dosages.
--   Outputs a TSV file with the imputed dosages for all samples.
+The trained models and SNP specifications are release assets:
 
-```bash
-python3 infer_dosage.py
-```
+<https://github.com/SauersML/ferromic/releases/tag/imputation-models-v1>
 
-## Directory Structure & Scripts
+Both commands fetch only the seven requested model assets through the release manifest.
 
-*   **`linked.py`**: The core training script. Implements the PLS regression, synthetic data generation, and cross-validation logic.
-*   **`infer_dosage.py`**: The inference engine. Applies trained models to new genotype data. Designed to be robust and memory-efficient.
-*   **`prepare_data_for_infer.py`**: Pre-processing script that converts PLINK files into the efficient numpy format needed by `infer_dosage.py`. Handles SNP matching and allele alignment.
-*   **`pack_models.py`**: Utility to verify and package trained models and their corresponding SNP metadata into a zip archive.
-*   **`pls_patch.py`**: Contains the `PLSRegression` implementation used by `linked.py`. It is based on `sklearn`'s implementation but maintained locally to ensure stability or custom behavior.
-*   **`tagging_snp_inversion_dosages.py`**: A specialized script for fetching specific tagging SNPs (e.g., for the 17q21 inversion) directly from Google Cloud Storage and generating hard calls based on strict unanimity.
+## Method
 
-## Dependencies
-The pipeline requires a standard Python scientific stack:
--   `numpy`
--   `pandas`
--   `scikit-learn`
--   `scipy`
--   `joblib`
--   `cyvcf2` (for training from VCFs)
--   `bed-reader` (for reading PLINK files)
--   `tqdm` (for progress bars)
+Models were trained on observed inversion dosages and SNP dosages inside each inversion
+and within 50 kbp of its breakpoints. Synthetic diploid genomes constructed from phased
+reference haplotypes expanded the observed haplotype combinations. Nested
+cross-validation selected the number of PLS components and evaluated out-of-sample
+performance without allowing a held-out sample's haplotypes into synthetic training
+genomes.
+
+The preparation command matches model predictors by chromosome, GRCh38 position, and
+effect allele. Ambiguous or absent predictors remain explicitly missing. During
+inference, missing genotypes are filled with per-ancestry predictor means; participants
+without a recognized ancestry label receive global means. The output is a TSV with one
+row per WGS participant and one column per inversion dosage.
+
+Training is implemented in `linked.py`; release packaging is implemented in
+`pack_models.py`. `benchmark_hsinv0284.py` applies the same preparation logic to the
+experimentally genotyped 6q24.1 inversion.
