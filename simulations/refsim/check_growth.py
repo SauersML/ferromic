@@ -279,11 +279,15 @@ def check_recurrent(reps):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--reps", type=int, default=40)
+    ap.add_argument("--structural-only", action="store_true",
+                    help="check trajectory endpoints and population-size "
+                         "conservation without running stochastic simulations")
     args = ap.parse_args(argv)
     ok = check_trajectory()
-    ok &= check_coalescent(args.reps)
-    ok &= check_recurrent(args.reps)
-    check_published_contrast(args.reps)
+    if not args.structural_only:
+        ok &= check_coalescent(args.reps)
+        ok &= check_recurrent(args.reps)
+        check_published_contrast(args.reps)
     print("\nOVERALL:", "PASS" if ok else "FAIL")
     return 0 if ok else 1
 

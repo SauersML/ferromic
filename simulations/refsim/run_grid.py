@@ -64,6 +64,86 @@ EXTREME_RHO = 1e-8
 EXTREME_REPS = 60
 EXTREME_SEED0 = 500_000
 
+# Gene-flux sweep for Reviewer 1. This is the ``replicate`` grid exactly -- same
+# two arms, same four depths, same three recombination rates, same six
+# frequencies -- with one axis added: a symmetric between-orientation migration
+# rate laid over both models. m_flux = 0 reproduces the replication itself, so
+# every flux level is read against a baseline generated under identical
+# conditions rather than against a previous run.
+#
+# The ladder is in multiples of the model's own within-orientation gene flow
+# (``M_WITHIN`` = 1e-8): none, 1x, 10x, 100x.
+FLUXSWEEP_FLUX = [0.0, 1e-8, 1e-7, 1e-6]
+FLUXSWEEP_SEED0 = 3_000_000
+# Generous; the run is bounded by --max-seconds, not by this. Replicate is the
+# outer loop, so whatever the wall clock allows is a balanced grid.
+FLUXSWEEP_REPS = 20
+
+# Second flux sweep, on ONE demography for both arms.
+#
+# The first sweep pairs "single" (the two-deme model read literally off the
+# Methods paragraph) with "upstream" (the nine-deme manifest run with both
+# admixture draws free). Those are different demographies, and "upstream" is a
+# mixture that also contains genuinely single-origin replicates, so its call
+# rate is a detection rate rather than power against a recurrent truth. Reading
+# a false-positive rate off one arm and a power off the other means the two
+# halves of the figure do not describe the same model, which is exactly the
+# ambiguity flagged in review.
+#
+# "fluxsweep2" fixes both arms to the nine-deme upstream demography and lets the
+# inverted admixture draw decide the truth: single_upstream conditions it on a
+# single inverted origin, recurrent conditions it on both. The false-positive
+# rate and the power are then measured on the same model, and one demography
+# figure describes both panels.
+FLUXSWEEP2_SCENARIOS = ["single_upstream", "recurrent"]
+FLUXSWEEP2_REPS = 20
+FLUXSWEEP2_SEED0 = 6_000_000
+
+# Third flux sweep, on the pair the MANUSCRIPT depicts.
+#
+# fluxsweep2 uses single_upstream, which is what the upstream *script* does: the
+# inverted draw is conditioned on one origin and the direct draw is left free.
+# Manuscript Fig. 1A draws something more specific -- the direct sample taken
+# from the non-sister deme, i.e. fD = 1 - fI -- which is `single_repo`. Keeping
+# direct lineages out of the inverted clade's ancestral group lowers the
+# false-positive rate, and the manuscript reports a rate below 5%, which neither
+# single_upstream (0.26) nor the two-deme model (0.007, and exactly zero at every
+# no-flux cell) reproduces. This grid runs the depicted pair so the sweep's
+# false-positive arm is the model the published figure describes.
+FLUXSWEEP3_SCENARIOS = ["single_repo", "recurrent"]
+FLUXSWEEP3_REPS = 20
+FLUXSWEEP3_SEED0 = 9_000_000
+
+# Frequency-trajectory comparison for Reviewer 1. Same axes as the replication,
+# minus the flux ladder, run twice: once on the published constant-size
+# single-event model and once on the model in which the inversion actually
+# rises in frequency from one haplotype to its observed value. The two arms occupy
+# different cells of the same grid, so they get different seeds and the
+# comparison is between independent samples, not paired.
+GROWTH_SCENARIOS = ["single", "single_growth"]
+GROWTH_REPS = 50
+GROWTH_SEED0 = 4_000_000
+
+# The same comparison on the recurrent side, where the quantity at stake is
+# power rather than the false-positive rate.
+RGROWTH_SCENARIOS = ["recurrent", "recurrent_growth"]
+RGROWTH_REPS = 50
+RGROWTH_SEED0 = 5_000_000
+
+# Replication of the manuscript's Fig. 1 power analysis, at its own parameters.
+# The manifest frequencies are Fig. 1G's x axis; the Methods give 100 replicates
+# per model, mig_const 1e-8 and sampleHaploSize 240.
+#
+# Two arms, matching what the manuscript describes rather than what one script
+# happens to emit. "single" is the two-population model of Fig. 1A at the FIRST
+# event of each triple -- 500/250/100/50 kya, exactly the four depths the Methods
+# list. "upstream" is the manifest run as-is, both admixture draws free, which is
+# what produces the recurrent power curve.
+REPL_FREQS = [0.01, 0.02, 0.05, 0.10, 0.25, 0.50]
+REPL_SCENARIOS = ["single", "upstream"]
+REPL_REPS = 100
+REPL_SEED0 = 2_000_000
+
 
 def build_grid(task, reps=None):
     """Deterministic ordered grid of job dicts (index order is the shard key)."""
@@ -86,6 +166,65 @@ def build_grid(task, reps=None):
                 rows.append(dict(scenario=sc, depth=depth, rho=rho, m_flux=m,
                                  inv_freq=freq, sample_size=TRAIN_SAMPLE_HAP,
                                  seed=base + r))
+    elif task == "replicate":
+        reps = reps or REPL_REPS
+        for cell, (sc, depth, rho, freq) in enumerate(
+                itertools.product(REPL_SCENARIOS, TIME_DEPTHS, RHOS, REPL_FREQS)):
+            for r in range(reps):
+                rows.append(dict(scenario=sc, depth=depth, rho=rho, m_flux=0.0,
+                                 inv_freq=freq, sample_size=FLUX_SAMPLE_HAP,
+                                 seed=REPL_SEED0 + cell * reps + r))
+    elif task == "fluxsweep":
+        reps = reps or FLUXSWEEP_REPS
+        # Replicate is the OUTER loop so the grid is swept a full replicate at a
+        # time. A run cut short by the wall clock then loses whole replicates
+        # spread evenly over every cell, rather than whole cells off the end.
+        cells = list(itertools.product(REPL_SCENARIOS, TIME_DEPTHS, RHOS,
+                                       FLUXSWEEP_FLUX, REPL_FREQS))
+        for r in range(reps):
+            for cell, (sc, depth, rho, m, freq) in enumerate(cells):
+                rows.append(dict(scenario=sc, depth=depth, rho=rho,
+                                 m_flux=m, inv_freq=freq,
+                                 sample_size=FLUX_SAMPLE_HAP,
+                                 seed=FLUXSWEEP_SEED0 + cell * reps + r))
+    elif task == "fluxsweep2":
+        reps = reps or FLUXSWEEP2_REPS
+        cells = list(itertools.product(FLUXSWEEP2_SCENARIOS, TIME_DEPTHS, RHOS,
+                                       FLUXSWEEP_FLUX, REPL_FREQS))
+        for r in range(reps):
+            for cell, (sc, depth, rho, m, freq) in enumerate(cells):
+                rows.append(dict(scenario=sc, depth=depth, rho=rho,
+                                 m_flux=m, inv_freq=freq,
+                                 sample_size=FLUX_SAMPLE_HAP,
+                                 seed=FLUXSWEEP2_SEED0 + cell * reps + r))
+    elif task == "fluxsweep3":
+        reps = reps or FLUXSWEEP3_REPS
+        cells = list(itertools.product(FLUXSWEEP3_SCENARIOS, TIME_DEPTHS, RHOS,
+                                       FLUXSWEEP_FLUX, REPL_FREQS))
+        for r in range(reps):
+            for cell, (sc, depth, rho, m, freq) in enumerate(cells):
+                rows.append(dict(scenario=sc, depth=depth, rho=rho,
+                                 m_flux=m, inv_freq=freq,
+                                 sample_size=FLUX_SAMPLE_HAP,
+                                 seed=FLUXSWEEP3_SEED0 + cell * reps + r))
+    elif task == "growth":
+        reps = reps or GROWTH_REPS
+        cells = list(itertools.product(GROWTH_SCENARIOS, TIME_DEPTHS, RHOS,
+                                       REPL_FREQS))
+        for r in range(reps):
+            for cell, (sc, depth, rho, freq) in enumerate(cells):
+                rows.append(dict(scenario=sc, depth=depth, rho=rho, m_flux=0.0,
+                                 inv_freq=freq, sample_size=FLUX_SAMPLE_HAP,
+                                 seed=GROWTH_SEED0 + cell * reps + r))
+    elif task == "rgrowth":
+        reps = reps or RGROWTH_REPS
+        cells = list(itertools.product(RGROWTH_SCENARIOS, TIME_DEPTHS, RHOS,
+                                       REPL_FREQS))
+        for r in range(reps):
+            for cell, (sc, depth, rho, freq) in enumerate(cells):
+                rows.append(dict(scenario=sc, depth=depth, rho=rho, m_flux=0.0,
+                                 inv_freq=freq, sample_size=FLUX_SAMPLE_HAP,
+                                 seed=RGROWTH_SEED0 + cell * reps + r))
     elif task == "extreme":
         reps = reps or EXTREME_REPS
         for cell, (sc, depth, m) in enumerate(
@@ -134,7 +273,8 @@ def _run_one(job):
     try:
         mts, sample_ids, meta = refsim.simulate(
             job["scenario"], times["t01_23"], times["t0_1"], times["t2_3"],
-            job["sample_size"], job["inv_freq"], job["rho"], M_WITHIN,
+            job["sample_size"], job["inv_freq"], job["rho"],
+            job.get("m_const", M_WITHIN),
             job["seed"], m_flux=job["m_flux"], t_inv_years=times.get("t_inv"),
             flux_scope=job.get("flux_scope", "leaves"))
         mapping = refsim.mapping_hap_SV(sample_ids)
@@ -184,7 +324,7 @@ def _run_one(job):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--task", required=True, choices=["flux", "trainset", "extreme"])
+    ap.add_argument("--task", required=True, choices=["flux", "trainset", "extreme", "replicate", "fluxsweep", "fluxsweep2", "fluxsweep3", "growth", "rgrowth"])
     ap.add_argument("--shard", type=int, default=0)
     ap.add_argument("--nshards", type=int, default=1)
     ap.add_argument("--procs", type=int, default=int(os.environ.get("SLURM_CPUS_PER_TASK", 8)))
@@ -194,12 +334,26 @@ def main(argv=None):
                          "refsim.demography). The grid and its seeds are "
                          "unchanged, so a 'leaves' and an 'all' run are paired "
                          "locus for locus.")
+    ap.add_argument("--m-const", type=float, default=None,
+                    help="override within-orientation migration (default 1e-8). "
+                         "The legacy manifest's panmixia rows use 1, which "
+                         "collapses each same-orientation pair into one "
+                         "population and makes the sample single-origin.")
     ap.add_argument("--flux", default=None,
                     help="comma-separated subset of m_flux values to run (the "
                          "grid and its seeds are unchanged; other rows are "
                          "skipped). Use to get the no-flux baseline first.")
     ap.add_argument("--scenarios", default=None,
                     help="comma-separated subset of scenarios to run "
+                         "(the grid and its seeds are unchanged; other rows are skipped)")
+    ap.add_argument("--max-seconds", type=float, default=None,
+                    help="stop cleanly once this much wall clock has elapsed; "
+                         "every locus finished by then is already on disk")
+    ap.add_argument("--depths", default=None,
+                    help="comma-separated subset of time depths to run "
+                         "(the grid and its seeds are unchanged; other rows are skipped)")
+    ap.add_argument("--rhos", default=None,
+                    help="comma-separated subset of recombination rates to run "
                          "(the grid and its seeds are unchanged; other rows are skipped)")
     ap.add_argument("--scratch", default=os.environ.get("TMPDIR", "/tmp"))
     ap.add_argument("--out", required=True)
@@ -208,10 +362,19 @@ def main(argv=None):
     grid = build_grid(args.task, args.reps)
     for j in grid:
         j["flux_scope"] = args.flux_scope
+        if args.m_const is not None:
+            j["m_const"] = args.m_const
     mine = [j for i, j in enumerate(grid) if i % args.nshards == args.shard]
     if args.scenarios:
         want = set(args.scenarios.split(","))
         mine = [j for j in mine if j["scenario"] in want]
+    if args.depths:
+        want = set(args.depths.split(","))
+        mine = [j for j in mine if j["depth"] in want]
+    if args.rhos:
+        keep = [float(x) for x in args.rhos.split(",")]
+        mine = [j for j in mine
+                if any(abs(j["rho"] - r) < 1e-30 for r in keep)]
     if args.flux:
         keep = [float(x) for x in args.flux.split(",")]
         mine = [j for j in mine
@@ -222,27 +385,51 @@ def main(argv=None):
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     t0 = time.time()
     rows = []
+    # Rows are written as they complete. Failures that arrive before the first
+    # successful result are buffered until the complete output schema is known.
+    fh = open(args.out, "w", newline="")
+    w = None
+    pending = []
     from multiprocessing import Pool
     with Pool(args.procs, initializer=_init,
               initargs=(args.task, args.scratch)) as pool:
-        for i, row in enumerate(pool.imap_unordered(_run_one, mine, chunksize=1)):
+        it = pool.imap_unordered(_run_one, mine, chunksize=1)
+        for i, row in enumerate(it):
+            if w is None and row.get("error"):
+                pending.append(row)
+            elif w is None:
+                fields = sorted(row)
+                lead = [f for f in ("scenario", "label", "depth", "rho", "m_flux",
+                                    "flux_scope", "inv_freq", "sample_size",
+                                    "seed", "tree_n_events", "call_recurrent",
+                                    "n_sites") if f in fields]
+                w = csv.DictWriter(fh, fieldnames=lead + [f for f in fields
+                                                          if f not in lead])
+                w.writeheader()
+                for buffered in pending:
+                    w.writerow(buffered)
+                pending.clear()
             rows.append(row)
+            if w is not None:
+                w.writerow(row)
+            el = time.time() - t0
             if (i + 1) % 50 == 0 or (i + 1) == len(mine):
-                el = time.time() - t0
+                fh.flush()
                 print(f"  {i + 1}/{len(mine)}  {el:.0f}s  "
                       f"({el / (i + 1):.1f}s/job)", flush=True)
-
-    fields = sorted({k for r in rows for k in r})
-    lead = [f for f in ("scenario", "label", "depth", "rho", "m_flux",
-                        "flux_scope", "inv_freq",
-                        "sample_size", "seed", "tree_n_events", "call_recurrent",
-                        "n_sites") if f in fields]
-    fields = lead + [f for f in fields if f not in lead]
-    with open(args.out, "w", newline="") as fh:
+            if args.max_seconds and el > args.max_seconds:
+                print(f"  wall-clock limit {args.max_seconds}s reached after "
+                      f"{i + 1} loci; stopping cleanly", flush=True)
+                pool.terminate()
+                break
+    if w is None:
+        fields = sorted({key for row in pending for key in row})
         w = csv.DictWriter(fh, fieldnames=fields)
         w.writeheader()
-        for r in rows:
-            w.writerow(r)
+        for row in pending:
+            w.writerow(row)
+    fh.flush()
+    fh.close()
     n_err = sum(1 for r in rows if r.get("error"))
     print(f"wrote {len(rows)} rows ({n_err} errors) -> {args.out} "
           f"in {time.time() - t0:.0f}s", flush=True)

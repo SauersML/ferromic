@@ -86,6 +86,7 @@ sample has sat in a small deme since the first event. It is kept, as
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import re
 import shutil
@@ -247,6 +248,109 @@ def demography(t01_23_years, t0_1_years, t2_3_years, m_const, frac_admix_i,
     return de
 
 
+def demography_recurrent_growth(t01_23_years, t0_1_years, t2_3_years,
+                                inv_freq, frac_admix_i, frac_admix_d,
+                                m_const=0.0, m_flux=0.0, flux_scope="leaves",
+                                n_steps=96):
+    """Recurrent model in which each of the three events starts as one haplotype.
+
+    The published recurrent model gives every deme a fixed size -- 0.1 N_a for
+    the inverted classes, 0.01 N_a for the direct class descended from them --
+    so, exactly as in the single-event model, an inversion is a fully formed
+    subpopulation from the instant it appears and its frequency never enters the
+    coalescent. Reviewer 1's objection applies here too.
+
+    Here each newly arising orientation carries its own trajectory, and the
+    admixture proportions do double duty: ``frac_admix_i`` sets both the share of
+    sampled inverted haplotypes drawn from ``P1_I`` and the size of that deme, so
+    a deme that contributes a tenth of the sample is a tenth the size rather than
+    the same size as one contributing nine tenths.
+
+    Present-day sizes, which sum to ``N_a``::
+
+        P1_I = N_a x f_I          P2_I = N_a x (1 - f_I)
+        P0_D = N_a (1 - x) f_D    P3_D = N_a (1 - x)(1 - f_D)
+
+    Each class that *begins* with an orientation change grows from a single
+    haplotype at its own event: the inverted clade (``Pa_I`` then ``P1_I``) from
+    the first event, ``P0_D`` from the second, ``P2_I`` from the third. The
+    direct class ``P3_D``/``Pa_D`` is the ancestral orientation and has no
+    founding bottleneck; it is stepped to take whatever ``N_a`` leaves over, so
+    the four classes conserve the population at every point.
+    """
+    import msprime
+
+    T1 = t01_23_years / GENERATION_TIME
+    T2 = t0_1_years / GENERATION_TIME
+    T3 = t2_3_years / GENERATION_TIME
+    x0 = float(inv_freq)
+    founder = 0.5                                   # one haplotype
+
+    n1I = max(1.0, N_A * x0 * frac_admix_i)
+    n2I = max(1.0, N_A * x0 * (1.0 - frac_admix_i))
+    n0D = max(1.0, N_A * (1.0 - x0) * frac_admix_d)
+    n3D = max(1.0, N_A * (1.0 - x0) * (1.0 - frac_admix_d))
+    a1I = math.log(n1I / founder) / T1
+    a0D = math.log(n0D / founder) / T2
+    a2I = math.log(n2I / founder) / T3
+
+    def inv_clade(t):
+        return n1I * math.exp(-a1I * t)
+
+    def p0d(t):
+        return n0D * math.exp(-a0D * t) if t < T2 else 0.0
+
+    def p2i(t):
+        return n2I * math.exp(-a2I * t) if t < T3 else 0.0
+
+    de = msprime.Demography()
+    de.add_population(name="P_I", description="Final INV group", initial_size=N_A * x0)
+    de.add_population(name="P_D", description="Final DIR group",
+                      initial_size=N_A * (1.0 - x0))
+    de.add_population(name="P0_D", description="Pop1, DIR",
+                      initial_size=n0D, growth_rate=a0D)
+    de.add_population(name="P1_I", description="Pop2, INV",
+                      initial_size=n1I, growth_rate=a1I)
+    de.add_population(name="P2_I", description="Pop3, INV",
+                      initial_size=n2I, growth_rate=a2I)
+    de.add_population(name="P3_D", description="Pop4, DIR", initial_size=n3D)
+    de.add_population(name="Pa_I", description="Ancestral INV group",
+                      initial_size=n1I, growth_rate=a1I)
+    de.add_population(name="Pa_D", description="Ancestral DIR group",
+                      initial_size=N_A)
+    de.add_population(name="P00", description="Ancestral group", initial_size=N_A)
+
+    # The ancestral direct class takes the remainder, stepped. Below T3 that is
+    # P3_D; above it, P2_I has merged in and the remainder belongs to Pa_D.
+    for i in range(1, n_steps):
+        t = T1 * i / n_steps
+        rest = max(1.0, N_A - inv_clade(t) - p0d(t) - p2i(t))
+        de.add_population_parameters_change(
+            time=t, population=("P3_D" if t < T3 else "Pa_D"),
+            initial_size=rest)
+
+    de.set_symmetric_migration_rate(["P0_D", "P3_D"], m_const)
+    de.set_symmetric_migration_rate(["P1_I", "P2_I"], m_const)
+    if m_flux > 0:
+        for a, b, t_start in _flux_pairs(T1, T2, T3):
+            if t_start <= 0:
+                de.set_symmetric_migration_rate([a, b], m_flux)
+            elif flux_scope == "all":
+                de.add_symmetric_migration_rate_change(
+                    time=t_start, populations=[a, b], rate=m_flux)
+        de.set_symmetric_migration_rate(["P_I", "P_D"], m_flux)
+
+    de.add_admixture(time=0.00001, derived="P_I", ancestral=["P1_I", "P2_I"],
+                     proportions=[frac_admix_i, 1 - frac_admix_i])
+    de.add_admixture(time=0.00001, derived="P_D", ancestral=["P0_D", "P3_D"],
+                     proportions=[frac_admix_d, 1 - frac_admix_d])
+    de.add_population_split(time=T3, derived=["P2_I", "P3_D"], ancestral="Pa_D")
+    de.add_population_split(time=T2, derived=["P0_D", "P1_I"], ancestral="Pa_I")
+    de.add_population_split(time=T1, derived=["Pa_I", "Pa_D"], ancestral="P00")
+    de.sort_events()
+    return de
+
+
 def draw_admixture(scenario, rng):
     """``frac_admixI`` / ``frac_admixD`` as drawn upstream, constrained by scenario.
 
@@ -293,19 +397,91 @@ def demography_single(t_inv_years, m_flux=0.0):
     models are run at t_inv in {500, 250, 100, 50} kya. There is no second inverted
     deme and no sister direct deme -- those exist only in the recurrent model.
 
-    Deme sizes follow upstream's convention: the inverted deme is 0.1 * N_a, the
-    direct deme and the ancestor are N_a.
+    Deme sizes are upstream's own: ``singleINV_m1.py`` gives the inverted deme
+    ``N_a / 100`` and the direct deme ``N_a``, and merges inverted into direct at
+    ``Tsp_p0_p1`` with an empty migration matrix. Direct lineages therefore never
+    enter the inverted deme -- the tree carries exactly one orientation change.
+    (The Methods say the bottleneck is a "90% reduction"; the code applies 99%.)
     """
     import msprime
 
     de = msprime.Demography()
-    de.add_population(name="P_I", description="INV group", initial_size=0.1 * N_A)
+    de.add_population(name="P_I", description="INV group", initial_size=N_A / 100)
     de.add_population(name="P_D", description="DIR group", initial_size=N_A)
     de.add_population(name="P00", description="Ancestral group", initial_size=N_A)
     if m_flux > 0:
         de.set_symmetric_migration_rate(["P_I", "P_D"], m_flux)
     de.add_population_split(time=t_inv_years / GENERATION_TIME,
                             derived=["P_I", "P_D"], ancestral="P00")
+    de.sort_events()
+    return de
+
+
+def growth_rate(t_inv_years, inv_freq, n_anc=None):
+    """Per-generation rate taking one haplotype at ``t_inv`` to ``inv_freq`` today.
+
+    The inversion is a single mutation, so it starts as one copy out of ``2 N_a``
+    and rises to its present frequency. Writing the inverted class as a
+    subpopulation of size ``N_a x(t)``, an exponential trajectory
+    ``x(t) = x_0 exp(-alpha t)`` measured backwards from the present satisfies
+    ``x(T) = 1 / (2 N_a)`` when
+
+        alpha = ln(2 N_a x_0) / T.
+
+    That is the growth msprime wants: a population declining backwards in time to
+    a single founding lineage exactly at the inversion event.
+    """
+    n_anc = N_A if n_anc is None else n_anc
+    t_gen = t_inv_years / GENERATION_TIME
+    return math.log(2 * n_anc * float(inv_freq)) / t_gen
+
+
+def demography_growth(t_inv_years, inv_freq, m_flux=0.0, n_steps=64):
+    """Single-event model in which the inversion actually rises to ``inv_freq``.
+
+    The published model gives the inverted class a constant size of ``N_a / 100``
+    whatever the inversion's frequency or age, so frequency never enters the
+    coalescent -- it only decides how many haplotypes are drawn. Reviewer 1 is
+    right that this leaves no room for the inversion to accumulate diversity while
+    it does so (Charlesworth 2023).
+
+    Here the inverted class instead carries its own frequency trajectory. It is
+    one haplotype at ``t_inv`` and ``N_a * inv_freq`` diploids today, growing at
+    ``growth_rate`` in between; the direct class takes the remainder,
+    ``N_a * (1 - x(t))``, in ``n_steps`` piecewise-constant pieces, so the two
+    orientations together conserve ``N_a`` at every point rather than the total
+    population quietly changing size with the inversion's frequency.
+
+    Two consequences, both of them the point of the exercise. Frequency is now a
+    parameter of the model and not of the sampling: a 50% inversion has an
+    inverted effective size of ``0.5 N_a`` and a 1% inversion ``0.01 N_a``,
+    differing fifty-fold in the diversity they can carry. And every inverted
+    lineage is forced to coalesce at or before ``t_inv``, because the class
+    narrows to a single founder there -- which is what a single origin means.
+    """
+    import msprime
+
+    x0 = float(inv_freq)
+    t_gen = t_inv_years / GENERATION_TIME
+    alpha = growth_rate(t_inv_years, x0)
+
+    de = msprime.Demography()
+    de.add_population(name="P_I", description="INV group",
+                      initial_size=N_A * x0, growth_rate=alpha)
+    de.add_population(name="P_D", description="DIR group",
+                      initial_size=N_A * (1.0 - x0))
+    de.add_population(name="P00", description="Ancestral group", initial_size=N_A)
+    # The direct class is N_a(1 - x(t)), which is not exponential, so it is
+    # stepped. Steps are uniform in t, which is uniform in log x for an
+    # exponential trajectory, so they are finest where x moves fastest.
+    for i in range(1, n_steps):
+        t = t_gen * i / n_steps
+        x = x0 * math.exp(-alpha * t)
+        de.add_population_parameters_change(
+            time=t, population="P_D", initial_size=N_A * (1.0 - x))
+    if m_flux > 0:
+        de.set_symmetric_migration_rate(["P_I", "P_D"], m_flux)
+    de.add_population_split(time=t_gen, derived=["P_I", "P_D"], ancestral="P00")
     de.sort_events()
     return de
 
@@ -343,17 +519,26 @@ def simulate(scenario, t01_23_years, t0_1_years, t2_3_years, sample_size,
     num_direct = sample_size - num_inv
     num_direct_sample = round(num_direct / 2)
 
-    if scenario == "single":
+    if scenario in ("single", "single_growth"):
         if t_inv_years is None:
-            raise ValueError("scenario 'single' requires t_inv_years")
+            raise ValueError(f"scenario {scenario!r} requires t_inv_years")
         # Drawn and discarded so the RNG stream matches the other scenarios.
         rng.randint(0, 10)
-        de = demography_single(t_inv_years, m_flux=m_flux)
+        if scenario == "single_growth":
+            de = demography_growth(t_inv_years, inv_freq, m_flux=m_flux)
+        else:
+            de = demography_single(t_inv_years, m_flux=m_flux)
         frac_i, frac_d = 1.0, 0.0
     else:
-        frac_i, frac_d = draw_admixture(scenario, rng)
-        de = demography(t01_23_years, t0_1_years, t2_3_years, m_const,
-                        frac_i, frac_d, m_flux=m_flux, flux_scope=flux_scope)
+        base = "recurrent" if scenario == "recurrent_growth" else scenario
+        frac_i, frac_d = draw_admixture(base, rng)
+        if scenario == "recurrent_growth":
+            de = demography_recurrent_growth(
+                t01_23_years, t0_1_years, t2_3_years, inv_freq, frac_i, frac_d,
+                m_const=m_const, m_flux=m_flux, flux_scope=flux_scope)
+        else:
+            de = demography(t01_23_years, t0_1_years, t2_3_years, m_const,
+                            frac_i, frac_d, m_flux=m_flux, flux_scope=flux_scope)
 
     sample_ids = []
     for i, v in enumerate([num_inv_sample, num_direct_sample]):

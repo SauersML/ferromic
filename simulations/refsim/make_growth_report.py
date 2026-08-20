@@ -23,6 +23,9 @@ from __future__ import annotations
 
 import argparse
 import csv
+import glob
+import hashlib
+import json
 import math
 import os
 import statistics
@@ -68,8 +71,9 @@ def diversity_curves(reps=60, seed0=9_500_000):
         for model in ("single", "single_growth"):
             vals = []
             for x0 in FREQS:
-                n_inv = max(2, int(240 * x0) // 2)
-                n_dir = (240 - int(240 * x0)) // 2
+                num_inv = round(240 * x0)
+                n_inv = max(1, round(num_inv / 2))
+                n_dir = round((240 - num_inv) / 2)
                 de = (refsim.demography_growth(t_inv, x0)
                       if model == "single_growth"
                       else refsim.demography_single(t_inv))
@@ -91,17 +95,115 @@ def diversity_curves(reps=60, seed0=9_500_000):
     return out
 
 
-def load_grid(path):
+def load_grid(pattern):
+    paths = sorted(glob.glob(pattern))
+    if not paths:
+        raise SystemExit(f"no input files matched {pattern!r}")
     rows = []
-    with open(path, newline="") as fh:
-        for r in csv.DictReader(fh):
-            if r.get("error"):
-                continue
-            rows.append(dict(scenario=r["scenario"], depth=r["depth"],
-                             rho=float(r["rho"]), freq=float(r["inv_freq"]),
-                             call=int(r["call_recurrent"]),
-                             events=int(float(r["tree_n_events"]))))
-    return rows
+    failures = []
+    for path in paths:
+        with open(path, newline="") as fh:
+            for line, r in enumerate(csv.DictReader(fh), start=2):
+                if r.get("error"):
+                    failures.append((path, line, r["error"]))
+                    continue
+                rows.append(dict(scenario=r["scenario"], depth=r["depth"],
+                                 rho=float(r["rho"]), freq=float(r["inv_freq"]),
+                                 seed=int(r["seed"]),
+                                 call=int(r["call_recurrent"]),
+                                 events=int(float(r["tree_n_events"]))))
+    if failures:
+        path, line, message = failures[0]
+        raise SystemExit(
+            f"{len(failures)} simulations failed; first failure at "
+            f"{path}:{line}: {message}")
+    return rows, paths
+
+
+def validate_grid(rows, reps):
+    expected_cells = {
+        (scenario, depth, rho, freq)
+        for scenario in SINGLE_ARMS
+        for depth in DEPTH_ORDER
+        for rho in (0.0, 1e-8, 1e-6)
+        for freq in FREQS
+    }
+    counts = defaultdict(int)
+    identities = set()
+    for r in rows:
+        key = (r["scenario"], r["depth"], r["rho"], r["freq"])
+        counts[key] += 1
+        identity = (r["scenario"], r["depth"], r["rho"], r["freq"], r["seed"])
+        if identity in identities:
+            raise SystemExit(f"duplicate simulation row: {identity}")
+        identities.add(identity)
+    observed_cells = set(counts)
+    if observed_cells != expected_cells:
+        missing = sorted(expected_cells - observed_cells)
+        extra = sorted(observed_cells - expected_cells)
+        raise SystemExit(f"growth grid cells differ from the specification; "
+                         f"missing={missing[:3]}, extra={extra[:3]}")
+    bad = {cell: n for cell, n in counts.items() if n != reps}
+    if bad:
+        first, n = next(iter(sorted(bad.items())))
+        raise SystemExit(f"growth grid is incomplete: {first} has {n}/{reps} rows")
+
+
+def write_csv(rows, path):
+    fields = ["scenario", "depth", "rho", "inv_freq", "reps", "n_called",
+              "recurrent_call_rate", "ci_low", "ci_high"]
+    with open(path, "w", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fields)
+        writer.writeheader()
+        for scenario in SINGLE_ARMS:
+            for depth in DEPTH_ORDER:
+                for rho in (0.0, 1e-8, 1e-6):
+                    for freq in FREQS:
+                        k, n, p, lo, hi = fpr(
+                            rows, scenario=scenario, depth=depth, rho=rho,
+                            freq=freq)
+                        writer.writerow({
+                            "scenario": scenario,
+                            "depth": depth,
+                            "rho": repr(rho),
+                            "inv_freq": repr(freq),
+                            "reps": n,
+                            "n_called": k,
+                            "recurrent_call_rate": f"{p:.8f}",
+                            "ci_low": f"{lo:.8f}",
+                            "ci_high": f"{hi:.8f}",
+                        })
+    print("wrote", path)
+
+
+def write_provenance(paths, rows, reps, path):
+    def sha256(input_path):
+        digest = hashlib.sha256()
+        with open(input_path, "rb") as fh:
+            for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    payload = {
+        "task": "growth",
+        "replicates_per_cell": reps,
+        "simulation_rows": len(rows),
+        "scenarios": list(SINGLE_ARMS),
+        "depths": list(DEPTH_ORDER),
+        "recombination_rates": [0.0, 1e-8, 1e-6],
+        "inversion_frequencies": FREQS,
+        "input_shards": [
+            {
+                "name": os.path.basename(p),
+                "sha256": sha256(p),
+            }
+            for p in paths
+        ],
+    }
+    with open(path, "w") as fh:
+        json.dump(payload, fh, indent=2, sort_keys=True)
+        fh.write("\n")
+    print("wrote", path)
 
 
 def fpr(rows, **kw):
@@ -518,11 +620,17 @@ def main(argv=None):
                          "power panel and table")
     ap.add_argument("--outdir", default=".")
     ap.add_argument("--reps", type=int, default=60)
+    ap.add_argument("--grid-reps", type=int, default=50,
+                    help="required number of classifier replicates per grid cell")
     args = ap.parse_args(argv)
-    rows = load_grid(args.grid)
-    rrows = load_grid(args.recurrent_grid) if args.recurrent_grid else []
+    rows, paths = load_grid(args.grid)
+    validate_grid(rows, args.grid_reps)
+    rrows = load_grid(args.recurrent_grid)[0] if args.recurrent_grid else []
     div = diversity_curves(args.reps)
     os.makedirs(args.outdir, exist_ok=True)
+    write_csv(rows, os.path.join(args.outdir, "growth_results.csv"))
+    write_provenance(paths, rows, args.grid_reps,
+                     os.path.join(args.outdir, "growth_provenance.json"))
     write_md(div, rows, os.path.join(args.outdir, "growth_results.md"), rrows)
     plot_model(os.path.join(args.outdir, "growth_model.png"))
     plot(div, rows, os.path.join(args.outdir, "growth_frequency.png"), rrows)
