@@ -324,10 +324,11 @@ def test_keep_list_intersects_cohort_and_drops_related(tmp_path):
         ancestry_path=str(ancestry),
         group="EUR",
         out_path=str(tmp_path / "keep_eur.txt"),
+        genotype_ids={"a", "c"},
         cohort_path=str(cohort),
         related_path=str(related),
     )
-    assert ids == ["a", "b"]
+    assert ids == ["a"]
 
 
 def test_keep_list_refuses_an_empty_group(tmp_path):
@@ -337,7 +338,10 @@ def test_keep_list_refuses_an_empty_group(tmp_path):
     )
     with pytest.raises(ValueError, match="No participants remain"):
         wapca.build_keep_list(
-            ancestry_path=str(ancestry), group="eas", out_path=str(tmp_path / "k.txt")
+            ancestry_path=str(ancestry),
+            group="eas",
+            out_path=str(tmp_path / "k.txt"),
+            genotype_ids={"a"},
         )
 
 

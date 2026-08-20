@@ -222,6 +222,7 @@ def build_keep_list(
     ancestry_path: str,
     group: str,
     out_path: str,
+    genotype_ids: set[str],
     cohort_path: Optional[str] = None,
     related_path: Optional[str] = None,
 ) -> list[str]:
@@ -250,6 +251,8 @@ def build_keep_list(
         cohort = set(_read_ids(cohort_path))
         selected &= cohort
         print(f"[keep] {len(selected):,} after intersecting the analysis cohort")
+    selected &= genotype_ids
+    print(f"[keep] {len(selected):,} after intersecting the PLINK samples")
     if related_path:
         related = set(_read_ids(related_path))
         selected -= related
@@ -379,6 +382,27 @@ def _plink_prefix(genotype_path: str) -> str:
             f"missing: {', '.join(missing)}"
         )
     return path
+
+
+def _read_plink_sample_ids(genotype_path: str) -> set[str]:
+    """Read IIDs from the FAM paired with a PLINK BED dataset."""
+    fam_path = _plink_prefix(genotype_path) + ".fam"
+    if not os.path.isfile(fam_path):
+        raise FileNotFoundError(f"PLINK sample file is unavailable: {fam_path}")
+    frame = pd.read_csv(
+        fam_path,
+        sep=r"\s+",
+        header=None,
+        usecols=[1],
+        dtype=str,
+    )
+    ids = frame.iloc[:, 0].astype(str)
+    if ids.empty:
+        raise ValueError(f"PLINK sample file contains no participants: {fam_path}")
+    if ids.duplicated().any():
+        duplicate = ids[ids.duplicated()].iloc[0]
+        raise ValueError(f"PLINK sample IDs are not unique; first duplicate: {duplicate}")
+    return set(ids)
 
 
 def _read_hwe_scores(bin_path: str, metadata_path: str) -> tuple[np.ndarray, list[str]]:
@@ -567,6 +591,7 @@ def fit_group(args: argparse.Namespace) -> None:
     out_dir = os.path.abspath(args.out_dir)
     os.makedirs(out_dir, exist_ok=True)
     output_prefix = os.path.join(out_dir, f"gnomon_{group}")
+    genotype_ids = _read_plink_sample_ids(args.genotypes)
 
     keep_path = args.keep or os.path.join(out_dir, f"keep_{group}.txt")
     if args.keep is None:
@@ -574,12 +599,19 @@ def fit_group(args: argparse.Namespace) -> None:
             ancestry_path=args.ancestry,
             group=group,
             out_path=keep_path,
+            genotype_ids=genotype_ids,
             cohort_path=args.cohort,
             related_path=args.related,
         )
     else:
         ids = _read_ids(keep_path)
         print(f"[keep] using supplied list of {len(ids):,} ids")
+        missing = sorted(set(ids) - genotype_ids)
+        if missing:
+            raise SystemExit(
+                f"The supplied keep list contains {len(missing):,} participant(s) "
+                f"absent from the PLINK dataset; first missing ID: {missing[0]}"
+            )
     if len(ids) != len(set(ids)):
         raise SystemExit(f"The keep list for group '{group}' contains duplicate participant IDs.")
 
