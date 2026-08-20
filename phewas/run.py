@@ -844,16 +844,23 @@ def _apply_within_ancestry_pcs(
         )
 
     aligned = within_pcs_df.reindex(covariates_df.index.astype(str))
-    unmatched = int(aligned[ordered[0]].isna().sum())
-    if unmatched:
-        # The covariate merge upstream is an inner join, so quietly dropping these
-        # participants would silently redefine the analysis cohort. Fail instead.
-        examples = ", ".join(map(str, aligned.index[aligned[ordered[0]].isna()][:5]))
+    unmatched_mask = aligned[ordered].isna().any(axis=1)
+    unmatched = int(unmatched_mask.sum())
+    if unmatched == len(aligned):
         raise ValueError(
-            f"{prefix} {unmatched} of {len(aligned)} participants have no ancestry-specific "
-            f"principal components (e.g. {examples}). Refusing to continue, because dropping "
-            "them would change the cohort relative to the matched global-PC run."
+            f"{prefix} none of the {len(aligned)} analysis participants have "
+            "ancestry-specific principal components."
         )
+    if unmatched:
+        examples = ", ".join(map(str, aligned.index[unmatched_mask][:5]))
+        print(
+            f"{prefix} excluding {unmatched} of {len(aligned)} participants absent from "
+            f"the fitted PC cohort (e.g. {examples}).",
+            flush=True,
+        )
+        keep = ~unmatched_mask.to_numpy()
+        aligned = aligned.iloc[keep]
+        covariates_df = covariates_df.iloc[keep]
 
     degenerate = [c for c in ordered if not np.isfinite(aligned[c].to_numpy()).all()]
     if degenerate:

@@ -163,10 +163,21 @@ def test_swap_replaces_global_pcs_and_reports_the_component_count():
     pd.testing.assert_series_equal(updated["AGE"], covariates["AGE"])
 
 
-def test_swap_refuses_to_silently_drop_participants():
+def test_swap_excludes_participants_without_fitted_components(capsys):
     covariates = _covariates(n=20)
     within = _within_pcs(covariates.index[:18], k=4)
-    with pytest.raises(ValueError, match="no ancestry-specific"):
+
+    updated, k = run._apply_within_ancestry_pcs(covariates, within, "eur")
+
+    assert k == 4
+    assert updated.index.tolist() == covariates.index[:18].tolist()
+    assert "excluding 2 of 20 participants" in capsys.readouterr().out
+
+
+def test_swap_rejects_a_pc_table_with_no_analysis_participants():
+    covariates = _covariates(n=20)
+    within = _within_pcs(pd.Index(["elsewhere"]), k=4)
+    with pytest.raises(ValueError, match="none of the 20 analysis participants"):
         run._apply_within_ancestry_pcs(covariates, within, "eur")
 
 
