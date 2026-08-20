@@ -39,12 +39,21 @@ def build_parser() -> argparse.ArgumentParser:
             "Matches the ancestry labels produced during shared setup."
         ),
     )
-    parser.add_argument(
+    phenotype_selection = parser.add_mutually_exclusive_group()
+    phenotype_selection.add_argument(
         "--pheno",
         type=str,
         help=(
             "Filter to analyze only a single phenotype by name. "
             "All other phenotypes will be excluded from the analysis."
+        ),
+    )
+    phenotype_selection.add_argument(
+        "--pheno-file",
+        type=str,
+        help=(
+            "Analyze only the phenotype names listed in this text file, one sanitized "
+            "phenotype name per line. Blank lines and lines beginning with '#' are ignored."
         ),
     )
     parser.add_argument(
@@ -74,6 +83,7 @@ def apply_cli_configuration(args: argparse.Namespace) -> dict[str, object]:
         "min_cases_controls": None,
         "population_filter": "all",
         "phenotype_filter": None,
+        "phenotype_file": None,
     }
 
     if getattr(args, "min_cases_controls", None) is not None:
@@ -106,6 +116,13 @@ def apply_cli_configuration(args: argparse.Namespace) -> dict[str, object]:
     else:
         run.PHENOTYPE_FILTER = None
         os.environ.pop("FERROMIC_PHENOTYPE_FILTER", None)
+
+    phenotype_file = getattr(args, "pheno_file", None)
+    if phenotype_file is not None:
+        normalized_file = phenotype_file.strip()
+        if not normalized_file:
+            raise SystemExit("--pheno-file must name a non-empty path")
+        pipeline_config["phenotype_file"] = normalized_file
 
     pc_source = run._normalize_pc_source(
         getattr(args, "pc_source", None) or run.PC_SOURCE_GLOBAL

@@ -542,10 +542,22 @@ def test_run_main_applies_cli_overrides():
             "min_cases_controls": None,
             "population_filter": "eur",
             "phenotype_filter": None,
+            "phenotype_file": None,
             # The PC source is always recorded explicitly so a stale environment
             # variable cannot decide it for the spawned child.
             "pc_source": run.PC_SOURCE_GLOBAL,
         })
+
+
+def test_phenotype_file_loader_is_strict_and_ignores_comments():
+    with temp_workspace() as tmpdir:
+        path = Path(tmpdir) / "phenotypes.txt"
+        path.write_text("# selected hits\nTrait_A\n\nTrait_B\n", encoding="utf-8")
+        assert run._load_phenotype_names(str(path)) == ("Trait_A", "Trait_B")
+
+        path.write_text("Trait_A\nTrait_A\n", encoding="utf-8")
+        with pytest.raises(ValueError, match="duplicate names"):
+            run._load_phenotype_names(str(path))
 
 
 def test_pipeline_config_applied_in_child_process():
