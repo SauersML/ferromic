@@ -61,7 +61,7 @@ gsutil -u "$GOOGLE_PROJECT" -m cp -r gs://fc-aou-datasets-controlled/v8/microarr
 python -m phewas.extra.within_ancestry_pca sites \
     --bim arrays.bim --out sites/include_sites.tsv
 
-# One group at a time. The component count scales with group size unless overridden.
+# One group at a time. Defaults are the production settings shown below.
 python -m phewas.extra.within_ancestry_pca fit \
     --genotypes ./arrays \
     --sites sites/include_sites.tsv \
@@ -70,8 +70,27 @@ python -m phewas.extra.within_ancestry_pca fit \
     --related relatedness_flagged_samples.tsv \
     --group eur \
     --out-dir within_ancestry_pcs \
+    --gnomon /path/to/gnomon/target/release/gnomon \
     --dosages imputed_inversion_dosages.tsv
 ```
+
+The producer calls current `gnomon main` as a single indexed PLINK fit with 16
+components, four worker threads, MAF ≥ 0.01, sample and variant missingness ≤ 0.05,
+and LD normalization. Current main makes `--ld` safe for a biobank array by applying an
+evenly spaced 100,000-marker budget and a 500 kbp physical window when no expert
+override is supplied. Marker thinning and a physical-distance window are paired
+deliberately: after thinning, a window measured in neighboring sites no longer has a
+stable genomic meaning. The LD work is local rather than all-pairs, but it can still
+dominate runtime because each local system grows with the number of retained markers in
+that window; the marker budget keeps that density bounded. Current main also applies
+`--threads 4` to both its fit-local and process-wide Rayon pools, so the producer no
+longer needs its own CPU-affinity workaround.
+
+Convergence is strict. The producer never passes `--allow-unconverged`, and current main
+therefore refuses to create a model when the eigensolver does not meet its tolerance.
+The producer independently requires `converged=true` in `hwe_summary.tsv` before it
+writes PheWAS covariates. The JSON sidecar records the full command, gnomon version and
+executable digest, resolved LD policy, and solver diagnostics.
 
 `--cohort` takes any file whose first column is a participant id, so the imputed dosage
 table can be passed directly: the components must be fit on the same people the
@@ -83,12 +102,15 @@ regress away the signal being measured. Passing `--dosages` turns that from an a
 into a check: the sidecar records the largest absolute correlation between any component
 and any inversion dosage, which should be near zero.
 
-Every fit writes beside the genotypes under a shared stem, so a second group would
-overwrite the first. The artifacts are moved into the group's working directory
-immediately, and a model that predates the current run is rejected rather than read.
+Current main's native `--out PREFIX` writes every artifact independently of the genotype
+path. The producer assigns a distinct prefix to each ancestry, so concurrent fits cannot
+overwrite one another and the shared BED/BIM/FAM trio is neither copied nor symlinked.
 
-Groups too small to support components (under about a thousand participants) produce no
-file and stay on the global components; record that fallback in the methods.
+Sample missingness QC is computed after the ancestry/cohort keep list, as in PLINK. If it
+removes even one participant, the producer stops: silently accepting the reduced score
+table would change the treatment-arm PheWAS cohort relative to its matched global-PC
+run. Resolve such a mismatch upstream and use the same participant set in both arms.
+There is no global-PC fallback for a requested within-ancestry run.
 
 ### Stage 2 — run both arms
 

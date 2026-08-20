@@ -809,8 +809,9 @@ def _apply_within_ancestry_pcs(
 
     The design matrices are assembled by column *name* (``PC1``..``PC{NUM_PCS}``) in
     both run.py and models.py, so swapping the values here propagates to every model
-    without touching the fitting code. The number of components is returned because it
-    varies by group: it is scaled to the group's sample size when the PCs are fit.
+    without touching the fitting code. The number of components is returned so the
+    association design exactly matches the certified fit artifact rather than assuming
+    a count independently.
     """
     prefix = f"[PCs] Population '{population_label}':"
 
