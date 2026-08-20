@@ -16,13 +16,13 @@ from imputation.targets import PHEWAS_TARGET_INVERSIONS
 
 
 THREADS = 16
-MEMORY_MB = 64_000
 MIN_CPUS = 16
 MIN_MEMORY_BYTES = 100 * 1024**3
-MIN_FREE_BYTES = 30 * 1024**3
+MIN_DOWNLOAD_FREE_BYTES = 200 * 1024**3
 MARKERS = 100_000
 COMPONENTS = 16
 POPULATIONS = ("eur", "afr", "eas", "amr", "sas", "mid")
+ARRAY_BUCKET = "gs://vwb-aou-datasets-controlled/v8/microarray/plink"
 
 
 @dataclass(frozen=True)
@@ -48,8 +48,12 @@ class Paths:
         return self.auxiliary / "relatedness/samples_relatedness_flagged_samples.tsv"
 
     @property
-    def arrays(self) -> Path:
+    def mounted_arrays(self) -> Path:
         return self.v8 / "microarray/plink/arrays"
+
+    @property
+    def arrays(self) -> Path:
+        return self.local / "source/arrays"
 
     @property
     def python(self) -> Path:
@@ -70,10 +74,6 @@ class Paths:
     @property
     def sites(self) -> Path:
         return self.local / "sites/include_sites.tsv"
-
-    @property
-    def pca_genotypes(self) -> Path:
-        return self.local / "pca/arrays_pca"
 
     @property
     def pca_output(self) -> Path:
@@ -208,17 +208,24 @@ def validate_dosages(path: Path) -> int:
     return sample_count
 
 
-def validate_staged_genotypes(prefix: Path) -> None:
-    paths = [
-        Path(f"{prefix}.{suffix}")
-        for suffix in ("bed", "bim", "fam", "stage.json")
+def _plink_files(prefix: Path) -> list[Path]:
+    return [Path(f"{prefix}.{suffix}") for suffix in ("bed", "bim", "fam")]
+
+
+def validate_local_arrays(paths: Paths) -> None:
+    mounted = _plink_files(paths.mounted_arrays)
+    local = _plink_files(paths.arrays)
+    _require_files(mounted + local)
+    mismatched = [
+        str(destination)
+        for source, destination in zip(mounted, local)
+        if source.stat().st_size != destination.stat().st_size
     ]
-    _require_files(paths)
-    report = _read_json(Path(f"{prefix}.stage.json"))
-    if report.get("staged_markers") != MARKERS:
-        raise ValueError(f"The staged PCA dataset does not contain {MARKERS:,} markers.")
-    if _line_count(Path(f"{prefix}.bim")) != MARKERS:
-        raise ValueError(f"The staged BIM does not contain {MARKERS:,} markers.")
+    if mismatched:
+        raise ValueError(
+            "Local array files differ in size from the controlled v8 objects: "
+            + ", ".join(mismatched)
+        )
 
 
 def validate_pcs(table_path: Path, sidecar_path: Path, population: str) -> None:
@@ -261,14 +268,12 @@ def preflight(paths: Paths) -> None:
         raise RuntimeError(f"At least {MIN_CPUS} CPUs are required.")
     if _memory_bytes() < MIN_MEMORY_BYTES:
         raise RuntimeError("At least 100 GiB RAM is required.")
-    if shutil.disk_usage(paths.local).free < MIN_FREE_BYTES:
-        raise RuntimeError("At least 30 GiB free local disk is required.")
-    if shutil.which("plink2") is None or shutil.which("gnomon") is None:
-        raise RuntimeError("Both plink2 and gnomon must be installed.")
+    if shutil.which("gcloud") is None or shutil.which("gnomon") is None:
+        raise RuntimeError("Both gcloud and gnomon must be installed.")
 
     inputs = [paths.ancestry, paths.related, paths.phenotypes]
     inputs.extend(
-        Path(f"{paths.arrays}.{suffix}") for suffix in ("bed", "bim", "fam")
+        Path(f"{paths.mounted_arrays}.{suffix}") for suffix in ("bed", "bim", "fam")
     )
     for chromosome in ("chr4", "chr6", "chr8", "chr10", "chr12", "chr17"):
         inputs.extend(
@@ -283,6 +288,43 @@ def preflight(paths: Paths) -> None:
     free_gib = shutil.disk_usage(paths.local).free / 1024**3
     print(f"[preflight] free disk={free_gib:.1f} GiB")
     _run(["gnomon", "version"], cwd=paths.repo)
+
+
+def localize_arrays(paths: Paths) -> None:
+    mounted = _plink_files(paths.mounted_arrays)
+    local = _plink_files(paths.arrays)
+    valid = [
+        destination.is_file()
+        and destination.stat().st_size == source.stat().st_size
+        for source, destination in zip(mounted, local)
+    ]
+    if not all(valid):
+        if shutil.disk_usage(paths.local).free < MIN_DOWNLOAD_FREE_BYTES:
+            raise RuntimeError(
+                "At least 200 GiB free local disk is required to download the AoU "
+                "microarray BED before fitting PCA."
+            )
+        paths.arrays.parent.mkdir(parents=True, exist_ok=True)
+        sources = [
+            f"{ARRAY_BUCKET}/arrays.{suffix}"
+            for suffix, is_valid in zip(("bed", "bim", "fam"), valid)
+            if not is_valid
+        ]
+        _run(
+            [
+                "gcloud",
+                "storage",
+                "cp",
+                *sources,
+                paths.arrays.parent,
+                "--billing-project",
+                os.environ["GOOGLE_PROJECT"],
+            ],
+            cwd=paths.repo,
+        )
+    validate_local_arrays(paths)
+    total_gib = sum(path.stat().st_size for path in local) / 1024**3
+    print(f"[pca] local array checkpoint: {total_gib:.1f} GiB")
 
 
 def prepare_dosages(paths: Paths) -> None:
@@ -329,55 +371,29 @@ def prepare_dosages(paths: Paths) -> None:
     print(f"[dosage] dosage checkpoint: {samples:,} samples")
 
 
-def stage_pca_genotypes(paths: Paths) -> None:
+def prepare_pca_sites(paths: Paths) -> None:
     paths.sites.parent.mkdir(parents=True, exist_ok=True)
-    paths.pca_genotypes.parent.mkdir(parents=True, exist_ok=True)
     paths.pca_output.mkdir(parents=True, exist_ok=True)
-    _run(
-        [
-            paths.python,
-            "-m",
-            "phewas.extra.within_ancestry_pca",
-            "sites",
-            "--bim",
-            Path(f"{paths.arrays}.bim"),
-            "--out",
-            paths.sites,
-        ],
-        cwd=paths.repo,
-    )
-
-    staged = [
-        Path(f"{paths.pca_genotypes}.{suffix}")
-        for suffix in ("bed", "bim", "fam", "stage.json")
-    ]
-    present = sum(path.is_file() for path in staged)
-    if present == 0:
+    if not paths.sites.is_file():
         _run(
             [
                 paths.python,
                 "-m",
                 "phewas.extra.within_ancestry_pca",
-                "stage",
-                "--genotypes",
-                paths.arrays,
-                "--sites",
-                paths.sites,
+                "sites",
+                "--bim",
+                Path(f"{paths.arrays}.bim"),
                 "--out",
-                paths.pca_genotypes,
-                "--markers",
-                str(MARKERS),
-                "--threads",
-                str(THREADS),
-                "--memory-mb",
-                str(MEMORY_MB),
+                paths.sites,
             ],
             cwd=paths.repo,
         )
-    elif present != len(staged):
-        raise RuntimeError(f"Incomplete PCA staging checkpoint at {paths.pca_genotypes}.")
-    validate_staged_genotypes(paths.pca_genotypes)
-    print("[pca] staged genotype checkpoint validated")
+    eligible = _line_count(paths.sites)
+    if eligible < MARKERS:
+        raise ValueError(
+            f"PCA include list contains {eligible:,} sites; at least {MARKERS:,} are required."
+        )
+    print(f"[pca] site checkpoint: {eligible:,} eligible markers")
 
 
 def run_population(paths: Paths, population: str) -> None:
@@ -394,7 +410,7 @@ def run_population(paths: Paths, population: str) -> None:
                 "phewas.extra.within_ancestry_pca",
                 "fit",
                 "--genotypes",
-                paths.pca_genotypes,
+                paths.arrays,
                 "--sites",
                 paths.sites,
                 "--ancestry",
@@ -455,7 +471,8 @@ def main() -> None:
     paths.logs.mkdir(parents=True, exist_ok=True)
     preflight(paths)
     prepare_dosages(paths)
-    stage_pca_genotypes(paths)
+    localize_arrays(paths)
+    prepare_pca_sites(paths)
     for population in POPULATIONS:
         run_population(paths, population)
     print(f"[done] results: {paths.results}")
