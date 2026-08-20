@@ -15,7 +15,7 @@ To reproduce the polygenic score sensitivity analysis:
    ```
 2. **Download the microarray PLINK inputs:**
    ```bash
-   gsutil -u "$GOOGLE_PROJECT" -m cp -r gs://fc-aou-datasets-controlled/v8/microarray/plink/* .
+   gsutil -u "$GOOGLE_PROJECT" -m cp -r gs://vwb-aou-datasets-controlled/v8/microarray/plink/* .
    ```
 3. **Compute scores for the 17q21 region (example invocation):**
    ```bash
@@ -55,7 +55,7 @@ Stage the microarray PLINK trio locally first; streaming genotypes over the netw
 dominates the runtime of everything else.
 
 ```bash
-gsutil -u "$GOOGLE_PROJECT" -m cp -r gs://fc-aou-datasets-controlled/v8/microarray/plink/* .
+gsutil -u "$GOOGLE_PROJECT" -m cp -r gs://vwb-aou-datasets-controlled/v8/microarray/plink/* .
 
 # Autosomes minus every long-range LD region and every tested inversion (+/- 1 Mb).
 python -m phewas.extra.within_ancestry_pca sites \

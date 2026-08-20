@@ -31,9 +31,9 @@ USE_PIPELINE_COVARS = True
 REMOVE_RELATED = True
 INCLUDE_ANCESTRY = True  # ancestry one-hots (drop_first) as in run.py
 
-PCS_URI = "gs://fc-aou-datasets-controlled/v8/wgs/short_read/snpindel/aux/ancestry/ancestry_preds.tsv"
-SEX_URI = "gs://fc-aou-datasets-controlled/v8/wgs/short_read/snpindel/aux/qc/genomic_metrics.tsv"
-RELATEDNESS_URI = "gs://fc-aou-datasets-controlled/v8/wgs/short_read/snpindel/aux/relatedness/relatedness_flagged_samples.tsv"
+PCS_URI = "gs://vwb-aou-datasets-controlled/v8/wgs/short_read/snpindel/aux/ancestry/ancestry_preds.tsv"
+SEX_URI = "gs://vwb-aou-datasets-controlled/v8/wgs/short_read/snpindel/aux/qc/genomic_metrics.tsv"
+RELATEDNESS_URI = "gs://vwb-aou-datasets-controlled/v8/wgs/short_read/snpindel/aux/relatedness/relatedness_flagged_samples.tsv"
 
 NUM_PCS = 10
 
