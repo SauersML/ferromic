@@ -44,7 +44,9 @@ It builds the seven required inversion dosages, downloads the array PLINK files 
 the VM's local disk, and then fits and analyzes EUR, AFR, EAS, AMR, SAS, and MID in
 sequence. It runs only the within-ancestry-PC arm; the existing global-PC analyses are
 not repeated. Completed dosage, array-download, PCA, and PheWAS outputs are validated
-and reused on restart.
+and reused on restart. The PheWAS analyzes one inversion at a time because each inversion
+already uses a full CPU worker pool; running all seven pools together exhausts memory
+without increasing throughput.
 
 The PheWAS adjusts for the principal components published alongside the callset. Those
 come from projecting participants onto a cross-ancestry reference, and the same file

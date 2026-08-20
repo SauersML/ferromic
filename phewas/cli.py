@@ -77,6 +77,14 @@ def build_parser() -> argparse.ArgumentParser:
             "production runs; the default remains a timestamped filename."
         ),
     )
+    parser.add_argument(
+        "--max-concurrent-inversions",
+        type=_positive_int,
+        help=(
+            "Maximum number of inversions analyzed concurrently. Each inversion uses "
+            "its own CPU worker pool, so large cohorts should normally use one."
+        ),
+    )
     return parser
 
 
@@ -159,6 +167,10 @@ def apply_cli_configuration(args: argparse.Namespace) -> dict[str, object]:
         if not normalized_output.endswith(".tsv"):
             raise SystemExit("--output must end in .tsv")
         pipeline_config["output"] = os.path.abspath(normalized_output)
+
+    max_inversions = getattr(args, "max_concurrent_inversions", None)
+    if max_inversions is not None:
+        pipeline_config["max_concurrent_inversions"] = int(max_inversions)
 
     return pipeline_config
 
