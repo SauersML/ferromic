@@ -853,8 +853,8 @@ def load_within_ancestry_pcs(gcp_project: str, WITHIN_ANCESTRY_PCS_URI: str) -> 
     Unlike the cross-ancestry table at PCS_URI -- which packs its components into a
     list-like ``pca_features`` string -- these are written as a plain wide TSV by
     phewas/extra/within_ancestry_pca.py: one ``person_id`` column plus ``WPC1``..``WPCk``.
-    The component count varies by group because it is scaled to the group's sample size,
-    so it is inferred here rather than requested.
+    The producer writes the requested component count into the table. It is inferred
+    here so the association design exactly matches the certified fit artifact.
     """
     print(f"    -> Loading ancestry-specific PCs from '{WITHIN_ANCESTRY_PCS_URI}'...")
     read_kwargs = {"sep": "\t"}

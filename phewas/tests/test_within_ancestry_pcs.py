@@ -262,12 +262,31 @@ def test_site_list_drops_excluded_regions_and_non_autosomes(tmp_path):
     assert len(written) == 2
 
 
-def test_component_count_scales_with_group_size():
-    assert wapca.components_for(130_000) == 20
-    assert wapca.components_for(45_000) == 10
-    assert wapca.components_for(2_000) == 5
-    # Too small to estimate reliably: the group falls back to the global components.
-    assert wapca.components_for(400) == 0
+def test_fit_defaults_match_the_fixed_phewas_design():
+    args = wapca.build_parser().parse_args(
+        [
+            "fit", "--genotypes", "arrays", "--sites", "sites.tsv",
+            "--group", "eur", "--keep", "keep.txt",
+        ]
+    )
+    assert args.components == 16
+    assert args.threads == 4
+    assert args.maf == 0.01
+    assert args.geno == 0.05
+    assert args.mind == 0.05
+    assert wapca.GNOMON_LD_DEFAULT_MARKERS == 100_000
+    assert wapca.GNOMON_LD_DEFAULT_WINDOW_BP == 500_000
+
+
+def test_fit_rejects_a_group_that_could_escape_its_output_prefix(tmp_path):
+    args = wapca.build_parser().parse_args(
+        [
+            "fit", "--genotypes", "arrays", "--sites", "sites.tsv",
+            "--group", "../eur", "--keep", "keep.txt", "--out-dir", str(tmp_path),
+        ]
+    )
+    with pytest.raises(SystemExit, match="--group must start with a letter"):
+        wapca.fit_group(args)
 
 
 def test_keep_list_intersects_cohort_and_drops_related(tmp_path):
@@ -316,6 +335,7 @@ def _pack_scores(scores: np.ndarray, row_ids: list[str]) -> bytes:
     header[8:12] = wapca._MATRIX_VERSION.to_bytes(4, "little")
     header[12:20] = rows.to_bytes(8, "little")
     header[20:28] = cols.to_bytes(8, "little")
+    header[28:32] = wapca._MATRIX_ELEMENT_KIND_F64_LE.to_bytes(4, "little")
     body = np.asarray(scores, dtype="<f8").T.tobytes(order="C")
 
     encoded = [rid.encode("utf-8") for rid in row_ids]
@@ -342,6 +362,8 @@ def _write_fit_outputs(directory, stem, scores, row_ids):
                 "kind": "scores",
                 "layout": "column_major",
                 "dtype": "f64_le",
+                "element_kind": wapca._MATRIX_ELEMENT_KIND_F64_LE,
+                "endianness": "little",
                 "row_ids_embedded": True,
                 "row_id_field": "IID",
                 "rows": scores.shape[0],
@@ -350,27 +372,18 @@ def _write_fit_outputs(directory, stem, scores, row_ids):
         )
     )
     (directory / f"{stem}.hwe.json").write_text("{}")
-    (directory / f"{stem}.hwe_summary.tsv").write_text("key\tvalue\nn\t3\n")
+    (directory / f"{stem}.hwe.project.bin").write_bytes(b"projection cache")
+    (directory / f"{stem}.hwe_summary.tsv").write_text(
+        "metric\tvalue\nn_samples\t3\nconverged\ttrue\n"
+    )
+    (directory / f"{stem}.samples.tsv").write_text("FID\tIID\n0\ta\n0\tb\n")
 
 
-@pytest.mark.parametrize(
-    ("path", "stem"),
-    [
-        ("arrays", "arrays"),
-        ("./arrays.bed", "arrays"),
-        ("/data/cohort.pgen", "cohort"),
-        ("/data/chr1.vcf.gz", "chr1"),
-    ],
-)
-def test_output_stem_matches_gnomon(path, stem):
-    assert wapca._output_stem(path) == stem
-
-
-def test_artifacts_are_expected_beside_the_genotypes(tmp_path):
-    genotypes = tmp_path / "geno" / "arrays.bed"
-    paths = wapca._artifact_paths(str(genotypes))
-    # gnomon writes next to the input, not into the working directory.
-    assert paths["hwe_scores.bin"] == str(tmp_path / "geno" / "arrays.hwe_scores.bin")
+def test_native_output_prefix_isolates_each_groups_outputs(tmp_path):
+    eur = wapca._artifact_paths(str(tmp_path / "gnomon_eur"))
+    afr = wapca._artifact_paths(str(tmp_path / "gnomon_afr"))
+    assert eur["hwe.json"] == str(tmp_path / "gnomon_eur.hwe.json")
+    assert eur["hwe_scores.bin"] != afr["hwe_scores.bin"]
 
 
 def test_score_matrix_round_trips(tmp_path):
@@ -408,41 +421,82 @@ def test_scores_frame_rejects_too_few_components(tmp_path):
         wapca._scores_frame(collected, components=5)
 
 
-def test_collect_moves_artifacts_out_of_the_shared_directory(tmp_path):
-    geno_dir = tmp_path / "geno"
-    _write_fit_outputs(geno_dir, "arrays", np.zeros((2, 2)), ["a", "b"])
-    workdir = tmp_path / "work"
-    workdir.mkdir()
-
-    collected = wapca._collect_fit_artifacts(str(geno_dir / "arrays.bed"), str(workdir), 0.0)
-
-    assert (workdir / "hwe_scores.bin").exists()
-    # Relocating matters: the next group's fit reuses the same stem and would overwrite.
-    assert not (geno_dir / "arrays.hwe_scores.bin").exists()
-    assert collected["hwe.json"] == str(workdir / "hwe.json")
+def test_scores_frame_rejects_duplicate_participants(tmp_path):
+    _write_fit_outputs(tmp_path, "arrays", np.zeros((2, 2)), ["a", "a"])
+    collected = {
+        "hwe_scores.bin": str(tmp_path / "arrays.hwe_scores.bin"),
+        "hwe_scores.metadata.json": str(tmp_path / "arrays.hwe_scores.metadata.json"),
+    }
+    with pytest.raises(SystemExit, match="duplicate participant"):
+        wapca._scores_frame(collected, components=2)
 
 
-def test_collect_rejects_a_model_left_over_from_another_group(tmp_path):
-    geno_dir = tmp_path / "geno"
-    _write_fit_outputs(geno_dir, "arrays", np.zeros((2, 2)), ["a", "b"])
-    workdir = tmp_path / "work"
-    workdir.mkdir()
-    import time as _time
+def test_fit_artifacts_requires_complete_current_main_output(tmp_path):
+    _write_fit_outputs(tmp_path, "pca_eur", np.zeros((2, 2)), ["a", "b"])
 
-    with pytest.raises(SystemExit, match="predates this run"):
-        wapca._collect_fit_artifacts(
-            str(geno_dir / "arrays.bed"), str(workdir), _time.time() + 60
+    collected = wapca._fit_artifacts(str(tmp_path / "pca_eur"))
+    assert collected["hwe.json"] == str(tmp_path / "pca_eur.hwe.json")
+    assert collected["hwe.project.bin"] == str(tmp_path / "pca_eur.hwe.project.bin")
+
+    (tmp_path / "pca_eur.samples.tsv").unlink()
+    with pytest.raises(SystemExit, match="samples.tsv"):
+        wapca._fit_artifacts(str(tmp_path / "pca_eur"))
+
+
+def test_gnomon_fit_uses_current_main_flags_once(monkeypatch, tmp_path):
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        stdout = (
+            "gnomon 0.1.0\nRelease: development build\n"
+            if command[-1] == "version"
+            else ""
         )
+        return __import__("subprocess").CompletedProcess(command, 0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(wapca.subprocess, "run", fake_run)
+    monkeypatch.setattr(wapca, "_full_digest", lambda _: "abc123")
+    provenance = wapca._run_gnomon_fit(
+        gnomon="/bin/gnomon",
+        genotypes="/data/arrays.bed",
+        output_prefix="/results/gnomon_eur",
+        keep_path="/data/keep.txt",
+        sites_path="/data/sites.tsv",
+        components=16,
+        threads=4,
+        maf=0.01,
+        geno=0.05,
+        mind=0.05,
+        workdir=str(tmp_path),
+    )
+
+    fit_command = calls[1][0]
+    assert fit_command[:3] == ["/bin/gnomon", "fit", "/data/arrays.bed"]
+    assert fit_command.count("/data/arrays.bed") == 1
+    for flag in (
+        "--out", "--keep", "--list", "--components", "--threads",
+        "--mind", "--geno", "--maf", "--ld",
+    ):
+        assert flag in fit_command
+    for obsolete_workaround in ("--markers", "--bp_window", "--allow-unconverged"):
+        assert obsolete_workaround not in fit_command
+    assert "preexec_fn" not in calls[1][1]
+    assert provenance["version"].startswith("gnomon 0.1.0")
+    assert provenance["executable_sha256"] == "abc123"
 
 
-def test_fit_summary_is_json_serialisable(tmp_path):
-    """The sidecar embeds gnomon's summary table; numpy scalars would break json.dump."""
+def test_fit_summary_requires_current_schema_and_convergence(tmp_path):
     summary = tmp_path / "hwe_summary.tsv"
-    pd.DataFrame({"key": ["n_samples", "explained"], "value": [55000, 0.031]}).to_csv(
+    pd.DataFrame(
+        {"metric": ["n_samples", "converged"], "value": [55000, "true"]}
+    ).to_csv(
         summary, sep="\t", index=False
     )
-    records = json.loads(pd.read_csv(summary, sep="\t").to_json(orient="records"))
-    json.dumps({"hwe_summary": records, "excluded": [
-        {"chrom": r.chrom, "start": r.start, "end": r.end, "reason": r.reason}
-        for r in wapca.excluded_regions()
-    ]})
+    parsed = wapca._fit_summary(str(summary))
+    assert parsed == {"n_samples": "55000", "converged": "true"}
+    json.dumps({"hwe_summary": parsed})
+
+    summary.write_text("metric\tvalue\nconverged\tfalse\n")
+    with pytest.raises(SystemExit, match="without a certified converged"):
+        wapca._fit_summary(str(summary))
