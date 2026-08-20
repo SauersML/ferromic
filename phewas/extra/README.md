@@ -37,11 +37,11 @@ use the checkpointed wrapper from the repository root:
 bash phewas/run_aou_within_ancestry_hits.sh
 ```
 
-It builds the seven required inversion dosages, stages the 100,000-marker PCA input on
+It builds the seven required inversion dosages, downloads the array PLINK files once to
 the VM's local disk, and then fits and analyzes EUR, AFR, EAS, AMR, SAS, and MID in
 sequence. It runs only the within-ancestry-PC arm; the existing global-PC analyses are
-not repeated. Completed dosage, staging, PCA, and PheWAS outputs are validated and
-reused on restart.
+not repeated. Completed dosage, array-download, PCA, and PheWAS outputs are validated
+and reused on restart.
 
 The PheWAS adjusts for the principal components published alongside the callset. Those
 come from projecting participants onto a cross-ancestry reference, and the same file
@@ -62,16 +62,16 @@ set, with a separate variant set and its own component count. `WPC3` in one grou
 one coefficient to describe a covariate whose meaning changes by row, so
 `--pc-source within-ancestry` requires `--pop-label` and fails without it.
 
-### Stage 1 — stage markers and fit the components
+### Stage 1 — localize the array and fit the components
 
-The controlled dataset and workspace mounts are GCSFuse-backed. Build the eligible site
-list from the mounted BIM, then make one compact 100,000-marker PLINK dataset on the
-VM's local disk. Every ancestry fit reuses that local dataset.
+The controlled dataset and workspace mounts are GCSFuse-backed. The production wrapper
+uses a resumable, sliced `gcloud storage cp` download to put the v8 array PLINK trio on
+the VM's actual local disk. Every ancestry fit reuses that local dataset; PLINK does not
+rewrite a second marker subset because Gnomon performs its own indexed marker selection.
 
 ```bash
 LOCAL=/home/jupyter/aou-phewas
-ARRAYS=/home/jupyter/workspace/
-ARRAYS+=vwb-aou-datasets-controlled/v8/microarray/plink/arrays
+ARRAYS=/home/jupyter/aou-phewas/source/arrays
 
 AUX=/home/jupyter/workspace/
 AUX+=vwb-aou-datasets-controlled/v8/wgs/short_read/snpindel/aux
@@ -84,15 +84,9 @@ python -m phewas.extra.within_ancestry_pca sites \
     --bim "$ARRAYS.bim" \
     --out "$LOCAL/sites/include_sites.tsv"
 
-# Match Gnomon's deterministic marker budget and materialize it once locally.
-python -m phewas.extra.within_ancestry_pca stage \
-    --genotypes "$ARRAYS" \
-    --sites "$LOCAL/sites/include_sites.tsv" \
-    --out "$LOCAL/pca/arrays_pca"
-
 # One group at a time. Defaults are the production settings shown below.
 python -m phewas.extra.within_ancestry_pca fit \
-    --genotypes "$LOCAL/pca/arrays_pca" \
+    --genotypes "$ARRAYS" \
     --sites "$LOCAL/sites/include_sites.tsv" \
     --ancestry "$ANCESTRY" \
     --cohort "$PWD/imputed_inversion_dosages.tsv" \
@@ -105,13 +99,12 @@ python -m phewas.extra.within_ancestry_pca fit \
 
 The producer calls current `gnomon main` as a single indexed PLINK fit with 16
 components, four worker threads, MAF ≥ 0.01, sample and variant missingness ≤ 0.05,
-and LD normalization. Current main makes `--ld` safe for a biobank array by applying an
-evenly spaced 100,000-marker budget and a 500 kbp physical window when no expert
-override is supplied. Marker thinning and a physical-distance window are paired
-deliberately: after thinning, a window measured in neighboring sites no longer has a
-stable genomic meaning. The LD work is local rather than all-pairs, but it can still
-dominate runtime because each local system grows with the number of retained markers in
-that window; the marker budget keeps that density bounded. Current main also applies
+and LD normalization. The producer explicitly requests an evenly spaced 100,000-marker
+budget and a 500 kbp physical window. Marker thinning and a physical-distance window
+are paired deliberately: after thinning, a window measured in neighboring sites no
+longer has a stable genomic meaning. The LD work is local rather than all-pairs, but it
+can still dominate runtime because each local system grows with the number of retained
+markers in that window; the marker budget keeps that density bounded. Current main also applies
 `--threads 4` to both its fit-local and process-wide Rayon pools, so the producer no
 longer needs its own CPU-affinity workaround.
 
