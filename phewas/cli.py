@@ -69,6 +69,14 @@ def build_parser() -> argparse.ArgumentParser:
             "components cannot; it requires --pop-label because the axes differ by group."
         ),
     )
+    parser.add_argument(
+        "--output",
+        type=str,
+        help=(
+            "Write the final TSV to this exact path. This is useful for resumable "
+            "production runs; the default remains a timestamped filename."
+        ),
+    )
     return parser
 
 
@@ -142,6 +150,15 @@ def apply_cli_configuration(args: argparse.Namespace) -> dict[str, object]:
         os.environ.pop("FERROMIC_PC_SOURCE", None)
     else:
         os.environ["FERROMIC_PC_SOURCE"] = pc_source
+
+    output = getattr(args, "output", None)
+    if output is not None:
+        normalized_output = output.strip()
+        if not normalized_output:
+            raise SystemExit("--output must name a non-empty path")
+        if not normalized_output.endswith(".tsv"):
+            raise SystemExit("--output must end in .tsv")
+        pipeline_config["output"] = os.path.abspath(normalized_output)
 
     return pipeline_config
 
