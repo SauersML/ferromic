@@ -93,6 +93,12 @@ def test_default_pc_source_leaves_no_environment_footprint():
     assert "FERROMIC_PC_SOURCE" not in os.environ
 
 
+def test_cli_sets_inversion_concurrency():
+    args = cli.parse_args(["--max-concurrent-inversions", "1"])
+    config = cli.apply_cli_configuration(args)
+    assert config["max_concurrent_inversions"] == 1
+
+
 def test_apply_pipeline_config_round_trips_through_the_environment():
     run._apply_pipeline_config(
         {"population_filter": "afr", "pc_source": "within-ancestry"}

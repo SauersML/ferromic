@@ -454,6 +454,8 @@ def run_population(paths: Paths, population: str) -> None:
                 paths.phenotypes,
                 "--min-cases-controls",
                 "100",
+                "--max-concurrent-inversions",
+                "1",
                 "--output",
                 result,
             ],

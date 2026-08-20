@@ -48,3 +48,28 @@ def test_phewas_result_checkpoint_requires_analysis_columns(tmp_path: Path):
         encoding="utf-8",
     )
     assert workflow.validate_phewas_result(path) == 1
+
+
+def test_production_phewas_runs_one_inversion_pool_at_a_time(
+    monkeypatch, tmp_path: Path
+):
+    commands = []
+    monkeypatch.setattr(workflow, "_run", lambda command, **_kwargs: commands.append(command))
+    monkeypatch.setattr(workflow, "validate_pcs", lambda *_args: None)
+    monkeypatch.setattr(workflow, "validate_phewas_result", lambda *_args: 1)
+
+    paths = workflow.Paths(
+        repo=tmp_path,
+        local=tmp_path / "local",
+        v8=tmp_path / "v8",
+    )
+    paths.pca_output.mkdir(parents=True)
+    paths.results.mkdir(parents=True)
+    (paths.pca_output / "within_ancestry_pcs_eur.tsv").touch()
+    (paths.pca_output / "within_ancestry_pcs_eur.json").touch()
+
+    workflow.run_population(paths, "eur")
+
+    phewas_command = [str(value) for value in commands[-1]]
+    option = phewas_command.index("--max-concurrent-inversions")
+    assert phewas_command[option + 1] == "1"

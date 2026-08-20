@@ -681,6 +681,10 @@ def _apply_pipeline_config(pipeline_config: Optional[dict[str, object]] = None) 
 
     config = pipeline_config or {}
 
+    max_inversions = config.get("max_concurrent_inversions")
+    if max_inversions is not None and int(max_inversions) <= 0:
+        raise ValueError("max_concurrent_inversions must be a positive integer.")
+
     # Validate file-backed configuration in the supervisor before it spawns the worker.
     # A deterministic path/content error inside the child would otherwise be retried.
     phenotype_file = config.get("phenotype_file")
@@ -1855,9 +1859,18 @@ def _pipeline_once(pipeline_config: Optional[dict[str, object]] = None):
         }
         num_ancestry_dummies = len(A_cols)
         C = 1 + 1 + 1 + NUM_PCS + 2 + num_ancestry_dummies
-        MAX_CONCURRENT_INVERSIONS = MAX_CONCURRENT_INVERSIONS_DEFAULT
-        if tctx["MODE"] == "bootstrap":
+        configured_concurrency = config.get("max_concurrent_inversions")
+        if configured_concurrency is not None:
+            MAX_CONCURRENT_INVERSIONS = int(configured_concurrency)
+        elif tctx["MODE"] == "bootstrap":
             MAX_CONCURRENT_INVERSIONS = MAX_CONCURRENT_INVERSIONS_BOOT
+        else:
+            MAX_CONCURRENT_INVERSIONS = MAX_CONCURRENT_INVERSIONS_DEFAULT
+        print(
+            f"[Orchestrator] Maximum concurrent inversions: "
+            f"{MAX_CONCURRENT_INVERSIONS}",
+            flush=True,
+        )
         pending_inversions = deque(sorted(list(run.TARGET_INVERSIONS)))
         running_inversions = {}
 
@@ -2252,8 +2265,19 @@ def supervisor_main(max_restarts=0, backoff_sec=10, *, pipeline_config=None):
             break
         if code in (-2, -15):
             break
+        if restarts >= max_restarts:
+            print(
+                f"[Supervisor] Child exited with code {code}. "
+                "No restart attempts remain.",
+                flush=True,
+            )
+            break
         restarts += 1
-        print(f"[Supervisor] Child exited with code {code}. Restart {restarts}/{max_restarts} in {backoff_sec}s...", flush=True)
+        print(
+            f"[Supervisor] Child exited with code {code}. "
+            f"Restarting {restarts}/{max_restarts} in {backoff_sec}s...",
+            flush=True,
+        )
         for _ in range(backoff_sec * 5):
             if should_stop["flag"]:
                 return
