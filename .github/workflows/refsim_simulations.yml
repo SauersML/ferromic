@@ -27,8 +27,8 @@ on:
   workflow_dispatch:
     inputs:
       tasks:
-        description: 'Comma-separated grids to run (flux,trainset,extreme)'
-        default: 'flux,trainset,extreme'
+        description: 'Comma-separated grids to run (flux,trainset,extreme,growth)'
+        default: 'flux,trainset,extreme,growth'
       commit:
         description: 'Commit regenerated results back to main'
         type: boolean
@@ -70,7 +70,7 @@ jobs:
       - id: build
         run: |
           set -euo pipefail
-          tasks="${{ github.event.inputs.tasks || 'flux,trainset,extreme' }}"
+          tasks="${{ github.event.inputs.tasks || 'flux,trainset,extreme,growth' }}"
           python3 - "$tasks" "${NSHARDS}" <<'PY' >> "$GITHUB_OUTPUT"
           import json, sys
           tasks = [t.strip() for t in sys.argv[1].split(",") if t.strip()]
@@ -153,7 +153,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install numpy pandas scipy scikit-learn matplotlib
+          pip install msprime numpy pandas scipy scikit-learn matplotlib
 
       - uses: actions/download-artifact@v4
         with:
@@ -164,7 +164,7 @@ jobs:
       - name: Show what landed
         run: |
           ls -la simulations/refsim/out/ || true
-          for t in flux trainset extreme; do
+          for t in flux trainset extreme growth; do
             n=$(ls simulations/refsim/out/${t}_shard*.csv 2>/dev/null | wc -l)
             echo "$t: $n / ${NSHARDS} shards"
           done
@@ -202,6 +202,24 @@ jobs:
           python -m recurrence.cli fit
           python -m recurrence.cli score
 
+      - name: Validate and aggregate the frequency-trajectory analysis
+        if: github.event.inputs.reps == ''
+        working-directory: simulations/refsim
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          growth=(out/growth_shard*.csv)
+          if [ ${#growth[@]} -eq 0 ]; then
+            echo "growth was not requested"
+            exit 0
+          fi
+          if [ ${#growth[@]} -ne "${NSHARDS}" ]; then
+            echo "growth incomplete (${#growth[@]}/${NSHARDS})"
+            exit 1
+          fi
+          python check_growth.py --structural-only
+          python make_growth_report.py 'out/growth_shard*.csv' --outdir .
+
       - name: Verify every tracked gzip still decompresses
         run: |
           set -euo pipefail
@@ -229,6 +247,9 @@ jobs:
             simulations/refsim/extreme_results.csv
             simulations/refsim/extreme_results.md
             simulations/refsim/sweep_extreme.json
+            simulations/refsim/growth_results.csv
+            simulations/refsim/growth_results.md
+            simulations/refsim/growth_provenance.json
             recurrence/data/sim_features.csv.gz
             recurrence/results/model.json
             recurrence/results/transferable_model.json
@@ -244,6 +265,11 @@ jobs:
           )
           for f in "${files[@]}"; do
             [ -f "$f" ] && git add -- "$f" || echo "missing (skipped): $f"
+          done
+          for f in simulations/refsim/growth_model.png \
+                   simulations/refsim/growth_frequency.png \
+                   simulations/refsim/growth_diversity_ratio.png; do
+            [ -f "$f" ] && git add -f -- "$f" || echo "missing (skipped): $f"
           done
 
           if git diff --staged --quiet; then
@@ -270,6 +296,7 @@ jobs:
             simulations/refsim/*_results.csv
             simulations/refsim/*_results.md
             simulations/refsim/sweep_*.json
+            simulations/refsim/growth_provenance.json
             simulations/refsim/*.png
             recurrence/results/*.json
           if-no-files-found: warn
