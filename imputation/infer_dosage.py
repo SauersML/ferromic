@@ -34,7 +34,6 @@ MODEL_MANIFEST_URL = (
 )
 MISSING_INT8 = np.int8(-127)
 MIN_PREDICTOR_CALL_RATE = 0.01
-MIN_MODEL_COVERAGE = 0.90
 DOSAGE_MIN = 0.0
 DOSAGE_MAX = 2.0
 ANCESTRY_CODES = {
@@ -160,6 +159,22 @@ def _matrix_statistics(
     return call_rates, means
 
 
+def _training_feature_means(model: object, n_features: int) -> np.ndarray:
+    """Return the PLS centering means used when the model was fitted."""
+    try:
+        estimator = model.named_steps["pls"]
+    except (AttributeError, KeyError, TypeError) as error:
+        raise RuntimeError(
+            "The inversion model must be a fitted pipeline with a 'pls' step."
+        ) from error
+    means = np.asarray(getattr(estimator, "_x_mean", None), dtype=np.float32)
+    if means.shape != (n_features,) or not np.isfinite(means).all():
+        raise RuntimeError(
+            "The inversion model has missing or malformed PLS training means."
+        )
+    return means
+
+
 def _predict(
     target: str,
     matrix_path: Path,
@@ -171,21 +186,24 @@ def _predict(
     matrix = np.load(matrix_path, mmap_mode="r")
     if matrix.ndim != 2 or matrix.shape[0] != len(ancestry_codes):
         raise ValueError(f"Unexpected matrix shape for {target}: {matrix.shape}.")
-    call_rates, means = _matrix_statistics(matrix, ancestry_codes)
-    covered = call_rates >= MIN_PREDICTOR_CALL_RATE
-    coverage = float(covered.mean()) if covered.size else 0.0
-    if coverage < MIN_MODEL_COVERAGE:
-        raise RuntimeError(
-            f"{target} has usable coverage for only {coverage:.1%} of predictors; "
-            f"minimum is {MIN_MODEL_COVERAGE:.0%}."
-        )
     model = joblib.load(model_path)
-    expected_features = getattr(model, "n_features_in_", matrix.shape[1])
-    if int(expected_features) != matrix.shape[1]:
+    expected_features = getattr(model, "n_features_in_", None)
+    if expected_features is None or int(expected_features) != matrix.shape[1]:
         raise RuntimeError(
             f"{target} model expects {expected_features} predictors but the matrix has "
             f"{matrix.shape[1]}."
         )
+    training_means = _training_feature_means(model, matrix.shape[1])
+    call_rates, means = _matrix_statistics(matrix, ancestry_codes)
+    covered = call_rates >= MIN_PREDICTOR_CALL_RATE
+    covered_count = int(covered.sum())
+    if covered_count == 0:
+        raise RuntimeError(
+            f"{target} has no predictors with at least "
+            f"{MIN_PREDICTOR_CALL_RATE:.0%} call rate."
+        )
+    absent = call_rates == 0
+    means[:, absent] = training_means[absent]
     predictions = np.empty(matrix.shape[0], dtype=np.float32)
     clamped_count = 0
     with threadpool_limits(limits=threads):
@@ -204,7 +222,8 @@ def _predict(
             predictions[start:end] = clamped
     report = {
         "predictor_count": int(matrix.shape[1]),
-        "covered_predictors": int(covered.sum()),
+        "covered_predictors": covered_count,
+        "training_mean_predictors": int(absent.sum()),
         "mean_call_rate": float(call_rates.mean()),
         "clamped_predictions": clamped_count,
         "model_sha256": _sha256(model_path),
@@ -243,7 +262,9 @@ def infer(
         reports[target] = report
         print(
             f"[infer] coverage={report['covered_predictors']:,}/"
-            f"{report['predictor_count']:,}; clamped={report['clamped_predictions']:,}"
+            f"{report['predictor_count']:,}; "
+            f"training-mean={report['training_mean_predictors']:,}; "
+            f"clamped={report['clamped_predictions']:,}"
         )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
