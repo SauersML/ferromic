@@ -150,13 +150,13 @@ analysis, not all 1,089 phenotypes.
 for pop in afr amr eas eur mid sas; do
     python3 -m phewas.cli \
         --pop-label "$pop" \
-        --pheno-file data/phewas_significant_phenotypes.txt \
+        --pheno-file phewas/data/significant_phenotypes.txt \
         --min-cases-controls 100
 
     python3 -m phewas.cli \
         --pop-label "$pop" \
         --pc-source within-ancestry \
-        --pheno-file data/phewas_significant_phenotypes.txt \
+        --pheno-file phewas/data/significant_phenotypes.txt \
         --min-cases-controls 100
 done
 ```

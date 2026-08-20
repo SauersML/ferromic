@@ -89,7 +89,7 @@ class Paths:
 
     @property
     def phenotypes(self) -> Path:
-        return self.repo / "data/phewas_significant_phenotypes.txt"
+        return self.repo / "phewas/data/significant_phenotypes.txt"
 
 
 def _run(
