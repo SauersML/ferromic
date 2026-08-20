@@ -103,11 +103,21 @@ python3 -m phewas.cli --pop-label "eur"
 # Debug a single phenotype
 python3 -m phewas.cli --pheno "Type_2_diabetes"
 
+# Run a predefined phenotype panel with the ordinary logistic model
+python3 -m phewas.cli --pheno-file data/phewas_significant_phenotypes.txt
+
 # Adjust for ancestry-specific principal components instead of the projected
 # global ones. Requires --pop-label: the components are fit separately within
 # each ancestry group, so their axes are not comparable across groups.
 # See phewas/extra/README.md for how the components are produced.
 python3 -m phewas.cli --pop-label "eur" --pc-source within-ancestry
+
+# Within-population-PC sensitivity analysis for the 37 phenotypes that were
+# BH-significant in the published pooled PheWAS
+python3 -m phewas.cli \
+  --pop-label "eur" \
+  --pc-source within-ancestry \
+  --pheno-file data/phewas_significant_phenotypes.txt
 ```
 
 `--pc-source` defaults to `global`, which is what every published result uses. The

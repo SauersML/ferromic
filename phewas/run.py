@@ -696,6 +696,12 @@ def _apply_pipeline_config(pipeline_config: Optional[dict[str, object]] = None) 
 
     config = pipeline_config or {}
 
+    # Validate file-backed configuration in the supervisor before it spawns the worker.
+    # A deterministic path/content error inside the child would otherwise be retried.
+    phenotype_file = config.get("phenotype_file")
+    if phenotype_file is not None:
+        _load_phenotype_names(str(phenotype_file))
+
     min_override = config.get("min_cases_controls")
     if min_override is not None:
         CLI_MIN_CASES_CONTROLS_OVERRIDE = int(min_override)
@@ -750,6 +756,24 @@ def _normalize_population_label(label: Optional[str]) -> str:
         return ""
     normalized = str(label).strip().lower()
     return normalized
+
+
+def _load_phenotype_names(path: str) -> tuple[str, ...]:
+    """Load a strict, ordered phenotype shortlist from a plain-text file."""
+    with open(path, "r", encoding="utf-8") as handle:
+        names = tuple(
+            line.strip()
+            for line in handle
+            if line.strip() and not line.lstrip().startswith("#")
+        )
+    if not names:
+        raise ValueError(f"Phenotype file '{path}' contains no phenotype names")
+    duplicates = sorted({name for name in names if names.count(name) > 1})
+    if duplicates:
+        raise ValueError(
+            f"Phenotype file '{path}' contains duplicate names: {', '.join(duplicates)}"
+        )
+    return names
 
 
 def _normalize_pc_source(source: Optional[str]) -> str:
@@ -1048,6 +1072,13 @@ def _pipeline_once(pipeline_config: Optional[dict[str, object]] = None):
     Entry point for the PheWAS pipeline. Uses module-level configuration directly.
     """
     _apply_pipeline_config(pipeline_config)
+    config = pipeline_config or {}
+    phenotype_file_value = config.get("phenotype_file")
+    selected_phenotypes = (
+        _load_phenotype_names(str(phenotype_file_value))
+        if phenotype_file_value is not None
+        else None
+    )
 
     script_start_time = time.time()
 
@@ -1111,6 +1142,23 @@ def _pipeline_once(pipeline_config: Optional[dict[str, object]] = None):
                 if filtered_count == 0:
                     raise ValueError(f"No phenotype found matching filter: '{PHENOTYPE_FILTER}'")
                 print(f"[Config] Phenotype filter applied: '{PHENOTYPE_FILTER}' ({filtered_count}/{original_count} phenotypes)", flush=True)
+            elif selected_phenotypes is not None:
+                original_count = len(pheno_defs_df)
+                available = set(pheno_defs_df["sanitized_name"].astype(str))
+                missing = sorted(set(selected_phenotypes) - available)
+                if missing:
+                    raise ValueError(
+                        "Phenotype shortlist contains names absent from the definitions: "
+                        + ", ".join(missing)
+                    )
+                pheno_defs_df = pheno_defs_df[
+                    pheno_defs_df["sanitized_name"].isin(selected_phenotypes)
+                ].copy()
+                print(
+                    f"[Config] Phenotype file applied: '{phenotype_file_value}' "
+                    f"({len(pheno_defs_df)}/{original_count} phenotypes)",
+                    flush=True,
+                )
             
             bootstrap_draw_cap = _infer_bootstrap_ceiling(
                 num_phenotypes=pheno_defs_df.shape[0],
@@ -1336,6 +1384,7 @@ def _pipeline_once(pipeline_config: Optional[dict[str, object]] = None):
             "covars": covar_key,
             "population_filter": population_filter_label,
             "phenotype_filter": PHENOTYPE_FILTER,
+            "phenotype_shortlist": selected_phenotypes,
         }
 
         def _inversion_cache_path(inv: str) -> str:
@@ -1370,6 +1419,7 @@ def _pipeline_once(pipeline_config: Optional[dict[str, object]] = None):
                 "DATA_KEYS": data_keys,
                 "POPULATION_FILTER": population_filter_label,
                 "PHENOTYPE_FILTER": PHENOTYPE_FILTER,
+                "PHENOTYPE_SHORTLIST": selected_phenotypes,
             }
             return io.stable_hash(payload)
 
