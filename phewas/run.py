@@ -2262,16 +2262,16 @@ def supervisor_main(max_restarts=0, backoff_sec=10, *, pipeline_config=None):
         current_child["proc"] = None
         code = p.exitcode
         if code == 0:
-            break
+            return
         if code in (-2, -15):
-            break
+            raise SystemExit(128 + abs(code))
         if restarts >= max_restarts:
             print(
                 f"[Supervisor] Child exited with code {code}. "
                 "No restart attempts remain.",
                 flush=True,
             )
-            break
+            raise SystemExit(code if code is not None and code > 0 else 1)
         restarts += 1
         print(
             f"[Supervisor] Child exited with code {code}. "
