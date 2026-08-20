@@ -626,9 +626,9 @@ LOADER_CHUNK_SIZE = 128
 CACHE_DIR = "./phewas_cache"
 LOCK_DIR = os.path.join(CACHE_DIR, "locks")
 INVERSION_DOSAGES_FILE = "imputed_inversion_dosages.tsv"
-PCS_URI = "gs://fc-aou-datasets-controlled/v8/wgs/short_read/snpindel/aux/ancestry/ancestry_preds.tsv"
-SEX_URI = "gs://fc-aou-datasets-controlled/v8/wgs/short_read/snpindel/aux/qc/genomic_metrics.tsv"
-RELATEDNESS_URI = "gs://fc-aou-datasets-controlled/v8/wgs/short_read/snpindel/aux/relatedness/relatedness_flagged_samples.tsv"
+PCS_URI = "gs://vwb-aou-datasets-controlled/v8/wgs/short_read/snpindel/aux/ancestry/ancestry_preds.tsv"
+SEX_URI = "gs://vwb-aou-datasets-controlled/v8/wgs/short_read/snpindel/aux/qc/genomic_metrics.tsv"
+RELATEDNESS_URI = "gs://vwb-aou-datasets-controlled/v8/wgs/short_read/snpindel/aux/relatedness/relatedness_flagged_samples.tsv"
 
 # Ancestry-specific ("fine-scale") principal components, fit separately inside each
 # genetic ancestry group rather than projected onto a cross-ancestry reference. One

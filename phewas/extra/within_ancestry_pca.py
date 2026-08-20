@@ -13,7 +13,7 @@ which doubles as the provenance record for the methods.
 
 Typical use inside the workbench, after staging the microarray PLINK trio locally::
 
-    gsutil -u "$GOOGLE_PROJECT" -m cp -r gs://fc-aou-datasets-controlled/v8/microarray/plink/* .
+    gsutil -u "$GOOGLE_PROJECT" -m cp -r gs://vwb-aou-datasets-controlled/v8/microarray/plink/* .
 
     python -m phewas.extra.within_ancestry_pca sites \\
         --bim arrays.bim --out sites/include_sites.tsv

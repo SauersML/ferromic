@@ -18,8 +18,8 @@ OUTPUT_DIR      = "./assoc_outputs"
 CACHE_DIR       = ".bq_cache"
 
 # GCS (requester pays)
-GCS_ANCESTRY_URI = "gs://fc-aou-datasets-controlled/v8/wgs/short_read/snpindel/aux/ancestry/ancestry_preds.tsv"
-GCS_SEX_URI      = "gs://fc-aou-datasets-controlled/v8/wgs/short_read/snpindel/aux/qc/genomic_metrics.tsv"
+GCS_ANCESTRY_URI = "gs://vwb-aou-datasets-controlled/v8/wgs/short_read/snpindel/aux/ancestry/ancestry_preds.tsv"
+GCS_SEX_URI      = "gs://vwb-aou-datasets-controlled/v8/wgs/short_read/snpindel/aux/qc/genomic_metrics.tsv"
 
 # target inversion (we’ll auto-detect case; name will be normalized to lowercase)
 INV_TARGET      = "chr17-45585160-inv-706887"
