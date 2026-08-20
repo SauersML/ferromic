@@ -37,6 +37,9 @@ use the checkpointed wrapper from the repository root:
 bash phewas/run_aou_within_ancestry_hits.sh
 ```
 
+The wrapper installs the latest published build from `gnomon` main at the start of
+every invocation, so it never uses a commit-pinned or stale local executable.
+
 It builds the seven required inversion dosages, downloads the array PLINK files once to
 the VM's local disk, and then fits and analyzes EUR, AFR, EAS, AMR, SAS, and MID in
 sequence. It runs only the within-ancestry-PC arm; the existing global-PC analyses are

@@ -4,6 +4,8 @@ set -euo pipefail
 readonly REPO="/home/jupyter/repos/ferromic"
 readonly LOCAL="/home/jupyter/aou-phewas"
 readonly VENV="$LOCAL/venv"
+readonly GNOMON_INSTALLER="https://raw.githubusercontent.com/"\
+"SauersML/gnomon/main/install.sh"
 
 cd "$REPO"
 mkdir -p "$LOCAL"
@@ -20,7 +22,9 @@ fi
   threadpoolctl==3.6.0 \
   bed-reader==1.1.0
 
+curl -fsSL "$GNOMON_INSTALLER" | bash -s -- --binary gnomon
 export PATH="$HOME/.local/bin:$PATH"
+hash -r
 
 exec "$VENV/bin/python" \
   -m phewas.aou_within_ancestry_hits
