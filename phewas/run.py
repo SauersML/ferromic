@@ -16,6 +16,7 @@ import json
 import importlib
 import importlib.util
 import hashlib
+from pathlib import Path
 from typing import Callable, Optional, Sequence, Tuple
 try:
     import psutil
@@ -55,6 +56,7 @@ from . import pheno
 from . import pipes
 from . import models
 from . import testing
+from imputation.targets import PHEWAS_TARGET_INVERSIONS
 
 from statsmodels.tools.sm_exceptions import ConvergenceWarning
 
@@ -574,38 +576,7 @@ class MultiTenantGovernor(ResourceGovernor):
         return mem_ok
 
 # --- Configuration ---
-TARGET_INVERSIONS = {
-    "chr8-7301025-INV-5297356",
-    "chr10-79542902-INV-674513",
-    "chr12-46897663-INV-16289",
-    "chr17-45585160-INV-706887",
-    "chr4-33098029-INV-7075",
-    "chr6-141867315-INV-29159",
-    "chr6-167181003-INV-209976",
-}
-
-
-"""
-TARGET_INVERSIONS = {
-    "chr8-7301025-INV-5297356",
-    "chr10-79542902-INV-674513",
-    "chr12-46897663-INV-16289",
-    "chr17-45585160-INV-706887",
-    "chr4-33098029-INV-7075",
-    "chr6-141867315-INV-29159",
-    "chr6-167181003-INV-209976",
-}
-"""
-
-"""
-Low imputation:
-1. **chr7-73113990-INV-1685041**
-2. **chr16-15028481-INV-133352**
-3. **chr16-28471894-INV-165758**
-4. **chr7-65219158-INV-312667**
-5. **chr15-30618104-INV-1535102**
-6. **chr7-54220528-INV-101153**
-"""
+TARGET_INVERSIONS = set(PHEWAS_TARGET_INVERSIONS)
 
 # NOTE: 'chr17-45974480-INV-29218' was an old tag-SNP-span pseudo-coordinate and is NOT a
 # real inversion id. The 17q21.31 inversion is tracked under its canonical id
@@ -626,9 +597,23 @@ LOADER_CHUNK_SIZE = 128
 CACHE_DIR = "./phewas_cache"
 LOCK_DIR = os.path.join(CACHE_DIR, "locks")
 INVERSION_DOSAGES_FILE = "imputed_inversion_dosages.tsv"
-PCS_URI = "gs://vwb-aou-datasets-controlled/v8/wgs/short_read/snpindel/aux/ancestry/ancestry_preds.tsv"
-SEX_URI = "gs://vwb-aou-datasets-controlled/v8/wgs/short_read/snpindel/aux/qc/genomic_metrics.tsv"
-RELATEDNESS_URI = "gs://vwb-aou-datasets-controlled/v8/wgs/short_read/snpindel/aux/relatedness/relatedness_flagged_samples.tsv"
+_AOU_V8 = (
+    Path.home()
+    / "workspace"
+    / "vwb-aou-datasets-controlled"
+    / "v8"
+    / "wgs"
+    / "short_read"
+    / "snpindel"
+)
+PCS_URI = str(_AOU_V8 / "aux" / "ancestry" / "echo_v4_r2.ancestry_preds.tsv")
+SEX_URI = str(_AOU_V8 / "aux" / "qc" / "genomics_metrics_Dec142023_1859_02_tz0000.tsv")
+RELATEDNESS_URI = str(
+    _AOU_V8
+    / "aux"
+    / "relatedness"
+    / "samples_relatedness_flagged_samples.tsv"
+)
 
 # Ancestry-specific ("fine-scale") principal components, fit separately inside each
 # genetic ancestry group rather than projected onto a cross-ancestry reference. One

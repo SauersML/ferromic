@@ -31,6 +31,7 @@ or any non-public resource.
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 from typing import Dict, List, Tuple
@@ -271,15 +272,28 @@ def main() -> None:
     subset_prefix = os.path.join(work, "subset")
     build_subset_bed(args.kgp_vcf, bench_samples, rstart, rend, subset_prefix, work)
 
-    # 3) route bed -> model genotype matrix (prepare_data_for_infer.py, unchanged)
+    # 3) route bed -> model genotype matrix with the same sharded-PLINK preparation
+    # used for AoU. This benchmark has one chromosome, so expose its subset as chr6.
     geno_dir = os.path.join(work, "genotype_matrices")
-    env = dict(os.environ)
-    env.update(
-        PLINK_PREFIX=subset_prefix,
-        OUTPUT_DIR=geno_dir,
-        MODEL_SOURCE_DIR=model_dir,
+    shard_dir = os.path.join(work, "plink_shards")
+    os.makedirs(shard_dir, exist_ok=True)
+    for suffix in (".bed", ".bim", ".fam"):
+        shutil.copy2(subset_prefix + suffix, os.path.join(shard_dir, "chr6" + suffix))
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    run(
+        [
+            sys.executable,
+            "-m",
+            "imputation.prepare_data_for_infer",
+            "--plink-dir",
+            shard_dir,
+            "--output-dir",
+            geno_dir,
+            "--target",
+            MODEL_NAME,
+        ],
+        cwd=repo_root,
     )
-    run([sys.executable, os.path.join(os.path.dirname(__file__), "prepare_data_for_infer.py")], env=env)
 
     # bed sample order (fam) drives matrix row order
     fam = pd.read_csv(subset_prefix + ".fam", sep=r"\s+", header=None, dtype=str)
