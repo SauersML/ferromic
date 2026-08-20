@@ -732,7 +732,11 @@ def _apply_pipeline_config(pipeline_config: Optional[dict[str, object]] = None) 
             "model. Pass a population label (--pop-label) alongside --pc-source within-ancestry."
         )
 
-    MASTER_RESULTS_CSV = _master_results_filename()
+    requested_output = config.get("output")
+    if requested_output is None:
+        MASTER_RESULTS_CSV = _master_results_filename()
+    else:
+        MASTER_RESULTS_CSV = str(Path(str(requested_output)).expanduser().resolve())
 
 
 def _normalize_population_label(label: Optional[str]) -> str:
@@ -2185,7 +2189,7 @@ def _pipeline_once(pipeline_config: Optional[dict[str, object]] = None):
         print("=" * 70)
 
 
-def supervisor_main(max_restarts=100, backoff_sec=10, *, pipeline_config=None):
+def supervisor_main(max_restarts=0, backoff_sec=10, *, pipeline_config=None):
     import multiprocessing as mp, time, signal, os
 
     # Apply the configuration in the parent before spawning anything. Two reasons: an

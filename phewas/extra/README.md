@@ -30,6 +30,19 @@ Adjust the score list and genomic intervals as needed for other regions or panel
 
 ## Ancestry-specific principal components
 
+For the AoU v8 production run restricted to the 37 previously significant phenotypes,
+use the checkpointed wrapper from the repository root:
+
+```bash
+bash phewas/run_aou_within_ancestry_hits.sh
+```
+
+It builds the seven required inversion dosages, stages the 100,000-marker PCA input on
+the VM's local disk, and then fits and analyzes EUR, AFR, EAS, AMR, SAS, and MID in
+sequence. It runs only the within-ancestry-PC arm; the existing global-PC analyses are
+not repeated. Completed dosage, staging, PCA, and PheWAS outputs are validated and
+reused on restart.
+
 The PheWAS adjusts for the principal components published alongside the callset. Those
 come from projecting participants onto a cross-ancestry reference, and the same file
 supplies the ancestry labels, so the two are views of one computation. They separate

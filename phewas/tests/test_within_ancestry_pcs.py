@@ -104,6 +104,23 @@ def test_apply_pipeline_config_round_trips_through_the_environment():
     assert "pcs-within-ancestry" in run.MASTER_RESULTS_CSV
 
 
+def test_explicit_output_path_replaces_timestamped_name(tmp_path):
+    output = tmp_path / "eur_within.tsv"
+    args = cli.parse_args(
+        [
+            "--pop-label",
+            "eur",
+            "--pc-source",
+            "within-ancestry",
+            "--output",
+            str(output),
+        ]
+    )
+    config = cli.apply_cli_configuration(args)
+    run._apply_pipeline_config(config)
+    assert run.MASTER_RESULTS_CSV == str(output.resolve())
+
+
 def test_apply_pipeline_config_rejects_pooled_within_ancestry():
     with pytest.raises(ValueError, match="single-population"):
         run._apply_pipeline_config(
