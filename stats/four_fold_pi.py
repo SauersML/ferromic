@@ -576,10 +576,10 @@ def make_figure(df):
         n_recur = int((sub["recurrence"] == 1).sum())
         ax.text(0.5, -0.105, f"Single-event (n = {n_single})",
                 transform=ax.get_xaxis_transform(), ha="center", va="top",
-                fontsize=10)
+                fontsize=12)
         ax.text(3.5, -0.105, f"Recurrent (n = {n_recur})",
                 transform=ax.get_xaxis_transform(), ha="center", va="top",
-                fontsize=10)
+                fontsize=12)
         ax.set_ylabel(r"Nucleotide diversity ($\pi$, $\times10^{-3}$)")
         ax.yaxis.set_major_formatter(
             plt.FuncFormatter(lambda v, _: f"{v * 1e3:g}"))
