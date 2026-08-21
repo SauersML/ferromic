@@ -74,6 +74,7 @@ PHYMETA_TSV  = _resolve_input("phy_metadata.tsv")
 OUT_SUMMARY  = os.path.join(DATA_DIR, "recurrence_controls_summary.tsv")
 OUT_COVTAB   = os.path.join(DATA_DIR, "recurrence_controls_covariates.tsv")
 ARCH_TSV     = _resolve_input("inversion_architecture_covariates.tsv")
+LOCUS_ORDER_TSV = _resolve_input("recurrence_controls_locus_order.tsv")
 OUT_FIG      = os.path.join(DATA_DIR, "recurrence_controls.pdf")
 
 # ------------------------- SETTINGS -------------------------
@@ -224,6 +225,24 @@ def load_loci() -> pd.DataFrame:
     # recombination landscape and genomic compartment (see
     # stats/inversion_architecture_covariates.py for how these are derived)
     best = _attach_architecture(best)
+
+    # pandas merge order differs across platforms.  Because the seeded CRT
+    # assigns one random-label column to each locus, make that assignment
+    # explicit rather than allowing a hash-join implementation detail to alter
+    # the Monte Carlo p-values.
+    order = pd.read_csv(LOCUS_ORDER_TSV, sep="\t")["region_id"].astype(str).tolist()
+    if len(order) != len(set(order)):
+        raise ValueError("Duplicate region_id in recurrence_controls_locus_order.tsv")
+    observed = set(best["region_id"].astype(str))
+    expected = set(order)
+    if observed != expected:
+        raise ValueError(
+            "Locus-order manifest does not match analysis loci: "
+            f"missing={sorted(observed - expected)}, extra={sorted(expected - observed)}"
+        )
+    rank = {region_id: i for i, region_id in enumerate(order)}
+    best["_crt_order"] = best["region_id"].map(rank)
+    best = best.sort_values("_crt_order", kind="stable").drop(columns="_crt_order")
 
     return best
 
