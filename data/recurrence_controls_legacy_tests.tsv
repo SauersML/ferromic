@@ -1,0 +1,16 @@
+outcome	control	effect	ci_lo	ci_hi	p	n	n_recur	n_single	scale
+Delta-log pi interaction (ratio)	unadjusted	4.14936	2.0858	8.25447	5.01496e-05	62	32	30	ratio
+Delta-log pi interaction (ratio)	covariate-adjusted	4.43818	1.94661	10.1189	0.000393987	62	32	30	ratio
+Delta-log pi interaction (ratio)	matched (length+AF)	3.92172	1.69228	9.06914	0.0029997	36	18	18	ratio
+Delta-log pi interaction (ratio)	adjusted + recombination/compartment	3.83339	1.55648	9.44112	0.00347697	62	32	30	ratio
+Delta-log pi interaction (ratio)	matched (length+AF+recomb)	6.54702	1.86019	23.3633	0.00709929	20	10	10	ratio
+Hudson FST (Recurrent - Single)	unadjusted	-0.198223	-0.320971	-0.0754737	0.00155013	59	32	27	difference
+Hudson FST (Recurrent - Single)	covariate-adjusted	-0.225188	-0.385733	-0.0646428	0.00597436	59	32	27	difference
+Hudson FST (Recurrent - Single)	matched (length+AF)	-0.197842	-0.355128	-0.0431391	0.0131987	32	16	16	difference
+Hudson FST (Recurrent - Single)	adjusted + recombination/compartment	-0.227855	-0.407358	-0.0483516	0.0128481	59	32	27	difference
+Hudson FST (Recurrent - Single)	matched (length+AF+recomb)	-0.208141	-0.462607	0.0627561	0.10439	18	9	9	difference
+da = Dxy - pi_avg (Recurrent - Single)	unadjusted	-0.000256768	-0.000473884	-3.96517e-05	0.0204519	60	32	28	difference
+da = Dxy - pi_avg (Recurrent - Single)	covariate-adjusted	-0.00037022	-0.000671667	-6.87738e-05	0.0160769	60	32	28	difference
+da = Dxy - pi_avg (Recurrent - Single)	matched (length+AF)	-0.000288294	-0.000643923	1.80928e-05	0.079892	34	17	17	difference
+da = Dxy - pi_avg (Recurrent - Single)	adjusted + recombination/compartment	-0.000414006	-0.000794132	-3.38789e-05	0.0327867	60	32	28	difference
+da = Dxy - pi_avg (Recurrent - Single)	matched (length+AF+recomb)	-0.000219111	-0.000459263	1.2e-05	0.0588941	18	9	9	difference

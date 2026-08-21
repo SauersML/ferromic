@@ -35,15 +35,15 @@
   },
   "input_files": {
     "output_csv": {
-      "path": "/projects/standard/hsiehph/sauer354/ferromic-runs/figure2a-repolarized-20260724/data/output.csv",
+      "path": "/home/runner/work/ferromic/ferromic/data/output.csv",
       "sha256": "c19cd7af05d9100df4aca76599cfffd7e63ae46b081a67cca2e5d9c1fd8f7737"
     },
     "inv_properties": {
-      "path": "/projects/standard/hsiehph/sauer354/ferromic-runs/figure2a-repolarized-20260724/data/inv_properties.tsv",
+      "path": "/home/runner/work/ferromic/ferromic/data/inv_properties.tsv",
       "sha256": "fc6bcb95681737e6b838db8495e730e2e28e74d219f1905a0037dc066b04cc34"
     },
     "polarity_json": {
-      "path": "/projects/standard/hsiehph/sauer354/ferromic-runs/figure2a-repolarized-20260724/data/chimp_alignment_responses.json",
+      "path": "/home/runner/work/ferromic/ferromic/data/chimp_alignment_responses.json",
       "sha256": "5b869ebd2106509f83fea49234e0a2204ecd76ef1985d2215b1e921e1e4ff3e5"
     }
   }
