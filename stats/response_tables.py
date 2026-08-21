@@ -75,11 +75,12 @@ def four_fold():
     df = _read("four_fold_pi_by_inversion.tsv")
     if df is None:
         return
+    df = df[pd.to_numeric(df["recurrence"], errors="coerce").isin([0, 1])].copy()
     out = pd.DataFrame({
         "Inversion (GRCh38)": [_inv_label(r.chr, r.region_start, r.region_end)
                                for r in df.itertuples()],
         "Recurrence class": df["recurrence"].map(
-            {0: "single-event", 1: "recurrent"}).fillna("not classified"),
+            {0: "single-event", 1: "recurrent"}),
         "Coding sequences in locus": df["n_cds"],
         "Coding sequences with 4-fold sites": df["n_cds_with_fourfold"],
         "4-fold sites, direct haplotypes": df["fourfold_sites_direct"],
@@ -98,11 +99,12 @@ def four_fold():
 def pin_pis():
     df = _read("pin_pis_by_inversion.tsv")
     if df is not None:
+        df = df[pd.to_numeric(df["recurrence"], errors="coerce").isin([0, 1])].copy()
         out = pd.DataFrame({
             "Inversion (GRCh38)": [_inv_label(r.chr, r.region_start, r.region_end)
                                    for r in df.itertuples()],
             "Recurrence class": df["recurrence"].map(
-                {0: "single-event", 1: "recurrent"}).fillna("not classified"),
+                {0: "single-event", 1: "recurrent"}),
             "Coding sequences used": df["n_cds_used"],
             "0-fold (nonsynonymous) sites, direct": df["zerofold_sites_direct"],
             "0-fold (nonsynonymous) sites, inverted": df["zerofold_sites_inverted"],

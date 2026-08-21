@@ -20,11 +20,12 @@ This script:
      callable sites (>= 2 called haplotypes), matching
      calculate_pi_from_summary (sum of per-site pi / effective length).
      This is done separately for the inverted and direct haplotype groups.
-  4. Aggregates by recurrence category from data/inv_properties.tsv
-     (0_single_1_recur_consensus) and compares fourfold pi to whole-locus pi
-     (output.csv 0_pi_filtered / 1_pi_filtered) by orientation and recurrence,
-     using the paper's paired Wilcoxon signed-rank and Mann-Whitney U tests
-     (cf. stats/recur_diversity.py, stats/inv_dir_recur_model.py).
+  4. Restricts the analysis to loci with a consensus recurrence classification
+     in data/inv_properties.tsv (0_single_1_recur_consensus), then compares
+     fourfold pi to whole-locus pi (output.csv 0_pi_filtered / 1_pi_filtered) by
+     orientation and recurrence using the paper's paired Wilcoxon signed-rank
+     and Mann-Whitney U tests (cf. stats/recur_diversity.py,
+     stats/inv_dir_recur_model.py).
 
 Outputs (written to the working directory, i.e. data/ when run from there):
   - four_fold_pi_by_inversion.tsv : per-inversion fourfold and whole-locus pi
@@ -450,10 +451,12 @@ def _p_label(value):
 
 
 def make_figure(df):
-    """Two panels in the manuscript's Fig. 2A violin style -- whole-inversion pi
-    and 4-fold-degenerate-site pi, each direct vs inverted split by recurrence.
-    Layout, colors, boxplots, paired log2-ratio lines and significance brackets
-    mirror stats/figure2a_repolarized.py / stats/inv_dir_recur_violins.py."""
+    """Four-panel figure for consensus-classified loci only.
+
+    The top row compares direct and inverted diversity within each recurrence
+    class. The bottom row compares per-locus orientation differences among the
+    same loci. Unclassified loci are excluded from every panel and statistic.
+    """
     if plt is None:
         print("matplotlib unavailable; skipping figure")
         return
@@ -603,16 +606,14 @@ def make_figure(df):
         sub = usable.dropna(subset=[xcol, ycol])
         x = sub[xcol].to_numpy(float)
         y = sub[ycol].to_numpy(float)
-        rec = pd.to_numeric(sub["recurrence"], errors="coerce").to_numpy()
+        rec = pd.to_numeric(sub["recurrence"], errors="raise").to_numpy()
+        if not np.isin(rec, [0, 1]).all():
+            raise ValueError("four-fold figure requires consensus-classified loci")
 
         # Color encodes orientation in this figure, so recurrence class is
         # carried by marker shape instead.
         is_single = rec == 0
         is_recur = rec == 1
-        is_unclass = ~(is_single | is_recur)
-        ax.scatter(x[is_unclass], y[is_unclass], s=34, facecolors="none",
-                   edgecolors="#9a9a9a", linewidths=1.0,
-                   label=f"unclassified (n = {int(is_unclass.sum())})")
         # Class colors match the other recurrence figures
         # (stats/divergence_da_dxy_by_type.py); marker shape is a redundant cue.
         ax.scatter(x[is_single], y[is_single], s=42, marker="o",
@@ -622,13 +623,9 @@ def make_figure(df):
                    color="#8c2d7e", edgecolors="black", linewidths=0.4,
                    label=f"recurrent (n = {int(is_recur.sum())})")
 
-        rho_all, p_all = _st.spearmanr(x, y)
-        cls = is_single | is_recur
-        rho_c, p_c = _st.spearmanr(x[cls], y[cls])
+        rho, p = _st.spearmanr(x, y)
         ax.set_title(
-            f"all loci: \u03c1 = {rho_all:.3f}, {_p_label(p_all)} (n = {len(x)})\n"
-            f"classified loci: \u03c1 = {rho_c:.3f}, {_p_label(p_c)} "
-            f"(n = {int(cls.sum())})",
+            f"\u03c1 = {rho:.3f}, {_p_label(p)} (n = {len(x)})",
             fontsize=11)
 
         xlim = np.nanmax(np.abs(x)) * 1.15
@@ -697,9 +694,11 @@ def split_half_analysis(df, site_map, n_rep=2000, seed=2026):
             vecs.append((v0, v1))
     n = len(keys)
     classified = np.array([k[2] in (0.0, 1.0) for k in keys])
+    if not classified.all():
+        raise ValueError("split-half analysis requires consensus-classified loci")
     d_whole = np.array([k[1] for k in keys])
-    print(f"\nsplit-half: {n} loci with >=2 callable 4-fold sites in both "
-          f"orientations ({int(classified.sum())} recurrence-classified)")
+    print(f"\nsplit-half: {n} consensus-classified loci with >=2 callable "
+          "4-fold sites in both orientations")
 
     def one_rep():
         dA = np.empty(n)
@@ -714,8 +713,7 @@ def split_half_analysis(df, site_map, n_rep=2000, seed=2026):
             dB[i] = halves[1][1] - halves[0][1]
         return dA, dB
 
-    subsets = [("all_with_fourfold", np.ones(n, bool)),
-               ("recurrence_classified", classified)]
+    subsets = [("recurrence_classified", classified)]
     stats_acc = {name: {"r_hh": [], "ceiling": [], "r_half_whole": []}
                  for name, _ in subsets}
     for _ in range(n_rep):
@@ -783,18 +781,26 @@ def main():
         df = df.sort_values(["chr", "region_start"]).reset_index(drop=True)
         df.to_csv(OUT_TABLE, sep="\t", index=False)
         print(f"Saved per-inversion table -> {OUT_TABLE} ({len(df)} loci)")
-        split_half_analysis(df, site_map)
+    recurrence = pd.to_numeric(df["recurrence"], errors="coerce")
+    analysis_df = df[recurrence.isin([0, 1])].copy()
+    analysis_df["recurrence"] = pd.to_numeric(
+        analysis_df["recurrence"], errors="raise"
+    ).astype(int)
+    print(f"Restricted 4-fold analysis to {len(analysis_df)} loci with a "
+          "consensus recurrence classification")
+    if not args.from_table:
+        split_half_analysis(analysis_df, site_map)
 
-    tests = run_tests(df)
+    tests = run_tests(analysis_df)
     tests.to_csv(OUT_TESTS, sep="\t", index=False)
     print(f"Saved tests -> {OUT_TESTS}")
 
-    make_figure(df)
+    make_figure(analysis_df)
 
     # Console summary by recurrence category
     print("\n=== Median pi by orientation x recurrence ===")
     for code, name in [(0, "Single-event"), (1, "Recurrent")]:
-        sub = df[df["recurrence"] == code]
+        sub = analysis_df[analysis_df["recurrence"] == code]
         print(f"\n{name} (n loci = {len(sub)}):")
         for label, col in [
             ("4-fold  direct  ", "pi_fourfold_direct"),
