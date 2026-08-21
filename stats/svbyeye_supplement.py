@@ -14,6 +14,7 @@ import math
 import shutil
 from pathlib import Path
 
+import pymupdf
 from PIL import Image
 from pypdf import PdfReader, PdfWriter, Transformation
 from reportlab.lib.colors import HexColor, black, white
@@ -101,7 +102,7 @@ def load_properties() -> dict[str, dict[str, str]]:
 
 def make_base_page(record: dict, metadata: dict, source_type: str) -> bytes:
     buffer = io.BytesIO()
-    pdf = canvas.Canvas(buffer, pagesize=(PAGE_WIDTH, PAGE_HEIGHT), pageCompression=1)
+    pdf = canvas.Canvas(buffer, pagesize=(PAGE_WIDTH, PAGE_HEIGHT), pageCompression=1, invariant=1)
     pdf.setTitle(record["inv_id"])
     pdf.setFillColor(HexColor("#15324A"))
     pdf.setFont("Helvetica-Bold", 15)
@@ -144,7 +145,7 @@ def add_native_image(page, image_path: Path) -> None:
     y = PLOT_BOTTOM + (max_height - height) / 2
 
     overlay = io.BytesIO()
-    pdf = canvas.Canvas(overlay, pagesize=(PAGE_WIDTH, PAGE_HEIGHT), pageCompression=1)
+    pdf = canvas.Canvas(overlay, pagesize=(PAGE_WIDTH, PAGE_HEIGHT), pageCompression=1, invariant=1)
     pdf.drawImage(
         ImageReader(str(image_path)),
         x,
@@ -217,13 +218,13 @@ def merge_source_on_page(page, source_path: Path, x: float, y: float, width: flo
 def write_example_figure() -> Path:
     output_path = OUTPUT_DIR / "Supplemental_Figure_SVbyEye_orientation_examples.pdf"
     buffer = io.BytesIO()
-    pdf = canvas.Canvas(buffer, pagesize=(PAGE_WIDTH, 950), pageCompression=1)
+    pdf = canvas.Canvas(buffer, pagesize=(PAGE_WIDTH, 950), pageCompression=1, invariant=1)
     pdf.setFillColor(white)
     pdf.rect(0, 0, PAGE_WIDTH, 950, fill=1, stroke=0)
     pdf.setFillColor(black)
     pdf.setFont("Helvetica-Bold", 28)
-    pdf.drawString(18, 920, "A")
-    pdf.drawString(18, 458, "B")
+    pdf.drawString(140, 920, "A")
+    pdf.drawString(140, 458, "B")
     pdf.save()
     page = PdfReader(io.BytesIO(buffer.getvalue())).pages[0]
     merge_source_on_page(page, VECTOR_SOURCE_DIR / VECTOR_SOURCES[EXAMPLE_IDS[0]], 35, 480, 1010)
@@ -237,6 +238,10 @@ def write_example_figure() -> Path:
     })
     with output_path.open("wb") as handle:
         writer.write(handle)
+    document = pymupdf.open(output_path)
+    pixmap = document[0].get_pixmap(matrix=pymupdf.Matrix(2.5, 2.5), alpha=False)
+    pixmap.save(OUTPUT_DIR / "Supplemental_Figure_SVbyEye_orientation_examples.png")
+    document.close()
     return output_path
 
 
@@ -330,7 +335,7 @@ def draw_index_page(pdf: canvas.Canvas, rows: list[dict], index_number: int) -> 
 
 def write_front_matter(records: list[dict], index_rows: list[dict]) -> bytes:
     buffer = io.BytesIO()
-    pdf = canvas.Canvas(buffer, pagesize=(PAGE_WIDTH, PAGE_HEIGHT), pageCompression=1)
+    pdf = canvas.Canvas(buffer, pagesize=(PAGE_WIDTH, PAGE_HEIGHT), pageCompression=1, invariant=1)
     draw_cover(pdf, records)
     pdf.showPage()
     for page_number in range(math.ceil(len(index_rows) / INDEX_ROWS_PER_PAGE)):

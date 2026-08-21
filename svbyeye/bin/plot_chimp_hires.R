@@ -315,11 +315,7 @@ plot <- plot +
     clip = "on"
   ) +
   labs(
-    title = paste0(label, " (", inv_id, ")"),
-    subtitle = paste0(
-      "Three-inversion-length window; ", recurrence,
-      " inversion; aligned panTro6 sequence ", chimp_contig, "."
-    )
+    title = paste0(label, " (", inv_id, ")")
   ) +
   theme(
     panel.grid.major = element_blank(),
@@ -329,13 +325,16 @@ plot <- plot +
     axis.ticks.x = element_line(linewidth = 1),
     axis.ticks.length.x = grid::unit(2, "mm"),
     axis.ticks.y = element_blank(),
-    plot.title = element_text(size = 15, face = "bold"),
-    plot.subtitle = element_text(size = 10.5),
-    axis.title.x = element_text(size = 10),
-    axis.title.x.top = element_text(size = 10),
-    axis.text.y = element_text(size = 10, face = "bold"),
+    plot.title = element_text(size = 24, face = "bold", margin = margin(b = 10)),
+    axis.title.x = element_text(size = 18),
+    axis.title.x.top = element_text(size = 18, margin = margin(b = 8)),
+    axis.text.x = element_text(size = 16),
+    axis.text.y = element_text(size = 18, face = "bold"),
+    legend.title = element_text(size = 17),
+    legend.text = element_text(size = 16),
+    legend.key.size = grid::unit(7, "mm"),
     legend.position = "bottom",
-    plot.margin = margin(14, 18, 14, 18)
+    plot.margin = margin(34, 24, 30, 120)
   )
 
 dir.create(dirname(out_prefix), recursive = TRUE, showWarnings = FALSE)
@@ -371,3 +370,25 @@ orientation <- data.frame(
   axis_rule = axis_rule,
   left_boundary_gap_bp = left_gap,
   right_boundary_gap_bp = right_gap,
+  chimp_axis_reversed = axis_reversed,
+  alignments_plotted = nrow(plot_paf),
+  stringsAsFactors = FALSE
+)
+write.table(
+  orientation,
+  paste0(out_prefix, ".orientation.tsv"),
+  sep = "\t",
+  quote = FALSE,
+  row.names = FALSE
+)
+
+cat(
+  "wrote", paste0(out_prefix, ".pdf/.png"), "\n",
+  "chimp contig:", chimp_contig, "\n",
+  "left flank vote:", left_vote, " ",
+  paste(names(left_support), left_support, collapse = ", "), "\n",
+  "right flank vote:", right_vote, " ",
+  paste(names(right_support), right_support, collapse = ", "), "\n",
+  "axis rule:", axis_rule, "\n",
+  "chimp axis reversed:", axis_reversed, "\n"
+)
