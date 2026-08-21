@@ -6,7 +6,7 @@ Output: ``flux_results.csv`` (one row per grid cell), ``flux_results.md``, and
 ``flux_fpr_power.png``.
 
 Every rate here is the upstream classifier's: ``call_recurrent`` is
-``minMutHomoplasy >= 2`` on the IQ-TREE ML tree. For ``scenario = single`` the
+``minMutHomoplasy >= 2`` on the IQ-TREE ML tree. For ``scenario = single_repo`` the
 recurrent-call rate is the false-positive rate; for ``scenario = recurrent`` it
 is the detection rate. The ``m_flux = 0`` column is upstream's own model with no
 between-orientation exchange, so it is the reference FPR / power that the
@@ -48,13 +48,13 @@ def wilson_ci(k, n, z=1.96):
 def scenario_names(cs):
     """(single-origin scenario, recurrent scenario) as they appear in the data.
 
-    The single-origin arm has been called ``single`` and ``single_upstream`` at
-    different times; hard-coding either silently empties half the report, so take
-    the name from the rows rather than assuming it.
+    Read the names from the rows so the report also works for explicitly named
+    sensitivity grids.
     """
     present = {c["scenario"] for c in cs}
-    single = sorted(present - {"recurrent"})
-    return (single[0] if single else "single"), "recurrent"
+    single = sorted(p for p in present if p.startswith("single"))
+    rec = sorted(present - set(single))
+    return (single[0] if single else "single"), (rec[0] if rec else "recurrent")
 
 
 def flux_values(cs):
@@ -113,12 +113,21 @@ def write_csv(cs, path):
     cols = ["scenario", "depth", "rho", "m_flux", "reps", "n_called",
             "recurrent_call_rate", "ci_low", "ci_high",
             "mean_events", "median_events", "mean_n_sites"]
+    # rho and m_flux span 1e-8 to 1e-6, so rounding them to six decimals collapses
+    # every rate below 1e-6 onto zero and silently merges distinct grid cells.
+    # They are written at full precision; only the derived rates are rounded.
+    exact = {"rho", "m_flux"}
+
+    def fmt(k, v):
+        if not isinstance(v, float):
+            return v
+        return repr(v) if k in exact else round(v, 6)
+
     with open(path, "w", newline="") as fh:
         w = csv.writer(fh)
         w.writerow(cols)
         for c in cs:
-            w.writerow([c[k] if not isinstance(c[k], float) else round(c[k], 6)
-                        for k in cols])
+            w.writerow([fmt(k, c[k]) for k in cols])
     print("wrote", path)
 
 
@@ -147,6 +156,36 @@ def endpoint_trend(rows, scenario):
                 n_lo=n1, n_hi=n2, z=z, p=p)
 
 
+def armitage_trend(rows, scenario):
+    """Cochran-Armitage test for trend in the call rate across the flux ladder.
+
+    The endpoint z test above throws away the intermediate levels. With a graded
+    dose the ordered test is both more powerful and the honest question: does the
+    rate move *with* flux, not merely differ between its two ends. Levels are
+    scored by rank (0, 1, 2, ...) rather than by m, because m = 0 has no log and
+    the ladder is otherwise evenly spaced in decades.
+    """
+    fluxes = sorted({r["m_flux"] for r in rows})
+    n, x = [], []
+    for m in fluxes:
+        rs = [r for r in rows if r["scenario"] == scenario and r["m_flux"] == m]
+        n.append(len(rs))
+        x.append(sum(r["call"] for r in rs))
+    N, X = sum(n), sum(x)
+    if N == 0 or X == 0 or X == N:
+        return dict(fluxes=fluxes, rates=[xi / ni if ni else float("nan")
+                                          for xi, ni in zip(x, n)],
+                    n=n, z=0.0, p=1.0)
+    p_bar = X / N
+    t = list(range(len(fluxes)))
+    T = sum(ti * (xi - ni * p_bar) for ti, xi, ni in zip(t, x, n))
+    var = p_bar * (1 - p_bar) * (sum(ni * ti * ti for ni, ti in zip(n, t))
+                                 - sum(ni * ti for ni, ti in zip(n, t)) ** 2 / N)
+    z = T / math.sqrt(var) if var > 0 else 0.0
+    return dict(fluxes=fluxes, rates=[xi / ni for xi, ni in zip(x, n)], n=n,
+                z=z, p=math.erfc(abs(z) / math.sqrt(2)))
+
+
 def write_md(cs, path, rows=None):
     FLUX = flux_values(cs)
     rhos = sorted({c["rho"] for c in cs})
@@ -172,7 +211,8 @@ def write_md(cs, path, rows=None):
                         (f"{c['recurrent_call_rate']:.3f} "
                          f"({c['ci_low']:.2f}-{c['ci_high']:.2f})") if c else "—"
                         for c in row) + " |\n")
-        fh.write("\n## Marginal over the nine (depth x rho) cells\n\n")
+        n_cells = len({(c["depth"], c["rho"]) for c in cs})
+        fh.write(f"\n## Marginal over the {n_cells} (depth x rho) cells\n\n")
         fh.write("| scenario | " + " | ".join(f"m={m:.0e}" for m in FLUX) + " |\n")
         fh.write("|" + "---|" * (len(FLUX) + 1) + "\n")
         for sc in (sc_single, sc_recur):
@@ -196,6 +236,17 @@ def write_md(cs, path, rows=None):
                 t = endpoint_trend(rows, sc)
                 fh.write(f"| {sc} | {t['rate_lo']:.4f} (n={t['n_lo']}) | "
                          f"{t['rate_hi']:.4f} (n={t['n_hi']}) | {t['z']:.2f} | {t['p']:.4f} |\n")
+
+            fh.write("\n## Trend across the whole flux ladder "
+                     "(Cochran-Armitage)\n\n")
+            fh.write("| scenario | " + " | ".join(
+                f"m={m:.0e}" for m in flux_values(cs)) + " | z | p |\n")
+            fh.write("|---" * (len(flux_values(cs)) + 3) + "|\n")
+            for sc in (sc_single, sc_recur):
+                t = armitage_trend(rows, sc)
+                cells_ = " | ".join(f"{r:.4f} (n={ni})"
+                                    for r, ni in zip(t["rates"], t["n"]))
+                fh.write(f"| {sc} | {cells_} | {t['z']:.2f} | {t['p']:.4f} |\n")
     print("wrote", path)
 
 
@@ -239,7 +290,7 @@ def plot(cs, path):
     # and the single-origin panel has one, so any number here is wrong for one
     # of the two panels. Both parameterisations belong in the caption.
     depth_label = {"old": "Old", "young": "Young", "recent": "Recent",
-                   "very_recent": "VeryRecent"}
+                   "very_recent": "Very recent"}
 
     def _pow10(v):
         """`1e-08` is machine notation; a figure should say 10^-8."""
@@ -252,7 +303,13 @@ def plot(cs, path):
     xticks = [max(m, 3e-10) for m in FLUX]
     xlabels = [_pow10(m) for m in FLUX]
 
-    fig, axes = plt.subplots(1, 2, figsize=(9.5, 4.7), sharey=True)
+    # Independent y scales. A shared 0-1 axis is only honest if both panels
+    # use the range, and they do not: power fills it while every
+    # false-positive point sits under 0.08, so sharing throws away the panel
+    # that carries the result. Each axis is scaled to its own data, with the
+    # 5% benchmark drawn on the false-positive panel to keep it readable
+    # against the number the manuscript quotes.
+    fig, axes = plt.subplots(1, 2, figsize=(9.5, 4.7))
     sc_single, sc_recur = scenario_names(cs)
     for ax, sc, title, ylab in (
             (axes[0], sc_single, "Single-origin false-positive rate", "rate"),
@@ -278,9 +335,13 @@ def plot(cs, path):
         ax.set_xticklabels(xlabels)
         ax.set_xlabel("between-orientation flux $m$\n(per lineage per generation)")
         ax.set_title(title)
-        ax.set_ylim(-0.03, 1.03)
-        if ylab:
-            ax.set_ylabel(ylab)
+        if sc == sc_recur:
+            ax.set_ylim(-0.03, 1.03)
+        else:
+            top = max([c["ci_high"] for c in cs
+                       if c["scenario"] == sc] + [0.055])
+            ax.set_ylim(-0.03 * top / 1.03, top * 1.12)
+        ax.set_ylabel(ylab or "rate")
     # The 5% line is a false-positive benchmark; it says nothing about power.
     axes[0].axhline(0.05, color="#999999", lw=0.8, ls=":", zorder=0)
     axes[0].annotate("5%", xy=(xticks[0], 0.05), xytext=(0, 4),
@@ -318,13 +379,34 @@ def main(argv=None):
     ap.add_argument("--prefix", default="flux",
                    help="output basename stem (use 'extreme' for the extension grid)")
     ap.add_argument("--outdir", default=".")
+    ap.add_argument("--figure-only", metavar="RESULTS_CSV",
+                    help="skip aggregation and redraw the figure from an "
+                         "existing <prefix>_results.csv. The cluster's python "
+                         "has no matplotlib, so the aggregation runs there and "
+                         "the figure is drawn wherever it does.")
     args = ap.parse_args(argv)
+
+    os.makedirs(args.outdir, exist_ok=True)
+    if args.figure_only:
+        with open(args.figure_only, newline="") as fh:
+            cs = []
+            for r in csv.DictReader(fh):
+                cs.append({k: (float(v) if k in ("rho", "m_flux",
+                                                 "recurrent_call_rate",
+                                                 "ci_low", "ci_high",
+                                                 "mean_events", "median_events",
+                                                 "mean_n_sites") and v != ""
+                               else int(v) if k in ("reps", "n_called")
+                               else v)
+                           for k, v in r.items()})
+        plot(cs, os.path.join(args.outdir, f"{args.prefix}_fpr_power.png"))
+        print(f"{len(cs)} cells -> figure only")
+        return
 
     rows = load(args.inputs or ["out/flux_shard*.csv"])
     if not rows:
         raise SystemExit("no input rows found")
     cs = cells(rows)
-    os.makedirs(args.outdir, exist_ok=True)
     write_csv(cs, os.path.join(args.outdir, f"{args.prefix}_results.csv"))
     write_md(cs, os.path.join(args.outdir, f"{args.prefix}_results.md"), rows=rows)
     with open(os.path.join(args.outdir, f"sweep_{args.prefix}.json"), "w") as fh:

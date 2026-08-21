@@ -218,6 +218,22 @@ def class_aware_locus_pi(seqs, sites):
     for cs, pos, cls in sites:
         by_codon.setdefault(cs, []).append((pos, cls))
 
+    vals = class_aware_site_pi_values(seqs, sites, _by_codon=by_codon)
+    if not vals:
+        return np.nan, 0
+    return float(np.mean(vals)), len(vals)
+
+
+def class_aware_site_pi_values(seqs, sites, _by_codon=None):
+    """Per-site π values behind class_aware_locus_pi, in site order.
+
+    The locus-level estimator is the unweighted mean of these values, so any
+    resampling of them (bootstrap, split-half) resamples the estimator exactly."""
+    by_codon = _by_codon
+    if by_codon is None:
+        by_codon = {}
+        for cs, pos, cls in sites:
+            by_codon.setdefault(cs, []).append((pos, cls))
     vals = []
     for cs, posclasses in by_codon.items():
         codons = [s[cs:cs + 3] for s in seqs]
@@ -228,6 +244,4 @@ def class_aware_locus_pi(seqs, sites):
             p = site_pi(bases)
             if p is not None:
                 vals.append(p)
-    if not vals:
-        return np.nan, 0
-    return float(np.mean(vals)), len(vals)
+    return vals

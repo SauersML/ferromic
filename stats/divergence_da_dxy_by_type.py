@@ -35,7 +35,19 @@ import numpy as np
 import pandas as pd
 from scipy.stats import mannwhitneyu
 
-mpl.rcParams.update({"pdf.fonttype": 42, "ps.fonttype": 42, "font.family": "DejaVu Sans"})
+mpl.rcParams.update({"pdf.fonttype": 42, "ps.fonttype": 42, "font.family": "DejaVu Sans",
+                     "axes.formatter.use_mathtext": True})
+
+
+def sci_label(v: float) -> str:
+    """Mathtext scientific notation, e.g. $4.2\\times10^{-5}$."""
+    if v is None or not np.isfinite(v):
+        return "NA"
+    if v == 0:
+        return "0"
+    exp = int(np.floor(np.log10(abs(v))))
+    mant = v / (10 ** exp)
+    return f"${mant:.1f}\\times10^{{{exp}}}$"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s",
                     handlers=[logging.StreamHandler(sys.stdout)])
@@ -147,7 +159,7 @@ def make_plot(df: pd.DataFrame, metric: str, ylabel: str, out_path: Path, p_valu
         jitter = rng.normal(0, 0.04, size=s.size)
         ax.scatter(pos + jitter, s, color="dimgray", alpha=0.55, s=18, edgecolor="none", zorder=5)
         med = float(np.median(s))
-        ax.text(pos + 0.14, med, f"{med:.2e}", fontsize=9, va="center",
+        ax.text(pos + 0.14, med, sci_label(med), fontsize=9, va="center",
                 bbox=dict(boxstyle="round,pad=0.2", fc="white", alpha=0.7, ec="none"))
 
     ax.set_xticks(positions)
@@ -160,6 +172,68 @@ def make_plot(df: pd.DataFrame, metric: str, ylabel: str, out_path: Path, p_valu
     ax.spines["right"].set_visible(False)
     fig.tight_layout()
     fig.savefig(out_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    logger.info("Saved %s", out_path)
+
+
+def make_combined_plot(df: pd.DataFrame, out_path: Path,
+                       stats_by_metric: dict[str, float]) -> None:
+    """FST, Dxy and da side by side, recurrent vs single-event.
+
+    Reviewer 1 objected that FST alone cannot separate a real difference in
+    divergence from a difference in within-class diversity. This panel makes the
+    resolution visible in one place: FST differs between recurrence classes, the
+    absolute divergence Dxy does not, and the diversity-corrected net divergence
+    da does -- i.e. the FST difference is carried by within-class diversity, not
+    by absolute divergence between arrangements.
+    """
+    metrics = [
+        ("hudson_fst_hap_group_0v1", "Hudson $F_{ST}$", lambda v: f"{v:.3f}"),
+        ("dxy", "Absolute divergence $d_{xy}$", sci_label),
+        ("da", "Net divergence $d_a$", sci_label),
+    ]
+    fig, axes = plt.subplots(1, len(metrics), figsize=(12.6, 4.6))
+    positions = np.arange(len(CATEGORY_ORDER))
+    rng = np.random.default_rng(0)
+    for ax, (metric, ylabel, fmt) in zip(axes, metrics):
+        series = [df.loc[df["category"] == cat, metric].dropna().to_numpy()
+                  for cat in CATEGORY_ORDER]
+        keep = [(p, s, c) for p, s, c in zip(positions, series, CATEGORY_ORDER)
+                if s.size]
+        if keep:
+            parts = ax.violinplot([s for _, s, _ in keep],
+                                  positions=[p for p, _, _ in keep],
+                                  widths=0.72, showmedians=True,
+                                  showextrema=False)
+            for body, (_, _, cat) in zip(parts["bodies"], keep):
+                body.set_facecolor(CATEGORY_COLOR[cat])
+                body.set_edgecolor("darkgrey")
+                body.set_alpha(0.4)
+            if "cmedians" in parts:
+                parts["cmedians"].set_color("black")
+                parts["cmedians"].set_linewidth(1.4)
+        for pos, s, cat in zip(positions, series, CATEGORY_ORDER):
+            if not s.size:
+                continue
+            ax.scatter(pos + rng.normal(0, 0.045, s.size), s, color="dimgray",
+                       alpha=0.6, s=17, edgecolor="none", zorder=5)
+            ax.text(pos + 0.16, float(np.median(s)), fmt(float(np.median(s))),
+                    fontsize=8, va="center",
+                    bbox=dict(boxstyle="round,pad=0.15", fc="white",
+                              alpha=0.75, ec="none"))
+        ax.set_xticks(positions)
+        ax.set_xticklabels([f"{cat}\n(n={s.size})"
+                            for cat, s in zip(CATEGORY_ORDER, series)],
+                           fontsize=10)
+        ax.set_ylabel(ylabel, fontsize=12)
+        p = stats_by_metric.get(metric, np.nan)
+        p_txt = "p < 0.001" if p < 0.001 else f"p = {p:.3f}"
+        ax.set_title(f"{ylabel}\nMann-Whitney: {p_txt}", fontsize=11)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=300, bbox_inches="tight")
+    fig.savefig(out_path.with_suffix(".png"), dpi=200, bbox_inches="tight")
     plt.close(fig)
     logger.info("Saved %s", out_path)
 
@@ -196,6 +270,7 @@ def main() -> None:
     for metric, ylabel, fname in [
         ("dxy", "Absolute divergence d$_{xy}$", "divergence_dxy_by_type.pdf"),
         ("da", "Net divergence d$_a$", "divergence_da_by_type.pdf"),
+        ("hudson_fst_hap_group_0v1", "Hudson F_ST", "divergence_fst_by_type.pdf"),
     ]:
         rec = classified.loc[classified["category"] == "Recurrent", metric].dropna().to_numpy()
         single = classified.loc[classified["category"] == "Single-event", metric].dropna().to_numpy()
@@ -221,6 +296,10 @@ def main() -> None:
     summary = pd.DataFrame(summary_rows)
     summary.to_csv(DATA_DIR / "divergence_da_dxy_by_type_stats.tsv", sep="\t", index=False)
     logger.info("Wrote test summary")
+
+    make_combined_plot(classified,
+                       DATA_DIR / "divergence_fst_dxy_da_by_type.pdf",
+                       {r["metric"]: r["p_two_sided"] for r in summary_rows})
 
 
 if __name__ == "__main__":

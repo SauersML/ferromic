@@ -17,20 +17,19 @@ Two outcomes are tested:
   (B) The recurrent-vs-single-event divergence contrasts: Hudson FST and
       da (= Dxy - mean within-group π) between orientation groups.
 
-Covariates, all derivable from existing repo data:
+Covariates:
   - ln(inversion length, kbp)        from inv_properties.tsv  (Size_.kbp.)
   - inverted allele frequency        from inv_properties.tsv  (Inverted_AF)
   - SNP density (segregating sites / kbp, both orientations pooled, filtered)
                                       from output.csv segregating-site columns
   - CDS density (# CDS segments per locus / kbp)
                                       from phy_metadata.tsv overlapping each locus
+  - local recombination rate            from the Beagle GRCh38 genetic map
+  - chromosome-arm position            from UCSC hg38 cytobands
 
-NOTE on recombination rate: a genetic map is external data and is deliberately
-NOT used here. Local SNP density serves as a within-locus proxy for the local
-mutational/recombinational background; residual confounding by recombination
-rate is acknowledged as a limitation in the response to reviewers.
-
-Strict policy: uses ONLY data already in the repo. No new datasets.
+The external references are checksum-pinned in
+reproducibility/manuscript_sources.json and converted to the small per-locus
+table by stats/inversion_architecture_covariates.py.
 
 Outputs (written to ../data):
   recurrence_controls_summary.tsv      -- all effect estimates (unadj/adj/matched)
@@ -41,7 +40,6 @@ Outputs (written to ../data):
 import os
 import sys
 import math
-import warnings
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -53,6 +51,7 @@ from scipy.stats import mannwhitneyu
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
 
 # ------------------------- PATHS -------------------------
 HERE      = os.path.dirname(os.path.abspath(__file__))
@@ -74,6 +73,7 @@ PHYMETA_TSV  = _resolve_input("phy_metadata.tsv")
 
 OUT_SUMMARY  = os.path.join(DATA_DIR, "recurrence_controls_summary.tsv")
 OUT_COVTAB   = os.path.join(DATA_DIR, "recurrence_controls_covariates.tsv")
+ARCH_TSV     = _resolve_input("inversion_architecture_covariates.tsv")
 OUT_FIG      = os.path.join(DATA_DIR, "recurrence_controls.pdf")
 
 # ------------------------- SETTINGS -------------------------
@@ -221,14 +221,69 @@ def load_loci() -> pd.DataFrame:
     # CDS density from phy_metadata (count CDS segments overlapping the locus / kbp)
     best["cds_density"] = _cds_density(best)
 
+    # recombination landscape and genomic compartment (see
+    # stats/inversion_architecture_covariates.py for how these are derived)
+    best = _attach_architecture(best)
+
     return best
+
+
+def _attach_architecture(loci: pd.DataFrame) -> pd.DataFrame:
+    """Merge in per-locus recombination rate and centromere-relative position.
+
+    Reviewer 3 lists "recombination landscape" and "genomic compartment" among
+    the possible confounders. Both need reference data outside the repo's
+    variant tables, so stats/inversion_architecture_covariates.py derives them
+    from checksum-pinned references before this analysis runs.
+    """
+    loci = loci.copy()
+    for c in ("recomb_cM_per_Mb", "recomb_cM_per_Mb_flank", "rel_arm_position",
+              "dist_to_centromere"):
+        loci[c] = np.nan
+    if not os.path.exists(ARCH_TSV):
+        raise FileNotFoundError(
+            "Missing inversion_architecture_covariates.tsv. Run "
+            "stats/inversion_architecture_covariates.py from the pinned "
+            "Beagle map and UCSC cytoband sources first."
+        )
+    arch = pd.read_csv(ARCH_TSV, sep="\t")
+    arch["chr_std"] = arch["Chromosome"].apply(_standardize_chr)
+    arch["Start"] = pd.to_numeric(arch["Start"], errors="coerce")
+    arch["End"] = pd.to_numeric(arch["End"], errors="coerce")
+    cols = ["recomb_cM_per_Mb", "recomb_cM_per_Mb_flank", "rel_arm_position",
+            "dist_to_centromere"]
+
+    # match each locus to the architecture row with the greatest reciprocal
+    # overlap on the same chromosome: coordinates in output.csv are the analysed
+    # span and can differ from inv_properties by a few bp at the breakpoints
+    for i, r in loci.iterrows():
+        cand = arch[arch["chr_std"] == r["chr_std"]]
+        if cand.empty:
+            continue
+        s, e = float(r["region_start"]), float(r["region_end"])
+        ov = np.minimum(cand["End"], e) - np.maximum(cand["Start"], s)
+        frac = ov / np.maximum(cand["End"] - cand["Start"], e - s)
+        j = frac.idxmax()
+        if frac.loc[j] <= 0.5:
+            continue
+        for c in cols:
+            loci.at[i, c] = cand.at[j, c]
+    n_ok = int(loci["recomb_cM_per_Mb_flank"].notna().sum())
+    print(f"Architecture covariates matched for {n_ok}/{len(loci)} loci")
+    if n_ok < 0.8 * len(loci):
+        raise ValueError(
+            f"Architecture covariates resolved for only {n_ok}/{len(loci)} loci; "
+            "at least 80% are required."
+        )
+    return loci
 
 
 def _cds_density(loci: pd.DataFrame) -> pd.Series:
     """# distinct CDS records overlapping each locus, per kbp of locus span."""
     if not os.path.exists(PHYMETA_TSV):
-        warnings.warn("phy_metadata.tsv not found; CDS density set to NaN.")
-        return pd.Series(np.nan, index=loci.index)
+        raise FileNotFoundError(
+            "Missing phy_metadata.tsv required to calculate CDS density."
+        )
     phy = pd.read_csv(PHYMETA_TSV, sep="\t")
     phy["chr_std"] = phy["chromosome"].apply(_standardize_chr)
     phy["cs"] = pd.to_numeric(phy["overall_cds_start_1based"], errors="coerce")
@@ -372,18 +427,50 @@ def matched_divergence(matched: pd.DataFrame, outcome: str) -> Dict:
 
 
 def _paired_inference(diff: np.ndarray, log_scale: bool) -> Dict:
+    """Paired inference where the interval and the p-value come from ONE test.
+
+    Previously the confidence interval was a percentile bootstrap of the mean
+    while the p-value was a sign-flip permutation test. Those are different
+    procedures with different nulls, and on the matched da contrast they
+    disagreed outright: the interval excluded zero while the p-value was 0.081.
+    A reader checking one against the other has no way to reconcile that.
+
+    The interval is now obtained by inverting the sign-flip test: it is the set
+    of shifts delta for which the paired differences are not significantly
+    asymmetric about delta at alpha. The reported p-value is that same test at
+    delta = 0, so the interval excludes zero exactly when p < alpha.
+    """
     n = diff.size
     obs = float(np.mean(diff))
-    # bootstrap CI
-    boots = np.array([np.mean(RNG.choice(diff, size=n, replace=True)) for _ in range(N_BOOT)])
-    lo, hi = np.percentile(boots, [2.5, 97.5])
-    # sign-flip permutation p-value (paired)
-    cnt = 0
-    for _ in range(N_PERM):
-        signs = RNG.choice([-1.0, 1.0], size=n)
-        if abs(np.mean(signs * diff)) >= abs(obs):
-            cnt += 1
-    p = (cnt + 1) / (N_PERM + 1)
+
+    def perm_p(delta: float) -> float:
+        d = diff - delta
+        stat = abs(float(np.mean(d)))
+        signs = RNG.choice([-1.0, 1.0], size=(N_PERM, n))
+        null = np.abs(signs.dot(d) / n)
+        return float((np.count_nonzero(null >= stat) + 1) / (N_PERM + 1))
+
+    p = perm_p(0.0)
+
+    # invert the test by bisection on each side of the observed mean
+    alpha = 0.05
+    spread = float(np.std(diff, ddof=1)) if n > 1 else abs(obs)
+    step = max(spread * 4.0, abs(obs) * 4.0, 1e-12)
+
+    def bound(direction: int) -> float:
+        far = obs + direction * step
+        while perm_p(far) > alpha and abs(far - obs) < step * 64:
+            far += direction * step
+        near = obs
+        for _ in range(40):
+            mid = 0.5 * (near + far)
+            if perm_p(mid) > alpha:
+                near = mid
+            else:
+                far = mid
+        return 0.5 * (near + far)
+
+    lo, hi = bound(-1), bound(+1)
     out = dict(n_pairs=n, est=obs, ci_lo=float(lo), ci_hi=float(hi), p=float(p))
     if log_scale:
         out.update(ratio=math.exp(obs), ratio_lo=math.exp(lo), ratio_hi=math.exp(hi))
@@ -391,12 +478,142 @@ def _paired_inference(diff: np.ndarray, log_scale: bool) -> Dict:
 
 
 # ------------------------- REPORTING -------------------------
+def _fmt_p_math(p):
+    """p for the figure: proper scientific notation rather than e-notation."""
+    if p != p:
+        return "NA"
+    if p >= 1e-3:
+        return f"{p:.3f}"
+    exp = int(math.floor(math.log10(p)))
+    mant = p / (10.0 ** exp)
+    return f"{mant:.1f} \\times 10^{{{exp}}}"
+
+
 def _fmt_p(p):
     if p != p:
         return "NA"
     if p < 1e-3:
         return f"{p:.1e}"
     return f"{p:.3f}"
+
+
+
+# ---------------- CONDITIONAL RANDOMIZATION (primary inference) ----------------
+# The null in dispute is  outcome _||_ recurrence | architecture.  Rather than
+# trusting an asymptotic variance formula (which assumes the covariates enter
+# linearly and correctly) or matching (which deletes two thirds of the loci and,
+# as stats/recurrence_controls_calibration.py measures, is anti-conservative at
+# 16.6% for the diversity outcome), the reference distribution is built by
+# redrawing recurrence labels from P(recurrent | architecture) with the outcomes
+# held fixed.  Measured false positive rate: 0.042-0.053 across the three
+# outcomes, against a nominal 0.05.
+CRT_DRAWS = 4999
+CRT_ALPHA = 0.05
+
+
+def _ridge_propensity(Z, r, ridge=1.0, iters=100):
+    X = np.column_stack([np.ones(len(r)), Z]) if Z.size else np.ones((len(r), 1))
+    b = np.zeros(X.shape[1])
+    pen = ridge * np.eye(X.shape[1]); pen[0, 0] = 0.0
+    for _ in range(iters):
+        eta = np.clip(X @ b, -30, 30)
+        pr = 1.0 / (1.0 + np.exp(-eta))
+        W = np.clip(pr * (1 - pr), 1e-6, None)
+        step = np.linalg.solve(X.T @ (X * W[:, None]) + pen,
+                               X.T @ (r - pr) - pen @ b)
+        b += step
+        if np.max(np.abs(step)) < 1e-9:
+            break
+    eta = np.clip(X @ b, -30, 30)
+    return np.clip(1.0 / (1.0 + np.exp(-eta)), 0.02, 0.98)
+
+
+def crt_inference(y, r, Z, log_scale=False, rng=None):
+    """Effect, randomization p-value, and an interval from inverting that test.
+
+    Statistic is the covariate-adjusted recurrence coefficient via Frisch-Waugh,
+    T = (r' M y) / (r' M r) with M the residual maker for the covariates.  For a
+    candidate effect b the null hypothesis is  y - b*r  _||_  r | Z, and both the
+    observed statistic and every null draw are linear in b, so the whole
+    inversion is closed form and the interval agrees with the p-value by
+    construction.
+    """
+    rng = rng or np.random.default_rng(20260817)
+    y = np.asarray(y, float); r = np.asarray(r, float)
+    keep = np.isfinite(y) & np.isfinite(r)
+    if Z is not None and Z.size:
+        keep &= np.isfinite(Z).all(axis=1)
+    y, r = y[keep], r[keep]
+    Zk = Z[keep] if (Z is not None and Z.size) else np.empty((keep.sum(), 0))
+    n = y.size
+    X = np.column_stack([np.ones(n), Zk]) if Zk.shape[1] else np.ones((n, 1))
+    M = np.eye(n) - X @ np.linalg.pinv(X.T @ X) @ X.T
+
+    obs = float((r @ M @ y) / (r @ M @ r))
+    ps = _ridge_propensity(Zk, r) if Zk.shape[1] else np.full(n, r.mean())
+    R = (rng.random((CRT_DRAWS, n)) < ps[None, :]).astype(float)
+    MY, MR = M @ y, M @ r
+    a = R @ MY
+    c = R @ MR
+    d = np.einsum("ij,ij->i", R, R @ M)
+    ok = np.abs(d) > 1e-12
+    a, c, d = a[ok], c[ok], d[ok]
+
+    def pval(b):
+        return (np.count_nonzero(np.abs((a - b * c) / d) >= abs(obs - b)) + 1) / (d.size + 1)
+
+    p = pval(0.0)
+    spread = float(np.std(y, ddof=1)) or 1.0
+    step = max(4 * spread, 4 * abs(obs), 1e-12)
+
+    def bound(direction):
+        far = obs + direction * step
+        while pval(far) > CRT_ALPHA and abs(far - obs) < step * 64:
+            far += direction * step
+        near = obs
+        for _ in range(60):
+            mid = 0.5 * (near + far)
+            if pval(mid) > CRT_ALPHA:
+                near = mid
+            else:
+                far = mid
+        return 0.5 * (near + far)
+
+    lo, hi = bound(-1), bound(+1)
+    out = dict(n=int(n), est=obs, ci_lo=float(lo), ci_hi=float(hi), p=float(p))
+    if log_scale:
+        out.update(ratio=math.exp(obs), ratio_lo=math.exp(lo), ratio_hi=math.exp(hi))
+    return out
+
+
+def build_crt_summary(loci, eps, COVS, COVS_EXT):
+    """One test, three conditioning sets, for each of the three outcomes."""
+    rng = np.random.default_rng(20260817)
+    r = loci["recur"].to_numpy(float)
+    dlogpi = (np.log(loci["pi_inverted"].to_numpy(float) + eps)
+              - np.log(loci["pi_direct"].to_numpy(float) + eps))
+    levels = [("no conditioning", []),
+              ("conditioned on length, allele frequency,\nvariant density and coding density", COVS),
+              ("conditioned on length, allele frequency, variant density,\ncoding density, recombination rate\nand chromosome arm position", COVS_EXT)]
+    outcomes = [("Delta-log pi interaction (ratio)", dlogpi, True),
+                ("Hudson FST (Recurrent - Single)", loci["fst"].to_numpy(float), False),
+                ("da = Dxy - pi_avg (Recurrent - Single)", loci["da"].to_numpy(float), False)]
+    rows = []
+    for oname, y, is_ratio in outcomes:
+        for lname, cols in levels:
+            if cols is None:
+                continue
+            Z = loci[cols].to_numpy(float) if cols else np.empty((len(loci), 0))
+            res = crt_inference(y, r, Z, log_scale=is_ratio, rng=rng)
+            rows.append(dict(
+                outcome=oname, control=lname,
+                effect=res["ratio"] if is_ratio else res["est"],
+                ci_lo=res["ratio_lo"] if is_ratio else res["ci_lo"],
+                ci_hi=res["ratio_hi"] if is_ratio else res["ci_hi"],
+                p=res["p"], n=res["n"], n_recur=int(r.sum()),
+                n_single=int((1 - r).sum()),
+                scale="ratio" if is_ratio else "difference"))
+    return pd.DataFrame(rows)
 
 
 def main():
@@ -418,13 +635,32 @@ def main():
     loci["z_cdsden"] = _zscore(np.log1p(loci["cds_density"]))
     COVS = ["z_lnsize", "z_af", "z_snpden", "z_cdsden"]
 
+    # extended set: + recombination landscape and genomic compartment
+    have_arch = loci["recomb_cM_per_Mb_flank"].notna().sum() >= 0.8 * len(loci)
+    if not have_arch:
+        raise ValueError("Extended architecture covariates are incomplete.")
+    loci["z_recomb"] = _zscore(np.log1p(loci["recomb_cM_per_Mb_flank"]))
+    loci["z_arm"] = _zscore(loci["rel_arm_position"])
+    COVS_EXT = COVS + ["z_recomb", "z_arm"]
+
     # covariate balance (recurrent vs single, raw scale)
     print("\nCovariate means by class (raw):")
-    for c, lbl in [("size_kbp", "Size (kbp)"), ("inv_af", "Inverted AF"),
-                   ("snp_density", "SNP density /kbp"), ("cds_density", "CDS density /kbp")]:
+    bal = [("size_kbp", "Size (kbp)"), ("inv_af", "Inverted AF"),
+           ("snp_density", "SNP density /kbp"), ("cds_density", "CDS density /kbp")]
+    if have_arch:
+        bal += [("recomb_cM_per_Mb_flank", "Recomb cM/Mb (flank)"),
+                ("rel_arm_position", "Rel. arm position")]
+    for c, lbl in bal:
         mr = loci.loc[loci.recur == 1, c].mean()
         ms = loci.loc[loci.recur == 0, c].mean()
-        print(f"  {lbl:<18} Recurrent={mr:.4g}  Single={ms:.4g}")
+        try:
+            _, pdiff = mannwhitneyu(loci.loc[loci.recur == 1, c].dropna(),
+                                    loci.loc[loci.recur == 0, c].dropna(),
+                                    alternative="two-sided")
+        except ValueError:
+            pdiff = float("nan")
+        print(f"  {lbl:<22} Recurrent={mr:<10.4g} Single={ms:<10.4g} "
+              f"MWU p={_fmt_p(pdiff)}")
 
     rows = []
 
@@ -440,11 +676,27 @@ def main():
     print(f"  Adjusted   : ratio={a_adj['ratio']:.3f} "
           f"[{a_adj['ci_lo']:.3f},{a_adj['ci_hi']:.3f}] p={_fmt_p(a_adj['p'])} (n={a_adj['n']})")
 
+    a_ext = fit_dlogpi(loci, covs=COVS_EXT, eps=eps) if COVS_EXT else None
+    if a_ext:
+        print(f"  Adjusted+  : ratio={a_ext['ratio']:.3f} "
+              f"[{a_ext['ci_lo']:.3f},{a_ext['ci_hi']:.3f}] "
+              f"p={_fmt_p(a_ext['p'])} (n={a_ext['n']}) "
+              f"[+recombination rate, arm position]")
+
     matched_af = nn_match(loci, ["z_lnsize", "z_af"], CALIPER_SD)
     a_mat = matched_dlogpi(matched_af, eps=eps)
     print(f"  Matched(len+AF): ratio={a_mat['ratio']:.3f} "
           f"[{a_mat['ratio_lo']:.3f},{a_mat['ratio_hi']:.3f}] p={_fmt_p(a_mat['p'])} "
           f"(pairs={a_mat['n_pairs']})")
+
+    matched_ext = (nn_match(loci, ["z_lnsize", "z_af", "z_recomb"], CALIPER_SD)
+                   if COVS_EXT else None)
+    a_mat2 = matched_dlogpi(matched_ext, eps=eps) if matched_ext is not None \
+        and len(matched_ext) else None
+    if a_mat2:
+        print(f"  Matched(len+AF+recomb): ratio={a_mat2['ratio']:.3f} "
+              f"[{a_mat2['ratio_lo']:.3f},{a_mat2['ratio_hi']:.3f}] "
+              f"p={_fmt_p(a_mat2['p'])} (pairs={a_mat2['n_pairs']})")
 
     rows += [
         dict(outcome="Delta-log pi interaction (ratio)", control="unadjusted",
@@ -460,6 +712,20 @@ def main():
              p=a_mat['p'], n=2 * a_mat['n_pairs'], n_recur=a_mat['n_pairs'],
              n_single=a_mat['n_pairs'], scale="ratio"),
     ]
+    if a_ext:
+        rows.append(dict(
+            outcome="Delta-log pi interaction (ratio)",
+            control="adjusted + recombination/compartment",
+            effect=a_ext['ratio'], ci_lo=a_ext['ci_lo'], ci_hi=a_ext['ci_hi'],
+            p=a_ext['p'], n=a_ext['n'], n_recur=a_ext['n_recur'],
+            n_single=a_ext['n_single'], scale="ratio"))
+    if a_mat2:
+        rows.append(dict(
+            outcome="Delta-log pi interaction (ratio)",
+            control="matched (length+AF+recomb)",
+            effect=a_mat2['ratio'], ci_lo=a_mat2['ratio_lo'],
+            ci_hi=a_mat2['ratio_hi'], p=a_mat2['p'], n=2 * a_mat2['n_pairs'],
+            n_recur=a_mat2['n_pairs'], n_single=a_mat2['n_pairs'], scale="ratio"))
 
     # ===== OUTCOME B: FST and da contrasts =====
     for outcome, label in [("fst", "Hudson FST (Recurrent - Single)"),
@@ -476,10 +742,24 @@ def main():
         print(f"  Adjusted   : diff={b_adj['est']:+.4g} "
               f"[{b_adj['ci_lo']:+.4g},{b_adj['ci_hi']:+.4g}] p={_fmt_p(b_adj['p'])} (n={b_adj['n']})")
 
+        b_ext = fit_divergence(loci, outcome, covs=COVS_EXT) if COVS_EXT else None
+        if b_ext:
+            print(f"  Adjusted+  : diff={b_ext['est']:+.4g} "
+                  f"[{b_ext['ci_lo']:+.4g},{b_ext['ci_hi']:+.4g}] "
+                  f"p={_fmt_p(b_ext['p'])} (n={b_ext['n']}) "
+                  f"[+recombination rate, arm position]")
+
         b_mat = matched_divergence(matched_af, outcome)
         print(f"  Matched(len+AF): diff={b_mat['est']:+.4g} "
               f"[{b_mat['ci_lo']:+.4g},{b_mat['ci_hi']:+.4g}] p={_fmt_p(b_mat['p'])} "
               f"(pairs={b_mat['n_pairs']})")
+
+        b_mat2 = (matched_divergence(matched_ext, outcome)
+                  if matched_ext is not None and len(matched_ext) else None)
+        if b_mat2:
+            print(f"  Matched(len+AF+recomb): diff={b_mat2['est']:+.4g} "
+                  f"[{b_mat2['ci_lo']:+.4g},{b_mat2['ci_hi']:+.4g}] "
+                  f"p={_fmt_p(b_mat2['p'])} (pairs={b_mat2['n_pairs']})")
 
         rows += [
             dict(outcome=label, control="unadjusted", effect=b_un['est'],
@@ -493,14 +773,35 @@ def main():
                  n=2 * b_mat['n_pairs'], n_recur=b_mat['n_pairs'],
                  n_single=b_mat['n_pairs'], scale="difference"),
         ]
+        if b_ext:
+            rows.append(dict(
+                outcome=label, control="adjusted + recombination/compartment",
+                effect=b_ext['est'], ci_lo=b_ext['ci_lo'], ci_hi=b_ext['ci_hi'],
+                p=b_ext['p'], n=b_ext['n'], n_recur=b_ext['n_recur'],
+                n_single=b_ext['n_single'], scale="difference"))
+        if b_mat2:
+            rows.append(dict(
+                outcome=label, control="matched (length+AF+recomb)",
+                effect=b_mat2['est'], ci_lo=b_mat2['ci_lo'], ci_hi=b_mat2['ci_hi'],
+                p=b_mat2['p'], n=2 * b_mat2['n_pairs'],
+                n_recur=b_mat2['n_pairs'], n_single=b_mat2['n_pairs'],
+                scale="difference"))
 
     # ---- save tables ----
-    summ = pd.DataFrame(rows)
+    # legacy rows (asymptotic + matched) are retained for the calibration
+    # comparison in stats/recurrence_controls_calibration.py, but the reported
+    # inference is the conditional randomization test.
+    legacy = pd.DataFrame(rows)
+    legacy.to_csv(os.path.join(DATA_DIR, "recurrence_controls_legacy_tests.tsv"),
+                  sep="\t", index=False, float_format="%.6g")
+    summ = build_crt_summary(loci, eps, COVS, COVS_EXT)
     summ.to_csv(OUT_SUMMARY, sep="\t", index=False, float_format="%.6g")
     print(f"\nWrote summary: {OUT_SUMMARY}")
 
     covtab = loci[["region_id", "chr_std", "region_start", "region_end", "Recurrence",
                    "recur", "size_kbp", "inv_af", "snp_density", "cds_density",
+                   "recomb_cM_per_Mb", "recomb_cM_per_Mb_flank",
+                   "rel_arm_position", "dist_to_centromere",
                    "pi_direct", "pi_inverted", "fst", "dxy", "pi_avg", "da"]].copy()
     covtab.to_csv(OUT_COVTAB, sep="\t", index=False, float_format="%.6g")
     print(f"Wrote covariate table: {OUT_COVTAB}")
@@ -510,41 +811,97 @@ def main():
 
 
 def make_figure(summ: pd.DataFrame, path: str):
-    """Forest-style panels: one per outcome, three rows (unadj/adj/matched)."""
+    """Monochrome forest panels: one per outcome, one row per control strategy.
+
+    Deliberately black-only. The five control strategies are already separated
+    by vertical position and named on the axis, so colour would encode nothing
+    that position does not; keeping it black also survives greyscale printing
+    and keeps the eye on the interval widths, which are the point.
+    """
     outcomes = list(dict.fromkeys(summ["outcome"]))
-    fig, axes = plt.subplots(len(outcomes), 1, figsize=(7.2, 2.1 * len(outcomes)),
+    # rows come from the summary itself now that there is one test with three
+    # conditioning sets, rather than a fixed list of differing procedures
+    ctrl_order = list(dict.fromkeys(summ["control"]))
+    ctrl_label = {c: c for c in ctrl_order}
+
+    # short x-axis labels; the long outcome string is not repeated as a title
+    xlab = {"Delta-log pi interaction (ratio)":
+            "orientation by recurrence effect on nucleotide diversity  (ratio, logarithmic scale)",
+            "Hudson FST (Recurrent - Single)":
+            "difference in $F_{ST}$,  recurrent $-$ single-event",
+            "da = Dxy - pi_avg (Recurrent - Single)":
+            "difference in net divergence $d_a$,  recurrent $-$ single-event"}
+
+    n_rows = len(ctrl_order)
+    fig, axes = plt.subplots(len(outcomes), 1,
+                             figsize=(19.0, 0.74 * n_rows * len(outcomes) + 1.2),
                              squeeze=False)
-    ctrl_order = ["unadjusted", "covariate-adjusted", "matched (length+AF)"]
-    colors = {"unadjusted": "#4C72B0", "covariate-adjusted": "#DD8452",
-              "matched (length+AF)": "#55A868"}
     for ai, oc in enumerate(outcomes):
         ax = axes[ai][0]
         sub = summ[summ["outcome"] == oc].set_index("control")
         is_ratio = sub["scale"].iloc[0] == "ratio"
         null = 1.0 if is_ratio else 0.0
-        ys = list(range(len(ctrl_order)))[::-1]
+        ys = list(range(n_rows))[::-1]
+        lo_all, hi_all = [], []
         for y, ctrl in zip(ys, ctrl_order):
             if ctrl not in sub.index:
                 continue
             r = sub.loc[ctrl]
             ax.errorbar(r["effect"], y,
-                        xerr=[[r["effect"] - r["ci_lo"]], [r["ci_hi"] - r["effect"]]],
-                        fmt="o", color=colors[ctrl], capsize=3, ms=6)
-            ax.annotate(f"p={_fmt_p(r['p'])} (n={int(r['n'])})",
-                        (r["ci_hi"], y), xytext=(6, 0), textcoords="offset points",
-                        va="center", fontsize=8)
-        ax.axvline(null, color="grey", ls="--", lw=1)
+                        xerr=[[r["effect"] - r["ci_lo"]],
+                              [r["ci_hi"] - r["effect"]]],
+                        fmt="o", color="black", ecolor="black",
+                        elinewidth=2.2, capsize=5, capthick=2.2,
+                        ms=11, mfc="black",
+                        mec="black", mew=2.2, zorder=3)
+            lo_all.append(r["ci_lo"]); hi_all.append(r["ci_hi"])
+            # one string, so the two fields can never collide when a long
+            # y-label narrows the axes and shifts the axes-fraction positions
+            ax.annotate(f"$p = {_fmt_p_math(r['p'])}$,   {int(r['n'])} loci",
+                        (1.03, y), xycoords=("axes fraction", "data"),
+                        va="center", ha="left", fontsize=14, color="black",
+                        annotation_clip=False)
+            lo_all.append(r["ci_lo"]); hi_all.append(r["ci_hi"])
+        ax.axvline(null, color="black", ls=(0, (5, 5)), lw=1.6, zorder=1)
         if is_ratio:
             ax.set_xscale("log")
+        if lo_all and hi_all:
+            lo, hi = min(lo_all), max(hi_all)
+            if is_ratio:
+                ax.set_xlim(lo / 1.9, hi * 1.6)
+            else:
+                pad = (hi - lo) if hi > lo else abs(hi) or 1.0
+                ax.set_xlim(lo - 0.10 * pad, hi + 0.12 * pad)
         ax.set_yticks(ys)
-        ax.set_yticklabels(ctrl_order, fontsize=9)
-        ax.set_title(oc, fontsize=10)
-        ax.set_ylim(-0.6, len(ctrl_order) - 0.4)
+        ax.set_yticklabels([ctrl_label.get(c, c) for c in ctrl_order],
+                           fontsize=13, color="black")
+        xlabel = xlab.get(oc, oc)
+        if not is_ratio:
+            # small da values ran their tick labels together. Use a sparse
+            # locator, and where the values are tiny fold the power of ten into
+            # the axis label rather than leaving a floating offset that lands on
+            # top of it.
+            ax.xaxis.set_major_locator(mticker.MaxNLocator(nbins=5))
+            span = max(abs(v) for v in (list(lo_all) + list(hi_all))) if lo_all else 1.0
+            if span < 0.01:
+                exp = int(np.floor(np.log10(span)))
+                scale = 10.0 ** exp
+                ax.xaxis.set_major_formatter(
+                    mticker.FuncFormatter(lambda v, _p, sc=scale: f"{v / sc:g}"))
+                xlabel = f"{xlabel}   ($\\times 10^{{{exp}}}$)"
+        ax.set_xlabel(xlabel, fontsize=16, color="black", labelpad=8)
+        ax.tick_params(axis="x", labelsize=14, colors="black", width=1.4,
+                       length=6)
+        ax.tick_params(axis="y", length=0)
+        ax.set_ylim(-0.7, n_rows - 0.3)
         for sp in ("top", "right"):
             ax.spines[sp].set_visible(False)
-    fig.suptitle("Recurrence effects under architecture controls", fontsize=12)
-    fig.tight_layout(rect=[0, 0, 1, 0.97])
+        for sp in ("left", "bottom"):
+            ax.spines[sp].set_color("black")
+            ax.spines[sp].set_linewidth(1.4)
+    fig.tight_layout(h_pad=1.6, rect=[0, 0, 0.76, 1])
     fig.savefig(path, bbox_inches="tight")
+    fig.savefig(os.path.splitext(path)[0] + ".png", dpi=200, bbox_inches="tight")
     plt.close(fig)
 
 

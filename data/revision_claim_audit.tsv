@@ -1,0 +1,63 @@
+claim	observed	expected	tolerance	source	source_sha256	status
+Porubsky loci reviewed	292	292	0	data/table_s5_exclusion_reasons.tsv	9fd40602be223fb0c1865a0b17d0ba0841eb89dbd1ba60446c5507e01ad46ffa	PASS
+consensus recurrence loci analysed	93	93	0	data/table_s5_exclusion_reasons.tsv	9fd40602be223fb0c1865a0b17d0ba0841eb89dbd1ba60446c5507e01ad46ffa	PASS
+SD hard-rule agreement with consensus	0.7957	0.7957	5e-05	data/recurrence_sd_summary.tsv	99ead059f20caa141dd8356d4de3388c3ea9ff9c0002438fbb28d66bd0415e5c	PASS
+SD recurrence sensitivity p: [SD hard rule (primary)] Single-event: Inverted vs Direct	0.000296111	0.000296111	5e-09	data/recurrence_sd_summary.tsv	99ead059f20caa141dd8356d4de3388c3ea9ff9c0002438fbb28d66bd0415e5c	PASS
+SD recurrence sensitivity p: [SD hard rule (primary)] Recurrent: Inverted vs Direct	0.63832	0.63832	5e-06	data/recurrence_sd_summary.tsv	99ead059f20caa141dd8356d4de3388c3ea9ff9c0002438fbb28d66bd0415e5c	PASS
+SD recurrence sensitivity p: [SD hard rule (primary)] Interaction (difference between those two)	0.000355745	0.000355745	5e-09	data/recurrence_sd_summary.tsv	99ead059f20caa141dd8356d4de3388c3ea9ff9c0002438fbb28d66bd0415e5c	PASS
+4-fold concordance wholeLocus vs fourfold rho	0.501267	0.501267	5e-07	data/four_fold_pi_correlations.tsv	9730c718af7b45321590db60bb0e7e080d6a093c76dc0d44211691a0ca409063	PASS
+4-fold concordance wholeLocus vs fourfold p	0.00908858	0.00908858	5e-09	data/four_fold_pi_correlations.tsv	9730c718af7b45321590db60bb0e7e080d6a093c76dc0d44211691a0ca409063	PASS
+4-fold concordance wholeLocus vs fourfold loci	26	26	0	data/four_fold_pi_correlations.tsv	9730c718af7b45321590db60bb0e7e080d6a093c76dc0d44211691a0ca409063	PASS
+4-fold concordance fourfold vs wholeCDS rho	0.628613	0.628613	5e-07	data/four_fold_pi_correlations.tsv	9730c718af7b45321590db60bb0e7e080d6a093c76dc0d44211691a0ca409063	PASS
+4-fold concordance fourfold vs wholeCDS p	0.000583291	0.000583291	5e-09	data/four_fold_pi_correlations.tsv	9730c718af7b45321590db60bb0e7e080d6a093c76dc0d44211691a0ca409063	PASS
+4-fold concordance fourfold vs wholeCDS loci	26	26	0	data/four_fold_pi_correlations.tsv	9730c718af7b45321590db60bb0e7e080d6a093c76dc0d44211691a0ca409063	PASS
+Dxy recurrence comparison p	0.917387896502609	0.9173878965	5e-10	data/divergence_da_dxy_by_type_stats.tsv	b54701cc1c1b2b11da16ba2d66993e88d4903d8d66ad45082d89301645698b8e	PASS
+da recurrent median	4.25e-05	4.25e-05	5e-12	data/divergence_da_dxy_by_type_stats.tsv	b54701cc1c1b2b11da16ba2d66993e88d4903d8d66ad45082d89301645698b8e	PASS
+da single-event median	0.0001285	0.0001285	5e-12	data/divergence_da_dxy_by_type_stats.tsv	b54701cc1c1b2b11da16ba2d66993e88d4903d8d66ad45082d89301645698b8e	PASS
+da recurrence comparison p	0.0373039467646704	0.0373039468	5e-10	data/divergence_da_dxy_by_type_stats.tsv	b54701cc1c1b2b11da16ba2d66993e88d4903d8d66ad45082d89301645698b8e	PASS
+Hudson FST recurrence comparison p	0.00499931182433605	0.00499931182	5e-11	data/divergence_da_dxy_by_type_stats.tsv	b54701cc1c1b2b11da16ba2d66993e88d4903d8d66ad45082d89301645698b8e	PASS
+chimp-polarized derived_vs_ancestral_single_event ratio	0.202758465376854	0.2027584654	5e-09	results/figure2a_repolarized/figure2a_model_effects.tsv	0befa99b8ff7926ba77265cd2fb407704ccb5556e316c2f0a3e90a2f5966b342	PASS
+chimp-polarized derived_vs_ancestral_single_event p	0.00260253284190269	0.00260253284	5e-10	results/figure2a_repolarized/figure2a_model_effects.tsv	0befa99b8ff7926ba77265cd2fb407704ccb5556e316c2f0a3e90a2f5966b342	PASS
+chimp-polarized derived_vs_ancestral_recurrent ratio	1.01283465480162	1.012834655	5e-09	results/figure2a_repolarized/figure2a_model_effects.tsv	0befa99b8ff7926ba77265cd2fb407704ccb5556e316c2f0a3e90a2f5966b342	PASS
+chimp-polarized derived_vs_ancestral_recurrent p	0.94029414439768	0.9402941444	5e-10	results/figure2a_repolarized/figure2a_model_effects.tsv	0befa99b8ff7926ba77265cd2fb407704ccb5556e316c2f0a3e90a2f5966b342	PASS
+chimp-polarized orientation_by_recurrence_interaction ratio	4.99527678372947	4.995276784	5e-09	results/figure2a_repolarized/figure2a_model_effects.tsv	0befa99b8ff7926ba77265cd2fb407704ccb5556e316c2f0a3e90a2f5966b342	PASS
+chimp-polarized orientation_by_recurrence_interaction p	0.00385568589852178	0.0038556859	5e-10	results/figure2a_repolarized/figure2a_model_effects.tsv	0befa99b8ff7926ba77265cd2fb407704ccb5556e316c2f0a3e90a2f5966b342	PASS
+piN/piS single loci	2	2	0	data/pin_pis_tests.tsv	ee37390f558954c2e8020091b00ec2a3843b829e8eb5c5d60022f2210b86febd	PASS
+piN/piS single direct median	0.203267076590682	0.2032670766	5e-10	data/pin_pis_tests.tsv	ee37390f558954c2e8020091b00ec2a3843b829e8eb5c5d60022f2210b86febd	PASS
+piN/piS single inverted median	0.12845665194372	0.1284566519	5e-10	data/pin_pis_tests.tsv	ee37390f558954c2e8020091b00ec2a3843b829e8eb5c5d60022f2210b86febd	PASS
+piN/piS recurrent loci	9	9	0	data/pin_pis_tests.tsv	ee37390f558954c2e8020091b00ec2a3843b829e8eb5c5d60022f2210b86febd	PASS
+piN/piS recurrent direct median	0.215755708436627	0.2157557084	5e-10	data/pin_pis_tests.tsv	ee37390f558954c2e8020091b00ec2a3843b829e8eb5c5d60022f2210b86febd	PASS
+piN/piS recurrent inverted median	0.13666466703078	0.136664667	5e-10	data/pin_pis_tests.tsv	ee37390f558954c2e8020091b00ec2a3843b829e8eb5c5d60022f2210b86febd	PASS
+FDFT1 omega direct	0	0	5e-05	data/paml_extreme_omega_check.tsv	1842e614408f16b4c7d247bffd69e7b47f6d01f8d4e4c8e3a7eccf7325ee32d6	PASS
+FDFT1 omega inverted	59.2218	59.2218	5e-05	data/paml_extreme_omega_check.tsv	1842e614408f16b4c7d247bffd69e7b47f6d01f8d4e4c8e3a7eccf7325ee32d6	PASS
+FDFT1 unadjusted p	0.0013448	0.0013448	5e-08	data/paml_extreme_omega_check.tsv	1842e614408f16b4c7d247bffd69e7b47f6d01f8d4e4c8e3a7eccf7325ee32d6	PASS
+BLK omega direct	156.364	156.364	5e-05	data/paml_extreme_omega_check.tsv	1842e614408f16b4c7d247bffd69e7b47f6d01f8d4e4c8e3a7eccf7325ee32d6	PASS
+BLK omega inverted	0.0001	0.0001	5e-05	data/paml_extreme_omega_check.tsv	1842e614408f16b4c7d247bffd69e7b47f6d01f8d4e4c8e3a7eccf7325ee32d6	PASS
+BLK unadjusted p	0.0175552	0.0175552	5e-08	data/paml_extreme_omega_check.tsv	1842e614408f16b4c7d247bffd69e7b47f6d01f8d4e4c8e3a7eccf7325ee32d6	PASS
+PAML genes passing BH q < 0.05	0	0	0	data/paml_extreme_omega_check.tsv	1842e614408f16b4c7d247bffd69e7b47f6d01f8d4e4c8e3a7eccf7325ee32d6	PASS
+architecture control p: Delta-log pi interaction (ratio); no conditioning	0.0002	0.0002	5e-07	data/recurrence_controls_summary.tsv	208c51c05deaf8e359bb651c672f162cb92dbeb602d27c41ed9984d529c748f0	PASS
+architecture control p: Delta-log pi interaction (ratio); conditioned on length, allele frequency, variant density and coding density	0.0004	0.0004	5e-07	data/recurrence_controls_summary.tsv	208c51c05deaf8e359bb651c672f162cb92dbeb602d27c41ed9984d529c748f0	PASS
+architecture control p: Delta-log pi interaction (ratio); conditioned on length, allele frequency, variant density, coding density, recombination rate and chromosome arm position	0.0036	0.0036	5e-07	data/recurrence_controls_summary.tsv	208c51c05deaf8e359bb651c672f162cb92dbeb602d27c41ed9984d529c748f0	PASS
+architecture control p: Hudson FST (Recurrent - Single); no conditioning	0.0006	0.0006	5e-07	data/recurrence_controls_summary.tsv	208c51c05deaf8e359bb651c672f162cb92dbeb602d27c41ed9984d529c748f0	PASS
+architecture control p: Hudson FST (Recurrent - Single); conditioned on length, allele frequency, variant density and coding density	0.0008	0.0008	5e-07	data/recurrence_controls_summary.tsv	208c51c05deaf8e359bb651c672f162cb92dbeb602d27c41ed9984d529c748f0	PASS
+architecture control p: Hudson FST (Recurrent - Single); conditioned on length, allele frequency, variant density, coding density, recombination rate and chromosome arm position	0.0034	0.0034	5e-07	data/recurrence_controls_summary.tsv	208c51c05deaf8e359bb651c672f162cb92dbeb602d27c41ed9984d529c748f0	PASS
+architecture control p: da = Dxy - pi_avg (Recurrent - Single); no conditioning	0.0042	0.0042	5e-07	data/recurrence_controls_summary.tsv	208c51c05deaf8e359bb651c672f162cb92dbeb602d27c41ed9984d529c748f0	PASS
+architecture control p: da = Dxy - pi_avg (Recurrent - Single); conditioned on length, allele frequency, variant density and coding density	0.0014	0.0014	5e-07	data/recurrence_controls_summary.tsv	208c51c05deaf8e359bb651c672f162cb92dbeb602d27c41ed9984d529c748f0	PASS
+architecture control p: da = Dxy - pi_avg (Recurrent - Single); conditioned on length, allele frequency, variant density, coding density, recombination rate and chromosome arm position	0.0034	0.0034	5e-07	data/recurrence_controls_summary.tsv	208c51c05deaf8e359bb651c672f162cb92dbeb602d27c41ed9984d529c748f0	PASS
+breakpoint decay Spearman rho	0.500324	0.500324	5e-07	data/decay_spearman_variants.tsv	8df0b7f42b7f89797bce002a9eef0e9a8b348278ae3b3a90a5bfbe000fc66be2	PASS
+breakpoint decay Spearman p	0.00021564	0.00021564	5e-09	data/decay_spearman_variants.tsv	8df0b7f42b7f89797bce002a9eef0e9a8b348278ae3b3a90a5bfbe000fc66be2	PASS
+breakpoint decay bins	50	50	0	data/decay_spearman_variants.tsv	8df0b7f42b7f89797bce002a9eef0e9a8b348278ae3b3a90a5bfbe000fc66be2	PASS
+breakpoint decay series	60	60	0	data/decay_spearman_variants.tsv	8df0b7f42b7f89797bce002a9eef0e9a8b348278ae3b3a90a5bfbe000fc66be2	PASS
+consensus imputation models with r2 > 0.5	12	12	0	data/imputation_threshold_summary.tsv	274114a5e86e2ed146c6e0fdebca6299e991aee95344b1ab6e56b620f5f727db	PASS
+consensus imputation models with r2 > 0.5 and BH p < 0.05	11	11	0	data/imputation_threshold_summary.tsv	274114a5e86e2ed146c6e0fdebca6299e991aee95344b1ab6e56b620f5f727db	PASS
+6q24.1 (HsInv0284) benchmark samples	517	517	0	data/imputation_benchmark_HsInv0284_summary.tsv	2698103b955824006888dc0f4d1d0d12decdb9bb2c1a2937271d0aadb5c2195e	PASS
+6q24.1 (HsInv0284) dosage r2	0.942869959563755	0.9428699596	5e-10	data/imputation_benchmark_HsInv0284_summary.tsv	2698103b955824006888dc0f4d1d0d12decdb9bb2c1a2937271d0aadb5c2195e	PASS
+6q24.1 (HsInv0284) hard-call concordance	0.996131528046422	0.996131528	5e-10	data/imputation_benchmark_HsInv0284_summary.tsv	2698103b955824006888dc0f4d1d0d12decdb9bb2c1a2937271d0aadb5c2195e	PASS
+8p23.1 benchmark samples	500	500	0	data/scoreinvhap_concordance.tsv	d6cb5561055d800e3caeaa60b721227e857519972994730ba741d5d2519dfcf8	PASS
+8p23.1 dosage r2	0.7575	0.7575	5e-07	data/scoreinvhap_concordance.tsv	d6cb5561055d800e3caeaa60b721227e857519972994730ba741d5d2519dfcf8	PASS
+8p23.1 hard-call concordance	0.758	0.758	5e-07	data/scoreinvhap_concordance.tsv	d6cb5561055d800e3caeaa60b721227e857519972994730ba741d5d2519dfcf8	PASS
+17q21.31 benchmark samples	500	500	0	data/scoreinvhap_concordance.tsv	d6cb5561055d800e3caeaa60b721227e857519972994730ba741d5d2519dfcf8	PASS
+17q21.31 dosage r2	0.9443	0.9443	5e-07	data/scoreinvhap_concordance.tsv	d6cb5561055d800e3caeaa60b721227e857519972994730ba741d5d2519dfcf8	PASS
+17q21.31 hard-call concordance	0.976	0.976	5e-07	data/scoreinvhap_concordance.tsv	d6cb5561055d800e3caeaa60b721227e857519972994730ba741d5d2519dfcf8	PASS
+CDS single-event orientation exact p	0.09375	0.09375	5e-09	data/robust_cds_reanalysis_results.tsv	26800ae9b0c06df97320ca89b55a72cd21e7d837b412f2855723144d28b0b641	PASS
+CDS recurrence-by-orientation exact p	0.413055640012162	0.41305564	5e-09	data/robust_cds_reanalysis_results.tsv	26800ae9b0c06df97320ca89b55a72cd21e7d837b412f2855723144d28b0b641	PASS

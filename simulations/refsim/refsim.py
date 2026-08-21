@@ -62,26 +62,30 @@ locus is an upstream replicate whose draw came up 0 or 1, and no separate
 demography is needed. Manuscript Fig. 1A draws exactly that: three demes, two
 direct and one inverted, because the unsampled inverted deme contributes nothing.
 
-``scenario`` therefore selects a sampling regime, not a model:
+The manuscript analysis uses two sampling regimes on the shared nine-deme
+structured-coalescent model:
+
+``single_repo``
+    One inverted origin is represented, and direct haplotypes are sampled from
+    the opposite ancestral clade (``fD = 1 - fI``). This is the single-origin
+    regime used for the reported false-positive rates.
+``recurrent``
+    Both inverted origins are represented in the sample. This is the regime
+    used for the reported power.
+
+The remaining sampling regimes are diagnostics and sensitivity models, not the
+source of the reported gene-flux values:
 
 ``single_upstream``
-    ``fI`` in {0, 1}, ``fD`` left free -- the manuscript's single-event locus.
-``recurrent``
-    ``fI`` in the interior, so both origins are sampled.
+    ``fI`` in {0, 1}, with the public script's unconstrained direct draw.
 ``upstream``
     both draws untouched; the mixture upstream actually produces.
 ``single_repo``
-    ``fI`` in {0, 1} *and* ``fD = 1 - fI``. Keeping the direct sample out of the
-    inverted clade's ancestral group lowers the false-positive rate, but upstream
-    does not do this, so it is a sensitivity rather than the reference.
+    Listed above because it is the reported single-origin sampling regime.
 
-``demography_single`` is a two-deme, one-split model read literally off the
-Methods paragraph. It is **not** what Fig. 1G scored, and it behaves differently:
-a 50-kya divergence gives inverted lineages only 2,000 generations to coalesce,
-so incomplete lineage sorting scatters them across the tree and the
-false-positive rate rises far above the upstream model's, where the inverted
-sample has sat in a small deme since the first event. It is kept, as
-``scenario="single"``, only as a sensitivity on that reading.
+The public upstream repository has no single-event generator.
+``demography_single`` is therefore retained only for the separate demographic
+sensitivity analysis; it is not the source of the reported gene-flux numbers.
 """
 from __future__ import annotations
 
@@ -359,19 +363,18 @@ def draw_admixture(scenario, rng):
     ``recurrent`` constrains ``fI`` to the interior so both inverted origins are
     sampled. ``upstream`` leaves both draws alone.
 
-    ``single_upstream`` is the manuscript's single-event locus. Upstream has one
+    ``single_upstream`` conditions the public script on a single inverted origin. Upstream has one
     demography and one script; whether a replicate is single-event or recurrent
     is decided by ``frac_admixI`` alone. When that draw lands on 0 or 1 -- two of
     its eleven values -- every sampled inverted haplotype descends from a single
     inverted deme, which is a single inversion origin. Conditioning on those two
     values is the same thing as running upstream and keeping those replicates.
 
-    Crucially the direct draw is left alone, because upstream leaves it alone.
+    The direct draw is left alone, because upstream leaves it alone.
     Constraining it to the non-sister clade (``fD = 1 - fI``) keeps direct
     lineages out of the inverted clade's ancestor and lowers the false-positive
-    rate, but that is our idea, not upstream's, and a locus simulated that way is
-    not the locus Fig. 1G scored. ``single_repo`` keeps that constrained variant
-    available as a sensitivity.
+    rate. ``single_repo`` is that constraint and is the single-origin arm used
+    for the reported gene-flux values.
     """
     frac_d = rng.randint(0, 10) / 10
     if scenario == "recurrent":
@@ -497,10 +500,10 @@ def simulate(scenario, t01_23_years, t0_1_years, t2_3_years, sample_size,
     ``sample_size`` is a haplotype count (upstream ``sampleHaploSize``); the
     inverted / direct split and the diploid rounding follow upstream exactly.
 
-    ``scenario="single"`` uses the manuscript's one-divergence model at
-    ``t_inv_years`` (see ``demography_single``). ``"single_repo"`` instead keeps
-    the full upstream demography and constrains the admixture draws so only one
-    inverted origin is sampled -- a cross-check that the two agree.
+    ``scenario="single"`` uses a separate one-divergence sensitivity model at
+    ``t_inv_years`` (see ``demography_single``). ``"single_repo"`` keeps the
+    full upstream demography and constrains the sampling to one inverted origin;
+    it is the arm used for the reported gene-flux false-positive rates.
 
     ``flux_scope`` is a no-op for ``scenario="single"``: that model has exactly
     two demes, both alive for the whole interval between the present and the one
