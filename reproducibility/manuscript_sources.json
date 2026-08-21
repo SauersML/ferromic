@@ -61,33 +61,33 @@
     {
       "id": "svbyeye_chr8_vector",
       "kind": "url",
-      "filename": "chr8_8p23.1-v3.pdf",
-      "url": "https://github.com/SauersML/ferromic/releases/download/manuscript-analysis-sources-v1/chr8_8p23.1-v3.pdf",
-      "sha256": "732f830e07767b2d689bd4a19c0b23fdb1e88e751d46960e82fc48154b22d0a0",
+      "filename": "chr8_8p23.1-v6.pdf",
+      "url": "https://github.com/SauersML/ferromic/releases/download/manuscript-analysis-sources-v2/chr8_8p23.1-v6.pdf",
+      "sha256": "a23b52df6ba5ed44a636244b53dbe6ab09b6d889efd0308668960aee37f02001",
       "role": "Vector SVbyEye example source"
     },
     {
       "id": "svbyeye_chr12_vector",
       "kind": "url",
-      "filename": "chr12_12q13.11-v3.pdf",
-      "url": "https://github.com/SauersML/ferromic/releases/download/manuscript-analysis-sources-v1/chr12_12q13.11-v3.pdf",
-      "sha256": "ef28f2babbd094825b2542a21c41c0da9ac361b9e7aad5eed1a923a634bb894a",
+      "filename": "chr12_12q13.11-v6.pdf",
+      "url": "https://github.com/SauersML/ferromic/releases/download/manuscript-analysis-sources-v2/chr12_12q13.11-v6.pdf",
+      "sha256": "d7eeeb4fc35bfa216a14edc7201d60756bddeb86b835f9ced406c9178e98adab",
       "role": "Vector SVbyEye example source"
     },
     {
       "id": "svbyeye_chr15_vector",
       "kind": "url",
-      "filename": "chr15_15q11.2-v3.pdf",
-      "url": "https://github.com/SauersML/ferromic/releases/download/manuscript-analysis-sources-v1/chr15_15q11.2-v3.pdf",
-      "sha256": "695debe9df892a9275635fe22b1e6a69bb780143615ab5c31923267c008e1f13",
+      "filename": "chr15_15q11.2-v6.pdf",
+      "url": "https://github.com/SauersML/ferromic/releases/download/manuscript-analysis-sources-v2/chr15_15q11.2-v6.pdf",
+      "sha256": "a3ef2a72ddb4b60acc325b42a61eee5bfa6e56dec66cc922474d7ba486d2eda7",
       "role": "Vector SVbyEye example source"
     },
     {
       "id": "svbyeye_chr17_vector",
       "kind": "url",
-      "filename": "chr17_17q21.31-v3.pdf",
-      "url": "https://github.com/SauersML/ferromic/releases/download/manuscript-analysis-sources-v1/chr17_17q21.31-v3.pdf",
-      "sha256": "8f893605a12c4c1645f2c1959df40eb21529ed40775237cea2c27325d21925e4",
+      "filename": "chr17_17q21.31-v6.pdf",
+      "url": "https://github.com/SauersML/ferromic/releases/download/manuscript-analysis-sources-v2/chr17_17q21.31-v6.pdf",
+      "sha256": "2c4df0b5f84cfae642774c460f98d10518c5de6c40d154959bbd47039743c89e",
       "role": "Vector SVbyEye example source"
     },
     {
