@@ -335,7 +335,7 @@ def summarize(comparison: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     return table, summary
 
 
-def plot_correspondence(comparison: pd.DataFrame, summary: dict) -> None:
+def plot_correspondence(comparison: pd.DataFrame) -> None:
     evaluable = comparison[comparison["evaluable"]]
     fig, axes = plt.subplots(2, 3, figsize=(9.0, 6.7), constrained_layout=True)
 
@@ -377,11 +377,6 @@ def plot_correspondence(comparison: pd.DataFrame, summary: dict) -> None:
 
     fig.supxlabel("Global-PC log(OR)")
     fig.supylabel("Within-ancestry-PC log(OR)")
-    fig.suptitle(
-        f"Pearson r = {summary['pearson_r_log_or']:.3f}",
-        fontsize=12,
-        fontweight="bold",
-    )
     fig.savefig(OUT_CORRESPONDENCE_PDF)
     fig.savefig(OUT_CORRESPONDENCE_PNG, dpi=240)
     plt.close(fig)
@@ -399,7 +394,7 @@ def main() -> None:
         json.dump(summary, handle, indent=2)
         handle.write("\n")
 
-    plot_correspondence(comparison, summary)
+    plot_correspondence(comparison)
 
     print(
         f"Compared {summary['evaluable_association_population_comparisons']} "
