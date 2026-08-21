@@ -1,0 +1,4 @@
+subset	n_loci	statistic	median	ci_lo	ci_hi	description	n_replicates
+recurrence_classified	26	r_hh	0.023659	-0.345685	0.405443	split-half self-correlation of the 4-fold orientation difference	2000
+recurrence_classified	26	ceiling	0.214998	0.000000	0.759580	attainable correlation with a perfectly-agreeing measure (Spearman-Brown sqrt of full-length reliability)	2000
+recurrence_classified	26	r_half_whole	0.412528	0.132555	0.646967	half-length 4-fold orientation difference vs whole-locus	2000

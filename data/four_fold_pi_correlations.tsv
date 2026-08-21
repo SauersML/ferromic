@@ -1,7 +1,14 @@
-subset	measure_x	measure_y	comparison	n_loci	spearman_rho	p_value
-all_with_fourfold	wholeLocus	fourfold	whole-locus vs 4-fold orientation difference	46	0.534278	0.000131072
-all_with_fourfold	fourfold	wholeCDS	4-fold vs whole-CDS orientation difference	46	0.744425	3.02264e-09
-all_with_fourfold	wholeLocus	wholeCDS	whole-locus vs whole-CDS orientation difference	46	0.446412	0.00187252
-recurrence_classified	wholeLocus	fourfold	whole-locus vs 4-fold orientation difference	26	0.541947	0.00423923
-recurrence_classified	fourfold	wholeCDS	4-fold vs whole-CDS orientation difference	26	0.689077	9.90219e-05
-recurrence_classified	wholeLocus	wholeCDS	whole-locus vs whole-CDS orientation difference	26	0.502998	0.00881458
+subset	measure_x	measure_y	comparison	n_loci	statistic	value	p_value
+recurrence_classified	wholeLocus	fourfold	whole-locus vs 4-fold orientation difference	26	spearman_rho	0.501267	0.00908858
+recurrence_classified	wholeLocus	fourfold	whole-locus vs 4-fold orientation difference: loci agreeing in sign (13 of 18)	18	sign_agreement_fraction	0.722222	0.0962524
+recurrence_classified	wholeLocus	fourfold	whole-locus vs 4-fold orientation difference: ceiling if agreement were perfect apart from 4-fold site-sampling noise (95% range -0.128-0.614)	26	noise_ceiling_median_rho	0.290737	0.88875
+recurrence_classified	fourfold	wholeCDS	4-fold vs whole-CDS orientation difference	26	spearman_rho	0.628613	0.000583291
+recurrence_classified	fourfold	wholeCDS	4-fold vs whole-CDS orientation difference: loci agreeing in sign (15 of 18)	18	sign_agreement_fraction	0.833333	0.00753784
+recurrence_classified	fourfold	wholeCDS	4-fold vs whole-CDS orientation difference: ceiling if agreement were perfect apart from 4-fold site-sampling noise (95% range -0.191-0.531)	26	noise_ceiling_median_rho	0.201253	0.99625
+recurrence_classified	wholeLocus	wholeCDS	whole-locus vs whole-CDS orientation difference	26	spearman_rho	0.516439	0.00691215
+recurrence_classified	wholeLocus	wholeCDS	whole-locus vs whole-CDS orientation difference: loci agreeing in sign (12 of 22)	22	sign_agreement_fraction	0.545455	0.831812
+recurrence_classified	wholeLocus	fourfold	wholeLocus vs fourfold pi levels across locus-orientation observations	52	spearman_rho_levels	0.578711	6.99206e-06
+recurrence_classified	wholeCDS	fourfold	wholeCDS vs fourfold pi levels across locus-orientation observations	52	spearman_rho_levels	0.712258	3.19293e-09
+recurrence_classified	fourfold_half_A	fourfold_half_B	split-half self-correlation of the 4-fold orientation difference (95% range -0.346-0.405, 2000 random splits)	26	split_half_r_hh	0.023659	
+recurrence_classified	fourfold_half_A	fourfold_half_B	attainable correlation with a perfectly-agreeing measure (Spearman-Brown sqrt of full-length reliability) (95% range 0.000-0.760, 2000 random splits)	26	split_half_ceiling	0.214998	
+recurrence_classified	fourfold_half_A	fourfold_half_B	half-length 4-fold orientation difference vs whole-locus (95% range 0.133-0.647, 2000 random splits)	26	split_half_r_half_whole	0.412528	
