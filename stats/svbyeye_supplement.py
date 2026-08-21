@@ -83,8 +83,8 @@ def load_records() -> list[dict]:
     return records
 
 
-def load_properties() -> dict[str, dict[str, str]]:
-    properties: dict[str, dict[str, str]] = {}
+def load_properties() -> dict[str, dict[str, object]]:
+    properties: dict[str, dict[str, object]] = {}
     with (DATA / "inv_properties.tsv").open(newline="") as handle:
         for row in csv.DictReader(handle, delimiter="\t"):
             consensus = row["0_single_1_recur_consensus"].strip()
@@ -96,6 +96,7 @@ def load_properties() -> dict[str, dict[str, str]]:
             properties[row["OrigID"]] = {
                 "recurrence": recurrence,
                 "inverted_af": af if af else "NA",
+                "consensus_recurrence": consensus in {"0", "1"},
             }
     return properties
 
@@ -395,6 +396,52 @@ def write_audit_pdf(records: list[dict], index_rows: list[dict]) -> Path:
     return output_path
 
 
+def native_figure_page(image_path: Path):
+    with Image.open(image_path) as image:
+        width, height = image.size
+    buffer = io.BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=(width, height), pageCompression=1, invariant=1)
+    pdf.drawImage(
+        ImageReader(str(image_path)),
+        0,
+        0,
+        width=width,
+        height=height,
+        preserveAspectRatio=True,
+        mask="auto",
+    )
+    pdf.save()
+    return PdfReader(io.BytesIO(buffer.getvalue())).pages[0]
+
+
+def write_consensus_pdf(records: list[dict], properties: dict[str, dict[str, object]]) -> Path:
+    consensus_records = [
+        record for record in records
+        if properties[record["inv_id"]]["consensus_recurrence"]
+    ]
+    if len(consensus_records) != 93:
+        raise RuntimeError(
+            f"Expected 93 loci with consensus recurrence calls, found {len(consensus_records)}"
+        )
+
+    output_path = OUTPUT_DIR / "Supplemental_File_SVbyEye_consensus_93_loci.pdf"
+    writer = PdfWriter()
+    for record in consensus_records:
+        vector_name = VECTOR_SOURCES.get(record["inv_id"])
+        if vector_name:
+            page = PdfReader(str(VECTOR_SOURCE_DIR / vector_name)).pages[0]
+        else:
+            page = native_figure_page(IMAGE_DIR / record["image_file"])
+        writer.add_page(page)
+    writer.add_metadata({
+        "/Title": "SVbyEye figures for 93 inversions with consensus recurrence calls",
+        "/Subject": "Chimpanzee-versus-GRCh38 alignment figures",
+    })
+    with output_path.open("wb") as handle:
+        writer.write(handle)
+    return output_path
+
+
 def main() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     PER_LOCUS_DIR.mkdir(parents=True, exist_ok=True)
@@ -431,11 +478,13 @@ def main() -> None:
     audit_legend_path = write_audit_legend()
     index_path = write_index(index_rows)
     audit_path = write_audit_pdf(records, index_rows)
+    consensus_path = write_consensus_pdf(records, properties)
     print(f"Example figure: {example_path}")
     print(f"Legend: {legend_path}")
     print(f"Audit legend: {audit_legend_path}")
     print(f"Index: {index_path}")
     print(f"Audit supplement: {audit_path}")
+    print(f"Consensus supplement: {consensus_path}")
 
 
 if __name__ == "__main__":
