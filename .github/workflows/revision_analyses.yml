@@ -413,8 +413,6 @@ jobs:
             data/recurrence_controls_covariates.tsv
             data/recurrence_controls_summary.tsv
             data/recurrence_controls_legacy_tests.tsv
-            data/recurrence_controls.pdf
-            data/recurrence_controls.png
             data/revision_claim_audit.tsv
             data/recurrence_sd_figure.png
             data/divergence_decomposition.png
