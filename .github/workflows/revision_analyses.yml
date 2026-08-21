@@ -261,6 +261,49 @@ jobs:
           cp /tmp/manuscript-sources/chr17_17q21.31-v6.pdf .svbyeye-preview/
           python stats/svbyeye_supplement.py
 
+      - name: Commit and push regenerated SVbyEye supplement
+        if: github.event_name != 'pull_request'
+        env:
+          PUSH_TOKEN: ${{ secrets.WRITE_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          files=(
+            output/pdf/svbyeye/Supplemental_Figure_SVbyEye_orientation_examples.pdf
+            output/pdf/svbyeye/Supplemental_Figure_SVbyEye_orientation_examples.png
+            output/pdf/svbyeye/Supplemental_Figure_SVbyEye_orientation_examples_legend.txt
+            output/pdf/svbyeye/Supplemental_File_SVbyEye_all_292_loci.pdf
+            output/pdf/svbyeye/Supplemental_File_SVbyEye_all_292_loci_legend.txt
+            output/pdf/svbyeye/svbyeye_locus_index.tsv
+          )
+          for f in "${files[@]}"; do
+            test -f "$f"
+            git add -- "$f"
+          done
+
+          if git diff --staged --quiet; then
+            echo "SVbyEye supplement is current."
+            exit 0
+          fi
+
+          git commit -m "Regenerate SVbyEye supplement [skip ci]"
+          git pull https://${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git main \
+            --rebase --autostash --strategy=recursive -X ours
+
+          for attempt in 1 2 3; do
+            if git push https://${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git HEAD:main; then
+              echo "Push succeeded on attempt $attempt"
+              exit 0
+            fi
+            echo "Push failed (attempt $attempt); refreshing and retrying"
+            git pull https://${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git main \
+              --rebase --autostash --strategy=recursive -X ours
+          done
+          echo "Push failed after 3 attempts"
+          exit 1
+
       - name: Imputation threshold reconciliation
         run: python stats/imputation_threshold_summary.py
 
@@ -321,12 +364,6 @@ jobs:
             results/figure2a_repolarized/figure2a_summary.json
             results/figure2a_repolarized/figure2a_repolarized.pdf
             results/figure2a_repolarized/figure2a_repolarized.png
-            output/pdf/svbyeye/Supplemental_Figure_SVbyEye_orientation_examples.pdf
-            output/pdf/svbyeye/Supplemental_Figure_SVbyEye_orientation_examples.png
-            output/pdf/svbyeye/Supplemental_Figure_SVbyEye_orientation_examples_legend.txt
-            output/pdf/svbyeye/Supplemental_File_SVbyEye_all_292_loci.pdf
-            output/pdf/svbyeye/Supplemental_File_SVbyEye_all_292_loci_legend.txt
-            output/pdf/svbyeye/svbyeye_locus_index.tsv
           )
           for f in "${files[@]}"; do
             test -f "$f"
