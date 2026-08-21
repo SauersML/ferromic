@@ -393,6 +393,7 @@ jobs:
             data/paml_extreme_omega_check.tsv
             data/four_fold_pi_correlations.tsv
             data/four_fold_pi_tests.tsv
+            data/four_fold_split_half.tsv
             data/pin_pis_tests.tsv
             data/cds_pairwise_adjusted.tsv
             data/cds_pairwise_nocov.tsv
@@ -424,7 +425,7 @@ jobs:
           )
           for f in "${files[@]}"; do
             test -f "$f"
-            git add -- "$f"
+            git add -f -- "$f"
           done
 
           if git diff --staged --quiet; then

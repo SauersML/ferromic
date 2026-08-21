@@ -27,11 +27,9 @@ Beyond the rank correlations it records three further concordance statistics:
 
 Orientation difference for a measure m is ``m_inverted - m_direct`` per locus.
 A locus contributes only when both orientations actually have 4-fold sites
-(``pi_fourfold_*`` is 0, not blank, when they do not). Two subsets are
-reported: ``all_with_fourfold`` (46 loci) and ``recurrence_classified``
-(26 loci -- the further restriction to a consensus recurrence call that the
-paired tests in ``four_fold_pi.py`` apply, and the set the response letter
-quotes).
+(``pi_fourfold_*`` is 0, not blank, when they do not) and the locus has a
+consensus recurrence classification. These are the 26 loci used by the figure,
+paired tests, and response letter.
 
 Input : data/four_fold_pi_by_inversion.tsv
 Output: data/four_fold_pi_correlations.tsv
@@ -144,17 +142,14 @@ def build(in_path=DEFAULT_IN, out_path=DEFAULT_OUT):
     with open(in_path, newline="") as fh:
         rows = list(csv.DictReader(fh, delimiter="\t"))
 
-    # A locus only carries 4-fold information when both orientations actually
-    # have 4-fold sites; pi_fourfold_* is 0 rather than blank when they do not.
-    usable = [r for r in rows
-              if (_f(r.get("fourfold_sites_direct")) or 0) > 0
-              and (_f(r.get("fourfold_sites_inverted")) or 0) > 0]
-    # The paired tests in four_fold_pi.py are further restricted to loci with a
-    # consensus recurrence call, which is the set the response letter quotes.
-    classified = [r for r in usable if str(r.get("recurrence", "")).strip() != ""]
+    classified = [
+        r for r in rows
+        if (_f(r.get("fourfold_sites_direct")) or 0) > 0
+        and (_f(r.get("fourfold_sites_inverted")) or 0) > 0
+        and _f(r.get("recurrence")) in (0.0, 1.0)
+    ]
 
-    subsets = [("all_with_fourfold", usable),
-               ("recurrence_classified", classified)]
+    subsets = [("recurrence_classified", classified)]
 
     rng = np.random.default_rng(SEED)
     out = []
@@ -222,6 +217,8 @@ def build(in_path=DEFAULT_IN, out_path=DEFAULT_OUT):
     if os.path.exists(split_path):
         with open(split_path, newline="") as fh:
             for r in csv.DictReader(fh, delimiter="\t"):
+                if r["subset"] != "recurrence_classified":
+                    continue
                 emit(r["subset"], "fourfold_half_A", "fourfold_half_B",
                      f"{r['description']} (95% range {float(r['ci_lo']):.3f}-"
                      f"{float(r['ci_hi']):.3f}, {r['n_replicates']} random splits)",

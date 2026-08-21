@@ -773,6 +773,8 @@ def _load_coding_site_diversity() -> pd.DataFrame:
     """4-fold pi and piN/piS per locus, from the two scripts that compute them."""
     ff = _load_tsv(DATA_DIR / "four_fold_pi_by_inversion.tsv", "4-fold diversity")
     pn = _load_tsv(DATA_DIR / "pin_pis_by_inversion.tsv", "piN/piS")
+    ff = ff[pd.to_numeric(ff["recurrence"], errors="coerce").isin([0, 1])].copy()
+    pn = pn[pd.to_numeric(pn["recurrence"], errors="coerce").isin([0, 1])].copy()
     key = ["chr", "region_start", "region_end"]
     dup = [c for c in pn.columns if c in ff.columns and c not in key]
     return ff.merge(pn.drop(columns=dup), on=key, how="outer")
@@ -1013,7 +1015,7 @@ SD_RECURRENCE_COLUMN_DEFS = {
 }
 
 FOURFOLD_CORR_COLUMN_DEFS = {
-    "subset": "Locus subset: all loci with 4-fold sites, or those with a consensus recurrence call.",
+    "subset": "Consensus-classified loci with 4-fold sites in both orientations.",
     "measure_x": "First diversity measure in the comparison.",
     "measure_y": "Second diversity measure in the comparison.",
     "comparison": "Human-readable description of the comparison, including any interval.",
@@ -2444,8 +2446,7 @@ def build_workbook(output_path: Path) -> None:
                 "Spearman correlations between per-locus orientation differences (inverted minus direct) in "
                 "nucleotide diversity measured three ways: across the whole locus, across whole coding sequence, "
                 "and restricted to 4-fold degenerate sites. A locus contributes only when both orientations "
-                "actually have 4-fold sites. Reported for all such loci and for the subset with a consensus "
-                "recurrence call, which is the subset the paired tests use."
+                "have 4-fold sites and the locus has a consensus recurrence classification."
             ),
             column_defs=FOURFOLD_CORR_COLUMN_DEFS,
             loader=_load_fourfold_correlations,
