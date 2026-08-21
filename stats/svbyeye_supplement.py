@@ -17,7 +17,7 @@ from pathlib import Path
 import pymupdf
 from PIL import Image
 from pypdf import PdfReader, PdfWriter, Transformation
-from reportlab.lib.colors import HexColor, black, white
+from reportlab.lib.colors import HexColor, white
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 
@@ -221,10 +221,6 @@ def write_example_figure() -> Path:
     pdf = canvas.Canvas(buffer, pagesize=(PAGE_WIDTH, 950), pageCompression=1, invariant=1)
     pdf.setFillColor(white)
     pdf.rect(0, 0, PAGE_WIDTH, 950, fill=1, stroke=0)
-    pdf.setFillColor(black)
-    pdf.setFont("Helvetica-Bold", 28)
-    pdf.drawString(140, 920, "A")
-    pdf.drawString(140, 458, "B")
     pdf.save()
     page = PdfReader(io.BytesIO(buffer.getvalue())).pages[0]
     merge_source_on_page(page, VECTOR_SOURCE_DIR / VECTOR_SOURCES[EXAMPLE_IDS[0]], 35, 480, 1010)
