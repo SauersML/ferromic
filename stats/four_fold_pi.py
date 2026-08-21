@@ -574,12 +574,12 @@ def make_figure(df):
         ax.tick_params(axis="x", pad=4)
         n_single = int((sub["recurrence"] == 0).sum())
         n_recur = int((sub["recurrence"] == 1).sum())
-        ax.text(0.5, -0.17, f"Single-event (n = {n_single})",
+        ax.text(0.5, -0.105, f"Single-event (n = {n_single})",
                 transform=ax.get_xaxis_transform(), ha="center", va="top",
-                fontsize=10.5, fontweight="bold")
-        ax.text(3.5, -0.17, f"Recurrent (n = {n_recur})",
+                fontsize=10)
+        ax.text(3.5, -0.105, f"Recurrent (n = {n_recur})",
                 transform=ax.get_xaxis_transform(), ha="center", va="top",
-                fontsize=10.5, fontweight="bold")
+                fontsize=10)
         ax.set_ylabel(r"Nucleotide diversity ($\pi$, $\times10^{-3}$)")
         ax.yaxis.set_major_formatter(
             plt.FuncFormatter(lambda v, _: f"{v * 1e3:g}"))
@@ -652,7 +652,7 @@ def make_figure(df):
     # Adjust the grid BEFORE the colorbar: fig.colorbar() carves its space out of
     # the current axes positions, and a later subplots_adjust would undo that and
     # slide the right panel underneath the bar.
-    fig.subplots_adjust(bottom=0.07, hspace=0.50, wspace=0.34)
+    fig.subplots_adjust(bottom=0.07, hspace=0.42, wspace=0.34)
     scalar = mpl.cm.ScalarMappable(norm=norm, cmap=cmap)
     colorbar = fig.colorbar(scalar, ax=list(axes[0]), pad=0.025, fraction=0.035,
                             shrink=0.80)
