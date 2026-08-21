@@ -181,19 +181,19 @@ jobs:
       - name: Set up R
         uses: r-lib/actions/setup-r@v2
         with:
-          r-version: 'release'
+          r-version: '4.6.1'
 
       - name: Cache R packages (Bioconductor build is ~8 min)
         uses: actions/cache@v4
         with:
           path: ${{ env.R_LIBS_USER }}
-          key: rlibs-scoreinvhap-${{ runner.os }}-bioc-v1
+          key: rlibs-scoreinvhap-${{ runner.os }}-r4.6.1-bioc3.23-v1
 
       - name: Install scoreInvHap (Bioconductor)
         run: |
           set -euo pipefail
           Rscript -e 'if (!requireNamespace("BiocManager", quietly=TRUE)) install.packages("BiocManager", repos="https://cloud.r-project.org")'
-          Rscript -e 'options(timeout=600); BiocManager::install(c("scoreInvHap","VariantAnnotation","GenomicRanges"), update=FALSE, ask=FALSE)'
+          Rscript -e 'options(timeout=600, BioC_mirror="https://bioconductor.posit.co"); BiocManager::install(c("scoreInvHap","VariantAnnotation","GenomicRanges"), version="3.23", update=FALSE, ask=FALSE)'
           Rscript -e 'library(scoreInvHap); cat("scoreInvHap OK\n")'
 
       - name: Run scoreInvHap genotyping
