@@ -65,8 +65,10 @@ for their own family; whichever is quoted must be named explicitly.
 
 Inputs
   data/tagging_snps.tsv                          per-locus tagging SNP table
-  data/selection_data/Selection_Summary_Statistics_01OCT2025.tsv
-                                                 AGES summary statistics (hg19)
+  --selection Selection_Summary_Statistics_01OCT2025.tsv.gz
+                                                 AGES summary statistics (hg19),
+                                                 fetched and checksum-verified via
+                                                 reproducibility/manuscript_sources.json
 The 1.8 GB selection file is read through ``batch_best_tagging_snps.load_selection_subset``,
 the same chunked streaming loader the single-best-SNP script uses, so only the
 requested positions are ever materialised.
@@ -87,17 +89,12 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 import scripts.extract_best_tagging_snp as ebts  # noqa: E402
-from scripts.extract_best_tagging_snp import (ensure_selection_data,  # noqa: E402
-                                              select_segment_bests,
+from scripts.extract_best_tagging_snp import (select_segment_bests,  # noqa: E402
                                               select_top_tags)
 # The chunked streaming loader already used by the single-best-SNP batch script.
 # Reused rather than reimplemented: it filters to the exact (chrom, pos) keys
 # requested, so the 1.8 GB AGES table is never held in memory.
 from stats.batch_best_tagging_snps import load_selection_subset  # noqa: E402
-
-ebts.OUTPUT_DIR = Path("data")
-ebts.SELECTION_DIR = ebts.OUTPUT_DIR / "selection_data"
-ebts.SELECTION_TSV_PATH = ebts.SELECTION_DIR / ebts.SELECTION_TSV_NAME
 
 TAGGING_TSV = Path("data/tagging_snps.tsv")
 OUT_TSV = Path("data/ages_multi_tag_snps.tsv")
@@ -157,7 +154,7 @@ def _pick_snps(regions, segments, top_n, tags):
     return picks
 
 
-def collect(regions, segments, top_n, tagging_tsv=TAGGING_TSV):
+def collect(regions, segments, top_n, selection_path, tagging_tsv=TAGGING_TSV):
     if not tagging_tsv.exists():
         raise SystemExit(f"tagging SNP table not found at {tagging_tsv}")
     tags = ebts.load_tagging_snps(tagging_tsv)
@@ -165,7 +162,9 @@ def collect(regions, segments, top_n, tagging_tsv=TAGGING_TSV):
 
     keys = pd.DataFrame([{"chrom_norm": k[0], "position_hg37": k[1]}
                          for *_rest, k in picks]).drop_duplicates()
-    subset = load_selection_subset(keys, ensure_selection_data())
+    if not selection_path.is_file():
+        raise FileNotFoundError(selection_path)
+    subset = load_selection_subset(keys, selection_path)
     lookup = {(row["CHROM_norm"], int(row["POS"])): row
               for _, row in subset.iterrows()}
 
@@ -218,10 +217,12 @@ def main(argv=None):
     ap.add_argument("--regions", nargs="+", default=DEFAULT_REGIONS)
     ap.add_argument("--segments", type=int, default=10)
     ap.add_argument("--top-n", type=int, default=5)
+    ap.add_argument("--selection", type=Path, required=True,
+                    help="checksum-verified AGES summary statistics TSV or TSV.GZ")
     ap.add_argument("--out", type=Path, default=OUT_TSV)
     args = ap.parse_args(argv)
 
-    df = collect(args.regions, args.segments, args.top_n)
+    df = collect(args.regions, args.segments, args.top_n, args.selection)
     df = df.sort_values(["region", "pos_hg19"], kind="mergesort")
     args.out.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(args.out, sep="\t", index=False)

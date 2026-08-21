@@ -96,6 +96,31 @@ jobs:
           echo "=== per-sample (head) ==="
           head -20 data/imputation_benchmark_HsInv0284.tsv
 
+      - name: Assert the reported benchmark numbers
+        run: |
+          python - <<'PY'
+          import csv
+          import math
+
+          rows = list(csv.DictReader(
+              open("data/imputation_benchmark_HsInv0284_summary.tsv"),
+              delimiter="\t",
+          ))
+          row = next(item for item in rows if item["group"] == "ALL")
+          expected = {
+              "n": (517, 0),
+              "r2": (0.9428699595637554, 5e-12),
+              "concordance": (0.9961315280464217, 5e-12),
+          }
+          for field, (target, tolerance) in expected.items():
+              observed = float(row[field])
+              if not math.isfinite(observed) or abs(observed - target) > tolerance:
+                  raise SystemExit(
+                      f"reported HsInv0284 {field} changed: {observed} != {target}"
+                  )
+          print("HsInv0284 reported values reproduced exactly.")
+          PY
+
       - name: Upload benchmark outputs
         uses: actions/upload-artifact@v4
         with:

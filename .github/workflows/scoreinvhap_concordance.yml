@@ -245,6 +245,36 @@ jobs:
           echo "=== RESULT ==="
           cat data/scoreinvhap_concordance.tsv
 
+      - name: Assert the reported concordance numbers
+        run: |
+          python - <<'PY'
+          import csv
+          import math
+
+          rows = {
+              row["inversion"]: row
+              for row in csv.DictReader(
+                  open("data/scoreinvhap_concordance.tsv"), delimiter="\t"
+              )
+          }
+          expected = {
+              "8p23.1": {"n_samples": (500, 0), "r2": (0.7575, 5e-7),
+                           "hardcall_concordance": (0.758, 5e-7)},
+              "17q21.31": {"n_samples": (500, 0), "r2": (0.9443, 5e-7),
+                             "hardcall_concordance": (0.976, 5e-7)},
+          }
+          for inversion, fields in expected.items():
+              row = rows[inversion]
+              for field, (target, tolerance) in fields.items():
+                  observed = float(row[field])
+                  if not math.isfinite(observed) or abs(observed - target) > tolerance:
+                      raise SystemExit(
+                          f"reported {inversion} {field} changed: "
+                          f"{observed} != {target}"
+                      )
+          print("scoreInvHap reported values reproduced.")
+          PY
+
       - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4

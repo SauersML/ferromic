@@ -1,9 +1,9 @@
 name: Revision Analyses
 
 # Regenerates every analysis added or corrected for the manuscript revision and
-# commits the resulting tables back. All of these run from committed inputs only
-# -- no All of Us, no network, no coalescent simulation, no per-CDS alignments --
-# so the whole set is reproducible from a clean checkout.
+# commits the resulting tables back. External source files are immutable release
+# assets whose SHA-256 digests are recorded in
+# reproducibility/manuscript_sources.json.
 #
 # The coalescent grid lives in its own workflow (refsim_simulations.yml) because it
 # is sharded across a matrix; the AGES multi-SNP check is a second job here because
@@ -15,6 +15,8 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/revision_analyses.yml'
+      - 'reproducibility/manuscript_sources.json'
+      - 'scripts/fetch_manuscript_sources.py'
       - 'stats/**'
       - 'cds/pipeline_lib.py'
       - 'data/inv_properties.tsv'
@@ -24,9 +26,14 @@ on:
       - 'data/pin_pis_by_inversion.tsv'
       - 'data/output.csv'
       - 'data/per_site_diversity_output.falsta.gz'
+      - 'data/per_site_fst_output.falsta.gz'
+      - 'data/chimp_alignment_responses.json'
+      - 'web/figures-site/public/inversions/img/**'
   pull_request:
     paths:
       - '.github/workflows/revision_analyses.yml'
+      - 'reproducibility/manuscript_sources.json'
+      - 'scripts/fetch_manuscript_sources.py'
       - 'stats/**'
 
 concurrency:
@@ -53,7 +60,30 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install numpy pandas scipy statsmodels matplotlib xlsxwriter openpyxl
+          pip install numpy pandas scipy statsmodels matplotlib xlsxwriter openpyxl pillow pypdf reportlab
+
+      - name: Fetch and verify immutable external sources
+        run: |
+          set -euo pipefail
+          python scripts/fetch_manuscript_sources.py \
+            --source porubsky_freeze4_callset \
+            --source cds_phylip_alignments \
+            --source beagle_grch38_genetic_map \
+            --source ucsc_hg38_cytoband \
+            --source svbyeye_chr8_vector \
+            --source svbyeye_chr12_vector \
+            --source svbyeye_chr15_vector \
+            --source svbyeye_chr17_vector \
+            --source inversion_properties \
+            --source population_genetics_locus_table \
+            --source population_genetics_diversity_track \
+            --source population_genetics_fst_track \
+            --source cds_metadata \
+            --source paml_results \
+            --source chimp_orientation_ledger \
+            --source tagging_snp_table \
+            --output-dir /tmp/manuscript-sources
+          cp /tmp/manuscript-sources/phy_outputs.zip phy_outputs.zip
 
       # --- upstream guard ----------------------------------------------------
       # data/callset.tsv is a committed copy of the freeze-4 inversion genotype
@@ -63,45 +93,53 @@ jobs:
       # read genotypes without a network call. A copy that nothing checks can
       # drift from what the alignments were actually built with, so compare them.
       - name: Check the committed callset against the upstream genotype table
-        continue-on-error: true
         run: |
-          set -uo pipefail
-          # The URL is owned by manual_run_vcf.yml, which is what actually feeds
-          # run_vcf. Read it from there rather than keeping a second copy that
-          # could drift from the one the alignments were really built with.
-          URL=$(grep -oE 'https://[^"]*simpleINV\.mod\.tsv' \
-                  .github/workflows/manual_run_vcf.yml | head -1)
-          if [ -z "$URL" ]; then
-            echo "::warning::could not find the genotype-table URL in manual_run_vcf.yml"
-            exit 0
-          fi
-          if ! curl -fsSL --retry 3 --max-time 300 -o /tmp/upstream_callset.tsv "$URL"; then
-            echo "::warning::could not reach the upstream genotype table; skipping the callset check"
-            exit 0
-          fi
+          set -euo pipefail
           python - <<'PY'
           import csv, sys
+
+          def normalize_gt(value):
+              # Phase order is irrelevant to every downstream analysis: 0|1 and
+              # 1|0 carry the same genotype dosage.  The local callset also adds
+              # PAV-supported calls where the public simpleINV table is missing;
+              # those additions are allowed, but every non-missing public call
+              # must agree.
+              raw = (value or "").split("_")[0].replace("/", "|")
+              alleles = tuple(sorted(raw.split("|")))
+              return None if not alleles or "" in alleles or "." in alleles else alleles
+
           def load(path):
               with open(path, newline="") as fh:
                   rows = list(csv.DictReader(fh, delimiter="\t"))
               out = {}
               for r in rows:
                   key = (r.get("seqnames"), r.get("start"), r.get("end"))
-                  gts = {k: (v or "").split("_")[0] for k, v in r.items()
+                  gts = {k: normalize_gt(v) for k, v in r.items()
                          if k and k[:2] in ("HG", "NA")}
                   out[key] = gts
               return out
-          up = load("/tmp/upstream_callset.tsv")
+          up = load("/tmp/manuscript-sources/porubsky_freeze4_callset.tsv")
           loc = load("data/callset.tsv")
           shared = set(up) & set(loc)
-          bad = [k for k in shared
-                 if any(up[k].get(s) != loc[k].get(s)
-                        for s in set(up[k]) & set(loc[k]))]
-          print(f"loci compared: {len(shared)}  genotype mismatches: {len(bad)}")
+          if len(up) != 292 or shared != set(up):
+              print(f"::error::expected all 292 public loci in data/callset.tsv; "
+                    f"public={len(up)}, shared={len(shared)}")
+              sys.exit(1)
+          bad = []
+          compared = 0
+          for key in shared:
+              for sample in set(up[key]) & set(loc[key]):
+                  if up[key][sample] is None:
+                      continue
+                  compared += 1
+                  if up[key][sample] != loc[key][sample]:
+                      bad.append((key, sample, up[key][sample], loc[key][sample]))
+          print(f"loci compared: {len(shared)}; non-missing public genotypes: "
+                f"{compared}; mismatches: {len(bad)}")
           if bad:
               print("::error::data/callset.tsv disagrees with the upstream genotype table")
-              for k in bad[:10]:
-                  print("  ", k)
+              for item in bad[:10]:
+                  print("  ", item)
               sys.exit(1)
           print("data/callset.tsv matches the upstream genotype table")
           PY
@@ -122,47 +160,42 @@ jobs:
       # This step asks the only question that cannot be fooled: recompute both
       # tables from the alignments and compare. If they differ, the cache is
       # stale and the run fails rather than propagating it.
-      - name: Fetch the alignments the tables must derive from
-        id: alignments
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -uo pipefail
-          RUN_ID=$(gh run list --workflow manual_run_vcf.yml --status success \
-                     --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null || true)
-          if [ -z "${RUN_ID:-}" ] || [ "$RUN_ID" = "null" ]; then
-            echo "have=0" >> "$GITHUB_OUTPUT"
-            echo "::warning::No successful manual_run_vcf.yml run to take alignments from; the derived-table check cannot run."
-            exit 0
-          fi
-          if gh run download "$RUN_ID" -n run-vcf-phy-outputs --dir . ; then
-            echo "have=1" >> "$GITHUB_OUTPUT"
-            echo "alignments from manual_run_vcf.yml run $RUN_ID"
-          else
-            echo "have=0" >> "$GITHUB_OUTPUT"
-            echo "::warning::run $RUN_ID has no run-vcf-phy-outputs artifact (artifacts expire); the derived-table check cannot run."
-          fi
-
       - name: Rebuild the derived tables from the alignments and compare
-        if: steps.alignments.outputs.have == '1'
         run: |
           set -euo pipefail
           mkdir -p /tmp/cached
           cp data/four_fold_pi_by_inversion.tsv data/pin_pis_by_inversion.tsv /tmp/cached/
           python -s stats/four_fold_pi.py
           python -s stats/pin_pis.py
-          status=0
-          for n in four_fold_pi_by_inversion.tsv pin_pis_by_inversion.tsv; do
-            if diff -q "/tmp/cached/$n" "data/$n" >/dev/null; then
-              echo "data/$n matches the alignments"
-            else
-              echo "::error::data/$n does not match what the alignments produce."
-              echo "The committed table is a stale cache. Commit the regenerated file."
-              diff "/tmp/cached/$n" "data/$n" | head -40 || true
-              status=1
-            fi
-          done
-          exit $status
+          python - <<'PY'
+          import pandas as pd
+          from pandas.testing import assert_frame_equal
+
+          for name in ("four_fold_pi_by_inversion.tsv", "pin_pis_by_inversion.tsv"):
+              expected = pd.read_csv(f"/tmp/cached/{name}", sep="\t")
+              observed = pd.read_csv(f"data/{name}", sep="\t")
+              try:
+                  assert_frame_equal(
+                      expected,
+                      observed,
+                      check_dtype=False,
+                      check_exact=False,
+                      rtol=1e-12,
+                      atol=1e-15,
+                  )
+              except AssertionError as exc:
+                  raise SystemExit(
+                      f"data/{name} differs materially from the alignment-derived table:\n{exc}"
+                  )
+              print(f"data/{name} matches the alignment-derived table within numeric tolerance")
+          PY
+
+      - name: Rebuild CDS-conservation inputs from the same alignments
+        run: |
+          python stats/rebuild_cds_conservation.py \
+            --archive phy_outputs.zip \
+            --inv-properties data/inv_properties.tsv \
+            --output-dir data
 
       # --- analyses that answer specific reviewer comments -------------------
       - name: Table S5 exclusion reasons (R2 #5)
@@ -206,6 +239,28 @@ jobs:
           python ../stats/divergence_da_dxy_by_type.py
           python ../stats/divergence_edge_decay.py
 
+      - name: Build genomic-architecture covariates from pinned references
+        run: |
+          python stats/inversion_architecture_covariates.py \
+            --refdir /tmp/manuscript-sources \
+            --inv data/inv_properties.tsv \
+            --out data/inversion_architecture_covariates.tsv
+
+      - name: Recurrence effects conditioned on genomic architecture (R3 #3)
+        run: python stats/recurrence_architecture_controls.py
+
+      - name: Build revision figures from regenerated tables
+        run: |
+          python stats/recurrence_sd_figure.py
+          python stats/divergence_decomposition_figure.py
+          python stats/figure2a_repolarized.py
+          mkdir -p .svbyeye-preview
+          cp /tmp/manuscript-sources/chr8_8p23.1-v3.pdf .svbyeye-preview/
+          cp /tmp/manuscript-sources/chr12_12q13.11-v3.pdf .svbyeye-preview/
+          cp /tmp/manuscript-sources/chr15_15q11.2-v3.pdf .svbyeye-preview/
+          cp /tmp/manuscript-sources/chr17_17q21.31-v3.pdf .svbyeye-preview/
+          python stats/svbyeye_supplement.py
+
       - name: Imputation threshold reconciliation
         run: python stats/imputation_threshold_summary.py
 
@@ -218,49 +273,8 @@ jobs:
       # --- reproducibility assertions ---------------------------------------
       # These numbers are quoted in the response letter. If a regeneration moves
       # them, the run must fail rather than silently rewrite the record.
-      - name: Assert the headline revision numbers reproduce
-        run: |
-          python - <<'PY'
-          import csv, sys
-          fail = []
-
-          def close(a, b, tol):
-              return abs(float(a) - float(b)) <= tol
-
-          # SD-architecture hard rule: agreement and the pi interaction
-          rows = {r["quantity"]: r for r in
-                  csv.DictReader(open("data/recurrence_sd_summary.tsv"), delimiter="\t")}
-          agree = float(rows["hard-rule agreement with consensus"]["value"])
-          if not close(agree, 0.7957, 5e-4):
-              fail.append(f"SD hard-rule agreement {agree} != 0.7957")
-          key = "[SD hard rule (primary)] Interaction (difference between those two)"
-          inter_p = float(rows[key]["p"])
-          if not close(inter_p, 0.000356, 5e-5):
-              fail.append(f"SD interaction p {inter_p} != 0.000356")
-
-          # PAML identifiability: orientation direction must match the manuscript
-          pam = {r["gene"]: r for r in
-                 csv.DictReader(open("data/paml_extreme_omega_check.tsv"), delimiter="\t")}
-          if pam["FDFT1"]["clade_with_higher_omega2"] != "inverted":
-              fail.append("FDFT1 higher omega is not in the inverted clade "
-                          "(table may be chimp-polarized)")
-          if pam["BLK"]["clade_with_higher_omega2"] != "direct":
-              fail.append("BLK higher omega is not in the direct clade "
-                          "(table may be chimp-polarized)")
-
-          # Analysis-set accounting
-          ex = list(csv.DictReader(open("data/table_s5_exclusion_reasons.tsv"), delimiter="\t"))
-          n_used = sum(1 for r in ex if r["analysed"] == "yes")
-          if (len(ex), n_used) != (292, 93):
-              fail.append(f"analysis set is {n_used}/{len(ex)}, expected 93/292")
-
-          if fail:
-              print("REPRODUCIBILITY CHECK FAILED:")
-              for f in fail:
-                  print("  -", f)
-              sys.exit(1)
-          print("All headline revision numbers reproduce.")
-          PY
+      - name: Assert and inventory the non-PheWAS revision numbers
+        run: python stats/verify_revision_outputs.py
 
       - name: Commit and push regenerated tables
         if: github.event_name != 'pull_request'
@@ -293,11 +307,24 @@ jobs:
             data/divergence_edge_decay_spearman.tsv
             data/recurrence_sd_calls.tsv
             data/recurrence_sd_summary.tsv
-            data/divergence_middle_vs_flank.tsv
-            data/divergence_edge_decay_spearman.tsv
+            data/inversion_architecture_covariates.tsv
+            data/recurrence_controls_covariates.tsv
+            data/recurrence_controls_summary.tsv
+            data/recurrence_controls_legacy_tests.tsv
+            data/recurrence_controls.pdf
+            data/recurrence_controls.png
+            data/revision_claim_audit.tsv
+            data/recurrence_sd_figure.png
+            data/divergence_decomposition.png
+            results/figure2a_repolarized/figure2a_locus_audit.tsv
+            results/figure2a_repolarized/figure2a_model_effects.tsv
+            results/figure2a_repolarized/figure2a_summary.json
+            results/figure2a_repolarized/figure2a_repolarized.pdf
+            results/figure2a_repolarized/figure2a_repolarized.png
           )
           for f in "${files[@]}"; do
-            [ -f "$f" ] && git add -- "$f" || echo "missing (skipped): $f"
+            test -f "$f"
+            git add -- "$f"
           done
 
           if git diff --staged --quiet; then
@@ -336,8 +363,17 @@ jobs:
             data/cds_*.tsv
             data/robust_cds_reanalysis_*
             data/recurrence_sd_*.tsv
+            data/inversion_architecture_covariates.tsv
+            data/recurrence_controls_*.tsv
+            data/recurrence_controls.pdf
+            data/recurrence_controls.png
+            data/revision_claim_audit.tsv
+            data/recurrence_sd_figure.png
+            data/divergence_decomposition.png
+            results/figure2a_repolarized/*
+            output/pdf/svbyeye/*
             web/figures-site/public/downloads/supplementary_tables.xlsx
-          if-no-files-found: warn
+          if-no-files-found: error
 
   ages-multi-snp:
     # Reviewer 2 #9: is the ancient-DNA selection signal specific to one tagging
@@ -360,6 +396,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install numpy pandas scipy requests tqdm
 
+      - name: Fetch and verify the immutable AGES source
+        run: |
+          python scripts/fetch_manuscript_sources.py \
+            --source ages_selection_summary \
+            --output-dir /tmp/manuscript-sources
+
       - name: FinnGen replication of the PheWAS signals (R2 #3)
         run: python stats/finngen_replication.py
 
@@ -367,7 +409,9 @@ jobs:
         run: python stats/inversion_eqtl_lookup.py
 
       - name: AGES selection stats across tagging SNPs
-        run: python stats/ages_multi_tag_snps.py
+        run: |
+          python stats/ages_multi_tag_snps.py \
+            --selection /tmp/manuscript-sources/Selection_Summary_Statistics_01OCT2025.tsv.gz
 
       - name: Assert every locus is sign-coherent once aligned to the inverted allele
         run: |
@@ -415,4 +459,4 @@ jobs:
             data/ages_multi_tag_snps.tsv
             data/finngen_replication.tsv
             data/inversion_eqtl.tsv
-          if-no-files-found: warn
+          if-no-files-found: error

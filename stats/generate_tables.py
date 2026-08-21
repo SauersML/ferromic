@@ -846,7 +846,7 @@ def _load_finngen() -> pd.DataFrame:
 
 
 def _load_flux_sweep() -> pd.DataFrame:
-    return pd.read_csv(REFSIM_DIR / "upstream_results.csv")
+    return pd.read_csv(REFSIM_DIR / "fluxsweep2_results.csv")
 
 
 CODING_DIVERSITY_COLUMN_DEFS = {
@@ -1016,10 +1016,20 @@ FOURFOLD_CORR_COLUMN_DEFS = {
     "subset": "Locus subset: all loci with 4-fold sites, or those with a consensus recurrence call.",
     "measure_x": "First diversity measure in the comparison.",
     "measure_y": "Second diversity measure in the comparison.",
-    "comparison": "Human-readable description of the compared orientation differences.",
-    "n_loci": "Number of loci contributing to the correlation.",
-    "spearman_rho": "Spearman rank correlation between the two orientation differences.",
-    "p_value": "Two-sided p-value for the correlation.",
+    "comparison": "Human-readable description of the comparison, including any interval.",
+    "n_loci": "Loci (or locus-orientation observations) contributing.",
+    "statistic": (
+        "Which concordance statistic the row reports: a Spearman correlation of "
+        "orientation differences or of diversity levels, the fraction of loci "
+        "agreeing in sign, or the median simulated correlation attainable if "
+        "agreement were perfect apart from 4-fold site-sampling noise."
+    ),
+    "value": "Value of the statistic.",
+    "p_value": (
+        "Two-sided p-value for correlations and sign agreement; for noise "
+        "ceilings, the fraction of simulations at or below the observed "
+        "correlation."
+    ),
 }
 
 OMEGA_IDENT_COLUMN_DEFS = {
@@ -2462,7 +2472,7 @@ def build_workbook(output_path: Path) -> None:
     )
 
     # --- revision additions, in the order the response letter cites them ----
-    if (REFSIM_DIR / "upstream_results.csv").exists():
+    if (REFSIM_DIR / "fluxsweep2_results.csv").exists():
         register(
             SheetInfo(
                 name="Gene-flux simulation sweep",

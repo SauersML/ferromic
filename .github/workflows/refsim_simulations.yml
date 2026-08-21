@@ -1,17 +1,15 @@
 name: Reference Recurrence Simulations
 
-# Runs the full reference recurrence pipeline (simulations/refsim) in CI and
-# commits the regenerated tables. This is the coalescent work that used to be
-# cluster-only: it is sharded across a matrix so each runner does a slice, then a
-# single aggregation job merges, refits, and pushes.
+# Runs the complete reported gene-flux grid in CI and commits its regenerated
+# tables. This is the coalescent work that used to be cluster-only: it is sharded
+# across a matrix so each runner does a slice, then a single aggregation job
+# validates the exact grid, summarizes it, and pushes.
 #
 # Cost, MEASURED rather than guessed. A GitHub 2-core runner takes >50 s per
 # 240-haplotype locus, against ~7 s/locus on a 128-core MSI node -- IQ-TREE on a
 # 200 kbp alignment does not fit a small runner well. So:
 #
-#   flux      5,400 loci / 20 shards = 270 each   ~2 h per shard, ~80 CPU-h total
-#   extreme   1,200 loci / 20 shards =  60 each   ~30 min per shard
-#   trainset 11,250 loci / 20 shards = 563 each   much faster (88 haplotypes, not 240)
+#   fluxsweep3 11,520 loci / 64 shards = 180 each (the reported analysis)
 #
 # An earlier version of this comment claimed 15-25 min per flux shard; that was
 # extrapolated from MSI timings and was wrong by roughly an order of magnitude.
@@ -26,9 +24,6 @@ name: Reference Recurrence Simulations
 on:
   workflow_dispatch:
     inputs:
-      tasks:
-        description: 'Comma-separated grids to run (flux,trainset,extreme,growth)'
-        default: 'flux,trainset,extreme,growth'
       commit:
         description: 'Commit regenerated results back to main'
         type: boolean
@@ -40,25 +35,16 @@ on:
           test can never overwrite the committed full-grid tables.'
         default: ''
       nshards:
-        description: 'Shards to split across (default 20)'
-        default: '20'
-  push:
-    branches: [main]
-    paths:
-      # Only the code that actually generates replicates. make_report.py just
-      # aggregates committed shards, so editing it must not launch a 60-job
-      # simulation -- doing so once saturated the runner limit and left every
-      # other workflow queued for hours.
-      - 'simulations/refsim/refsim.py'
-      - 'simulations/refsim/run_grid.py'
-
+        description: 'Shards to split across (default 64)'
+        default: '64'
 concurrency:
   group: refsim-${{ github.ref }}
   cancel-in-progress: true
 
 env:
-  IQTREE_VERSION: 2.2.2.7
-  NSHARDS: ${{ github.event.inputs.nshards || '20' }}
+  IQTREE_VERSION: 2.1.2
+  TASK: fluxsweep3
+  NSHARDS: ${{ github.event.inputs.nshards || '64' }}
   REPS: ${{ github.event.inputs.reps || '' }}
 
 jobs:
@@ -70,12 +56,11 @@ jobs:
       - id: build
         run: |
           set -euo pipefail
-          tasks="${{ github.event.inputs.tasks || 'flux,trainset,extreme,growth' }}"
-          python3 - "$tasks" "${NSHARDS}" <<'PY' >> "$GITHUB_OUTPUT"
+          python3 - "${TASK}" "${NSHARDS}" <<'PY' >> "$GITHUB_OUTPUT"
           import json, sys
-          tasks = [t.strip() for t in sys.argv[1].split(",") if t.strip()]
+          task = sys.argv[1]
           n = int(sys.argv[2])
-          include = [{"task": t, "shard": s} for t in tasks for s in range(n)]
+          include = [{"task": task, "shard": s} for s in range(n)]
           print("matrix=" + json.dumps({"include": include}))
           PY
 
@@ -87,7 +72,7 @@ jobs:
       fail-fast: false
       # Capped below the account's concurrent-runner limit so this workflow
       # cannot starve the others while it runs.
-      max-parallel: 8
+      max-parallel: 20
       matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
@@ -98,16 +83,30 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Verify immutable upstream simulation source
+        run: |
+          set -euo pipefail
+          python scripts/fetch_manuscript_sources.py \
+            --source inversion_simulation_upstream \
+            --output-dir /tmp/manuscript-sources
+          mkdir -p /tmp/inversion-simulation-upstream
+          tar -xzf /tmp/manuscript-sources/inversionSimulation-3f845a2b4e017842d1d6648210f148faab616e17.tar.gz \
+            -C /tmp/inversion-simulation-upstream
+          cmp simulations/refsim/inputFiles/temp.fa \
+            /tmp/inversion-simulation-upstream/inversionSimulation-3f845a2b4e017842d1d6648210f148faab616e17/inputFiles/temp.fa
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install msprime biopython numpy pandas scipy scikit-learn
+          pip install --requirement simulations/refsim/requirements.txt
 
       - name: Install IQ-TREE 2
         run: |
           set -euo pipefail
           url="https://github.com/iqtree/iqtree2/releases/download/v${IQTREE_VERSION}/iqtree-${IQTREE_VERSION}-Linux.tar.gz"
           curl -fsSL "$url" -o /tmp/iqtree.tar.gz
+          echo "4ad515deb95af9eeef1df949eaa41399cff24cd90077e0136cce66f0a63cc99f  /tmp/iqtree.tar.gz" \
+            | sha256sum --check --strict
           tar -xzf /tmp/iqtree.tar.gz -C /tmp
           sudo install -m 0755 "/tmp/iqtree-${IQTREE_VERSION}-Linux/bin/iqtree2" /usr/local/bin/iqtree2
           iqtree2 --version | head -1
@@ -138,7 +137,7 @@ jobs:
 
   aggregate:
     needs: simulate
-    if: always() && needs.simulate.result != 'cancelled'
+    if: needs.simulate.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -153,7 +152,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install msprime numpy pandas scipy scikit-learn matplotlib
+          pip install --requirement simulations/refsim/requirements.txt
 
       - uses: actions/download-artifact@v4
         with:
@@ -164,61 +163,32 @@ jobs:
       - name: Show what landed
         run: |
           ls -la simulations/refsim/out/ || true
-          for t in flux trainset extreme growth; do
-            n=$(ls simulations/refsim/out/${t}_shard*.csv 2>/dev/null | wc -l)
-            echo "$t: $n / ${NSHARDS} shards"
-          done
+          n=$(find simulations/refsim/out -name "${TASK}_shard*.csv" | wc -l)
+          echo "${TASK}: $n / ${NSHARDS} shards"
 
-      - name: Aggregate the flux and extreme sweeps
+      - name: Validate the complete selected simulation grid
         if: github.event.inputs.reps == ''
         working-directory: simulations/refsim
         run: |
           set -euo pipefail
           shopt -s nullglob
-          flux=(out/flux_shard*.csv); extreme=(out/extreme_shard*.csv)
-          if [ ${#flux[@]} -eq "${NSHARDS}" ]; then
-            python make_report.py 'out/flux_shard*.csv' --prefix flux
-          else
-            echo "flux incomplete (${#flux[@]}/${NSHARDS}) -- not regenerating its tables"
-          fi
-          if [ ${#extreme[@]} -eq "${NSHARDS}" ]; then
-            python make_report.py 'out/extreme_shard*.csv' --prefix extreme
-          else
-            echo "extreme incomplete (${#extreme[@]}/${NSHARDS}) -- not regenerating its tables"
-          fi
+          shards=(out/${TASK}_shard*.csv)
+          test ${#shards[@]} -eq "${NSHARDS}" || {
+            echo "${TASK} incomplete (${#shards[@]}/${NSHARDS})"; exit 1;
+          }
+          python validate_grid.py --task "${TASK}" \
+            --inputs "out/${TASK}_shard*.csv" \
+            --provenance fluxsweep_provenance.json
 
-      - name: Rebuild the training set, then refit and rescore
-        if: github.event.inputs.reps == ''
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          tr=(simulations/refsim/out/trainset_shard*.csv)
-          if [ ${#tr[@]} -ne "${NSHARDS}" ]; then
-            echo "trainset incomplete (${#tr[@]}/${NSHARDS}) -- skipping refit"
-            exit 0
-          fi
-          python -m recurrence.cli simulate --merge 'simulations/refsim/out/trainset_shard*.csv'
-          gzip -t recurrence/data/sim_features.csv.gz
-          python -m recurrence.cli fit
-          python -m recurrence.cli score
-
-      - name: Validate and aggregate the frequency-trajectory analysis
+      - name: Rebuild and assert the reported gene-flux results
         if: github.event.inputs.reps == ''
         working-directory: simulations/refsim
         run: |
           set -euo pipefail
-          shopt -s nullglob
-          growth=(out/growth_shard*.csv)
-          if [ ${#growth[@]} -eq 0 ]; then
-            echo "growth was not requested"
-            exit 0
-          fi
-          if [ ${#growth[@]} -ne "${NSHARDS}" ]; then
-            echo "growth incomplete (${#growth[@]}/${NSHARDS})"
-            exit 1
-          fi
-          python check_growth.py --structural-only
-          python make_growth_report.py 'out/growth_shard*.csv' --outdir .
+          python make_report.py 'out/fluxsweep3_shard*.csv' \
+            --prefix gene_flux
+          python verify_reported_flux.py \
+            --rows 'out/fluxsweep3_shard*.csv'
 
       - name: Verify every tracked gzip still decompresses
         run: |
@@ -240,36 +210,18 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          files=(
-            simulations/refsim/flux_results.csv
-            simulations/refsim/flux_results.md
-            simulations/refsim/sweep_flux.json
-            simulations/refsim/extreme_results.csv
-            simulations/refsim/extreme_results.md
-            simulations/refsim/sweep_extreme.json
-            simulations/refsim/growth_results.csv
-            simulations/refsim/growth_results.md
-            simulations/refsim/growth_provenance.json
-            recurrence/data/sim_features.csv.gz
-            recurrence/results/model.json
-            recurrence/results/transferable_model.json
-            recurrence/results/sim_metrics.json
-            recurrence/results/tf_sim_metrics.json
-            recurrence/results/sim_test_pred.csv.gz
-            recurrence/results/tf_sim_test_pred.csv.gz
-            recurrence/results/fit_provenance.json
-            recurrence/results/score_provenance.json
-            recurrence/results/real_scores.csv
-            recurrence/results/concordance.json
-            recurrence/results/concordance_disagreements.csv
-          )
+          files=(simulations/refsim/gene_flux_results.csv
+                 simulations/refsim/gene_flux_results.md
+                 simulations/refsim/sweep_gene_flux.json
+                 simulations/refsim/fluxsweep_provenance.json)
+          figures=(simulations/refsim/gene_flux_fpr_power.png)
           for f in "${files[@]}"; do
-            [ -f "$f" ] && git add -- "$f" || echo "missing (skipped): $f"
+            test -f "$f"
+            git add -- "$f"
           done
-          for f in simulations/refsim/growth_model.png \
-                   simulations/refsim/growth_frequency.png \
-                   simulations/refsim/growth_diversity_ratio.png; do
-            [ -f "$f" ] && git add -f -- "$f" || echo "missing (skipped): $f"
+          for f in "${figures[@]}"; do
+            test -f "$f"
+            git add -f -- "$f"
           done
 
           if git diff --staged --quiet; then
@@ -295,8 +247,7 @@ jobs:
           path: |
             simulations/refsim/*_results.csv
             simulations/refsim/*_results.md
+            simulations/refsim/*_provenance.json
             simulations/refsim/sweep_*.json
-            simulations/refsim/growth_provenance.json
             simulations/refsim/*.png
-            recurrence/results/*.json
-          if-no-files-found: warn
+          if-no-files-found: error

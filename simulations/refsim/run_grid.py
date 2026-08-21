@@ -1,20 +1,14 @@
 #!/usr/bin/env python
 """Shardable driver for the reference recurrence pipeline (``refsim.py``).
 
-Two grids, both scored by the upstream classifier (IQ-TREE ML tree + Fitch
-parsimony on the orientation trait, ``minMutHomoplasy >= 2`` = recurrent):
+Manuscript and sensitivity grids scored by the upstream classifier (IQ-TREE ML
+tree + Fitch parsimony on the orientation trait, ``minMutHomoplasy >= 2`` = recurrent):
 
-``flux``
-    The between-orientation gene-flux sweep. Axes: scenario (single /
-    recurrent) x time depth x recombination rate x flux rate, at the upstream
-    manifest's ``sampleHaploSize = 240``, ``inv_freq = 0.1``, ``mig_const = 1e-8``.
-    ``m_flux = 0`` is upstream's own model, so the first flux column is the
-    reference false-positive rate / power.
-
-``trainset``
-    The labelled training set for ``recurrence/``: the same axes plus inverted
-    allele frequency, at the real-data haplotype count (88), emitting the full
-    per-locus feature vector with the reference origin count as ``tree_n_events``.
+``fluxsweep`` is the reported gene-flux analysis. It uses ``single_repo`` and
+``recurrent``, four time depths, three recombination rates, four flux rates, six
+inversion frequencies, 20 replicates per cell, 240 haplotypes, and seeds starting
+at 9,000,000. ``replicate`` is the corresponding zero-flux power grid. ``growth``
+and ``rgrowth`` are separate frequency-trajectory sensitivity analyses.
 
 Sharding: ``--shard k --nshards N`` takes grid rows with ``index % N == k``, so a
 SLURM array covers the grid exactly once. Within a shard ``--procs`` replicates

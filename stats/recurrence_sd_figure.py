@@ -9,7 +9,7 @@ flanking-repeat architecture against the consensus labels.
    the 93 loci in flanking inverted-repeat size x identity, coloured by the
    consensus label, shaded by what the a-priori hard rule calls them
    (recurrent iff >= 10 kbp and >= 95% identity);
-   how those calls line up with the consensus labels.
+   the orientation x recurrence diversity interaction under either label set.
 
     python stats/recurrence_sd_figure.py [-o data/recurrence_sd_figure.png]
 """
@@ -74,33 +74,6 @@ def panel_architecture(ax):
         labelspacing=0.35)
 
 
-def panel_reclassification(ax):
-    """What the hard rule calls each locus, against its consensus label."""
-    calls = pd.read_csv(CALLS, sep="\t")
-    labels = [(0.0, "single-event", SINGLE), (1.0, "recurrent", RECURRENT)]
-
-    for i, (rule, _, colour) in enumerate(labels):
-        for j, (cons, _, _) in enumerate(labels):
-            n = int(((calls.sd_call_hard == rule)
-                     & (calls.consensus == cons)).sum())
-            ax.add_patch(plt.Rectangle((i - 0.5, j - 0.5), 1, 1,
-                                       color=colour,
-                                       alpha=0.30 if i == j else 0.10,
-                                       zorder=0))
-            ax.text(i, j, str(n), ha="center", va="center", fontsize=13,
-                    color="#222222", zorder=3)
-
-    ax.set_xticks(range(len(labels)))
-    ax.set_xticklabels([n for _, n, _ in labels])
-    ax.set_yticks(range(len(labels)))
-    ax.set_yticklabels([n for _, n, _ in labels])
-    ax.set_xlim(-0.5, len(labels) - 0.5)
-    ax.set_ylim(-0.5, len(labels) - 0.5)
-    ax.set_xlabel("SD rule call")
-    ax.set_ylabel("consensus label")
-    ax.set_title("Reclassification", loc="left")
-
-
 def panel_interaction(ax):
     """The orientation x recurrence interaction under either label set."""
     summary = pd.read_csv(SUMMARY, sep="\t")
@@ -111,10 +84,15 @@ def panel_interaction(ax):
         return float(r.value), float(r.p)
 
     sets = [("consensus", "consensus"), ("SD hard rule (primary)", "SD rule")]
+    # Deliberately NOT the recurrence palette used in the other two panels:
+    # there green/orange mean single-event/recurrent, here the bars distinguish
+    # which CLASSIFIER produced the labels, and reusing the same two colours for
+    # a different contrast reads as if the bars were the two recurrence classes.
+    classifier_colours = ("#4C5B8A", "#B07AA1")
     for i, (key, name) in enumerate(sets):
         value, p = row(key)
-        ax.bar(i, value, width=0.55, color=RECURRENT if i else SINGLE,
-               alpha=0.85, zorder=3)
+        ax.bar(i, value, width=0.55, color=classifier_colours[i],
+               alpha=0.9, zorder=3)
         ax.text(i, value + 0.12, f"{value:.2f}$\\times$\np = {p:.1g}",
                 ha="center", va="bottom", fontsize=8, color="#333333")
 
@@ -129,11 +107,10 @@ def panel_interaction(ax):
 
 def make_figure(path):
     _apply_style()
-    fig, axes = plt.subplots(1, 3, figsize=(12.4, 3.8),
-                             width_ratios=[1.35, 1.0, 0.85])
+    fig, axes = plt.subplots(1, 2, figsize=(8.6, 3.8),
+                             width_ratios=[1.35, 0.85])
     panel_architecture(axes[0])
-    panel_reclassification(axes[1])
-    panel_interaction(axes[2])
+    panel_interaction(axes[1])
     fig.tight_layout()
     fig.savefig(path)
     plt.close(fig)

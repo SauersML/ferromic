@@ -319,7 +319,11 @@ def fit_model(model_data: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, object]
 
 
 def p_label(value: float) -> str:
-    return f"P = {value:.2e}" if value < 0.001 else f"P = {value:.3f}"
+    if value < 0.001:
+        exp = int(np.floor(np.log10(abs(value))))
+        mant = value / (10 ** exp)
+        return f"P = ${mant:.1f}\\times10^{{{exp}}}$"
+    return f"P = {value:.3f}"
 
 
 def draw_figure(

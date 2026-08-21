@@ -49,10 +49,13 @@ from collections import Counter, defaultdict
 import numpy as np
 import pandas as pd
 from scipy import stats
-import matplotlib
 
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
+try:  # plotting is optional so the pass can run on cluster nodes without mpl
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+except ImportError:
+    plt = None
 
 # Shared figure style so panels across the paper read as one system.
 try:
@@ -67,6 +70,7 @@ _sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _codon_diversity import (
     VALID, FOURFOLD_PREFIXES, read_phy, site_pi, locus_pi,
     fourfold_codon_starts as fourfold_columns, class_aware_locus_pi,
+    class_aware_site_pi_values,
 )
 
 warnings.filterwarnings("ignore")
@@ -180,6 +184,13 @@ def fourfold_locus_pi(seqs, codon_starts):
     return class_aware_locus_pi(seqs, [(cs, 2, "4") for cs in codon_starts])
 
 
+def fourfold_site_pis(seqs, codon_starts):
+    """Per-site pi values at fourfold third positions; their mean is
+    fourfold_locus_pi and the per-inversion estimate is the pooled mean, so
+    resampling these values resamples the per-inversion estimator exactly."""
+    return class_aware_site_pi_values(seqs, [(cs, 2, "4") for cs in codon_starts])
+
+
 def whole_cds_pi(seqs, L):
     return locus_pi(seqs, range(L))
 
@@ -211,6 +222,7 @@ def collect_fourfold_pi(phy_dir):
             "wc0_num": 0.0, "wc0_den": 0,
             "wc1_num": 0.0, "wc1_den": 0,
             "n_cds": 0, "n_cds_ff": 0,
+            "ff0_sites": [], "ff1_sites": [],
         }
     )
 
@@ -254,16 +266,20 @@ def collect_fourfold_pi(phy_dir):
             a["wc1_den"] += wc1n
 
         if ff_cols:
-            ff0, ff0n = fourfold_locus_pi(s0, ff_cols)
-            ff1, ff1n = fourfold_locus_pi(s1, ff_cols)
+            v0 = fourfold_site_pis(s0, ff_cols)
+            v1 = fourfold_site_pis(s1, ff_cols)
+            ff0, ff0n = (float(np.mean(v0)), len(v0)) if v0 else (np.nan, 0)
+            ff1, ff1n = (float(np.mean(v1)), len(v1)) if v1 else (np.nan, 0)
             if ff0n or ff1n:
                 a["n_cds_ff"] += 1
             if ff0n:
                 a["ff0_num"] += ff0 * ff0n
                 a["ff0_den"] += ff0n
+                a["ff0_sites"].extend(v0)
             if ff1n:
                 a["ff1_num"] += ff1 * ff1n
                 a["ff1_den"] += ff1n
+                a["ff1_sites"].extend(v1)
 
     print(f"Processed {n_proc} CDS group pairs across {len(acc)} inversion loci.")
 
@@ -289,7 +305,10 @@ def collect_fourfold_pi(phy_dir):
                 "pi_wholeCDS_inverted": ratio(a["wc1_num"], a["wc1_den"]),
             }
         )
-    return pd.DataFrame(rows)
+    site_map = {key: (np.asarray(a["ff0_sites"], float),
+                      np.asarray(a["ff1_sites"], float))
+                for key, a in acc.items()}
+    return pd.DataFrame(rows), site_map
 
 
 def attach_whole_locus_pi(df):
@@ -413,63 +432,325 @@ def run_tests(df):
 # ------------------------- FIGURE ----------------------------
 
 
+def _sci(value, sig=2):
+    """Mathtext 1.3x10^-4; mathtext glyphs render regardless of the text font."""
+    if not (value == value) or value is None:
+        return "NA"
+    if value == 0:
+        return "0"
+    exp = int(np.floor(np.log10(abs(value))))
+    mant = value / (10 ** exp)
+    return f"${mant:.1f}\\times10^{{{exp}}}$"
+
+
+def _p_label(value):
+    if not (value == value):  # NaN
+        return "P = NA"
+    return f"P = {_sci(value)}" if value < 0.001 else f"P = {value:.3f}"
+
+
 def make_figure(df):
-    """Supplementary figure: fourfold pi by orientation x recurrence, plus a
-    fourfold-vs-whole-locus scatter."""
-    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    """Two panels in the manuscript's Fig. 2A violin style -- whole-inversion pi
+    and 4-fold-degenerate-site pi, each direct vs inverted split by recurrence.
+    Layout, colors, boxplots, paired log2-ratio lines and significance brackets
+    mirror stats/figure2a_repolarized.py / stats/inv_dir_recur_violins.py."""
+    if plt is None:
+        print("matplotlib unavailable; skipping figure")
+        return
+    import matplotlib as mpl
+    from matplotlib.colors import TwoSlopeNorm
 
-    cats = [(0, "Single-event"), (1, "Recurrent")]
-    colors = {"direct": "#2196F3", "inverted": "#F44336"}
+    mpl.rcParams.update({
+        "font.family": "sans-serif",
+        "font.sans-serif": ["Arial", "DejaVu Sans"],
+        "pdf.fonttype": 42,
+        "ps.fonttype": 42,
+        "axes.spines.top": False,
+        "axes.spines.right": False,
+    })
+    colors = {"Direct": "#1f3b78", "Inverted": "#8c2d7e"}
+    positions = {
+        ("Single-event", "Direct"): 0.0,
+        ("Single-event", "Inverted"): 1.0,
+        ("Recurrent", "Direct"): 3.0,
+        ("Recurrent", "Inverted"): 4.0,
+    }
+    groups = list(positions)
+    panels = [
+        ("A", "Whole inversion locus", "pi_wholeLocus_direct", "pi_wholeLocus_inverted"),
+        ("B", "4-fold-degenerate sites", "pi_fourfold_direct", "pi_fourfold_inverted"),
+    ]
 
-    # Panels 1-2: violins of fourfold pi by orientation, split by recurrence
-    for ax, (code, name) in zip(axes[:2], cats):
-        sub = df[df["recurrence"] == code]
-        data = [
-            sub["pi_fourfold_direct"].dropna().values,
-            sub["pi_fourfold_inverted"].dropna().values,
+    # One shared color scale for the paired log2(pi_direct/pi_inverted) lines.
+    ratios = []
+    for _, _, cdir, cinv in panels:
+        r = np.log2((df[cdir].to_numpy(float) + 1e-12)
+                    / (df[cinv].to_numpy(float) + 1e-12))
+        ratios.append(r[np.isfinite(r)])
+    max_abs = max(float(np.percentile(np.abs(np.concatenate(ratios)), 98)), 1e-12)
+    norm = TwoSlopeNorm(vmin=-max_abs, vcenter=0, vmax=max_abs)
+    cmap = plt.get_cmap("coolwarm")
+
+    fig, axes = plt.subplots(2, 2, figsize=(14.0, 12.0))
+    for ax, (letter, title, cdir, cinv) in zip(axes[0], panels):
+        rng = np.random.default_rng(2025)
+        sub = df.dropna(subset=[cdir, cinv, "recurrence"]).copy()
+        sub = sub[np.isin(sub["recurrence"], [0, 1])]
+        rec_name = {0: "Single-event", 1: "Recurrent"}
+
+        values = [
+            sub.loc[sub["recurrence"] == code, col].dropna().to_numpy(float)
+            for (grp, ori), code, col in [
+                (g, 0 if g[0] == "Single-event" else 1,
+                 cdir if g[1] == "Direct" else cinv) for g in groups]
         ]
-        data = [d for d in data if len(d)]
-        if not data:
-            ax.set_title(f"{name}\n(no data)")
-            continue
-        parts = ax.violinplot(data, showextrema=False)
-        for pc, c in zip(parts["bodies"], [colors["direct"], colors["inverted"]]):
-            pc.set_facecolor(c)
-            pc.set_alpha(0.6)
-            pc.set_edgecolor("black")
-        for i, d in enumerate(data, 1):
-            x = np.random.normal(i, 0.05, size=len(d))
-            ax.scatter(x, d, s=18, alpha=0.7, color="black", zorder=3)
-            ax.hlines(np.median(d), i - 0.2, i + 0.2, color="black", lw=2, zorder=4)
-        ax.set_xticks([1, 2])
-        ax.set_xticklabels(["Direct", "Inverted"])
-        ax.set_ylabel("pi at 4-fold sites")
-        ax.set_title(f"{name} (n={len(sub.dropna(subset=['pi_fourfold_direct']))})")
 
-    # Panel 3: fourfold pi vs whole-locus pi
-    ax = axes[2]
-    for orient, col_ff, col_wl, c in [
-        ("direct", "pi_fourfold_direct", "pi_wholeLocus_direct", colors["direct"]),
-        ("inverted", "pi_fourfold_inverted", "pi_wholeLocus_inverted", colors["inverted"]),
-    ]:
-        s = df.dropna(subset=[col_ff, col_wl])
-        ax.scatter(s[col_wl], s[col_ff], s=28, alpha=0.7, color=c, label=orient, edgecolor="white")
-    lim = max(
-        df[["pi_fourfold_direct", "pi_fourfold_inverted", "pi_wholeLocus_direct", "pi_wholeLocus_inverted"]]
-        .max(numeric_only=True)
-        .max(),
-        1e-6,
-    )
-    ax.plot([0, lim], [0, lim], "k--", lw=1, alpha=0.6)
-    ax.set_xlabel("pi whole-locus (output.csv)")
-    ax.set_ylabel("pi at 4-fold sites")
-    ax.set_title("4-fold vs whole-locus pi")
-    ax.legend()
+        violin = ax.violinplot(
+            values,
+            positions=[positions[g] for g in groups],
+            widths=0.9,
+            showmeans=False,
+            showmedians=False,
+            showextrema=False,
+        )
+        for body, (_, orientation) in zip(violin["bodies"], groups):
+            body.set_facecolor(colors[orientation])
+            body.set_edgecolor("none")
+            body.set_alpha(0.55)
 
-    fig.tight_layout()
+        for vals_box, g in zip(values, groups):
+            if not len(vals_box):
+                continue
+            ax.boxplot(
+                [vals_box],
+                positions=[positions[g]],
+                widths=0.18,
+                patch_artist=True,
+                showfliers=False,
+                boxprops={"facecolor": "white", "edgecolor": "#111111"},
+                medianprops={"color": "black", "linewidth": 1.5},
+                whiskerprops={"color": "#111111"},
+                capprops={"color": "#111111"},
+            )
+
+        for _, row in sub.iterrows():
+            grp = rec_name[int(row["recurrence"])]
+            d, v = float(row[cdir]), float(row[cinv])
+            if not (np.isfinite(d) and np.isfinite(v)):
+                continue
+            fold = np.log2((d + 1e-12) / (v + 1e-12))
+            j = float(rng.uniform(0.06, 0.20))
+            x_d = positions[(grp, "Direct")] + j
+            x_v = positions[(grp, "Inverted")] - j
+            ax.plot([x_d, x_v], [d, v], color=cmap(norm(fold)),
+                    linewidth=1.25, alpha=0.85, zorder=2)
+            ax.scatter([x_d], [d], c=[colors["Direct"]], s=25,
+                       edgecolors="black", linewidths=0.4, alpha=0.72, zorder=3)
+            ax.scatter([x_v], [v], c=[colors["Inverted"]], s=25,
+                       edgecolors="black", linewidths=0.4, alpha=0.72, zorder=3)
+
+        # Same paired test as run_tests(), so brackets and table cannot drift.
+        p_by_code = {}
+        for code in (0, 1):
+            g = sub[sub["recurrence"] == code]
+            delta = np.log1p(g[cinv].to_numpy(float)) - np.log1p(g[cdir].to_numpy(float))
+            _, p, _ = paired_wilcoxon(delta)
+            p_by_code[code] = p
+
+        ymax = max(float(np.nanmax(np.concatenate([v for v in values if len(v)]))), 1e-8)
+        ax.set_ylim(0, ymax * 1.23)
+        for left, right, p_value in ((0, 1, p_by_code[0]), (3, 4, p_by_code[1])):
+            y = ymax * 1.08
+            h = ymax * 0.025
+            ax.plot([left, left, right, right], [y, y + h, y + h, y], color="#222222")
+            ax.text((left + right) / 2, y + h * 1.25, _p_label(p_value), ha="center")
+
+        ax.axvline(2, color="#dddddd", linewidth=1)
+        ax.set_xticks([0, 1, 3, 4])
+        ax.set_xticklabels(["Direct", "Inverted", "Direct", "Inverted"])
+        n_single = int((sub["recurrence"] == 0).sum())
+        n_recur = int((sub["recurrence"] == 1).sum())
+        ax.text(0.5, -0.11, f"Single-event\n(n = {n_single})",
+                transform=ax.get_xaxis_transform(), ha="center", fontweight="bold")
+        ax.text(3.5, -0.11, f"Recurrent\n(n = {n_recur})",
+                transform=ax.get_xaxis_transform(), ha="center", fontweight="bold")
+        ax.set_ylabel(r"Nucleotide diversity ($\pi$, $\times10^{-3}$)")
+        ax.yaxis.set_major_formatter(
+            plt.FuncFormatter(lambda v, _: f"{v * 1e3:g}"))
+        ax.set_title(title, fontsize=12)
+        ax.text(-0.08, 1.04, letter, transform=ax.transAxes,
+                fontsize=15, fontweight="bold")
+
+    # ---- bottom row: the correlations the response letter quotes ----------
+    # Same "usable" rule as four_fold_pi_correlations.py: a locus carries 4-fold
+    # information only when both orientations actually have 4-fold sites.
+    from scipy import stats as _st
+    usable = df[(df["fourfold_sites_direct"].fillna(0) > 0)
+                & (df["fourfold_sites_inverted"].fillna(0) > 0)].copy()
+    for col in ("wholeLocus", "fourfold", "wholeCDS"):
+        usable[f"d_{col}"] = (usable[f"pi_{col}_inverted"].astype(float)
+                              - usable[f"pi_{col}_direct"].astype(float))
+
+    scatter_panels = [
+        ("C", "d_wholeLocus", "d_fourfold",
+         "\u0394\u03c0 (inverted \u2212 direct), whole inversion locus",
+         "\u0394\u03c0 (inverted \u2212 direct), 4-fold sites"),
+        ("D", "d_wholeCDS", "d_fourfold",
+         "\u0394\u03c0 (inverted \u2212 direct), whole CDS",
+         "\u0394\u03c0 (inverted \u2212 direct), 4-fold sites"),
+    ]
+    for ax, (letter, xcol, ycol, xlabel, ylabel) in zip(axes[1], scatter_panels):
+        sub = usable.dropna(subset=[xcol, ycol])
+        x = sub[xcol].to_numpy(float)
+        y = sub[ycol].to_numpy(float)
+        rec = pd.to_numeric(sub["recurrence"], errors="coerce").to_numpy()
+
+        # Color encodes orientation in this figure, so recurrence class is
+        # carried by marker shape instead.
+        is_single = rec == 0
+        is_recur = rec == 1
+        is_unclass = ~(is_single | is_recur)
+        ax.scatter(x[is_unclass], y[is_unclass], s=34, facecolors="none",
+                   edgecolors="#9a9a9a", linewidths=1.0,
+                   label=f"unclassified (n = {int(is_unclass.sum())})")
+        # Class colors match the other recurrence figures
+        # (stats/divergence_da_dxy_by_type.py); marker shape is a redundant cue.
+        ax.scatter(x[is_single], y[is_single], s=42, marker="o",
+                   color="#1f3b78", edgecolors="black", linewidths=0.4,
+                   label=f"single-event (n = {int(is_single.sum())})")
+        ax.scatter(x[is_recur], y[is_recur], s=52, marker="^",
+                   color="#8c2d7e", edgecolors="black", linewidths=0.4,
+                   label=f"recurrent (n = {int(is_recur.sum())})")
+
+        rho_all, p_all = _st.spearmanr(x, y)
+        cls = is_single | is_recur
+        rho_c, p_c = _st.spearmanr(x[cls], y[cls])
+        ax.set_title(
+            f"all loci: \u03c1 = {rho_all:.3f}, {_p_label(p_all)} (n = {len(x)})\n"
+            f"classified loci: \u03c1 = {rho_c:.3f}, {_p_label(p_c)} "
+            f"(n = {int(cls.sum())})",
+            fontsize=11)
+
+        xlim = np.nanmax(np.abs(x)) * 1.15
+        ylim = np.nanmax(np.abs(y)) * 1.15
+        lim = max(xlim, ylim)
+        ax.plot([-lim, lim], [-lim, lim], color="#bbbbbb", ls="--", lw=1.0,
+                zorder=1)
+        ax.axhline(0, color="#e3e3e3", lw=0.8, zorder=0)
+        ax.axvline(0, color="#e3e3e3", lw=0.8, zorder=0)
+        ax.set_xlim(-xlim, xlim)
+        ax.set_ylim(-ylim, ylim)
+        ax.set_xlabel(xlabel + r" ($\times10^{-3}$)")
+        ax.set_ylabel(ylabel + r" ($\times10^{-3}$)")
+        for axis in (ax.xaxis, ax.yaxis):
+            axis.set_major_formatter(
+                plt.FuncFormatter(lambda v, _: f"{v * 1e3:g}"))
+        ax.legend(frameon=False, fontsize=9, loc="upper left")
+        ax.text(-0.08, 1.10, letter, transform=ax.transAxes,
+                fontsize=15, fontweight="bold")
+
+    # Adjust the grid BEFORE the colorbar: fig.colorbar() carves its space out of
+    # the current axes positions, and a later subplots_adjust would undo that and
+    # slide the right panel underneath the bar.
+    fig.subplots_adjust(bottom=0.07, hspace=0.42, wspace=0.28)
+    scalar = mpl.cm.ScalarMappable(norm=norm, cmap=cmap)
+    colorbar = fig.colorbar(scalar, ax=list(axes[0]), pad=0.02, fraction=0.04,
+                            shrink=0.85)
+    colorbar.set_label(r"$\log_{2}(\pi_{\mathrm{direct}}/\pi_{\mathrm{inverted}})$")
     fig.savefig(OUT_FIG, bbox_inches="tight")
+    fig.savefig(os.path.splitext(OUT_FIG)[0] + ".png", dpi=300, bbox_inches="tight")
     plt.close(fig)
     print(f"Saved figure -> {OUT_FIG}")
+
+
+OUT_SPLIT = os.path.join(_DATA_DIR, "four_fold_split_half.tsv")
+
+
+def split_half_analysis(df, site_map, n_rep=2000, seed=2026):
+    """How well does the 4-fold estimate agree with itself?
+
+    The per-inversion 4-fold pi is the mean of per-site pi over the pooled
+    callable 4-fold sites, so randomly splitting those sites in two and
+    recomputing the orientation difference from each half gives two independent
+    same-length measurements of the same quantity. Their Spearman correlation
+    across loci (r_hh) is the measure's self-agreement; no noise model, no
+    demographic assumption. Spearman-Brown then gives the reliability of the
+    full-length measure, r_full = 2 r_hh / (1 + r_hh), and the correlation
+    attainable between the full 4-fold measure and ANY perfectly-agreeing
+    noiseless quantity is bounded by sqrt(r_full). Comparing the observed
+    whole-locus correlation to that bound asks whether the 4-fold data agree
+    with the whole-locus data as well as they agree with themselves.
+    """
+    from scipy import stats as st
+
+    rng = np.random.default_rng(seed)
+    d = df.copy()
+    d["d_whole"] = d["pi_wholeLocus_inverted"] - d["pi_wholeLocus_direct"]
+    keys, vecs = [], []
+    for _, r in d.iterrows():
+        key = (r["chr"], int(r["region_start"]), int(r["region_end"]))
+        v0, v1 = site_map.get(key, (np.array([]), np.array([])))
+        # need >= 2 sites per orientation to split, and a whole-locus delta
+        if len(v0) >= 2 and len(v1) >= 2 and np.isfinite(r["d_whole"]):
+            keys.append((key, float(r["d_whole"]),
+                         pd.to_numeric(r["recurrence"], errors="coerce")))
+            vecs.append((v0, v1))
+    n = len(keys)
+    classified = np.array([k[2] in (0.0, 1.0) for k in keys])
+    d_whole = np.array([k[1] for k in keys])
+    print(f"\nsplit-half: {n} loci with >=2 callable 4-fold sites in both "
+          f"orientations ({int(classified.sum())} recurrence-classified)")
+
+    def one_rep():
+        dA = np.empty(n)
+        dB = np.empty(n)
+        for i, (v0, v1) in enumerate(vecs):
+            halves = []
+            for v in (v0, v1):
+                idx = rng.permutation(len(v))
+                h = len(v) // 2
+                halves.append((v[idx[:h]].mean(), v[idx[h:]].mean()))
+            dA[i] = halves[1][0] - halves[0][0]
+            dB[i] = halves[1][1] - halves[0][1]
+        return dA, dB
+
+    subsets = [("all_with_fourfold", np.ones(n, bool)),
+               ("recurrence_classified", classified)]
+    stats_acc = {name: {"r_hh": [], "ceiling": [], "r_half_whole": []}
+                 for name, _ in subsets}
+    for _ in range(n_rep):
+        dA, dB = one_rep()
+        for name, mask in subsets:
+            r_hh = st.spearmanr(dA[mask], dB[mask]).statistic
+            r_full = 2 * r_hh / (1 + r_hh) if r_hh > -1 else np.nan
+            stats_acc[name]["r_hh"].append(r_hh)
+            stats_acc[name]["ceiling"].append(
+                np.sqrt(r_full) if (r_full == r_full and r_full > 0) else 0.0)
+            stats_acc[name]["r_half_whole"].append(
+                st.spearmanr(dA[mask], d_whole[mask]).statistic)
+
+    rows = []
+    label = {
+        "r_hh": "split-half self-correlation of the 4-fold orientation difference",
+        "ceiling": "attainable correlation with a perfectly-agreeing measure "
+                   "(Spearman-Brown sqrt of full-length reliability)",
+        "r_half_whole": "half-length 4-fold orientation difference vs whole-locus",
+    }
+    for name, mask in subsets:
+        for stat, valslist in stats_acc[name].items():
+            vals = np.asarray(valslist, float)
+            vals = vals[np.isfinite(vals)]
+            lo, med, hi = np.percentile(vals, [2.5, 50, 97.5])
+            rows.append({
+                "subset": name, "n_loci": int(mask.sum()), "statistic": stat,
+                "median": f"{med:.6f}", "ci_lo": f"{lo:.6f}", "ci_hi": f"{hi:.6f}",
+                "description": label[stat], "n_replicates": n_rep,
+            })
+            print(f"  {name:22s} {stat:14s} median={med:.3f} [{lo:.3f}, {hi:.3f}]")
+    out = pd.DataFrame(rows)
+    out.to_csv(OUT_SPLIT, sep="\t", index=False)
+    print(f"Saved split-half analysis -> {OUT_SPLIT}")
+    return out
 
 
 # ------------------------- MAIN ------------------------------
@@ -494,7 +775,7 @@ def main():
     else:
         phy_dir, tmp_dir = resolve_phy_dir()
         try:
-            df = collect_fourfold_pi(phy_dir)
+            df, site_map = collect_fourfold_pi(phy_dir)
         finally:
             if tmp_dir and os.path.isdir(tmp_dir):
                 shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -502,6 +783,7 @@ def main():
         df = df.sort_values(["chr", "region_start"]).reset_index(drop=True)
         df.to_csv(OUT_TABLE, sep="\t", index=False)
         print(f"Saved per-inversion table -> {OUT_TABLE} ({len(df)} loci)")
+        split_half_analysis(df, site_map)
 
     tests = run_tests(df)
     tests.to_csv(OUT_TESTS, sep="\t", index=False)

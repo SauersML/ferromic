@@ -1,207 +1,83 @@
-# `simulations/refsim/` — the reference recurrence pipeline, plus the gene-flux sweep
+# Reference recurrence simulations and gene-flux analysis
 
-This directory is a faithful port of
-[`hsiehphLab/inversionSimulation`](https://github.com/hsiehphLab/inversionSimulation) —
-the structured-coalescent simulation and recurrence classifier behind the manuscript's
-Fig. 1G — with exactly one addition: a **between-orientation gene-flux** term.
+This directory contains the structured-coalescent simulation and recurrence
+classifier used for the manuscript response. The implementation is a port of
+the immutable upstream source at commit
+`3f845a2b4e017842d1d6648210f148faab616e17`, verified through
+`reproducibility/manuscript_sources.json`.
 
-Every recurrence number in this repository is produced by the code here, so simulated
-false-positive rates and power are directly comparable to the upstream pipeline's.
+## Recurrence classifier
 
-## The classifier
+Each simulated locus is processed as follows:
 
-Identical to upstream, step for step:
+1. simulate the nine-deme structured coalescent with `msprime`;
+2. retain biallelic sites and construct a full-length haplotype alignment on
+   the upstream `inputFiles/temp.fa` reference backbone;
+3. infer the maximum-likelihood tree with IQ-TREE 2.1.2 using the upstream
+   `-safe -keep-ident -bb 1000 -m MFPMERGE -o CMP_CMP_0` options;
+4. collapse the outgroup and score direct/inverted tip labels with Fitch
+   parsimony; and
+5. classify a locus as recurrent when `minMutHomoplasy >= 2`.
 
-1. structured-coalescent simulation under the 9-deme model of
-   `scripts/recurrentINV_m1.2pop.py` (N<sub>a</sub> = 6000, µ = 1.25 × 10⁻⁸,
-   25 y/generation, 200 kbp locus);
-2. VCF-equivalent site table with multiallelic records dropped and `AA` set to `REF`
-   (`scripts/ancestralstateInVCF.forINVsim.test.py`);
-3. a **full-length nucleotide alignment** on upstream's own reference backbone
-   (`inputFiles/temp.fa`, vendored here byte-for-byte), one sequence per haplotype plus
-   the ancestral outgroup `CMP_CMP_0` (`scripts/phasedVCF2Fasta.py`, `scripts/rmFASTAseqs.py`);
-4. an **IQ-TREE maximum-likelihood tree** over that alignment rooted on the outgroup —
-   `-safe -keep-ident -bb 1000 -m MFPMERGE -o CMP_CMP_0` (Snakefile rule `IQTree`);
-5. the outgroup collapsed, orientation mapped onto the tips as a binary trait
-   (`A` = direct, `T` = inverted), and the minimum number of orientation state changes
-   scored with Biopython's Fitch `ParsimonyScorer` (`scripts/computeMinMutations.py`).
+The classifier uses the best IQ-TREE `.treefile`. Bootstrap trees are generated
+by IQ-TREE but are not used to make the recurrence call.
 
-The returned count is upstream's `minMutHomoplasy`. **A locus is called recurrent iff
-the count is ≥ 2.**
+## Reported gene-flux analysis
 
-`refsim.py` documents the file-by-file correspondence in its module docstring, including
-the two deliberate deviations — dropping `--date*` (which only produces the timetree the
-plotting rules consume, never `.treefile`) and pinning `-nt 1 -seed N` so replicates
-parallelise one per core and reproduce exactly.
+The response's gene-flux numbers come from the `fluxsweep` grid. Both arms use
+the shared nine-deme demography:
 
-### Single vs. recurrent origin
+- `single_repo`: one inverted origin is sampled and direct haplotypes are
+  sampled from the opposite ancestral clade (`fD = 1 - fI`);
+- `recurrent`: both inverted origins are represented in the sample.
 
-Upstream has **one** demography. Whether the sampled inverted haplotypes carry one or two
-independent inversion origins is decided by `frac_admixI = random.randint(0, 10) / 10`:
-the final inverted deme `P_I` is drawn from the two independently derived inverted demes
-`P1_I` and `P2_I` in proportions `[fI, 1 − fI]`. At `fI ∈ {0, 1}` every inverted lineage
-descends from a single inverted deme — a **single-origin** locus. At `0 < fI < 1` both
-origins contribute — a **recurrent** locus.
+Symmetric between-orientation migration is added among extant leaf demes as the
+analogue of gene conversion and double crossing over. The grid uses:
 
-`simulate(scenario=...)` therefore constrains only `fI`. Demography, deme sizes, split
-times and sampling are untouched, so the two labels are the upstream model conditioned on
-its own admixture draw rather than a separate hand-built model.
+- flux `m`: 0, 1e-8, 1e-7, and 1e-6 per lineage per generation;
+- inversion frequencies: 0.01, 0.02, 0.05, 0.10, 0.25, and 0.50;
+- four event-age models and three recombination rates;
+- 20 replicates per complete parameter cell, or 120 replicates after pooling
+  the six inversion frequencies; and
+- 240 sampled haplotypes and seeds 9,000,000 through 9,011,519.
 
-## The one addition: between-orientation flux
+This is the analysis that gives a maximum-flux single-event false-positive rate
+of 4.6% (95% Wilson CI 3.6-5.8%), a two-sided Cochran-Armitage trend p = 0.0071,
+and no trend in recurrent-event power (p = 0.3059). These values are regenerated
+by `make_report.py`; they are not hard-coded into that script.
 
-`m_flux` is symmetric migration between opposite-orientation demes (every inverted deme
-↔ every direct deme) — the gene-conversion / double-crossover analogue, in **migrants per
-lineage per generation**. Upstream has no such term, so **`m_flux = 0` reproduces
-upstream exactly** and is the reference column in every table below.
+The literal two-deme `single` model is retained only for the separate
+frequency-trajectory sensitivity analysis. It is not the source of the reported
+gene-flux results.
 
-## Layout
+## Reproduction
 
-```
-refsim.py          the reference pipeline (simulate -> alignment -> IQ-TREE -> parsimony)
-run_grid.py        shardable driver for the three grids
-make_report.py     per-replicate CSVs -> flux_results.{csv,md}, sweep_full.json, figure
-refsim.sbatch      SLURM array wrapper
-inputFiles/        upstream's reference backbone, vendored byte-for-byte
-out/               per-replicate CSVs (one per shard)
-```
-
-## Grids
-
-| task | axes | loci |
-|---|---|---|
-| `flux` | scenario × depth (recent/young/old) × ρ (0, 10⁻⁸, 10⁻⁶) × m (0, 10⁻⁹, 10⁻⁸, 10⁻⁷, 10⁻⁶), 240 haplotypes, f<sub>inv</sub> = 0.1 | 5,400 |
-| `extreme` | scenario × depth (young/recent) × m (10⁻⁶ … 10⁻⁴) at ρ = 10⁻⁸ | 1,200 |
-| `trainset` | the `flux` axes × f<sub>inv</sub> ∈ {0.05, 0.1, 0.2, 0.35, 0.5}, 88 haplotypes, full feature vector | 11,250 |
-
-`trainset` is the labelled training set consumed by `recurrence/` and carries the
-reference origin count as its `tree_n_events` feature.
-
-## Results
-
-**Main sweep** (5,400 loci, 240 haplotypes, f<sub>inv</sub> = 0.1), marginal over the
-nine depth × ρ cells. The single-origin half is the corrected one-divergence model; the
-recurrent half is unchanged, since the single-event bug never touched it:
-
-| m_flux | 0 | 10⁻⁹ | 10⁻⁸ | 10⁻⁷ | 10⁻⁶ |
-|---|---|---|---|---|---|
-| single-origin FPR | 0.113 | 0.102 | 0.115 | 0.094 | 0.106 |
-| recurrent power | 0.891 | 0.889 | 0.857 | 0.874 | 0.907 |
-
-Pooled endpoints: FPR 0.113 → 0.106 (z = −0.39, **p = 0.70**); power 0.891 → 0.907
-(z = 0.91, p = 0.36).
-
-**Neither the false-positive rate nor power moves detectably across the swept flux
-range.** This is the manuscript's claim, measured with the manuscript's own classifier.
-An earlier version of this file reported the FPR rising 0.157 → 0.207 at p = 0.033; that
-was produced by the mis-specified single-event scenario and is withdrawn.
-
-### Where the flux acts
-
-`m_flux` is applied with `refsim.demography(..., flux_scope=...)`. Under
-`"leaves"` it reaches only the four sampled demes, and msprime zeroes a deme's
-migration rates when it merges into its ancestor, so flux switches off as the
-splits are passed: at the `young` depths it acts on all four pairs for 0–50 kya,
-on `P0_D`–`P1_I` alone for 50–100 kya, and **not at all** from 100 kya back to
-the root at 250 kya, where only `Pa_I` and `Pa_D` remain. Under `"all"` it acts
-between every opposite-orientation pair for as long as both demes exist, so the
-orientations are partially connected over the model's whole history.
-
-Both were run over the full 5,400-locus grid at identical seeds, so the two are
-paired locus for locus:
-
-| m_flux | 0 | 10⁻⁹ | 10⁻⁸ | 10⁻⁷ | 10⁻⁶ |
-|---|---|---|---|---|---|
-| single-origin FPR — `leaves` | 0.113 | 0.102 | 0.115 | 0.094 | 0.106 |
-| single-origin FPR — `all` | 0.113 | 0.102 | 0.115 | 0.094 | 0.106 |
-| recurrent power — `leaves` | 0.891 | 0.889 | 0.857 | 0.874 | 0.907 |
-| recurrent power — `all` | 0.891 | 0.883 | 0.863 | 0.870 | 0.900 |
-
-Pooled endpoints under `"all"`: FPR 0.113 → 0.106 (z = −0.39, p = 0.70); power
-0.891 → 0.900 (z = 0.50, p = 0.62). **Extending flux across the entire history
-changes nothing detectable** — power moves by at most 0.007 against a standard
-error of ~0.013 at n = 540.
-
-The single-origin row is *identical* in every cell, which is structural rather
-than lucky: `demography_single` has two demes and one split, so flux already
-acted everywhere both orientations coexist and `flux_scope` cannot touch it.
-Recurrent power at `m_flux = 0` matches for the same reason — there is no flux
-to place.
-
-**Corrected single-event model — 2,700 loci.** The earlier single-event scenario was
-mis-specified (it let direct haplotypes come from the deme sister to the inverted one;
-see `refsim.py`). `single` is now the Methods' own one-divergence model at
-t_inv ∈ {50, 100, 250} kya for recent/young/old. Overall false-positive rate **0.106**.
-
-By depth × ρ, at m = 0 (upstream's own model, no flux):
-
-| depth (t_inv) | ρ = 0 | ρ = 10⁻⁸ | ρ = 10⁻⁶ |
-|---|---|---|---|
-| recent (50 kya) | 0.533 | 0.333 | 0.000 |
-| young (100 kya) | 0.133 | 0.017 | 0.000 |
-| old (250 kya) | 0.000 | 0.000 | 0.000 |
-
-Two things match the manuscript and two do not.
-
-*Matches:* the false-positive rate is driven by inversion age in the direction the
-manuscript reports — it is worst at the shallowest depth and zero at the oldest, and
-the manuscript likewise puts its highest rate at the 50-kya model. Deep or recombining
-loci are at or below 5%.
-
-*Does not match:* at 50 kya with no recombination the rate here is 0.53, not 0.04; and
-the ordering in ρ is inverted — we get 0.000 at ρ = 10⁻⁶ where the manuscript reports
-its *maximum* of 4%. The mechanism for our direction is straightforward: at ρ = 0 the
-whole 200 kbp is a single genealogy, so incomplete lineage sorting in a 600-individual
-inverted deme only 2,000 generations old frequently breaks inverted monophyly, while at
-ρ = 10⁻⁶ the alignment averages over many genealogies and the ML tree separates the
-orientations cleanly. That is expected coalescent behaviour, so the residual gap is not
-explained by the tree method or by the single-event model, and remains open.
-
-**An earlier version of this section claimed 1.6%, "under < 5%".** That was inferred
-from the subset of the *old* 9-deme run with no sister-deme admixture, which is not the
-same model: in that subset the inverted lineages sit in a small deme for the full
-100 kya to the P00 split, giving far more time to coalesce than the clean 50-kya model
-allows. Not comparable, and the claim is withdrawn.
-
-**Extreme extension** (1,200 loci at ρ = 10⁻⁸), corrected single-origin model,
-marginal over the two depths:
-
-| m_flux | 10⁻⁶ | 3×10⁻⁶ | 10⁻⁵ | 3×10⁻⁵ | 10⁻⁴ |
-|---|---|---|---|---|---|
-| single-origin FPR | 0.192 | 0.333 | 0.492 | 0.800 | 0.983 |
-| recurrent power | 0.900 | 0.883 | 0.883 | 0.900 | 0.942 |
-
-Detection holds at 0.88–0.94 throughout while the false-positive rate climbs to
-0.98 (z = 12.5). Past m ≈ 10⁻⁵ the classifier calls nearly everything recurrent and
-the two scenarios stop being distinguishable. **The breakdown sits between 10⁻⁶ and
-10⁻⁵ — above the entire range the manuscript sweeps**, which is why the main sweep
-is flat.
-
-## Reproduce
-
-Needs `msprime`, `biopython`, and an IQ-TREE binary (`iqtree2`, `iqtree3` or `iqtree` on
-`PATH`, or `$IQTREE_BIN`). One locus is a few seconds of IQ-TREE, so the grids are meant
-to be sharded:
+`run_grid.py` constructs every grid deterministically. `validate_grid.py` fails
+on missing, duplicated, extra, or errored loci and records SHA-256 checksums for
+every input shard. The GitHub Actions workflow
+`.github/workflows/refsim_simulations.yml` runs and validates all manuscript
+simulation grids from source. On MSI/Sioux, the reported sweep can be run with:
 
 ```bash
-# one array task per shard; --nshards must equal the array size
-sbatch --array=0-7 --export=ALL,TASK=flux     refsim.sbatch
-sbatch --array=0-7 --export=ALL,TASK=trainset refsim.sbatch
-sbatch --array=0-3 --export=ALL,TASK=extreme  refsim.sbatch
-
-# the same grid with flux acting wherever both orientations exist
-sbatch --array=0-95 --cpus-per-task=32 --mem=80g \
-       --export=ALL,TASK=flux,FLUX_SCOPE=all,TAG=fluxall refsim.sbatch
-python make_report.py 'out/fluxall*_shard*.csv' --prefix fluxall
-
-# aggregate the flux sweep
-python make_report.py 'out/flux_shard*.csv'
-
-# fold the training set into recurrence/data/sim_features.csv.gz
-python -m recurrence.cli simulate --merge 'simulations/refsim/out/trainset_shard*.csv'
+sbatch --array=0-7 --export=ALL,TASK=fluxsweep,TAG=fluxsweep \
+  refsim.sbatch
+python validate_grid.py --task fluxsweep \
+  --inputs 'out/fluxsweep_shard*.csv' \
+  --provenance fluxsweep_provenance.json
+python make_report.py 'out/fluxsweep_shard*.csv' --prefix gene_flux
 ```
 
-A single locus, end to end, for a smoke test:
+The MSI wrapper pins the historical MSI IQ-TREE 2.1.2 module and verifies its
+binary checksum before running. GitHub Actions uses the official IQ-TREE 2.1.2
+release archive with its independently pinned archive checksum.
 
-```bash
-python refsim.py --scenario single --depth young --rho 0 --seed 1
-```
+## Files
+
+- `refsim.py`: demographies, simulation, alignment, IQ-TREE, and parsimony call
+- `run_grid.py`: deterministic sharded grids
+- `validate_grid.py`: strict completeness and provenance validation
+- `make_report.py`: gene-flux tables, statistics, and figure
+- `replicate_manuscript.py`: zero-flux power-analysis report
+- `make_growth_report.py`: frequency-trajectory sensitivity summaries
+- `refsim.sbatch`: Sioux production wrapper
+- `setup_sioux.sbatch`: pinned Python environment setup
