@@ -175,7 +175,7 @@ def _phi_covariance_for_category(
         idx = candidate_indices.get(name)
         if idx is None:
             continue
-        case_indicator = np.in1d(used_idx, idx, assume_unique=False)
+        case_indicator = np.isin(used_idx, idx, assume_unique=False)
         n1 = int(case_indicator.sum())
         if n1 == 0 or n1 == used_idx.size:
             dropped.append(name)
