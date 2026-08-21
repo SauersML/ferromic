@@ -1,0 +1,77 @@
+{
+  "original_associations": 39,
+  "original_unique_phenotypes": 37,
+  "population_groups": 6,
+  "possible_association_population_comparisons": 234,
+  "evaluable_association_population_comparisons": 187,
+  "direction_concordant_comparisons": 180,
+  "direction_concordance_percent": 96.2566844919786,
+  "pearson_r_log_or": 0.981329321779238,
+  "median_absolute_beta_shift": 0.022209401291266716,
+  "percentile_95_absolute_beta_shift": 0.1813032454973695,
+  "nonconcordant_comparisons": [
+    {
+      "population": "AFR",
+      "locus": "chr12-46897663-INV-16289",
+      "Phenotype": "Hearing_impairment",
+      "existing_or": 0.9830893002141312,
+      "within_or": 1.017397598102865,
+      "within_p": 0.8967580948097401,
+      "within_q_selected_set": 0.9697218514992804
+    },
+    {
+      "population": "AFR",
+      "locus": "chr12-46897663-INV-16289",
+      "Phenotype": "Rosacea",
+      "existing_or": 1.013496090566296,
+      "within_or": 0.933500289963591,
+      "within_p": 0.8773830639858251,
+      "within_q_selected_set": 0.9697218514992804
+    },
+    {
+      "population": "AMR",
+      "locus": "17q21.31",
+      "Phenotype": "Abnormal_mammogram",
+      "existing_or": 0.998278339301333,
+      "within_or": 1.009883109113504,
+      "within_p": 0.8827564805023621,
+      "within_q_selected_set": 0.9750200668234134
+    },
+    {
+      "population": "EAS",
+      "locus": "17q21.31",
+      "Phenotype": "Other_skin_and_subcutaneous_disorders",
+      "existing_or": 0.9988378491114732,
+      "within_or": 1.099059789375219,
+      "within_p": 0.873087875097541,
+      "within_q_selected_set": 0.9859210717648742
+    },
+    {
+      "population": "EAS",
+      "locus": "17q21.31",
+      "Phenotype": "Pain_in_shoulder",
+      "existing_or": 0.823605433660136,
+      "within_or": 1.052247446006275,
+      "within_p": 0.9143793159359552,
+      "within_q_selected_set": 0.9859210717648742
+    },
+    {
+      "population": "SAS",
+      "locus": "17q21.31",
+      "Phenotype": "Other_follicular_disorders",
+      "existing_or": 1.018204767755455,
+      "within_or": 0.995840319255835,
+      "within_p": 0.9829526963837312,
+      "within_q_selected_set": 0.995348564275246
+    },
+    {
+      "population": "SAS",
+      "locus": "chr12-46897663-INV-16289",
+      "Phenotype": "Hearing_impairment",
+      "existing_or": 0.995584414861594,
+      "within_or": 1.039058134093028,
+      "within_p": 0.842038956360955,
+      "within_q_selected_set": 0.932200182688644
+    }
+  ]
+}

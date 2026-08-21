@@ -350,6 +350,45 @@ PHEWAS_COLUMN_DEFS: Dict[str, str] = OrderedDict(
     ]
 )
 
+WITHIN_ANCESTRY_PHEWAS_COLUMN_DEFS: Dict[str, str] = OrderedDict(
+    [
+        ("population", "All of Us genetic-ancestry group used for the stratified model."),
+        ("population_label", "Expanded label for the genetic-ancestry group."),
+        ("Inversion", "Inversion identifier."),
+        ("locus", "Cytogenetic locus label, where available."),
+        ("Phenotype", "Phecode-derived phenotype label."),
+        ("pooled_or", "Odds ratio from the original pooled multi-ancestry PheWAS."),
+        ("pooled_q", "Global BH-adjusted p-value from the original pooled PheWAS."),
+        (
+            "existing_or",
+            "Odds ratio from the existing ancestry-stratified model using 16 global principal components.",
+        ),
+        ("existing_p", "Nominal p-value from the existing ancestry-stratified model."),
+        ("within_or", "Odds ratio after replacing the global components with 16 components fitted within the ancestry group."),
+        ("within_p", "Nominal p-value from the within-ancestry-PC sensitivity model."),
+        (
+            "within_q_selected_set",
+            "BH-adjusted p-value within the preselected sensitivity set; this is not an independent replication statistic.",
+        ),
+        ("within_n_total", "Total participants in the within-ancestry-PC model."),
+        ("within_n_cases", "Cases in the within-ancestry-PC model."),
+        ("within_n_controls", "Controls in the within-ancestry-PC model."),
+        ("within_ci_lo_or", "Lower reported confidence bound for the within-ancestry-PC odds ratio."),
+        ("within_ci_hi_or", "Upper reported confidence bound for the within-ancestry-PC odds ratio."),
+        ("evaluable", "TRUE when both PC strategies produced valid estimates for direct comparison."),
+        (
+            "direction_concordant",
+            "TRUE when the existing and within-ancestry-PC log odds ratios have the same sign.",
+        ),
+        (
+            "beta_shift_within_minus_existing",
+            "Within-ancestry-PC log odds ratio minus the existing stratified log odds ratio.",
+        ),
+        ("absolute_beta_shift", "Absolute value of the change in log odds ratio."),
+        ("not_evaluable_reason", "Reason a comparison could not be evaluated."),
+    ]
+)
+
 def _phewas_desc(column: str, fallback: str) -> str:
     return PHEWAS_COLUMN_DEFS.get(column, fallback)
 
@@ -564,6 +603,7 @@ CDS_SUMMARY_TSV = DATA_DIR / "cds_identical_proportions.tsv"
 FIXED_DIFF_SUMMARY_TSV = DATA_DIR / "fixed_diff_summary.tsv"
 
 PHEWAS_RESULTS = DATA_DIR / "phewas_results.tsv"
+WITHIN_ANCESTRY_PHEWAS_RESULTS = DATA_DIR / "phewas_within_ancestry_correspondence.tsv"
 PHEWAS_TAGGING_RESULTS = DATA_DIR / "all_pop_phewas_tag.tsv"
 CATEGORIES_RESULTS_CANDIDATES = (
     DATA_DIR / "categories.tsv",
@@ -1909,6 +1949,15 @@ def _load_phewas_results() -> pd.DataFrame:
     return _clean_phewas_df(df, "PheWAS results", PHEWAS_COLUMN_DEFS)
 
 
+def _load_within_ancestry_phewas() -> pd.DataFrame:
+    df = _load_simple_tsv(WITHIN_ANCESTRY_PHEWAS_RESULTS)
+    return _prune_columns(
+        df,
+        WITHIN_ANCESTRY_PHEWAS_COLUMN_DEFS,
+        "Within-ancestry PC PheWAS",
+    )
+
+
 def _load_categories() -> pd.DataFrame:
     for candidate in CATEGORIES_RESULTS_CANDIDATES:
         if candidate.exists():
@@ -2308,7 +2357,8 @@ def build_workbook(output_path: Path) -> None:
             description=(
                 "Phenome-wide association study (PheWAS) results linking imputed inversion dosages to electronic health record "
                 "(EHR) phenotypes in the NIH All of Us cohort (v8). Association tests were performed using logistic regression "
-                "adjusted for age, sex, 16 genetic principal components, and ancestry categories. For the main PheWAS analysis, "
+                "adjusted for age, age squared, genetically inferred sex, and 16 global genetic principal components. For the "
+                "main PheWAS analysis, "
                 "NA values denote models that failed to converge or produced unstable fits. Interaction tests were only run when "
                 "the main result met the FDR threshold, so NA in interaction columns indicates the follow-up test was not "
                 "performed. Ancestry-specific analyses were likewise conditioned on main FDR significance; NA in those columns "
@@ -2316,6 +2366,22 @@ def build_workbook(output_path: Path) -> None:
             ),
             column_defs=PHEWAS_COLUMN_DEFS,
             loader=_load_phewas_results,
+        )
+    )
+
+    register(
+        SheetInfo(
+            name="Within-ancestry PC PheWAS",
+            description=(
+                "Sensitivity analysis for residual fine-scale population structure. The 37 phenotypes implicated by the pooled "
+                "PheWAS were retested against all seven inversions separately within the AFR, AMR, EAS, EUR, MID, and SAS All of "
+                "Us genetic-ancestry groups. Each model adjusted for age, age squared, genetically inferred sex, and 16 principal "
+                "components fitted de novo within that group. The table compares these estimates with the existing ancestry-"
+                "stratified estimates that used the 16 global components. Because the phenotype set was selected from the pooled "
+                "findings, selected-set q-values are descriptive sensitivity statistics rather than independent replication tests."
+            ),
+            column_defs=WITHIN_ANCESTRY_PHEWAS_COLUMN_DEFS,
+            loader=_load_within_ancestry_phewas,
         )
     )
 

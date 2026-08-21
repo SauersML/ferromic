@@ -48,7 +48,7 @@ and reused on restart. The PheWAS analyzes one inversion at a time because each 
 already uses a full CPU worker pool; running all seven pools together exhausts memory
 without increasing throughput.
 
-The PheWAS adjusts for the principal components published alongside the callset. Those
+The original PheWAS adjusted for the principal components published alongside the callset. Those
 come from projecting participants onto a cross-ancestry reference, and the same file
 supplies the ancestry labels, so the two are views of one computation. They separate
 continental groups well and carry very little variance *inside* a group, which means they
@@ -56,8 +56,9 @@ cannot control fine-scale (within-continent) structure. This workflow fits compo
 separately within each ancestry group and re-runs the association models with them.
 
 It is an additional sensitivity analysis. The pooled multi-ancestry PheWAS is unchanged
-and remains the primary result: global components plus ancestry indicators are the right
-instrument for between-ancestry structure.
+and remains the primary result. Its design matrix contained age, age squared,
+genetically inferred sex, and 16 global genetic principal components; categorical
+ancestry indicators were not included.
 
 ### Why it must be stratified
 
@@ -103,15 +104,16 @@ python -m phewas.extra.within_ancestry_pca fit \
 ```
 
 The producer calls current `gnomon main` as a single indexed PLINK fit with 16
-components, four worker threads, MAF ≥ 0.01, sample and variant missingness ≤ 0.05,
+components, the number of worker threads requested by the production wrapper,
+MAF ≥ 0.01, sample and variant missingness ≤ 0.05,
 and LD normalization. The producer explicitly requests an evenly spaced 100,000-marker
 budget and a 500 kbp physical window. Marker thinning and a physical-distance window
 are paired deliberately: after thinning, a window measured in neighboring sites no
 longer has a stable genomic meaning. The LD work is local rather than all-pairs, but it
 can still dominate runtime because each local system grows with the number of retained
-markers in that window; the marker budget keeps that density bounded. Current main also applies
-`--threads 4` to both its fit-local and process-wide Rayon pools, so the producer no
-longer needs its own CPU-affinity workaround.
+markers in that window; the marker budget keeps that density bounded. Current main also
+applies the requested thread count to both its fit-local and process-wide Rayon pools,
+so the producer no longer needs its own CPU-affinity workaround.
 
 Convergence is strict. The producer never passes `--allow-unconverged`, and current main
 therefore refuses to create a model when the eigensolver does not meet its tolerance.
@@ -139,7 +141,7 @@ table would change the treatment-arm PheWAS cohort relative to its matched globa
 run. Resolve such a mismatch upstream and use the same participant set in both arms.
 There is no global-PC fallback for a requested within-ancestry run.
 
-### Stage 2 — run both arms
+### Stage 2 — run the within-ancestry-PC sensitivity arm
 
 This reruns only the 37 phenotypes that were significant in the uploaded pooled
 analysis, not all 1,089 phenotypes.
@@ -148,41 +150,29 @@ analysis, not all 1,089 phenotypes.
 for pop in afr amr eas eur mid sas; do
     python3 -m phewas.cli \
         --pop-label "$pop" \
-        --pheno-file phewas/data/significant_phenotypes.txt \
-        --min-cases-controls 100
-
-    python3 -m phewas.cli \
-        --pop-label "$pop" \
         --pc-source within-ancestry \
         --pheno-file phewas/data/significant_phenotypes.txt \
         --min-cases-controls 100
 done
 ```
 
-The components are read from `WITHIN_ANCESTRY_PCS_URI`, which defaults to the layout the
-fitting step writes and is overridden with `FERROMIC_WITHIN_ANCESTRY_PCS_URI` when they
-live somewhere else, such as a workspace bucket. It is configured like every other data
-source the pipeline reads rather than as a command-line argument.
+The matching control estimates do not require another analysis run: the existing
+ancestry-stratified estimates that used global PCs are already stored in the AFR, AMR,
+EAS, EUR, MID, and SAS columns of `data/phewas_results.tsv`. The sensitivity analysis
+compares those estimates with the new within-ancestry-PC estimates for the same 39
+reported inversion-phenotype associations.
 
-Run **both** arms. Stratifying costs power and changes the model on its own, so without
-the control arm a shifted estimate cannot be attributed to the components rather than to
-stratification. The two arms differ in exactly one thing, which is what makes the contrast
-interpretable. Result filenames carry the population and the PC source, and the covariate
-cache key includes both, so the arms cannot share cached covariates.
+The components are read from the group-specific tables written by the fitting step.
+There is no global-PC fallback for a within-ancestry run.
 
-### Stage 3 — meta-analyse
+### Stage 3 — compare effect estimates
 
 ```bash
-python stats/phewas_within_ancestry_meta.py --results-dir <dir>
+python stats/phewas_within_ancestry_figures.py
 ```
 
-Inverse-variance meta-analysis across groups within each arm, with Cochran's Q, I², and a
-DerSimonian-Laird random-effects estimate, plus the genomic control factor per inversion
-per arm. The quantity that answers the stratification question is the ratio of the
-within-ancestry meta-analysed effect to the pooled effect: near one means structure is not
-driving the association.
-
-Read effect-size concordance and the meta-analysis, not per-stratum significance. Power
-falls sharply in the smaller groups, and the 17q21.31 inversion is close to
-European-specific, so associations there will lose significance in other groups for
-reasons that have nothing to do with confounding.
+The script writes the complete correspondence table, population summaries, and the
+publication effect-correspondence figure. Read effect-size correspondence rather than per-stratum
+significance. Power falls sharply in the smaller groups, and the 17q21.31 inversion is
+close to European-specific, so associations there will lose significance in other
+groups for reasons that have nothing to do with confounding.
