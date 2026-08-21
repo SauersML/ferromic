@@ -170,9 +170,9 @@ jobs:
                  genotype_matrices/chr17-45585160-INV-706887.genotypes.npy
           # Bring pls_patch onto the path so joblib can unpickle the models.
           cp imputation/pls_patch.py .
-          python scoreinvhap_benchmark/infer_dosage_public.py \
+          PLINK_PREFIX=plink/chr8 python scoreinvhap_benchmark/infer_dosage_public.py \
             chr8-7301025-INV-5297356 our_8p23.tsv
-          python scoreinvhap_benchmark/infer_dosage_public.py \
+          PLINK_PREFIX=plink/chr17 python scoreinvhap_benchmark/infer_dosage_public.py \
             chr17-45585160-INV-706887 our_17q21.tsv
 
       # --------------------------------------------------------------------
