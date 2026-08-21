@@ -127,15 +127,16 @@ jobs:
       - name: Build PLINK bed for our models (GRCh38)
         run: |
           set -euo pipefail
-          # Merge the two ROI VCFs, normalise to biallelic, write PLINK1 bed.
-          bcftools concat -a b38_chr8.vcf.gz b38_chr17.vcf.gz -Oz -o b38_merged.vcf.gz
-          bcftools index -t b38_merged.vcf.gz
-          plink2 --vcf b38_merged.vcf.gz \
-            --max-alleles 2 --snps-only just-acgt \
-            --set-all-var-ids '@:#' \
-            --make-bed --out subset
-          wc -l subset.bim
-          head -3 subset.fam
+          # The current preparation CLI consumes chromosome-sharded PLINK1 files.
+          mkdir -p plink
+          for chrom in chr8 chr17; do
+            plink2 --vcf "b38_${chrom}.vcf.gz" \
+              --max-alleles 2 --snps-only just-acgt \
+              --set-all-var-ids '@:#' \
+              --make-bed --out "plink/${chrom}"
+            wc -l "plink/${chrom}.bim"
+          done
+          head -3 plink/chr8.fam
 
       - name: Fetch imputation models from release
         run: |
@@ -152,15 +153,18 @@ jobs:
 
       - name: Prepare genotype matrices and run our inference
         env:
-          PLINK_PREFIX: subset
-          OUTPUT_DIR: genotype_matrices
           MODEL_SOURCE_DIR: data/models
           # Make the cp'd pls_patch.py importable when joblib unpickles the models
           # (infer_dosage_public.py is run by path, so cwd is not on sys.path).
           PYTHONPATH: ${{ github.workspace }}
         run: |
           set -euo pipefail
-          python imputation/prepare_data_for_infer.py
+          python imputation/prepare_data_for_infer.py \
+            --plink-dir plink \
+            --output-dir genotype_matrices \
+            --target chr8-7301025-INV-5297356 \
+            --target chr17-45585160-INV-706887 \
+            --threads "$(nproc)"
           echo "Genotype matrices for our two targets:"
           ls -la genotype_matrices/chr8-7301025-INV-5297356.genotypes.npy \
                  genotype_matrices/chr17-45585160-INV-706887.genotypes.npy
