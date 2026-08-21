@@ -166,7 +166,9 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install numpy pandas scipy statsmodels matplotlib xlsxwriter openpyxl pillow pypdf reportlab tqdm
+          pip install numpy==2.2.6 pandas==2.3.3 scipy==1.15.3 \
+            statsmodels==0.14.5 matplotlib==3.10.3 \
+            xlsxwriter openpyxl pillow pypdf reportlab tqdm
 
       - name: Fetch and verify immutable external sources
         run: |
