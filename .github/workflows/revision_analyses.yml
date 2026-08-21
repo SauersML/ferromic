@@ -60,7 +60,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install numpy pandas scipy statsmodels matplotlib xlsxwriter openpyxl pillow pypdf reportlab
+          pip install numpy pandas scipy statsmodels matplotlib xlsxwriter openpyxl pillow pymupdf pypdf reportlab tqdm
 
       - name: Fetch and verify immutable external sources
         run: |
@@ -255,10 +255,10 @@ jobs:
           python stats/divergence_decomposition_figure.py
           python stats/figure2a_repolarized.py
           mkdir -p .svbyeye-preview
-          cp /tmp/manuscript-sources/chr8_8p23.1-v3.pdf .svbyeye-preview/
-          cp /tmp/manuscript-sources/chr12_12q13.11-v3.pdf .svbyeye-preview/
-          cp /tmp/manuscript-sources/chr15_15q11.2-v3.pdf .svbyeye-preview/
-          cp /tmp/manuscript-sources/chr17_17q21.31-v3.pdf .svbyeye-preview/
+          cp /tmp/manuscript-sources/chr8_8p23.1-v6.pdf .svbyeye-preview/
+          cp /tmp/manuscript-sources/chr12_12q13.11-v6.pdf .svbyeye-preview/
+          cp /tmp/manuscript-sources/chr15_15q11.2-v6.pdf .svbyeye-preview/
+          cp /tmp/manuscript-sources/chr17_17q21.31-v6.pdf .svbyeye-preview/
           python stats/svbyeye_supplement.py
 
       - name: Imputation threshold reconciliation
@@ -321,6 +321,12 @@ jobs:
             results/figure2a_repolarized/figure2a_summary.json
             results/figure2a_repolarized/figure2a_repolarized.pdf
             results/figure2a_repolarized/figure2a_repolarized.png
+            output/pdf/svbyeye/Supplemental_Figure_SVbyEye_orientation_examples.pdf
+            output/pdf/svbyeye/Supplemental_Figure_SVbyEye_orientation_examples.png
+            output/pdf/svbyeye/Supplemental_Figure_SVbyEye_orientation_examples_legend.txt
+            output/pdf/svbyeye/Supplemental_File_SVbyEye_all_292_loci.pdf
+            output/pdf/svbyeye/Supplemental_File_SVbyEye_all_292_loci_legend.txt
+            output/pdf/svbyeye/svbyeye_locus_index.tsv
           )
           for f in "${files[@]}"; do
             test -f "$f"
