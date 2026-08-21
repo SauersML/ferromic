@@ -193,7 +193,7 @@ jobs:
         run: |
           set -euo pipefail
           Rscript -e 'if (!requireNamespace("BiocManager", quietly=TRUE)) install.packages("BiocManager", repos="https://cloud.r-project.org")'
-          Rscript -e 'BiocManager::install(c("scoreInvHap","VariantAnnotation","GenomicRanges"), update=FALSE, ask=FALSE)'
+          Rscript -e 'options(timeout=600); BiocManager::install(c("scoreInvHap","VariantAnnotation","GenomicRanges"), update=FALSE, ask=FALSE)'
           Rscript -e 'library(scoreInvHap); cat("scoreInvHap OK\n")'
 
       - name: Run scoreInvHap genotyping
