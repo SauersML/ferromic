@@ -2337,7 +2337,7 @@ def build_workbook(output_path: Path) -> None:
                 "or the model carry the reason for exclusion."
             ),
             column_defs=CHIMP_POLARITY_COLUMN_DEFS,
-            column_labels={"inv_id": "Inversion locus"},
+            column_labels={"inv_id": "Original inversion ID"},
             loader=_load_chimp_polarity,
         )
     )
