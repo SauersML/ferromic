@@ -5,15 +5,15 @@ variant density and coding density"	4.43818	2.01937	10.0015	0.0004	62	32	30	rati
 Delta-log pi interaction (ratio)	"conditioned on length, allele frequency, variant density,
 coding density, recombination rate
 and chromosome arm position"	3.83339	1.62366	9.10191	0.0036	62	32	30	ratio
-Hudson FST (Recurrent - Single)	no conditioning	-0.198223	-0.316508	-0.0795605	0.0006	59	32	30	difference
+Hudson FST (Recurrent - Single)	no conditioning	-0.198223	-0.316508	-0.0795605	0.0006	59	32	27	difference
 Hudson FST (Recurrent - Single)	"conditioned on length, allele frequency,
-variant density and coding density"	-0.225188	-0.356919	-0.0958216	0.0008	59	32	30	difference
+variant density and coding density"	-0.225188	-0.356919	-0.0958216	0.0008	59	32	27	difference
 Hudson FST (Recurrent - Single)	"conditioned on length, allele frequency, variant density,
 coding density, recombination rate
-and chromosome arm position"	-0.227855	-0.375354	-0.0789512	0.0034	59	32	30	difference
-da = Dxy - pi_avg (Recurrent - Single)	no conditioning	-0.000256768	-0.000456548	-6.5625e-05	0.0042	60	32	30	difference
+and chromosome arm position"	-0.227855	-0.375354	-0.0789512	0.0034	59	32	27	difference
+da = Dxy - pi_avg (Recurrent - Single)	no conditioning	-0.000256768	-0.000456548	-6.5625e-05	0.0042	60	32	28	difference
 da = Dxy - pi_avg (Recurrent - Single)	"conditioned on length, allele frequency,
-variant density and coding density"	-0.00037022	-0.000608962	-0.000137689	0.0014	60	32	30	difference
+variant density and coding density"	-0.00037022	-0.000608962	-0.000137689	0.0014	60	32	28	difference
 da = Dxy - pi_avg (Recurrent - Single)	"conditioned on length, allele frequency, variant density,
 coding density, recombination rate
-and chromosome arm position"	-0.000414006	-0.000675501	-0.000152098	0.0034	60	32	30	difference
+and chromosome arm position"	-0.000414006	-0.000675501	-0.000152098	0.0034	60	32	28	difference

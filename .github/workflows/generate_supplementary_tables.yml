@@ -9,6 +9,10 @@ permissions:
   contents: read
   actions: read
 
+concurrency:
+  group: supplementary-tables-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -19,56 +23,27 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.13"
 
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pandas xlsxwriter tqdm
+          pip install pandas==2.3.3 xlsxwriter==3.2.5 tqdm==4.67.1
 
-      - name: Download best tagging SNP results artifact
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify canonical committed inputs
         run: |
-          # Never hard-fail on a missing/expired cross-workflow artifact: the canonical
-          # data/best_tagging_snps_qvalues.tsv is committed in the repo (present from
-          # checkout). Try to REFRESH it from the latest successful batch run, but fall back
-          # to the committed copy. Only error if neither exists.
-          set -uo pipefail
-          mkdir -p data
-
-          echo "Locating latest successful batch_best_tagging_snps.yml run ..."
-          RUN_ID=$(gh run list --workflow batch_best_tagging_snps.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null || true)
-
-          if [[ -n "${RUN_ID:-}" ]] && gh run download "$RUN_ID" -n best-tagging-snps-results --dir data/best-tagging-snps-results 2>/dev/null; then
-            CANDIDATE=""
-            if [[ -f "data/best-tagging-snps-results/best_tagging_snps_qvalues.tsv" ]]; then
-              CANDIDATE="data/best-tagging-snps-results/best_tagging_snps_qvalues.tsv"
-            elif [[ -f "data/best-tagging-snps-results/data/best_tagging_snps_qvalues.tsv" ]]; then
-              CANDIDATE="data/best-tagging-snps-results/data/best_tagging_snps_qvalues.tsv"
-            fi
-            if [[ -n "$CANDIDATE" ]]; then
-              mv "$CANDIDATE" data/best_tagging_snps_qvalues.tsv
-              echo "✓ Refreshed best_tagging_snps_qvalues.tsv from run $RUN_ID."
-            else
-              echo "::warning::Artifact downloaded but file not found in expected locations; using committed copy."
-            fi
-          else
-            echo "::warning::No fresh best-tagging-snps-results artifact (missing/expired run); using committed data/best_tagging_snps_qvalues.tsv."
-          fi
-
-          if [[ ! -f data/best_tagging_snps_qvalues.tsv ]]; then
-            echo "::error::No best_tagging_snps_qvalues.tsv available (neither a fresh artifact nor a committed copy)."
-            exit 1
-          fi
-          echo "Using best_tagging_snps_qvalues.tsv ($(wc -l < data/best_tagging_snps_qvalues.tsv) lines)."
+          set -euo pipefail
+          test -s data/best_tagging_snps_qvalues.tsv
+          test -s data/imputation_results_merged.tsv
+          test -s data/per_gene_cds_permutation.tsv
+          test -s data/cds_permutation_joint_control.tsv
+          test -s simulations/refsim/gene_flux_summary.tsv
 
       - name: Generate supplementary tables workbook
-        run: |
-          python stats/generate_tables.py --output web/figures-site/public/downloads/supplementary_tables.xlsx
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python stats/generate_tables.py --output web/figures-site/public/downloads/supplementary_tables.xlsx
+
+      - name: Independently verify the exported workbook
+        run: python stats/verify_supplementary_workbook.py web/figures-site/public/downloads/supplementary_tables.xlsx
 
       - name: Upload supplementary tables artifact
         uses: actions/upload-artifact@v4
@@ -86,8 +61,6 @@ jobs:
       #                is not reproducible from this archive alone.
       # Built from git ls-files so the ferromic half is a pure function of the commit.
       - name: Build Supplemental Code archive
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           rm -rf supplemental_code && mkdir -p supplemental_code/ferromic
@@ -106,20 +79,20 @@ jobs:
           echo "ferromic: $n_ferromic files"
 
           # --- upstream simulation code ---------------------------------------
-          # Cited in the manuscript as the source of the recurrence inference.
-          if git clone --depth 1 https://github.com/hsiehphLab/inversionSimulation.git \
-                 supplemental_code/inversionSimulation 2>/dev/null; then
-            up_sha=$(git -C supplemental_code/inversionSimulation rev-parse HEAD)
-            rm -rf supplemental_code/inversionSimulation/.git
-            n_up=$(find supplemental_code/inversionSimulation -type f | wc -l)
-            echo "inversionSimulation: $n_up files at $up_sha"
-          else
-            up_sha="unavailable"; n_up=0
-            echo "::warning::could not clone hsiehphLab/inversionSimulation; the archive will note its absence"
-            mkdir -p supplemental_code/inversionSimulation
-            echo "Clone https://github.com/hsiehphLab/inversionSimulation for the structured-coalescent simulation and recurrence-inference code." \
-              > supplemental_code/inversionSimulation/SEE_UPSTREAM.txt
-          fi
+          # Fetch the immutable, SHA-256-verified archive recorded in
+          # reproducibility/manuscript_sources.json. Never archive a moving HEAD.
+          mkdir -p "$RUNNER_TEMP/manuscript-sources" supplemental_code/inversionSimulation
+          python scripts/fetch_manuscript_sources.py \
+            --source inversion_simulation_upstream \
+            --output-dir "$RUNNER_TEMP/manuscript-sources"
+          tar -xzf \
+            "$RUNNER_TEMP/manuscript-sources/inversionSimulation-3f845a2b4e017842d1d6648210f148faab616e17.tar.gz" \
+            --strip-components=1 \
+            -C supplemental_code/inversionSimulation
+          up_sha="3f845a2b4e017842d1d6648210f148faab616e17"
+          n_up=$(find supplemental_code/inversionSimulation -type f | wc -l)
+          test "$n_up" -gt 0
+          echo "inversionSimulation: $n_up files at $up_sha"
 
           # --- manifest --------------------------------------------------------
           {

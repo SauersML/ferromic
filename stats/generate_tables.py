@@ -5,11 +5,10 @@ This utility orchestrates the steps required to build the manuscript
 supplementary tables. It performs the following operations:
 
 1. Curates the inversion catalog from ``data/inv_properties.tsv``.
-2. Ensures the CDS conservation test results are produced by running the
-   ``stats/per_gene_cds_differences_jackknife.py`` pipeline and filters the
-   BH FDR results (q < 0.05).
-3. Aggregates the published TSV artefacts into a single Excel workbook with a
-   "Read me" worksheet that explains each tab.
+2. Loads the inversion-level permutation analysis of CDS conservation used in
+   the revision.
+3. Aggregates the published TSV artefacts into a single Excel workbook with an
+   "Information" worksheet that explains each tab.
 
 The resulting ``supplementary_tables.xlsx`` file is saved under the Next.js
 public directory so the web site can link to it directly.
@@ -18,22 +17,13 @@ public directory so the web site can link to it directly.
 from __future__ import annotations
 
 import argparse
-import io
-import json
-import os
-import shutil
-import subprocess
+import math
 import sys
-import warnings
-import zipfile
 import re
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional
-from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
-from urllib.request import Request, urlopen
 
 import pandas as pd
 
@@ -42,12 +32,6 @@ DATA_DIR = REPO_ROOT / "data"
 NEXT_PUBLIC_DIR = REPO_ROOT / "web" / "figures-site" / "public"
 DEFAULT_OUTPUT = NEXT_PUBLIC_DIR / "downloads" / "supplementary_tables.xlsx"
 
-GITHUB_TOKEN_ENVS = ("GITHUB_TOKEN", "GH_TOKEN")
-GITHUB_REPO_ENV = "GITHUB_REPOSITORY"
-DEFAULT_REPO_SLUG = "SauersML/ferromic"
-
-BEST_TAGGING_WORKFLOW = "batch_best_tagging_snps.yml"
-BEST_TAGGING_ARTIFACT = "best-tagging-snps-results"
 BEST_TAGGING_FILENAME = "best_tagging_snps_qvalues.tsv"
 
 INV_COLUMNS_KEEP: List[str] = [
@@ -81,13 +65,13 @@ INVERSION_COLUMN_DEFS: Dict[str, str] = OrderedDict(
         ("End", "The 1-based end coordinate of the inversion (GRCh38)."),
         (
             "number recurrent events",
-            "The estimated number of independent inversion recurrence events based on coalescent simulations.",
+            "The minimum number of orientation changes inferred on the haplotype tree by Porubsky et al. (2022).",
         ),
         ("Inversion ID", "The unique identifier assigned to the inversion (format: chr-start-inv-id)."),
         ("Size (kbp)", "The length of the inverted segment in kilobase pairs."),
         (
             "Inversion allele frequency",
-            "The frequency of the inverted allele observed in the phased reference panel (n=88 haplotypes).",
+            "The frequency of the inverted allele observed in the phased reference panel (n=82 haplotypes).",
         ),
         ("verdictRecurrence_hufsah", "Recurrence classification based on the Hufsah algorithm."),
         ("verdictRecurrence_benson", "Recurrence classification based on the Benson algorithm."),
@@ -115,6 +99,10 @@ GENE_CONSERVATION_COLUMN_DEFS: Dict[str, str] = OrderedDict(
         ("Gene", "HGNC gene symbol."),
         ("Transcript", "Ensembl transcript ID used for the CDS analysis."),
         ("Inversion ID", "The identifier of the inversion overlapping this gene."),
+        ("Recurrence class", "Consensus recurrence class of the inversion locus."),
+        ("Direct haplotypes", "Number of direct-orientation haplotypes contributing the CDS."),
+        ("Inverted haplotypes", "Number of inverted-orientation haplotypes contributing the CDS."),
+        ("Sequence classes", "Number of distinct CDS sequence-identity classes across both orientations."),
         (
             "Orientation more conserved",
             "Indicates which haplotype orientation (Inverted or Direct) has a higher proportion of identical CDS pairs based on the sign of Δ.",
@@ -135,9 +123,18 @@ GENE_CONSERVATION_COLUMN_DEFS: Dict[str, str] = OrderedDict(
             "Δ (inverted − direct)",
             "The difference in identical pair proportions (Inverted minus Direct). Positive values indicate higher conservation in the inverted orientation.",
         ),
-        ("SE(Δ)", "Standard error of the difference (Δ), calculated via leave-one-haplotype-out jackknife."),
-        ("p-value", "Nominal p-value testing the null hypothesis that conservation is equal between orientations."),
-        ("BH p-value", "Benjamini-Hochberg adjusted p-value controlling the false discovery rate (FDR)."),
+        (
+            "Permutation p-value",
+            "Two-sided p-value from the joint inversion-level permutation null, which shuffles orientation labels once per inversion and applies the same assignment to every gene in that inversion.",
+        ),
+        (
+            "Westfall-Young FWER p-value",
+            "Westfall-Young adjusted p-value controlling the family-wise error rate under the joint permutation null.",
+        ),
+        (
+            "Direct FDR q-value",
+            "False-discovery-rate q-value estimated directly from the joint permutation null across the 130 tested genes.",
+        ),
     ]
 )
 
@@ -597,28 +594,21 @@ PAML_COLUMN_DEFS: Dict[str, str] = OrderedDict(
     ]
 )
 
-GENE_RESULTS_SCRIPT = REPO_ROOT / "stats" / "per_gene_cds_differences_jackknife.py"
-GENE_RESULTS_TSV = DATA_DIR / "gene_inversion_direct_inverted.tsv"
-CDS_SUMMARY_TSV = DATA_DIR / "cds_identical_proportions.tsv"
+GENE_PERMUTATION_TSV = DATA_DIR / "per_gene_cds_permutation.tsv"
+GENE_JOINT_CONTROL_TSV = DATA_DIR / "cds_permutation_joint_control.tsv"
 FIXED_DIFF_SUMMARY_TSV = DATA_DIR / "fixed_diff_summary.tsv"
 
 PHEWAS_RESULTS = DATA_DIR / "phewas_results.tsv"
 WITHIN_ANCESTRY_PHEWAS_RESULTS = DATA_DIR / "phewas_within_ancestry_correspondence.tsv"
 PHEWAS_TAGGING_RESULTS = DATA_DIR / "all_pop_phewas_tag.tsv"
-CATEGORIES_RESULTS_CANDIDATES = (
-    DATA_DIR / "categories.tsv",
-    DATA_DIR / "phewas v2 - categories.tsv",
-)
+CATEGORIES_RESULTS = DATA_DIR / "phewas v2 - categories.tsv"
 IMPUTATION_RESULTS = DATA_DIR / "imputation_results.tsv"
 INV_PROPERTIES = DATA_DIR / "inv_properties.tsv"
 POPULATION_METRICS = DATA_DIR / "output.csv"
 POPULATION_FREQUENCIES = DATA_DIR / "inversion_population_frequencies.tsv"
 BEST_TAGGING_RESULTS = DATA_DIR / BEST_TAGGING_FILENAME
 PAML_RESULTS = DATA_DIR / "GRAND_PAML_RESULTS.tsv"
-IMPUTATION_RESULTS_MERGED_URL = (
-    "https://raw.githubusercontent.com/SauersML/ferromic/refs/heads/main/data/"
-    "imputation_results_merged.tsv"
-)
+IMPUTATION_RESULTS_MERGED = DATA_DIR / "imputation_results_merged.tsv"
 
 TABLE_S1 = DATA_DIR / "tables.xlsx - Table S1.tsv"
 TABLE_S2 = DATA_DIR / "tables.xlsx - Table S2.tsv"
@@ -644,24 +634,34 @@ def _load_exclusion_reasons() -> pd.DataFrame:
                      "Inversion exclusion-reason")
 
 
-def _load_cds_haplotype_counts() -> pd.DataFrame:
-    return _load_tsv(DATA_DIR / "cds_haplotype_counts.tsv",
-                     "CDS haplotype-count")
-
-
-def _load_sd_recurrence_calls() -> pd.DataFrame:
-    return _load_tsv(DATA_DIR / "recurrence_sd_calls.tsv",
-                     "SD-architecture recurrence")
-
-
 def _load_fourfold_correlations() -> pd.DataFrame:
-    return _load_tsv(DATA_DIR / "four_fold_pi_correlations.tsv",
-                     "4-fold diversity concordance")
-
-
-def _load_omega_identifiability() -> pd.DataFrame:
-    return _load_tsv(DATA_DIR / "paml_extreme_omega_check.tsv",
-                     "Clade-model omega identifiability")
+    df = _load_tsv(
+        DATA_DIR / "four_fold_pi_correlations.tsv",
+        "4-fold diversity concordance",
+    )
+    expected = {
+        ("wholeLocus", "fourfold"): (0.501267, 0.00908858),
+        ("fourfold", "wholeCDS"): (0.628613, 0.000583291),
+    }
+    for measures, (expected_rho, expected_p) in expected.items():
+        row = df.loc[
+            df["subset"].eq("recurrence_classified")
+            & df["measure_x"].eq(measures[0])
+            & df["measure_y"].eq(measures[1])
+            & df["statistic"].eq("spearman_rho")
+        ]
+        if len(row) != 1:
+            raise SupplementaryTablesError(
+                f"4-fold concordance lacks the unique recurrence-classified {measures} correlation."
+            )
+        rho = float(row.iloc[0]["value"])
+        p_value = float(row.iloc[0]["p_value"])
+        if not (math.isclose(rho, expected_rho, abs_tol=5e-7)
+                and math.isclose(p_value, expected_p, abs_tol=5e-10)):
+            raise SupplementaryTablesError(
+                f"4-fold concordance {measures} is stale: observed rho={rho}, p={p_value}."
+            )
+    return df
 
 
 # --- revision tables -------------------------------------------------------
@@ -693,8 +693,24 @@ def _load_ages_all_tags() -> pd.DataFrame:
 
 
 def _load_architecture_controls() -> pd.DataFrame:
-    return _load_tsv(DATA_DIR / "recurrence_controls_summary.tsv",
-                     "Genomic-architecture controls")
+    df = _load_tsv(
+        DATA_DIR / "recurrence_controls_summary.tsv",
+        "Genomic-architecture controls",
+    )
+    required = set(ARCHITECTURE_CONTROLS_COLUMN_DEFS)
+    missing = required - set(df.columns)
+    if missing:
+        raise SupplementaryTablesError(
+            "Genomic-architecture controls are missing columns: "
+            + ", ".join(sorted(missing))
+        )
+    for col in ("n", "n_recur", "n_single"):
+        df[col] = pd.to_numeric(df[col], errors="raise").astype(int)
+    if len(df) != 9 or not (df["n"] == df["n_recur"] + df["n_single"]).all():
+        raise SupplementaryTablesError(
+            "Genomic-architecture controls must contain nine rows with n = n_recur + n_single in every row."
+        )
+    return df
 
 
 def _load_chimp_polarity() -> pd.DataFrame:
@@ -733,24 +749,95 @@ def _load_imputation_benchmarks() -> pd.DataFrame:
     order = ["6q24.1 (HsInv0284)", "17q21.31", "8p23.1"]
     out["_o"] = out["inversion"].apply(
         lambda x: order.index(x) if x in order else len(order))
-    return out.sort_values("_o").drop(columns="_o").reset_index(drop=True)
-
-
-def _load_finngen() -> pd.DataFrame:
-    """Best tagging SNP per inversion and endpoint. The raw sweep is ~30,000
-    SNP-by-endpoint rows; only the per-endpoint best is interpretable."""
-    df = _load_tsv(DATA_DIR / "finngen_replication.tsv", "FinnGen replication")
-    df = df[df["direction_usable"] == "yes"]
-    df = (df.sort_values("p_value")
-            .groupby(["inversion", "finngen_endpoint"], as_index=False).first())
-    df = df[df["p_value"] < 1e-5].sort_values("p_value")
-    return df[["inversion", "finngen_endpoint", "finngen_phenotype", "chrom_hg38",
-               "pos_hg38", "ref", "alt", "alt_enriched_on", "r_with_inversion",
-               "beta_inverted_allele", "sebeta", "p_value"]].reset_index(drop=True)
+    out = out.sort_values("_o").drop(columns="_o").reset_index(drop=True)
+    expected = {
+        "6q24.1 (HsInv0284)": (517, 0.9428699595637554, 0.9961315280464217),
+        "17q21.31": (500, 0.9443, 0.976),
+        "8p23.1": (500, 0.7575, 0.758),
+    }
+    if len(out) != 3 or set(out["inversion"]) != set(expected):
+        raise SupplementaryTablesError("External imputation benchmark must contain exactly the three validated loci.")
+    for _, row in out.iterrows():
+        n, r2, concordance = expected[row["inversion"]]
+        if (int(row["n"]) != n
+                or not math.isclose(float(row["agreement_r2"]), r2, abs_tol=5e-7)
+                or not math.isclose(float(row["hard_call_concordance"]), concordance, abs_tol=5e-7)):
+            raise SupplementaryTablesError(
+                f"External imputation benchmark is stale for {row['inversion']}."
+            )
+    return out
 
 
 def _load_flux_sweep() -> pd.DataFrame:
-    return pd.read_csv(REFSIM_DIR / "gene_flux_results.csv")
+    """Load the complete sweep's pooled counts and derive display statistics.
+
+    The full grid contains 12 depth-by-recombination cells per scenario and
+    flux value, with 120 deterministic replicate loci per cell.  Keeping the
+    eight pooled rows is sufficient for the reviewer-response claims while
+    avoiding an otherwise redundant 96-row expansion of the same counts.
+    """
+    df = _load_tsv(REFSIM_DIR / "gene_flux_summary.tsv", "Gene-flux sweep")
+    required = {
+        "scenario", "m_flux", "n_cells", "replicates_per_cell", "reps",
+        "n_called", "trend_p",
+    }
+    missing = required - set(df.columns)
+    if missing:
+        raise SupplementaryTablesError(
+            "Gene-flux summary is missing columns: " + ", ".join(sorted(missing))
+        )
+    numeric = ["m_flux", "n_cells", "replicates_per_cell", "reps", "n_called", "trend_p"]
+    for col in numeric:
+        df[col] = pd.to_numeric(df[col], errors="raise")
+    if len(df) != 8 or int(df["reps"].sum()) != 11_520:
+        raise SupplementaryTablesError(
+            f"Gene-flux summary must contain 8 pooled rows and 11,520 loci; observed {len(df)} rows and {int(df['reps'].sum())} loci."
+        )
+    if not (df["reps"] == df["n_cells"] * df["replicates_per_cell"]).all():
+        raise SupplementaryTablesError("Gene-flux replicate totals do not equal cells x replicates per cell.")
+    expected_counts = {
+        ("single-event", 0.0): (37, 0.00712342373249036),
+        ("single-event", 1e-8): (49, 0.00712342373249036),
+        ("single-event", 1e-7): (45, 0.00712342373249036),
+        ("single-event", 1e-6): (66, 0.00712342373249036),
+        ("recurrent", 0.0): (1099, 0.305858351751984),
+        ("recurrent", 1e-8): (1133, 0.305858351751984),
+        ("recurrent", 1e-7): (1139, 0.305858351751984),
+        ("recurrent", 1e-6): (1121, 0.305858351751984),
+    }
+    observed_keys = set(zip(df["scenario"], df["m_flux"]))
+    if observed_keys != set(expected_counts):
+        raise SupplementaryTablesError(
+            "Gene-flux summary does not contain the complete two-scenario by four-flux grid."
+        )
+    for row in df.itertuples(index=False):
+        expected_called, expected_trend = expected_counts[(row.scenario, row.m_flux)]
+        if (int(row.n_called) != expected_called
+                or not math.isclose(float(row.trend_p), expected_trend, abs_tol=5e-15)):
+            raise SupplementaryTablesError(
+                f"Gene-flux summary is stale for {row.scenario} at m={row.m_flux}."
+            )
+    df["recurrent_call_rate"] = df["n_called"] / df["reps"]
+
+    def wilson(row: pd.Series) -> tuple[float, float]:
+        z = 1.96
+        n = float(row["reps"])
+        p = float(row["recurrent_call_rate"])
+        denominator = 1.0 + z * z / n
+        centre = (p + z * z / (2.0 * n)) / denominator
+        half = z * math.sqrt(p * (1.0 - p) / n + z * z / (4.0 * n * n)) / denominator
+        return max(0.0, centre - half), min(1.0, centre + half)
+
+    intervals = df.apply(wilson, axis=1)
+    df["ci_low"] = [value[0] for value in intervals]
+    df["ci_high"] = [value[1] for value in intervals]
+    df["metric"] = df["scenario"].map({
+        "single-event": "False-positive rate",
+        "recurrent": "Power",
+    })
+    if df["metric"].isna().any():
+        raise SupplementaryTablesError("Gene-flux summary contains an unknown scenario label.")
+    return df.sort_values(["scenario", "m_flux"], kind="mergesort").reset_index(drop=True)
 
 
 CODING_DIVERSITY_COLUMN_DEFS = {
@@ -812,7 +899,7 @@ AGES_ALL_TAGS_COLUMN_DEFS = {
 
 ARCHITECTURE_CONTROLS_COLUMN_DEFS = {
     "outcome": "Quantity being compared between recurrence classes.",
-    "control": "How genomic architecture was controlled: unadjusted, covariate-adjusted, or matched.",
+    "control": "Conditioning set used in the conditional-randomization test.",
     "effect": "Estimated effect on the stated scale.",
     "ci_lo": "Lower bound of the 95% confidence interval.",
     "ci_hi": "Upper bound of the 95% confidence interval.",
@@ -849,71 +936,18 @@ IMPUTATION_BENCHMARK_COLUMN_DEFS = {
     "inverted_allele_freq_external": "Inverted allele frequency from the external genotypes.",
 }
 
-FINNGEN_COLUMN_DEFS = {
-    "inversion": "Inversion locus.",
-    "finngen_endpoint": "FinnGen endpoint identifier.",
-    "finngen_phenotype": "FinnGen endpoint description.",
-    "chrom_hg38": "Chromosome of the tagging SNP (GRCh38).",
-    "pos_hg38": "Position of the tagging SNP (GRCh38).",
-    "ref": "Reference allele.",
-    "alt": "Alternate allele.",
-    "alt_enriched_on": "Orientation on which the alternate allele is enriched.",
-    "r_with_inversion": "Correlation between the tagging SNP and orientation.",
-    "beta_inverted_allele": "Effect size signed to the inverted allele.",
-    "sebeta": "Standard error of the effect size.",
-    "p_value": "Association p-value in FinnGen.",
-}
-
 FLUX_SWEEP_COLUMN_DEFS = {
-    "scenario": "Sampling regime: single-event or recurrent locus.",
-    "depth": "Time-depth scenario of the simulated inversion events.",
-    "rho": "Recombination rate per base pair per generation.",
+    "scenario": "Simulated locus class: single-event or recurrent.",
+    "metric": "The recurrent-call rate is a false-positive rate for single-event loci and power for recurrent loci.",
     "m_flux": "Between-orientation gene flux, per lineage per generation.",
-    "reps": "Simulated loci in the cell.",
+    "n_cells": "Number of inversion-age by recombination-rate grid cells pooled in this row.",
+    "replicates_per_cell": "Simulated loci per grid cell.",
+    "reps": "Total simulated loci pooled in this row.",
     "n_called": "Loci called recurrent by the reference classifier.",
     "recurrent_call_rate": "Proportion called recurrent: the false-positive rate for single-event loci, the power for recurrent loci.",
     "ci_low": "Lower bound of the Wilson 95% interval.",
     "ci_high": "Upper bound of the Wilson 95% interval.",
-    "mean_events": "Mean inferred number of inversion events.",
-    "median_events": "Median inferred number of inversion events.",
-    "mean_n_sites": "Mean segregating sites retained per locus.",
-}
-
-
-EXCLUSION_COLUMN_DEFS = {
-    "OrigID": "Inversion identifier from Porubsky et al. (2022).",
-    "Chromosome": "Chromosome of the inversion.",
-    "Start": "Start coordinate (GRCh38).",
-    "End": "End coordinate (GRCh38).",
-    "verdictRecurrence_hufsah": "Recurrence verdict from the first Porubsky et al. (2022) method.",
-    "verdictRecurrence_benson": "Recurrence verdict from the second Porubsky et al. (2022) method.",
-    "consensus_recurrence": "Consensus classification (single / recurrent), or NA when there is none.",
-    "analysed": "Whether the locus enters the analysis set (yes only when both methods agree).",
-    "exclusion_reason": "Why the locus is excluded: no call from one or both methods, or the two calls disagree.",
-}
-
-CDS_HAPLOTYPE_COLUMN_DEFS = {
-    "gene_name": "Gene symbol.",
-    "transcript_id": "Ensembl transcript identifier of the analysed CDS.",
-    "inversion": "Inversion locus (GRCh38) the gene falls within.",
-    "recurrence": "Consensus recurrence class of that inversion.",
-    "k_dir": "Number of direct-orientation haplotypes contributing this CDS.",
-    "k_inv": "Number of inverted-orientation haplotypes contributing this CDS.",
-    "both_orientations": "Whether the CDS has at least one haplotype in each orientation.",
-    "inv_underpowered_lt4": "Flag for k_inv < 4, where per-gene inverted estimates are poorly determined.",
-}
-
-SD_RECURRENCE_COLUMN_DEFS = {
-    "chr_std": "Chromosome (no 'chr' prefix).",
-    "Start": "Inversion start coordinate (GRCh38).",
-    "End": "Inversion end coordinate (GRCh38).",
-    "sd_size_kbp": "Flanking inverted-repeat (segmental duplication) size in kbp.",
-    "sd_identity_pct": "Flanking inverted-repeat sequence identity (%).",
-    "consensus": "Consensus recurrence label (0 = single-event, 1 = recurrent).",
-    "p_recurrent_insample": "Fitted probability of recurrence from the architecture-only logistic.",
-    "p_recurrent_loo": "Leave-one-out probability, from a model that never saw this locus's label.",
-    "sd_call_insample": "In-sample architecture-only recurrence call at p >= 0.5.",
-    "sd_call_loo": "Leave-one-out architecture-only recurrence call at p >= 0.5.",
+    "trend_p": "Two-sided Cochran-Armitage trend-test p-value across the four gene-flux levels for this scenario.",
 }
 
 FOURFOLD_CORR_COLUMN_DEFS = {
@@ -935,21 +969,6 @@ FOURFOLD_CORR_COLUMN_DEFS = {
         "correlation."
     ),
 }
-
-OMEGA_IDENT_COLUMN_DEFS = {
-    "gene": "Gene symbol.",
-    "transcript": "Transcript identifier used in the PAML run.",
-    "region": "Inversion region containing the gene.",
-    "status": "Whether the PAML run produced complete data.",
-    "overall_p_value": "Clade-model C likelihood-ratio p-value.",
-    "overall_q_value": "Benjamini-Hochberg q-value across genes.",
-    "p2_divergent_class": "Proportion of codons assigned to the divergent site class.",
-    "omega2_direct": "Divergent-class omega for the pooled direct clade.",
-    "omega2_inverted": "Divergent-class omega for the pooled inverted clade.",
-    "clade_with_higher_omega2": "Which clade carries the larger divergent-class omega.",
-    "not_identifiable_flags": "Reasons the estimate is not identifiable (boundary omega, negligible site class).",
-}
-
 
 # --------------------------------------------------------------------------- #
 # Canonical inversion naming (Reviewer 2 #11)
@@ -1110,98 +1129,36 @@ FINAL_SUPPLEMENTARY_TABLE_ORDER = (
     "17q21 tagging PheWAS",
 )
 
+# Fixed scientific inventory for the revision. These counts make deletion of an
+# obsolete table, accidental filtering, or a partial upstream export a hard
+# failure instead of a silently different workbook.
+EXPECTED_SUPPLEMENTARY_DATA_ROWS = (
+    17,    # S1  Old recurrent events
+    17,    # S2  Young recurrent events
+    17,    # S3  Recent recurrent events
+    17,    # S4  Very recent recurrent events
+    8,     # S5  Gene-flux simulation sweep
+    93,    # S6  Inversion catalog
+    35,    # S7  Coding-site diversity
+    26,    # S8  4-fold diversity concordance
+    93,    # S9  Chimpanzee polarity per locus
+    9,     # S10 Genomic-architecture controls
+    93,    # S11 Divergence between orientations
+    130,   # S12 CDS conservation genes
+    206,   # S13 dN/dS results
+    93,    # S14 Ancient DNA best tagging SNPs
+    45,    # S15 Ancient DNA, all tagging SNPs
+    75,    # S16 Imputation results
+    3,     # S17 Imputation external benchmarks
+    7_630, # S18 PheWAS results: seven inversions by 1,090 phenotypes
+    234,   # S19 Within-ancestry PC PheWAS
+    112,   # S20 Phenotype categories
+    1_097, # S21 17q21 tagging-SNP PheWAS
+)
+
 
 class SupplementaryTablesError(RuntimeError):
     """Raised for unrecoverable supplementary table failures."""
-
-
-def _github_headers(token: Optional[str]) -> Dict[str, str]:
-    headers: Dict[str, str] = {
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    return headers
-
-
-def _github_json(url: str, token: Optional[str], params: Optional[Dict[str, str]] = None) -> dict:
-    if params:
-        url = f"{url}?{urlencode(params)}"
-
-    req = Request(url, headers=_github_headers(token))
-    try:
-        with urlopen(req) as response:
-            return json.load(response)
-    except HTTPError as exc:  # pragma: no cover - network failure edge case
-        raise SupplementaryTablesError(
-            f"GitHub API request failed for {url} (HTTP {exc.code})."
-        ) from exc
-    except URLError as exc:  # pragma: no cover - network failure edge case
-        raise SupplementaryTablesError(f"Unable to reach GitHub API at {url}: {exc.reason}.") from exc
-
-
-def _download_github_artifact(
-    *,
-    workflow_file: str,
-    artifact_name: str,
-    expected_member: str,
-    destination: Path,
-) -> Path:
-    token = next((os.environ.get(env) for env in GITHUB_TOKEN_ENVS if os.environ.get(env)), None)
-    repo = os.environ.get(GITHUB_REPO_ENV) or DEFAULT_REPO_SLUG
-
-    runs_url = f"https://api.github.com/repos/{repo}/actions/workflows/{workflow_file}/runs"
-    runs_json = _github_json(
-        runs_url,
-        token,
-        params={"status": "success", "per_page": 1, "exclude_pull_requests": "true"},
-    )
-    runs = runs_json.get("workflow_runs", [])
-    if not runs:
-        raise SupplementaryTablesError(f"No successful runs found for workflow {workflow_file} in {repo}.")
-
-    run_id = runs[0].get("id")
-    artifacts_url = f"https://api.github.com/repos/{repo}/actions/runs/{run_id}/artifacts"
-    artifacts = _github_json(artifacts_url, token, params={"per_page": 100}).get("artifacts", [])
-    artifact = next((a for a in artifacts if a.get("name") == artifact_name), None)
-    if artifact is None:
-        raise SupplementaryTablesError(
-            f"Artifact '{artifact_name}' not found in workflow run {run_id} for {repo}."
-        )
-
-    if token:
-        download_url = artifact.get("archive_download_url")
-        req = Request(download_url, headers=_github_headers(token))
-    else:
-        # Public unauthenticated fallback via nightly.link
-        download_url = f"https://nightly.link/{repo}/actions/runs/{run_id}/{artifact_name}.zip"
-        req = Request(download_url)
-
-    try:
-        with urlopen(req) as response:
-            archive_bytes = response.read()
-    except HTTPError as exc:  # pragma: no cover - network failure edge case
-        raise SupplementaryTablesError(
-            f"Failed to download artifact {artifact_name} (HTTP {exc.code})."
-        ) from exc
-    except URLError as exc:  # pragma: no cover - network failure edge case
-        raise SupplementaryTablesError(
-            f"Unable to download artifact {artifact_name} from GitHub: {exc.reason}."
-        ) from exc
-
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(io.BytesIO(archive_bytes)) as zf:
-        member = next((name for name in zf.namelist() if name.endswith(expected_member)), None)
-        if member is None:
-            raise SupplementaryTablesError(
-                f"Expected file {expected_member} not found inside artifact {artifact_name}."
-            )
-
-        with zf.open(member) as src, destination.open("wb") as dst:
-            shutil.copyfileobj(src, dst)
-
-    return destination
 
 
 # Printed headers. Supplementary tables are read by people, so no column may
@@ -1322,6 +1279,8 @@ for _k in ("kappa", "lnl_h0", "lnl_h1", "lrt_stat", "omega0", "omega2_direct",
 
 _EXPLICIT_LABELS.update({
     # revision tables
+    "inversion": "Inversion locus",
+    "Inversion": "Original inversion ID",
     "region_start": "Start (GRCh38)", "region_end": "End (GRCh38)",
     "n_cds": "Coding sequences", "n_cds_used": "Coding sequences used",
     "n_cds_with_fourfold": "Coding sequences with 4-fold sites",
@@ -1376,19 +1335,14 @@ _EXPLICIT_LABELS.update({
     "hard_call_concordance": "Hard-call concordance",
     "inverted_allele_freq_imputed": "Inverted allele frequency, imputed",
     "inverted_allele_freq_external": "Inverted allele frequency, external",
-    "finngen_endpoint": "FinnGen endpoint",
-    "finngen_phenotype": "FinnGen phenotype",
-    "ref": "Reference allele", "alt": "Alternate allele",
-    "beta_inverted_allele": "Effect size, inverted allele",
-    "sebeta": "Effect size standard error",
-    "scenario": "Sampling regime", "depth": "Time-depth scenario",
-    "rho": "Recombination rate (per bp per generation)",
+    "scenario": "Simulated locus class",
+    "metric": "Performance metric",
     "m_flux": "Gene flux (per lineage per generation)",
+    "n_cells": "Grid cells pooled",
+    "replicates_per_cell": "Loci per grid cell",
     "reps": "Simulated loci", "n_called": "Loci called recurrent",
     "recurrent_call_rate": "Proportion called recurrent",
-    "mean_events": "Mean inferred events",
-    "median_events": "Median inferred events",
-    "mean_n_sites": "Mean segregating sites",
+    "trend_p": "Trend-test p-value",
 })
 
 
@@ -1408,19 +1362,16 @@ def _pretty_label(col: str) -> str:
     return words[0].upper() + words[1:] if words else raw
 
 
-def _prune_columns(df: pd.DataFrame, column_defs: Dict[str, str], sheet_name: str,
-                   column_labels: Optional[Dict[str, str]] = None) -> pd.DataFrame:
+def _prune_columns(
+    df: pd.DataFrame, column_defs: Dict[str, str], sheet_name: str
+) -> pd.DataFrame:
     expected_cols = list(column_defs.keys())
-    available_cols = [col for col in expected_cols if col in df.columns]
     missing = [col for col in expected_cols if col not in df.columns]
     if missing:
-        warnings.warn(
-            f"Sheet '{sheet_name}' is missing columns: {', '.join(missing)}. "
-            "Proceeding with available columns only.",
-            RuntimeWarning,
+        raise SupplementaryTablesError(
+            f"Sheet '{sheet_name}' is missing required columns: {', '.join(missing)}."
         )
-
-    return df.loc[:, available_cols].copy()
+    return df.loc[:, expected_cols].copy()
 
 
 def _format_chr_pos(chrom: str | float | int | None, pos: str | float | int | None) -> str | pd._libs.missing.NAType:
@@ -1543,16 +1494,7 @@ def _merge_population_metrics(inv_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _load_imputation_performance_ids(min_r2: float = 0.5) -> set[str]:
-    try:
-        df = pd.read_csv(IMPUTATION_RESULTS_MERGED_URL, sep="\t", dtype=str, low_memory=False)
-    except (HTTPError, URLError) as exc:
-        raise SupplementaryTablesError(
-            "Unable to download imputation performance results from GitHub. Please ensure network access is available or provide a local copy of imputation_results_merged.tsv."
-        ) from exc
-    except Exception as exc:  # pragma: no cover - defensive guardrail
-        raise SupplementaryTablesError(
-            "Failed to load imputation performance results from GitHub."
-        ) from exc
+    df = _load_tsv(IMPUTATION_RESULTS_MERGED, "Merged imputation performance")
 
     required_cols = {"id", "unbiased_pearson_r2"}
     missing_cols = required_cols - set(df.columns)
@@ -1628,111 +1570,6 @@ def _add_population_allele_frequencies(df: pd.DataFrame) -> pd.DataFrame:
     return merged
 
 
-def ensure_cds_summary() -> Path:
-    """Ensure cds_identical_proportions.tsv exists, generating it if .phy files are available."""
-    if CDS_SUMMARY_TSV.exists():
-        return CDS_SUMMARY_TSV
-
-    # Check if we have .phy files to run the pipeline
-    phy_files = list(REPO_ROOT.glob("*.phy"))
-    if len(phy_files) >= 100:  # Arbitrary threshold indicating we have the dataset
-        print(f"Found {len(phy_files)} .phy files. Running cds_differences.py to generate summary...")
-        try:
-            cds_diff_script = REPO_ROOT / "stats" / "cds_differences.py"
-            if not cds_diff_script.exists():
-                raise SupplementaryTablesError(f"CDS differences script not found: {cds_diff_script}")
-            
-            # Run cds_differences.py from repo root
-            result = subprocess.run(
-                [sys.executable, str(cds_diff_script)],
-                cwd=REPO_ROOT,
-                capture_output=True,
-                text=True,
-                timeout=3600,  # 1 hour timeout
-            )
-            
-            if result.returncode != 0:
-                print(f"cds_differences.py stderr:\n{result.stderr}", file=sys.stderr)
-                raise SupplementaryTablesError(
-                    f"cds_differences.py failed with exit code {result.returncode}"
-                )
-            
-            if not CDS_SUMMARY_TSV.exists():
-                raise SupplementaryTablesError(
-                    "cds_differences.py completed but did not produce cds_identical_proportions.tsv"
-                )
-            
-            print(f"✅ Generated {CDS_SUMMARY_TSV.name}")
-            return CDS_SUMMARY_TSV
-            
-        except subprocess.TimeoutExpired:
-            raise SupplementaryTablesError("cds_differences.py timed out after 1 hour")
-        except Exception as e:
-            print(f"Failed to run cds_differences.py: {e}", file=sys.stderr)
-            raise SupplementaryTablesError(
-                "cds_identical_proportions.tsv is missing and could not be generated from local inputs."
-            )
-
-    raise SupplementaryTablesError(
-        "cds_identical_proportions.tsv is missing. Please add it to the data directory or provide the required inputs "
-        "to generate it locally."
-    )
-
-
-def ensure_gene_results() -> Path:
-    """Ensure gene_inversion_direct_inverted.tsv exists, generating it if CDS summary is available."""
-    if GENE_RESULTS_TSV.exists():
-        return GENE_RESULTS_TSV
-
-    # First ensure we have the CDS summary
-    cds_summary = ensure_cds_summary()
-    
-    # Check if we have pairs files to run the per-gene analysis
-    pairs_files = list(REPO_ROOT.glob("pairs_CDS__*.tsv"))
-    if len(pairs_files) >= 100:  # Threshold indicating we have the dataset
-        print(f"Found {len(pairs_files)} pairs files. Running per_gene_cds_differences_jackknife.py...")
-        try:
-            gene_script = REPO_ROOT / "stats" / "per_gene_cds_differences_jackknife.py"
-            if not gene_script.exists():
-                raise SupplementaryTablesError(f"Per-gene script not found: {gene_script}")
-            
-            # Run per_gene_cds_differences_jackknife.py from repo root
-            result = subprocess.run(
-                [sys.executable, str(gene_script)],
-                cwd=REPO_ROOT,
-                capture_output=True,
-                text=True,
-                timeout=3600,  # 1 hour timeout
-            )
-            
-            if result.returncode != 0:
-                print(f"per_gene_cds_differences_jackknife.py stderr:\n{result.stderr}", file=sys.stderr)
-                raise SupplementaryTablesError(
-                    f"per_gene_cds_differences_jackknife.py failed with exit code {result.returncode}"
-                )
-            
-            if not GENE_RESULTS_TSV.exists():
-                raise SupplementaryTablesError(
-                    "per_gene_cds_differences_jackknife.py completed but did not produce gene_inversion_direct_inverted.tsv"
-                )
-            
-            print(f"✅ Generated {GENE_RESULTS_TSV.name}")
-            return GENE_RESULTS_TSV
-            
-        except subprocess.TimeoutExpired:
-            raise SupplementaryTablesError("per_gene_cds_differences_jackknife.py timed out after 1 hour")
-        except Exception as e:
-            print(f"Failed to run per_gene_cds_differences_jackknife.py: {e}", file=sys.stderr)
-            raise SupplementaryTablesError(
-                "gene_inversion_direct_inverted.tsv is missing and could not be generated from local inputs."
-            )
-
-    raise SupplementaryTablesError(
-        "gene_inversion_direct_inverted.tsv is missing. Please add it to the data directory or provide the required "
-        "inputs to generate it locally."
-    )
-
-
 def _load_inversion_catalog() -> pd.DataFrame:
     if not INV_PROPERTIES.exists():
         raise SupplementaryTablesError(f"Inversion properties TSV not found: {INV_PROPERTIES}")
@@ -1747,19 +1584,86 @@ def _load_inversion_catalog() -> pd.DataFrame:
             "Inversion properties TSV is missing required columns: " + ", ".join(missing)
         )
 
-    df = df[INV_COLUMNS_KEEP].copy()
+    analysed = _load_exclusion_reasons()
+    required_selection = {"OrigID", "analysed", "consensus_recurrence"}
+    missing_selection = required_selection - set(analysed.columns)
+    if missing_selection:
+        raise SupplementaryTablesError(
+            "Inversion selection table is missing columns: "
+            + ", ".join(sorted(missing_selection))
+        )
+    analysed = analysed.loc[
+        analysed["analysed"].astype(str).str.lower().eq("yes"),
+        ["OrigID", "consensus_recurrence"],
+    ].copy()
+    if len(analysed) != 93 or analysed["OrigID"].duplicated().any():
+        raise SupplementaryTablesError(
+            f"Expected 93 unique consensus-classified inversion IDs; observed {len(analysed)} rows."
+        )
+
+    df = df[INV_COLUMNS_KEEP].copy().merge(
+        analysed, on="OrigID", how="inner", validate="one_to_one"
+    )
+    counts = df["consensus_recurrence"].value_counts().to_dict()
+    if counts != {"single": 61, "recurrent": 32}:
+        raise SupplementaryTablesError(
+            f"Expected 61 single-event and 32 recurrent inversions; observed {counts}."
+        )
+    df = df.drop(columns="consensus_recurrence")
     df = _merge_population_metrics(df)
     df = df.rename(columns=INV_RENAME_MAP)
     return _prune_columns(df, INVERSION_COLUMN_DEFS, "Inversion catalog")
 
 
 def _load_gene_conservation() -> pd.DataFrame:
-    tsv_path = ensure_gene_results()
-    df = pd.read_csv(tsv_path, sep="\t", dtype=str, low_memory=False)
+    per_gene = _load_tsv(GENE_PERMUTATION_TSV, "Per-gene CDS permutation")
+    joint = _load_tsv(GENE_JOINT_CONTROL_TSV, "Joint CDS permutation control")
+    required_per_gene = {
+        "gene_name", "transcript_id", "inv_id", "recurrence", "k_direct",
+        "k_inverted", "n_seq_classes", "p_direct", "p_inverted", "delta",
+        "status",
+    }
+    required_joint = {
+        "gene_name", "inv_id", "recurrence", "k_inverted", "delta",
+        "joint_p", "wy_fwer_p", "direct_fdr_q",
+    }
+    for label, frame, required in (
+        ("per-gene CDS permutation", per_gene, required_per_gene),
+        ("joint CDS permutation", joint, required_joint),
+    ):
+        missing = required - set(frame.columns)
+        if missing:
+            raise SupplementaryTablesError(
+                f"{label} table is missing columns: {', '.join(sorted(missing))}"
+            )
 
-    numeric_cols = ["p_direct", "p_inverted", "delta", "se_delta", "p_value", "q_value"]
+    per_gene = per_gene.loc[per_gene["status"].eq("OK"), list(required_per_gene)].copy()
+    keys = ["gene_name", "inv_id"]
+    if per_gene.duplicated(keys).any() or joint.duplicated(keys).any():
+        raise SupplementaryTablesError("CDS permutation inputs contain duplicate gene/inversion keys.")
+    df = joint.merge(
+        per_gene.drop(columns=["recurrence", "k_inverted", "delta"]),
+        on=keys,
+        how="left",
+        validate="one_to_one",
+    )
+    if len(df) != 130 or df["transcript_id"].isna().any():
+        raise SupplementaryTablesError(
+            f"Expected 130 fully matched CDS permutation tests; observed {len(df)} rows."
+        )
+    numeric_cols = [
+        "k_direct", "k_inverted", "n_seq_classes", "p_direct", "p_inverted",
+        "delta", "joint_p", "wy_fwer_p", "direct_fdr_q",
+    ]
     for col in numeric_cols:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
+        df[col] = pd.to_numeric(df[col], errors="raise")
+    if not ((df["k_direct"] >= 4) & (df["k_inverted"] >= 4)).all():
+        raise SupplementaryTablesError("The CDS permutation table contains a gene with fewer than four haplotypes in an orientation.")
+    n_significant = int((df["direct_fdr_q"] < 0.05).sum())
+    if n_significant != 13:
+        raise SupplementaryTablesError(
+            f"Expected 13 genes at direct FDR q < 0.05; observed {n_significant}."
+        )
 
     if not FIXED_DIFF_SUMMARY_TSV.exists():
         raise SupplementaryTablesError(
@@ -1814,18 +1718,22 @@ def _load_gene_conservation() -> pd.DataFrame:
         "gene_name": "Gene",
         "transcript_id": "Transcript",
         "inv_id": "Inversion ID",
+        "recurrence": "Recurrence class",
+        "k_direct": "Direct haplotypes",
+        "k_inverted": "Inverted haplotypes",
+        "n_seq_classes": "Sequence classes",
         "p_direct": "Direct identical pair proportion",
         "p_inverted": "Inverted identical pair proportion",
         "delta": "Δ (inverted − direct)",
-        "se_delta": "SE(Δ)",
-        "p_value": "p-value",
-        "q_value": "BH p-value",
+        "joint_p": "Permutation p-value",
+        "wy_fwer_p": "Westfall-Young FWER p-value",
+        "direct_fdr_q": "Direct FDR q-value",
         "n_fixed_differences": "Fixed CDS differences",
     }
 
     df = df.rename(columns=rename_map)
     df = _prune_columns(df, GENE_CONSERVATION_COLUMN_DEFS, "CDS conservation genes")
-    df = df.sort_values("BH p-value", kind="mergesort").reset_index(drop=True)
+    df = df.sort_values("Direct FDR q-value", kind="mergesort").reset_index(drop=True)
     return df
 
 
@@ -1838,35 +1746,26 @@ def _load_simple_tsv(path: Path) -> pd.DataFrame:
 def _clean_phewas_df(
     df: pd.DataFrame, sheet_name: str, column_defs: Dict[str, str]
 ) -> pd.DataFrame:
-    # Check for P_Value_x and P_Value_y columns
-    if "P_Value_x" in df.columns and "P_Value_y" in df.columns:
-        # Convert to numeric for comparison
-        p_x = pd.to_numeric(df["P_Value_x"], errors="coerce")
-        p_y = pd.to_numeric(df["P_Value_y"], errors="coerce")
-
-        both_nan = p_x.isna() & p_y.isna()
-        both_equal = p_x == p_y
-        all_match = (both_nan | both_equal).all()
-
-        if not all_match:
-            diff_mask = ~(both_nan | both_equal)
-            first_diff_idx = diff_mask.idxmax() if diff_mask.any() else None
-            warnings.warn(
-                "P_Value_x and P_Value_y columns have different values. "
-                f"Using P_Value_x where available. First difference at row {first_diff_idx}: "
-                f"P_Value_x={df.loc[first_diff_idx, 'P_Value_x']}, "
-                f"P_Value_y={df.loc[first_diff_idx, 'P_Value_y']}",
-                RuntimeWarning,
+    if "P_LRT_Overall" not in df.columns:
+        raise SupplementaryTablesError(
+            f"{sheet_name} lacks the canonical primary association p-value P_LRT_Overall."
+        )
+    canonical = pd.to_numeric(df["P_LRT_Overall"], errors="coerce")
+    for collision_col in ("P_Value_x", "P_Value_y", "P_Value"):
+        if collision_col not in df.columns:
+            continue
+        candidate = pd.to_numeric(df[collision_col], errors="coerce")
+        comparable = canonical.notna() & candidate.notna()
+        mismatch = comparable & ~canonical.eq(candidate)
+        if mismatch.any():
+            first = mismatch[mismatch].index[0]
+            raise SupplementaryTablesError(
+                f"{sheet_name} has conflicting primary p-values at row {first}: "
+                f"P_LRT_Overall={canonical.loc[first]}, {collision_col}={candidate.loc[first]}."
             )
-            fill_mask = df["P_Value_x"].isna() & df["P_Value_y"].notna()
-            if fill_mask.any():
-                df.loc[fill_mask, "P_Value_x"] = df.loc[fill_mask, "P_Value_y"]
-
-        df = df.drop(columns=["P_Value_y"])
-        df = df.rename(columns={"P_Value_x": "P_Value_unadjusted"})
-
-    if "P_Value_unadjusted" not in df.columns and "P_Value" in df.columns:
-        df = df.rename(columns={"P_Value": "P_Value_unadjusted"})
+    df = df.drop(
+        columns=[c for c in ("P_Value_x", "P_Value_y", "P_Value") if c in df.columns]
+    ).rename(columns={"P_LRT_Overall": "P_Value_unadjusted"})
 
     if "Q_GLOBAL" in df.columns and "BH_P_GLOBAL" not in df.columns:
         df = df.rename(columns={"Q_GLOBAL": "BH_P_GLOBAL"})
@@ -1874,51 +1773,59 @@ def _clean_phewas_df(
     if "P_Source" in df.columns and "P_Source_x" not in df.columns:
         df = df.rename(columns={"P_Source": "P_Source_x"})
 
-    empty_cols = [
-        col for col in df.columns if df[col].isna().all() or (df[col].astype(str).str.strip() == "").all()
-    ]
-    if empty_cols:
-        df = df.drop(columns=empty_cols)
-
     return _prune_columns(df, column_defs, sheet_name)
 
 
 def _load_phewas_results() -> pd.DataFrame:
     df = _load_simple_tsv(PHEWAS_RESULTS)
-    return _clean_phewas_df(df, "PheWAS results", PHEWAS_COLUMN_DEFS)
+    cleaned = _clean_phewas_df(df, "PheWAS results", PHEWAS_COLUMN_DEFS)
+    n_inversions = cleaned["Inversion"].nunique(dropna=True)
+    n_phenotypes = cleaned["Phenotype"].nunique(dropna=True)
+    if len(cleaned) != 7_630 or n_inversions != 7 or n_phenotypes != 1_090:
+        raise SupplementaryTablesError(
+            "PheWAS results must contain the complete 7 x 1,090 test grid "
+            f"(7,630 rows); observed rows={len(cleaned)}, inversions={n_inversions}, phenotypes={n_phenotypes}."
+        )
+    q_values = pd.to_numeric(cleaned["BH_P_GLOBAL"], errors="coerce")
+    if int((q_values < 0.05).sum()) != 39:
+        raise SupplementaryTablesError(
+            f"Expected 39 PheWAS tests at global FDR q < 0.05; observed {int((q_values < 0.05).sum())}."
+        )
+    if cleaned.duplicated(["Phenotype", "Inversion"]).any():
+        raise SupplementaryTablesError("PheWAS results contain duplicate phenotype/inversion tests.")
+    return cleaned
 
 
 def _load_within_ancestry_phewas() -> pd.DataFrame:
     df = _load_simple_tsv(WITHIN_ANCESTRY_PHEWAS_RESULTS)
-    return _prune_columns(
+    df = _prune_columns(
         df,
         WITHIN_ANCESTRY_PHEWAS_COLUMN_DEFS,
         "Within-ancestry PC PheWAS",
     )
+    evaluable = df["evaluable"].astype(str).str.lower().eq("true")
+    if len(df) != 234 or int(evaluable.sum()) != 187:
+        raise SupplementaryTablesError(
+            f"Within-ancestry sensitivity table must contain 234 rows and 187 evaluable comparisons; observed {len(df)} and {int(evaluable.sum())}."
+        )
+    return df
 
 
 def _load_categories() -> pd.DataFrame:
-    for candidate in CATEGORIES_RESULTS_CANDIDATES:
-        if candidate.exists():
-            df = _load_simple_tsv(candidate)
-            # Remove Z_Cap and Dropped columns if present
-            columns_to_drop = ["Z_Cap", "Dropped", "Method", "Shrinkage", "Lambda"]
-            df = df.drop(columns=[col for col in columns_to_drop if col in df.columns])
-
-            # Rename columns for clarity
-            rename_map = {
-                "K_Total": "Phenotypes in category",
-                "K_GBJ": "Phenotypes included in GBJ",
-                "T_GLS": "GLS test statistic",
-                "K_GLS": "Phenotypes included in GLS",
-                "P_GLS": "P_GLS",
-                "Q_GLS": "BH_P_GLS",
-                "Q_GBJ": "BH_P_GBJ",
-            }
-            df = df.rename(columns=rename_map)
-
-            return _prune_columns(df, CATEGORY_COLUMN_DEFS, "Phenotype categories")
-    raise SupplementaryTablesError("Unable to locate categories TSV in the data directory.")
+    df = _load_simple_tsv(CATEGORIES_RESULTS)
+    columns_to_drop = ["Z_Cap", "Dropped", "Method", "Shrinkage", "Lambda"]
+    df = df.drop(columns=[col for col in columns_to_drop if col in df.columns])
+    rename_map = {
+        "K_Total": "Phenotypes in category",
+        "K_GBJ": "Phenotypes included in GBJ",
+        "T_GLS": "GLS test statistic",
+        "K_GLS": "Phenotypes included in GLS",
+        "P_GLS": "P_GLS",
+        "Q_GLS": "BH_P_GLS",
+        "Q_GBJ": "BH_P_GBJ",
+    }
+    df = df.rename(columns=rename_map)
+    return _prune_columns(df, CATEGORY_COLUMN_DEFS, "Phenotype categories")
 
 
 def _load_phewas_tagging() -> pd.DataFrame:
@@ -1981,41 +1888,18 @@ def _load_imputation_results() -> pd.DataFrame:
         df["Use"] = use_flag.mask(r2.isna() | q_values.isna(), pd.NA)
 
     df = _add_population_allele_frequencies(df)
-    return _prune_columns(df, IMPUTATION_COLUMN_DEFS, "Imputation results")
-
-
-def _load_paml_results() -> pd.DataFrame:
-    df = _load_simple_tsv(PAML_RESULTS)
-    if "status" not in df.columns:
-        raise SupplementaryTablesError("PAML results file is missing the 'status' column.")
-
-    df = df[df["status"].isin(["success", "partial_success"])]
-    if "region" in df.columns:
-        df["region"] = df["region"].str.replace(
-            r"^([^_]+)_([^_]+)_([^_]+)$", r"\1:\2-\3", regex=True
+    df = _prune_columns(df, IMPUTATION_COLUMN_DEFS, "Imputation results")
+    r2 = pd.to_numeric(df["unbiased_pearson_r2"], errors="coerce")
+    use = df["Use"].astype("boolean")
+    if len(df) != 75 or int((r2 > 0.5).sum()) != 12 or int(use.fillna(False).sum()) != 11:
+        raise SupplementaryTablesError(
+            "Imputation table must contain 75 fitted models, 12 with cross-validated r2 > 0.5, and 11 passing both quality criteria."
         )
-    df = _prune_columns(df, PAML_COLUMN_DEFS, "dN/dS (ω) results")
-    if {"region", "gene"}.issubset(df.columns):
-        df = df.sort_values(["region", "gene"], kind="mergesort")
-    return df.reset_index(drop=True)
-
-
-def _ensure_best_tagging_results() -> Path:
-    if BEST_TAGGING_RESULTS.exists():
-        return BEST_TAGGING_RESULTS
-
-    print("Best tagging SNP results missing; attempting to download latest artifact ...")
-    return _download_github_artifact(
-        workflow_file=BEST_TAGGING_WORKFLOW,
-        artifact_name=BEST_TAGGING_ARTIFACT,
-        expected_member=BEST_TAGGING_FILENAME,
-        destination=BEST_TAGGING_RESULTS,
-    )
+    return df
 
 
 def _load_best_tagging_snps() -> pd.DataFrame:
-    path = _ensure_best_tagging_results()
-    df = pd.read_csv(path, sep="\t", dtype=str, low_memory=False)
+    df = _load_tsv(BEST_TAGGING_RESULTS, "Best tagging SNPs")
     # Rename uppercase 'S' to lowercase 's' to match the column definition schema
     if "S" in df.columns and "s" not in df.columns:
         df = df.rename(columns={"S": "s"})
@@ -2158,6 +2042,12 @@ def _load_paml_results() -> pd.DataFrame:
         )
 
     df = _prune_columns(df, PAML_COLUMN_DEFS, "dN/dS (ω) results")
+    p_values = pd.to_numeric(df["cmc_p_value"], errors="coerce")
+    q_values = pd.to_numeric(df["cmc_bh_p_value"], errors="coerce")
+    if len(df) != 206 or int((p_values < 0.05).sum()) != 5 or int((q_values < 0.05).sum()) != 0:
+        raise SupplementaryTablesError(
+            "PAML table must contain 206 genes, five nominal p < 0.05 results, and no BH-significant results."
+        )
     if {"region", "gene"}.issubset(df.columns):
         df = df.sort_values(["region", "gene"], kind="mergesort")
     return df.reset_index(drop=True)
@@ -2235,13 +2125,13 @@ def build_workbook(output_path: Path) -> None:
         SheetInfo(
             name="Inversion catalog",
             description=(
-                "A comprehensive catalog of the 93 balanced human chromosomal inversions analyzed in this study. "
+                "The 93 balanced human chromosomal inversions analyzed in this study: 61 single-event and 32 recurrent loci. "
                 "Inversion calls, coordinates, and recurrence classifications are derived from Porubsky et al. (2022) "
                 "using Strand-seq and long-read sequencing on the 1000 Genomes Project panel (GRCh38 coordinates). "
                 "Chromosome, Start, End, number recurrent events, Inversion ID, Size (kbp), Inversion allele frequency, "
                 "verdictRecurrence_hufsah, and verdictRecurrence_benson columns are sourced directly from Porubsky et al. "
-                "(2022). NA in the 0_single_1_recur_consensus column indicates there was no consensus between single-event "
-                "and recurrent classifications. NA in Hudson's FST, Direct haplotypes pi, and Inverted haplotypes pi "
+                "(2022). Only loci for which the two recurrence methods agree are included. NA in Hudson's FST, Direct "
+                "haplotypes pi, and Inverted haplotypes pi "
                 "reflects that these metrics could not be calculated because the region lacked polymorphisms or had too few "
                 "haplotypes."
             ),
@@ -2254,9 +2144,10 @@ def build_workbook(output_path: Path) -> None:
         SheetInfo(
             name="CDS conservation genes",
             description=(
-                "Analysis of protein-coding gene conservation within inversion loci. Tests quantify differences in the "
-                "proportion of identical Coding Sequence (CDS) pairs between inverted and direct haplotypes, identifying genes "
-                "where the inverted orientation maintains significantly higher (or lower) sequence conservation."
+                "Inversion-level permutation analysis of protein-coding gene conservation within inversion loci. The 130 genes "
+                "have at least four haplotypes in each orientation. Orientation labels were shuffled once per inversion and the "
+                "same assignment was applied to every gene at that locus, preserving within-inversion dependence. Tests quantify "
+                "differences in the proportion of identical coding-sequence pairs between inverted and direct haplotypes."
             ),
             column_defs=GENE_CONSERVATION_COLUMN_DEFS,
             loader=_load_gene_conservation,
@@ -2384,10 +2275,10 @@ def build_workbook(output_path: Path) -> None:
         SheetInfo(
             name="Gene-flux simulation sweep",
             description=(
-                "False-positive rate and power of the recurrence classifier across between-orientation gene flux, "
-                "under the upstream structured-coalescent model. A locus is single-event when every sampled inverted "
-                "haplotype descends from one inverted deme and recurrent when both contribute; the demography is the "
-                "same either way. Rates carry Wilson 95% intervals, because several cells sit at zero."
+                "False-positive rate and power of the recurrence classifier across between-orientation gene flux under the "
+                "structured-coalescent model. Each row pools 12 inversion-age by recombination-rate cells with 120 simulated "
+                "loci per cell, for 11,520 loci overall. Rates carry Wilson 95% intervals. Trend p-values are from two-sided "
+                "Cochran-Armitage tests across the four gene-flux levels."
             ),
             column_defs=FLUX_SWEEP_COLUMN_DEFS,
             loader=_load_flux_sweep,
@@ -2424,9 +2315,9 @@ def build_workbook(output_path: Path) -> None:
         SheetInfo(
             name="Genomic-architecture controls",
             description=(
-                "The orientation-by-recurrence diversity interaction and the FST comparison, unadjusted, adjusted for "
-                "inversion length, inverted allele frequency, local SNP density and CDS density, and on subsets matched "
-                "on inversion length and allele frequency."
+                "Conditional-randomization tests of the orientation-by-recurrence diversity interaction and recurrence-class "
+                "differences in FST and da: without conditioning; conditioned on inversion length, inverted allele frequency, "
+                "local SNP density and CDS density; and additionally conditioned on recombination rate and chromosome-arm position."
             ),
             column_defs=ARCHITECTURE_CONTROLS_COLUMN_DEFS,
             loader=_load_architecture_controls,
@@ -2487,6 +2378,32 @@ def build_workbook(output_path: Path) -> None:
     ordered = [registered[name] for name in FINAL_SUPPLEMENTARY_TABLE_ORDER]
     sheet_infos = [sheet for sheet, _ in ordered]
     sheet_frames = [frame for _, frame in ordered]
+
+    if len(sheet_infos) != 21:
+        raise SupplementaryTablesError(
+            f"The revision defines exactly 21 supplementary tables; observed {len(sheet_infos)}."
+        )
+    for index, (sheet, frame) in enumerate(zip(sheet_infos, sheet_frames), start=1):
+        expected_rows = EXPECTED_SUPPLEMENTARY_DATA_ROWS[index - 1]
+        if len(frame) != expected_rows:
+            raise SupplementaryTablesError(
+                f"Table S{index} ({sheet.name}) must contain {expected_rows:,} data rows; "
+                f"observed {len(frame):,}."
+            )
+        if frame.columns.duplicated().any():
+            duplicates = sorted(set(frame.columns[frame.columns.duplicated()].astype(str)))
+            raise SupplementaryTablesError(
+                f"Table S{index} ({sheet.name}) has duplicate source columns: {duplicates}."
+            )
+        printed = [
+            sheet.column_labels.get(column, _pretty_label(column))
+            for column in frame.columns
+        ]
+        duplicate_labels = sorted({label for label in printed if printed.count(label) > 1})
+        if duplicate_labels:
+            raise SupplementaryTablesError(
+                f"Table S{index} ({sheet.name}) has duplicate printed headers: {duplicate_labels}."
+            )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with pd.ExcelWriter(output_path, engine="xlsxwriter") as writer:
