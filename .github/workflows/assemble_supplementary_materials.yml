@@ -1,0 +1,201 @@
+name: Assemble supplementary materials
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/assemble_supplementary_materials.yml'
+      - 'reproducibility/templates/INV_MS_SupplementaryMaterials_v3.8.final.docx'
+      - 'reproducibility/manuscript_sources.json'
+      - 'scripts/assemble_supplementary_materials.py'
+      - 'scripts/verify_assembled_supplement.py'
+      - 'stats/supplementary_inventory.py'
+      - 'stats/verify_supplementary_inventory.py'
+      - 'stats/four_fold_pi.py'
+      - 'stats/recurrence_sd_figure.py'
+      - 'stats/divergence_da_dxy_by_type.py'
+      - 'stats/figure2a_repolarized.py'
+      - 'stats/imputation_benchmark_figure.py'
+      - 'stats/phewas_within_ancestry_figures.py'
+      - 'data/four_fold_pi_by_inversion.tsv'
+      - 'data/recurrence_sd_calls.tsv'
+      - 'data/recurrence_sd_summary.tsv'
+      - 'data/output.csv'
+      - 'data/chimp_alignment_responses.json'
+      - 'data/inv_properties.tsv'
+      - 'data/imputation_benchmark_HsInv0284.tsv'
+      - 'data/imputation_benchmark_HsInv0284_summary.tsv'
+      - 'data/phewas_results.tsv'
+      - 'data/within_ancestry_pc_phewas_results.tsv'
+      - 'simulations/refsim/demography_model_fluxall.png'
+      - 'simulations/refsim/fluxsweep2_fpr_power.png'
+      - 'output/pdf/svbyeye/Supplemental_Figure_SVbyEye_orientation_examples.png'
+      - 'output/pdf/svbyeye/Supplemental_File_SVbyEye_consensus_93_loci.pdf'
+  pull_request:
+    paths:
+      - '.github/workflows/assemble_supplementary_materials.yml'
+      - 'scripts/assemble_supplementary_materials.py'
+      - 'scripts/verify_assembled_supplement.py'
+      - 'stats/supplementary_inventory.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supplementary-materials-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  assemble:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      MPLBACKEND: Agg
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          lfs: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install \
+            python-docx==1.2.0 pymupdf==1.26.4 pillow==11.3.0 \
+            pypdf==5.9.0 numpy==2.2.6 pandas==2.3.3 scipy==1.15.3 \
+            statsmodels==0.14.5 matplotlib==3.10.3
+
+      - name: Install Word rendering stack and manuscript fonts
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          echo msttcorefonts msttcorefonts/accepted-mscorefonts-eula select true \
+            | sudo debconf-set-selections
+          sudo apt-get install -y \
+            libreoffice-writer poppler-utils fonts-liberation2 \
+            ttf-mscorefonts-installer
+          fc-cache -f
+          fc-match -f '%{family}\n' 'Times New Roman' | head -1 \
+            | grep -qi 'Times New Roman'
+
+      - name: Verify immutable template and canonical inventory
+        run: |
+          set -euo pipefail
+          python scripts/fetch_manuscript_sources.py \
+            --source supplementary_materials_template \
+            --output-dir "$RUNNER_TEMP/manuscript-sources"
+          python stats/verify_supplementary_inventory.py \
+            --write-tsv output/supplementary_materials/supplementary_inventory.tsv
+
+      - name: Rebuild revision figure assets from their recorded tables
+        run: |
+          set -euo pipefail
+          (cd data && python ../stats/four_fold_pi.py --from-table)
+          python stats/recurrence_sd_figure.py
+          (cd data && python ../stats/divergence_da_dxy_by_type.py)
+          python stats/figure2a_repolarized.py
+          python stats/imputation_benchmark_figure.py
+          python stats/phewas_within_ancestry_figures.py
+
+      - name: Verify all 21 figure inputs and the 93-page alignment source
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          from PIL import Image
+          from pypdf import PdfReader
+          import sys
+
+          sys.path.insert(0, 'stats')
+          from supplementary_inventory import FINAL_SUPPLEMENTARY_FIGURES
+
+          for figure in FINAL_SUPPLEMENTARY_FIGURES:
+              if figure.asset:
+                  path = Path(figure.asset)
+                  assert path.is_file() and path.stat().st_size > 0, path
+                  with Image.open(path) as image:
+                      image.verify()
+          source = Path(
+              'output/pdf/svbyeye/Supplemental_File_SVbyEye_consensus_93_loci.pdf'
+          )
+          assert len(PdfReader(source).pages) == 93
+          PY
+
+      - name: Assemble and structurally validate the new DOCX
+        run: |
+          set -euo pipefail
+          python scripts/assemble_supplementary_materials.py
+          python scripts/verify_assembled_supplement.py \
+            output/supplementary_materials/Supplementary_Materials_final.docx
+
+      - name: Render the assembled DOCX to PDF
+        run: |
+          set -euo pipefail
+          mkdir -p output/supplementary_materials/rendered
+          libreoffice --headless --convert-to pdf \
+            --outdir output/supplementary_materials \
+            output/supplementary_materials/Supplementary_Materials_final.docx
+          test -s output/supplementary_materials/Supplementary_Materials_final.pdf
+          pdfinfo output/supplementary_materials/Supplementary_Materials_final.pdf \
+            > output/supplementary_materials/render_audit.txt
+          pdftoppm -png -r 90 \
+            output/supplementary_materials/Supplementary_Materials_final.pdf \
+            output/supplementary_materials/rendered/page
+
+      - name: Verify every rendered page and make contact sheets
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from PIL import Image, ImageChops, ImageDraw
+          from pypdf import PdfReader
+
+          root = Path('output/supplementary_materials')
+          pdf = root / 'Supplementary_Materials_final.pdf'
+          pages = sorted((root / 'rendered').glob('page-*.png'))
+          expected = len(PdfReader(pdf).pages)
+          assert len(pages) == expected
+          assert expected >= 114
+
+          thumbnails = []
+          for page in pages:
+              with Image.open(page).convert('RGB') as image:
+                  background = Image.new('RGB', image.size, 'white')
+                  bbox = ImageChops.difference(image, background).getbbox()
+                  assert bbox is not None, f'blank rendered page: {page}'
+                  thumb = image.copy()
+                  thumb.thumbnail((220, 170))
+                  thumbnails.append((page.name, thumb))
+
+          per_sheet = 24
+          for offset in range(0, len(thumbnails), per_sheet):
+              chunk = thumbnails[offset:offset + per_sheet]
+              sheet = Image.new('RGB', (6 * 240, 4 * 200), 'white')
+              draw = ImageDraw.Draw(sheet)
+              for cell, (name, thumb) in enumerate(chunk):
+                  x = (cell % 6) * 240
+                  y = (cell // 6) * 200
+                  sheet.paste(thumb, (x + 10, y + 20))
+                  draw.text((x + 10, y + 4), name, fill='black')
+              sheet.save(root / f'contact_sheet_{offset // per_sheet + 1:02d}.jpg', quality=90)
+          with (root / 'render_audit.txt').open('a') as handle:
+              handle.write(f'\nRendered pages checked: {len(pages)}\n')
+              handle.write('Blank pages: 0\n')
+          PY
+
+      - name: Upload assembled supplementary materials
+        uses: actions/upload-artifact@v4
+        with:
+          name: supplementary-materials-final
+          path: |
+            output/supplementary_materials/Supplementary_Materials_final.docx
+            output/supplementary_materials/Supplementary_Materials_final.pdf
+            output/supplementary_materials/supplementary_inventory.tsv
+            output/supplementary_materials/render_audit.txt
+            output/supplementary_materials/contact_sheet_*.jpg
+          if-no-files-found: error

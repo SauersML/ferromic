@@ -27,6 +27,8 @@ from typing import Callable, Dict, Iterable, List, Optional
 
 import pandas as pd
 
+from supplementary_inventory import FINAL_SUPPLEMENTARY_TABLE_ORDER
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = REPO_ROOT / "data"
 NEXT_PUBLIC_DIR = REPO_ROOT / "web" / "figures-site" / "public"
@@ -1104,30 +1106,6 @@ class SheetInfo:
     # is prettified by ``_pretty_label``.
     column_labels: Dict[str, str] = field(default_factory=dict)
 
-
-FINAL_SUPPLEMENTARY_TABLE_ORDER = (
-    "Old recurrent events",
-    "Young recurrent events",
-    "Recent recurrent events",
-    "Very recent recurrent events",
-    "Gene-flux simulation sweep",
-    "Inversion catalog",
-    "Coding-site diversity",
-    "4-fold diversity concordance",
-    "Chimpanzee polarity per locus",
-    "Genomic-architecture controls",
-    "Divergence between orientations",
-    "CDS conservation genes",
-    "dN/dS (ω) results",
-    "Ancient DNA best tagging SNPs",
-    "Ancient DNA, all tagging SNPs",
-    "Imputation results",
-    "Imputation external benchmarks",
-    "PheWAS results",
-    "Within-ancestry PC PheWAS",
-    "Phenotype categories",
-    "17q21 tagging PheWAS",
-)
 
 # Fixed scientific inventory for the revision. These counts make deletion of an
 # obsolete table, accidental filtering, or a partial upstream export a hard

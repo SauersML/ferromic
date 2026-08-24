@@ -39,17 +39,27 @@ jobs:
           test -s data/cds_permutation_joint_control.tsv
           test -s simulations/refsim/gene_flux_summary.tsv
 
+      - name: Verify and export final supplementary ordering
+        run: |
+          python stats/verify_supplementary_inventory.py \
+            --write-tsv web/figures-site/public/downloads/supplementary_inventory.tsv
+
       - name: Generate supplementary tables workbook
         run: python stats/generate_tables.py --output web/figures-site/public/downloads/supplementary_tables.xlsx
 
       - name: Independently verify the exported workbook
-        run: python stats/verify_supplementary_workbook.py web/figures-site/public/downloads/supplementary_tables.xlsx
+        run: |
+          python stats/verify_supplementary_workbook.py \
+            web/figures-site/public/downloads/supplementary_tables.xlsx
+          python stats/verify_supplementary_inventory.py
 
       - name: Upload supplementary tables artifact
         uses: actions/upload-artifact@v4
         with:
           name: supplementary-tables
-          path: web/figures-site/public/downloads/supplementary_tables.xlsx
+          path: |
+            web/figures-site/public/downloads/supplementary_tables.xlsx
+            web/figures-site/public/downloads/supplementary_inventory.tsv
           if-no-files-found: error
 
       # Journal "Supplemental Code": everything needed to reproduce the work.
