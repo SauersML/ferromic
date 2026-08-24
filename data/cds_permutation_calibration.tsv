@@ -1,0 +1,9 @@
+metric	nominal	realized
+per_test_typeI_at_0.05	0.05	0.018065076923076923
+per_test_typeI_at_0.01	0.01	0.003378692307692308
+per_test_typeI_at_0.05_k_inv<=10	0.05	0.024631081081081082
+family_anyFalseDiscovery_directFDR_at_0.05	0.05	0.05078
+mean_false_discoveries_directFDR_at_0.05		0.06
+family_FWER_BH_at_0.05	0.05	0.01138
+family_FWER_BY_at_0.05	0.05	0.00205
+family_FWER_WY_at_0.05	0.05	0.04999
