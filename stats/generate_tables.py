@@ -1765,7 +1765,11 @@ def _clean_phewas_df(
             )
     df = df.drop(
         columns=[c for c in ("P_Value_x", "P_Value_y", "P_Value") if c in df.columns]
-    ).rename(columns={"P_LRT_Overall": "P_Value_unadjusted"})
+    ).copy()
+    # The main PheWAS table presents this canonical statistic under a concise
+    # human-facing label, while the tagging-SNP table also retains the original
+    # pipeline field and its associated validity metadata.
+    df["P_Value_unadjusted"] = df["P_LRT_Overall"]
 
     if "Q_GLOBAL" in df.columns and "BH_P_GLOBAL" not in df.columns:
         df = df.rename(columns={"Q_GLOBAL": "BH_P_GLOBAL"})
