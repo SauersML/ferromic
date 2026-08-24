@@ -1,293 +1,94 @@
-inversion_id	coordinates	size_bp	recurrence_class	inverted_allele_frequency	chimpanzee_orientation_call	combined_pdf_page	source_type	source_file	exclusion_reason
-chr1-13084312-INV-62181	chr1:13,104,252-13,122,521	18269	Recurrent	0.69	na	12	Native 1400-pixel review image	chr1-13084312-INV-62181.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr1-13190915-INV-133672	chr1:13,190,914-13,324,586	133672	No consensus call	0.03	na	13	Native 1400-pixel review image	chr1-13190915-INV-133672.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr1-21203898-INV-862	chr1:21,203,917-21,204,602	685	No consensus call	0.06	direct	14	Native 1400-pixel review image	chr1-21203898-INV-862.chimp.webp	
-chr1-25338356-INV-24067	chr1:25,324,280-25,369,060	44780	Single-event	0.01	na	15	Native 1400-pixel review image	chr1-25338356-INV-24067.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr1-26639853-INV-8324	chr1:26,641,622-26,646,431	4809	No consensus call	0.99	na	16	Native 1400-pixel review image	chr1-26639853-INV-8324.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr1-43593626-INV-710	chr1:43,593,641-43,594,291	650	No consensus call	0.69	na	17	Native 1400-pixel review image	chr1-43593626-INV-710.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr1-60775308-INV-5023	chr1:60,776,841-60,778,677	1836	No consensus call	0.08	direct	18	Native 1400-pixel review image	chr1-60775308-INV-5023.chimp.webp	
-chr1-81642914-INV-66617	chr1:81,650,508-81,707,447	56939	Single-event	0.01	direct	19	Native 1400-pixel review image	chr1-81642914-INV-66617.chimp.webp	
-chr1-91666258-INV-840	chr1:91,666,232-91,667,085	853	No consensus call	0.1	direct	20	Native 1400-pixel review image	chr1-91666258-INV-840.chimp.webp	
-chr1-108311808-INV-57118	chr1:108,310,642-108,383,736	73094	Recurrent	0.57	na	21	Native 1400-pixel review image	chr1-108311808-INV-57118.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr1-120299059-INV-301908	chr1:120,299,058-120,600,965	301907	No consensus call	0.84	na	22	Native 1400-pixel review image	chr1-120299059-INV-301908.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr1-144376210-INV-224591	chr1:144,376,209-144,600,799	224590	Single-event	0.61	na	23	Native 1400-pixel review image	chr1-144376210-INV-224591.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr1-145160435-INV-994087	chr1:145,160,434-146,154,520	994086	No consensus call	0.02	na	24	Native 1400-pixel review image	chr1-145160435-INV-994087.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr1-146298110-INV-2374764	chr1:146,298,109-148,672,872	2374763	No consensus call	0.98	na	25	Native 1400-pixel review image	chr1-146298110-INV-2374764.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr1-148893782-INV-371863	chr1:148,893,781-149,265,643	371862	No consensus call	0.7	na	26	Native 1400-pixel review image	chr1-148893782-INV-371863.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr1-149842162-INV-9508	chr1:149,843,518-149,850,293	6775	Single-event	0.61	direct	27	Native 1400-pixel review image	chr1-149842162-INV-9508.chimp.webp	
-chr1-197787661-INV-1197	chr1:197,787,659-197,788,856	1197	No consensus call	0.09	na	28	Native 1400-pixel review image	chr1-197787661-INV-1197.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr1-227492704-INV-15726	chr1:227,499,209-227,502,113	2904	No consensus call	0.14	direct	29	Native 1400-pixel review image	chr1-227492704-INV-15726.chimp.webp	
-chr1-248128774-INV-300084	chr1:248,128,773-248,428,856	300083	Single-event	0.01	direct	30	Native 1400-pixel review image	chr1-248128774-INV-300084.chimp.webp	
-chr1-248517894-INV-12881	chr1:248,518,572-248,529,489	10917	No consensus call	0.7	na	31	Native 1400-pixel review image	chr1-248517894-INV-12881.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr2-45062769-INV-12977	chr2:45,065,588-45,081,777	16189	Single-event	0.03	direct	32	Native 1400-pixel review image	chr2-45062769-INV-12977.chimp.webp	
-chr2-87987172-INV-23268233	chr2:87,987,171-111,255,403	23268232	Single-event	0.01	na	33	Native 1400-pixel review image	chr2-87987172-INV-23268233.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr2-87995842-INV-184695	chr2:87,995,841-88,180,536	184695	Single-event	0.01	direct	34	Native 1400-pixel review image	chr2-87995842-INV-184695.chimp.webp	
-chr2-88859192-INV-39467	chr2:88,861,564-88,886,160	24596	No consensus call	0.15	na	35	Native 1400-pixel review image	chr2-88859192-INV-39467.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr2-90060919-INV-155562	chr2:90,060,918-90,216,479	155561	No consensus call	0.07	na	36	Native 1400-pixel review image	chr2-90060919-INV-155562.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr2-90286376-INV-93054	chr2:90,286,375-90,379,428	93053	No consensus call	0.3	na	37	Native 1400-pixel review image	chr2-90286376-INV-93054.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr2-91832041-INV-180624	chr2:91,832,040-92,012,663	180623	Recurrent	0.41	na	38	Native 1400-pixel review image	chr2-91832041-INV-180624.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr2-94191334-INV-102714	chr2:94,191,333-94,294,046	102713	No consensus call	0.02	na	39	Native 1400-pixel review image	chr2-94191334-INV-102714.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr2-95496991-INV-82806	chr2:95,496,989-95,579,796	82807	No consensus call	0.19	na	40	Native 1400-pixel review image	chr2-95496991-INV-82806.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr2-95800192-INV-224213	chr2:95,800,191-96,024,403	224212	Recurrent	0.08	na	41	Native 1400-pixel review image	chr2-95800192-INV-224213.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr2-97168745-INV-1492	chr2:97,168,744-97,170,236	1492	No consensus call	0.08	direct	42	Native 1400-pixel review image	chr2-97168745-INV-1492.chimp.webp	
-chr2-97340523-INV-28715	chr2:97,348,052-97,360,454	12402	No consensus call	0.49	direct	43	Native 1400-pixel review image	chr2-97340523-INV-28715.chimp.webp	
-chr2-108527822-INV-1205216	chr2:108,527,821-109,733,036	1205215	No consensus call	0.02	na	44	Native 1400-pixel review image	chr2-108527822-INV-1205216.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr2-110095179-INV-181032	chr2:110,095,177-110,276,210	181033	No consensus call	0.64	na	45	Native 1400-pixel review image	chr2-110095179-INV-181032.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr2-130138213-INV-1062391	chr2:130,138,212-131,200,602	1062390	Single-event	0.02	na	46	Native 1400-pixel review image	chr2-130138213-INV-1062391.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr2-130138213-INV-1392323	chr2:130,138,212-131,530,534	1392322	Single-event	0.02	na	47	Native 1400-pixel review image	chr2-130138213-INV-1392323.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr2-138246733-INV-5010	chr2:138,247,429-138,251,774	4345	No consensus call	0.73	na	48	Native 1400-pixel review image	chr2-138246733-INV-5010.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr2-215962719-INV-722	chr2:215,962,718-215,963,440	722	No consensus call	0.11	direct	49	Native 1400-pixel review image	chr2-215962719-INV-722.chimp.webp	
-chr2-222147677-INV-3251	chr2:222,149,224-222,149,582	358	No consensus call	0.01	direct	50	Native 1400-pixel review image	chr2-222147677-INV-3251.chimp.webp	
-chr2-236356297-INV-2677	chr2:236,356,880-236,358,489	1609	No consensus call	0.07	na	51	Native 1400-pixel review image	chr2-236356297-INV-2677.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr2-240674170-INV-26389	chr2:240,685,789-240,688,966	3177	No consensus call	0.36	direct	52	Native 1400-pixel review image	chr2-240674170-INV-26389.chimp.webp	
-chr3-26315757-INV-2108	chr3:26,316,193-26,317,447	1254	No consensus call	0.03	direct	53	Native 1400-pixel review image	chr3-26315757-INV-2108.chimp.webp	
-chr3-28414484-INV-5621	chr3:28,417,060-28,417,483	423	No consensus call	0.15	direct	54	Native 1400-pixel review image	chr3-28414484-INV-5621.chimp.webp	
-chr3-75454478-INV-1238	chr3:75,454,477-75,455,715	1238	Single-event	0.03	direct	55	Native 1400-pixel review image	chr3-75454478-INV-1238.chimp.webp	
-chr3-131969892-INV-7927	chr3:131,969,227-131,977,820	8593	No consensus call	0.11	direct	56	Native 1400-pixel review image	chr3-131969892-INV-7927.chimp.webp	
-chr3-162827167-INV-3077	chr3:162,827,574-162,829,855	2281	No consensus call	0.23	direct	57	Native 1400-pixel review image	chr3-162827167-INV-3077.chimp.webp	
-chr3-195680055-INV-44153	chr3:195,680,054-195,724,206	44152	No consensus call	0.5	direct	58	Native 1400-pixel review image	chr3-195680055-INV-44153.chimp.webp	
-chr3-195680867-INV-272256	chr3:195,692,124-195,956,606	264482	No consensus call	0.26	direct	59	Native 1400-pixel review image	chr3-195680867-INV-272256.chimp.webp	
-chr3-195749464-INV-230745	chr3:195,749,463-195,980,207	230744	Recurrent	0.26	direct	60	Native 1400-pixel review image	chr3-195749464-INV-230745.chimp.webp	
-chr4-33098029-INV-7075	chr4:33,098,066-33,104,924	6858	Single-event	0.03	direct	61	Native 1400-pixel review image	chr4-33098029-INV-7075.chimp.webp	
-chr4-40233409-INV-2010	chr4:40,233,406-40,235,439	2033	No consensus call	0.3	direct	62	Native 1400-pixel review image	chr4-40233409-INV-2010.chimp.webp	
-chr4-49284665-INV-6354	chr4:49,284,664-49,291,017	6353	No consensus call	0.36	na	63	Native 1400-pixel review image	chr4-49284665-INV-6354.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr4-49291020-INV-33986	chr4:49,291,019-49,325,004	33985	No consensus call	0.51	na	64	Native 1400-pixel review image	chr4-49291020-INV-33986.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr4-87925789-INV-11799	chr4:87,926,011-87,937,547	11536	No consensus call	0.81	na	65	Native 1400-pixel review image	chr4-87925789-INV-11799.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr4-145693640-INV-908	chr4:145,693,552-145,694,748	1196	No consensus call	0.66	direct	66	Native 1400-pixel review image	chr4-145693640-INV-908.chimp.webp	
-chr4-156904334-INV-8519	chr4:156,905,870-156,912,808	6938	No consensus call	0.01	direct	67	Native 1400-pixel review image	chr4-156904334-INV-8519.chimp.webp	
-chr4-187948402-INV-8158	chr4:187,950,173-187,954,784	4611	No consensus call	0.35	direct	68	Native 1400-pixel review image	chr4-187948402-INV-8158.chimp.webp	
-chr5-16979045-INV-519	chr5:16,978,658-16,979,397	739	No consensus call	0.06	direct	69	Native 1400-pixel review image	chr5-16979045-INV-519.chimp.webp	
-chr5-17580906-INV-11540	chr5:17,580,905-17,592,445	11540	No consensus call	0.16	na	70	Native 1400-pixel review image	chr5-17580906-INV-11540.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr5-21479306-INV-21422	chr5:21,479,305-21,500,726	21421	No consensus call	0.02	na	71	Native 1400-pixel review image	chr5-21479306-INV-21422.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr5-29069209-INV-308	chr5:29,069,229-29,069,523	294	No consensus call	0.45	na	72	Native 1400-pixel review image	chr5-29069209-INV-308.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr5-46896907-INV-18922	chr5:46,896,906-46,915,828	18922	No consensus call	0.77	na	73	Native 1400-pixel review image	chr5-46896907-INV-18922.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr5-47061569-INV-20494	chr5:47,061,568-47,082,062	20494	No consensus call	0.33	na	74	Native 1400-pixel review image	chr5-47061569-INV-20494.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr5-47105116-INV-46253	chr5:47,105,115-47,151,367	46252	No consensus call	0.66	na	75	Native 1400-pixel review image	chr5-47105116-INV-46253.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr5-64466170-INV-15635	chr5:64,470,920-64,477,089	6169	No consensus call	0.73	na	76	Native 1400-pixel review image	chr5-64466170-INV-15635.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr5-64470929-INV-4190	chr5:64,470,928-64,475,118	4190	No consensus call	0.74	na	77	Native 1400-pixel review image	chr5-64470929-INV-4190.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr5-70527774-INV-6139	chr5:70,527,773-70,533,912	6139	No consensus call	0.01	na	78	Native 1400-pixel review image	chr5-70527774-INV-6139.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr5-71009587-INV-84412	chr5:71,009,586-71,093,997	84411	Single-event	0.06	na	79	Native 1400-pixel review image	chr5-71009587-INV-84412.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr5-112179912-INV-56689	chr5:112,179,911-112,236,600	56689	Single-event	0.01	direct	80	Native 1400-pixel review image	chr5-112179912-INV-56689.chimp.webp	
-chr5-124425561-INV-121098	chr5:124,425,560-124,546,657	121097	Single-event	0.01	direct	81	Native 1400-pixel review image	chr5-124425561-INV-121098.chimp.webp	
-chr5-177946130-INV-57824	chr5:177,946,129-178,003,952	57823	Single-event	0.01	na	82	Native 1400-pixel review image	chr5-177946130-INV-57824.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr5-179633880-INV-24659	chr5:179,643,529-179,651,253	7724	Single-event	0.99	direct	83	Native 1400-pixel review image	chr5-179633880-INV-24659.chimp.webp	
-chr5-181095856-INV-7651	chr5:181,098,775-181,100,846	2071	No consensus call	0.25	na	84	Native 1400-pixel review image	chr5-181095856-INV-7651.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr6-26736773-INV-2849	chr6:26,736,772-26,739,621	2849	No consensus call	0.43	direct	85	Native 1400-pixel review image	chr6-26736773-INV-2849.chimp.webp	
-chr6-76111919-INV-44661	chr6:76,109,081-76,158,474	49393	Single-event	0.03	direct	86	Native 1400-pixel review image	chr6-76111919-INV-44661.chimp.webp	
-chr6-89213913-INV-300	chr6:89,213,914-89,214,230	316	No consensus call	0.55	na	87	Native 1400-pixel review image	chr6-89213913-INV-300.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr6-94031361-INV-335	chr6:94,031,360-94,031,695	335	No consensus call	0.56	na	88	Native 1400-pixel review image	chr6-94031361-INV-335.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr6-123106042-INV-3793	chr6:123,106,049-123,109,821	3772	Single-event	0.03	direct	89	Native 1400-pixel review image	chr6-123106042-INV-3793.chimp.webp	
-chr6-130527042-INV-4267	chr6:130,527,041-130,531,150	4109	No consensus call	0.16	direct	90	Native 1400-pixel review image	chr6-130527042-INV-4267.chimp.webp	
-chr6-141867315-INV-29159	chr6:141,866,310-141,898,728	32418	Single-event	0.05	direct	91	Native 1400-pixel review image	chr6-141867315-INV-29159.chimp.webp	
-chr6-167181003-INV-209976	chr6:167,209,001-167,357,782	148781	Single-event	0.03	direct	92	Native 1400-pixel review image	chr6-167181003-INV-209976.chimp.webp	
-chr7-5989047-INV-746598	chr7:5,989,046-6,735,643	746597	Recurrent	0.1	inverted	93	Native 1400-pixel review image	chr7-5989047-INV-746598.chimp.webp	
-chr7-33990522-INV-19762	chr7:33,990,735-34,010,143	19408	Single-event	0.01	direct	94	Native 1400-pixel review image	chr7-33990522-INV-19762.chimp.webp	
-chr7-40839738-INV-1134	chr7:40,839,776-40,840,871	1095	No consensus call	0.51	na	95	Native 1400-pixel review image	chr7-40839738-INV-1134.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr7-47614229-INV-1139	chr7:47,614,508-47,615,262	754	No consensus call	0.19	direct	96	Native 1400-pixel review image	chr7-47614229-INV-1139.chimp.webp	
-chr7-54220528-INV-101153	chr7:54,234,014-54,308,393	74379	Single-event	0.62	direct	97	Native 1400-pixel review image	chr7-54220528-INV-101153.chimp.webp	
-chr7-57641573-INV-197400	chr7:57,641,572-57,838,971	197399	No consensus call	0.1	na	98	Native 1400-pixel review image	chr7-57641573-INV-197400.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr7-57835189-INV-284465	chr7:57,835,188-58,119,653	284465	Single-event	0.02	na	99	Native 1400-pixel review image	chr7-57835189-INV-284465.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr7-60898865-INV-10087	chr7:60,898,864-60,908,951	10087	No consensus call	0.27	na	100	Native 1400-pixel review image	chr7-60898865-INV-10087.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr7-60911892-INV-666133	chr7:60,911,891-61,578,023	666132	Recurrent	0.52	na	101	Native 1400-pixel review image	chr7-60911892-INV-666133.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr7-62290675-INV-72470	chr7:62,290,674-62,363,143	72469	Recurrent	0.42	na	102	Native 1400-pixel review image	chr7-62290675-INV-72470.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr7-62408487-INV-47959	chr7:62,408,486-62,456,444	47958	Recurrent	0.57	na	103	Native 1400-pixel review image	chr7-62408487-INV-47959.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr7-63356276-INV-31891	chr7:63,356,275-63,388,165	31890	No consensus call	0.4	na	104	Native 1400-pixel review image	chr7-63356276-INV-31891.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr7-65219158-INV-312667	chr7:65,219,157-65,531,823	312666	Recurrent	0.33	inverted	105	Native 1400-pixel review image	chr7-65219158-INV-312667.chimp.webp	
-chr7-65565115-INV-74905	chr7:65,572,704-65,581,644	8940	No consensus call	0.39	na	106	Native 1400-pixel review image	chr7-65565115-INV-74905.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr7-67019304-INV-851	chr7:67,019,303-67,020,338	1035	No consensus call	0.1	direct	107	Native 1400-pixel review image	chr7-67019304-INV-851.chimp.webp	
-chr7-70955928-INV-18020	chr7:70,961,198-70,973,901	12703	Single-event	0.64	direct	108	Native 1400-pixel review image	chr7-70955928-INV-18020.chimp.webp	
-chr7-73113990-INV-1685041	chr7:73,113,989-74,799,029	1685040	Recurrent	0.05	na	109	Native 1400-pixel review image	chr7-73113990-INV-1685041.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr7-74799031-INV-480422	chr7:74,869,950-75,058,098	188148	Recurrent	0.1	na	110	Native 1400-pixel review image	chr7-74799031-INV-480422.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr7-76603964-INV-16446	chr7:76,603,963-76,620,409	16446	No consensus call	0.5	direct	111	Native 1400-pixel review image	chr7-76603964-INV-16446.chimp.webp	
-chr7-97445827-INV-13775	chr7:97,445,822-97,459,601	13779	Single-event	0.02	direct	112	Native 1400-pixel review image	chr7-97445827-INV-13775.chimp.webp	
-chr7-107418074-INV-5179	chr7:107,418,983-107,422,332	3349	No consensus call	0.89	na	113	Native 1400-pixel review image	chr7-107418074-INV-5179.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr7-143716563-INV-34437	chr7:143,716,562-143,750,998	34436	No consensus call	0.33	na	114	Native 1400-pixel review image	chr7-143716563-INV-34437.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr7-143779395-INV-19333	chr7:143,779,394-143,798,726	19332	No consensus call	0.5	na	115	Native 1400-pixel review image	chr7-143779395-INV-19333.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr7-143808753-INV-9661	chr7:143,808,752-143,818,413	9661	No consensus call	0.32	na	116	Native 1400-pixel review image	chr7-143808753-INV-9661.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr7-144254565-INV-2203	chr7:144,254,564-144,256,766	2202	No consensus call	0.69	na	117	Native 1400-pixel review image	chr7-144254565-INV-2203.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr8-2340295-INV-42058	chr8:2,343,351-2,378,385	35034	Recurrent	0.51	direct	118	Native 1400-pixel review image	chr8-2340295-INV-42058.chimp.webp	
-chr8-7301025-INV-5297356	chr8:7,301,024-12,598,379	5297355	Recurrent	0.5	direct	119	True vector source	chr8_8p23.1-v6.pdf	
-chr8-12369153-INV-24982	chr8:12,369,152-12,394,133	24981	No consensus call	0.24	direct	120	Native 1400-pixel review image	chr8-12369153-INV-24982.chimp.webp	
-chr8-85728659-INV-13234	chr8:85,728,658-85,741,892	13234	No consensus call	0.61	na	121	Native 1400-pixel review image	chr8-85728659-INV-13234.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr8-85741975-INV-20818	chr8:85,741,974-85,762,792	20818	No consensus call	0.43	na	122	Native 1400-pixel review image	chr8-85741975-INV-20818.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr8-85769985-INV-51732	chr8:85,769,984-85,821,716	51732	No consensus call	0.19	na	123	Native 1400-pixel review image	chr8-85769985-INV-51732.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr8-102423262-INV-520	chr8:102,423,403-102,423,638	235	No consensus call	0.31	na	124	Native 1400-pixel review image	chr8-102423262-INV-520.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr8-102880338-INV-757	chr8:102,880,337-102,881,094	757	No consensus call	0.03	direct	125	Native 1400-pixel review image	chr8-102880338-INV-757.chimp.webp	
-chr9-12016541-INV-55306	chr9:12,004,038-12,074,552	70514	Single-event	0.02	direct	126	Native 1400-pixel review image	chr9-12016541-INV-55306.chimp.webp	
-chr9-30951702-INV-5595	chr9:30,952,354-30,956,484	4130	No consensus call	0.02	direct	127	Native 1400-pixel review image	chr9-30951702-INV-5595.chimp.webp	
-chr9-38773641-INV-4023105	chr9:38,773,640-42,796,744	4023104	No consensus call	0.03	na	128	Native 1400-pixel review image	chr9-38773641-INV-4023105.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr9-64028786-INV-39671	chr9:64,028,785-64,068,456	39671	No consensus call	0.98	direct	129	Native 1400-pixel review image	chr9-64028786-INV-39671.chimp.webp	
-chr9-85796067-INV-6026	chr9:85,797,070-85,801,040	3970	Single-event	0.01	direct	130	Native 1400-pixel review image	chr9-85796067-INV-6026.chimp.webp	
-chr9-87942698-INV-167577	chr9:87,942,696-88,110,274	167578	Single-event	0.01	na	131	Native 1400-pixel review image	chr9-87942698-INV-167577.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr9-91958952-INV-763	chr9:91,958,957-91,959,591	634	No consensus call	0.09	direct	132	Native 1400-pixel review image	chr9-91958952-INV-763.chimp.webp	
-chr9-102565835-INV-4446	chr9:102,565,838-102,570,277	4439	No consensus call	0.07	direct	133	Native 1400-pixel review image	chr9-102565835-INV-4446.chimp.webp	
-chr9-113105213-INV-14149	chr9:113,111,686-113,112,886	1200	No consensus call	0.6	direct	134	Native 1400-pixel review image	chr9-113105213-INV-14149.chimp.webp	
-chr9-123976301-INV-18001	chr9:123,979,106-123,991,038	11932	No consensus call	0.52	na	135	Native 1400-pixel review image	chr9-123976301-INV-18001.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr10-4961364-INV-47135	chr10:4,983,056-4,984,361	1305	No consensus call	0.08	direct	136	Native 1400-pixel review image	chr10-4961364-INV-47135.chimp.webp	
-chr10-15742645-INV-17942	chr10:15,742,803-15,760,427	17624	Single-event	0.01	direct	137	Native 1400-pixel review image	chr10-15742645-INV-17942.chimp.webp	
-chr10-37102555-INV-11157	chr10:37,105,149-37,111,121	5972	No consensus call	0.48	na	138	Native 1400-pixel review image	chr10-37102555-INV-11157.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr10-46135869-INV-77646	chr10:46,144,703-46,204,851	60148	Single-event	0.06	na	139	Native 1400-pixel review image	chr10-46135869-INV-77646.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr10-46769329-INV-87814	chr10:46,769,328-46,857,141	87813	No consensus call	0.06	na	140	Native 1400-pixel review image	chr10-46769329-INV-87814.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr10-46983452-INV-484782	chr10:46,983,451-47,468,232	484781	Recurrent	0.09	na	141	Native 1400-pixel review image	chr10-46983452-INV-484782.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr10-47480264-INV-66161	chr10:47,480,263-47,546,423	66160	No consensus call	0.03	na	142	Native 1400-pixel review image	chr10-47480264-INV-66161.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr10-47649266-INV-107520	chr10:47,649,265-47,756,785	107520	No consensus call	0.06	direct	143	Native 1400-pixel review image	chr10-47649266-INV-107520.chimp.webp	
-chr10-47983094-INV-61350	chr10:47,983,093-48,044,442	61349	No consensus call	0.03	na	144	Native 1400-pixel review image	chr10-47983094-INV-61350.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr10-55007454-INV-5370	chr10:55,007,431-55,013,434	6003	Single-event	0.09	direct	145	Native 1400-pixel review image	chr10-55007454-INV-5370.chimp.webp	
-chr10-65465442-INV-4580	chr10:65,465,445-65,470,067	4622	Single-event	0.01	direct	146	Native 1400-pixel review image	chr10-65465442-INV-4580.chimp.webp	
-chr10-71065991-INV-2615	chr10:71,066,858-71,067,726	868	No consensus call	0.05	direct	147	Native 1400-pixel review image	chr10-71065991-INV-2615.chimp.webp	
-chr10-73657970-INV-2177	chr10:73,657,969-73,660,146	2177	No consensus call	0.1	direct	148	Native 1400-pixel review image	chr10-73657970-INV-2177.chimp.webp	
-chr10-79542902-INV-674513	chr10:79,542,901-80,217,413	674512	Single-event	0.03	inverted	149	Native 1400-pixel review image	chr10-79542902-INV-674513.chimp.webp	
-chr10-87308006-INV-117026	chr10:87,308,005-87,425,030	117025	No consensus call	0.02	na	150	Native 1400-pixel review image	chr10-87308006-INV-117026.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr10-91440445-INV-8733	chr10:91,443,587-91,446,029	2442	No consensus call	0.85	na	151	Native 1400-pixel review image	chr10-91440445-INV-8733.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr10-103197205-INV-9055	chr10:103,205,557-103,205,994	437	No consensus call	0.06	direct	152	Native 1400-pixel review image	chr10-103197205-INV-9055.chimp.webp	
-chr10-113411929-INV-356	chr10:113,411,933-113,412,252	319	No consensus call	0.1	direct	153	Native 1400-pixel review image	chr10-113411929-INV-356.chimp.webp	
-chr10-131619519-INV-1521	chr10:131,619,777-131,620,717	940	No consensus call	0.06	na	154	Native 1400-pixel review image	chr10-131619519-INV-1521.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr10-133657263-INV-130160	chr10:133,657,262-133,787,421	130159	No consensus call	0.07	na	155	Native 1400-pixel review image	chr10-133657263-INV-130160.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr11-310146-INV-10302	chr11:311,836-317,944	6108	No consensus call	0.73	direct	156	Native 1400-pixel review image	chr11-310146-INV-10302.chimp.webp	
-chr11-738460-INV-2650	chr11:738,649-740,185	1536	No consensus call	0.03	direct	157	Native 1400-pixel review image	chr11-738460-INV-2650.chimp.webp	
-chr11-1661292-INV-24445	chr11:1,667,460-1,683,267	15807	No consensus call	0.5	na	158	Native 1400-pixel review image	chr11-1661292-INV-24445.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr11-4271710-INV-17848	chr11:4,271,709-4,289,557	17848	No consensus call	0.86	na	159	Native 1400-pixel review image	chr11-4271710-INV-17848.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr11-18246600-INV-21672	chr11:18,249,084-18,265,819	16735	Single-event	0.01	direct	160	Native 1400-pixel review image	chr11-18246600-INV-21672.chimp.webp	
-chr11-24263185-INV-392	chr11:24,263,179-24,266,246	3067	No consensus call	0.05	direct	161	Native 1400-pixel review image	chr11-24263185-INV-392.chimp.webp	
-chr11-48880392-INV-19590	chr11:48,888,300-48,892,127	3827	No consensus call	0.34	direct	162	Native 1400-pixel review image	chr11-48880392-INV-19590.chimp.webp	
-chr11-50136371-INV-206505	chr11:50,154,999-50,324,102	169103	Recurrent	0.4	inverted	163	Native 1400-pixel review image	chr11-50136371-INV-206505.chimp.webp	
-chr11-55662740-INV-3952	chr11:55,662,739-55,666,690	3951	No consensus call	0.17	direct	164	Native 1400-pixel review image	chr11-55662740-INV-3952.chimp.webp	
-chr11-62094124-INV-7773	chr11:62,093,043-62,102,999	9956	No consensus call	0.45	direct	165	Native 1400-pixel review image	chr11-62094124-INV-7773.chimp.webp	
-chr11-66251212-INV-1252	chr11:66,251,227-66,252,453	1226	No consensus call	0.21	direct	166	Native 1400-pixel review image	chr11-66251212-INV-1252.chimp.webp	
-chr11-71571191-INV-6980	chr11:71,571,819-71,576,724	4905	Single-event	0.03	direct	167	Native 1400-pixel review image	chr11-71571191-INV-6980.chimp.webp	
-chr11-89920625-INV-3224	chr11:89,920,623-89,923,848	3225	Recurrent	0.53	na	168	Native 1400-pixel review image	chr11-89920625-INV-3224.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr12-13392052-INV-6162	chr12:13,392,624-13,397,634	5010	No consensus call	0.59	direct	169	Native 1400-pixel review image	chr12-13392052-INV-6162.chimp.webp	
-chr12-37705669-INV-31994	chr12:37,705,668-37,737,662	31994	No consensus call	0.02	na	170	Native 1400-pixel review image	chr12-37705669-INV-31994.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr12-46897663-INV-16289	chr12:46,896,694-46,915,975	19281	Single-event	0.06	direct	171	True vector source	chr12_12q13.11-v6.pdf	
-chr12-71546144-INV-1652	chr12:71,546,200-71,547,738	1538	No consensus call	0.09	direct	172	Native 1400-pixel review image	chr12-71546144-INV-1652.chimp.webp	
-chr12-75713181-INV-18615	chr12:75,713,180-75,731,794	18614	Single-event	0.01	direct	173	Native 1400-pixel review image	chr12-75713181-INV-18615.chimp.webp	
-chr12-131312082-INV-332759	chr12:131,312,081-131,644,839	332758	Single-event	0.03	direct	174	Native 1400-pixel review image	chr12-131312082-INV-332759.chimp.webp	
-chr12-131333944-INV-289865	chr12:131,333,943-131,623,807	289864	No consensus call	0.03	direct	175	Native 1400-pixel review image	chr12-131333944-INV-289865.chimp.webp	
-chr13-37314466-INV-4035	chr13:37,315,207-37,317,760	2553	No consensus call	0.11	na	176	Native 1400-pixel review image	chr13-37314466-INV-4035.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr13-48199211-INV-7451	chr13:48,199,250-48,206,639	7389	Single-event	0.02	direct	177	Native 1400-pixel review image	chr13-48199211-INV-7451.chimp.webp	
-chr13-52310303-INV-10653	chr13:52,310,302-52,320,954	10652	Single-event	0.02	na	178	Native 1400-pixel review image	chr13-52310303-INV-10653.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr13-52344011-INV-158247	chr13:52,344,010-52,502,256	158246	No consensus call	0.03	na	179	Native 1400-pixel review image	chr13-52344011-INV-158247.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr13-53902574-INV-190801	chr13:53,902,573-54,093,373	190800	Single-event	0.01	direct	180	Native 1400-pixel review image	chr13-53902574-INV-190801.chimp.webp	
-chr13-63717417-INV-120779	chr13:63,727,377-63,820,968	93591	No consensus call	0.05	direct	181	Native 1400-pixel review image	chr13-63717417-INV-120779.chimp.webp	
-chr13-64598738-INV-17482	chr13:64,598,737-64,616,218	17481	Single-event	0.01	direct	182	Native 1400-pixel review image	chr13-64598738-INV-17482.chimp.webp	
-chr13-79822252-INV-17591	chr13:79,823,210-79,839,670	16460	No consensus call	0.07	direct	183	Native 1400-pixel review image	chr13-79822252-INV-17591.chimp.webp	
-chr13-97456279-INV-437	chr13:97,456,283-97,456,722	439	No consensus call	0.12	direct	184	Native 1400-pixel review image	chr13-97456279-INV-437.chimp.webp	
-chr14-18862646-INV-796362	chr14:18,862,645-19,659,006	796361	No consensus call	0.19	na	185	Native 1400-pixel review image	chr14-18862646-INV-796362.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr14-34540582-INV-21874	chr14:34,547,864-34,555,230	7366	No consensus call	0.45	direct	186	Native 1400-pixel review image	chr14-34540582-INV-21874.chimp.webp	
-chr14-60604531-INV-8718	chr14:60,606,118-60,611,659	5541	Single-event	0.18	direct	187	Native 1400-pixel review image	chr14-60604531-INV-8718.chimp.webp	
-chr14-65375818-INV-880	chr14:65,375,818-65,376,683	865	No consensus call	0.29	direct	188	Native 1400-pixel review image	chr14-65375818-INV-880.chimp.webp	
-chr14-85872201-INV-17070	chr14:85,872,200-85,889,269	17069	Single-event	0.01	direct	189	Native 1400-pixel review image	chr14-85872201-INV-17070.chimp.webp	
-chr14-105571550-INV-8996	chr14:105,573,622-105,577,544	3922	No consensus call	0.17	direct	190	Native 1400-pixel review image	chr14-105571550-INV-8996.chimp.webp	
-chr14-105692001-INV-7875	chr14:105,693,931-105,698,385	4454	No consensus call	0.67	na	191	Native 1400-pixel review image	chr14-105692001-INV-7875.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr15-22701128-INV-512754	chr15:22,701,127-23,213,881	512754	No consensus call	0.01	na	192	Native 1400-pixel review image	chr15-22701128-INV-512754.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr15-23295577-INV-22616	chr15:23,295,576-23,318,191	22615	Single-event	0.69	na	193	Native 1400-pixel review image	chr15-23295577-INV-22616.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr15-23345460-INV-5044410	chr15:23,345,459-28,389,868	5044409	Single-event	0.01	inverted	194	True vector source	chr15_15q11.2-v6.pdf	
-chr15-28298425-INV-325091	chr15:28,298,424-28,623,514	325090	No consensus call	0.08	na	195	Native 1400-pixel review image	chr15-28298425-INV-325091.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr15-30434572-INV-97097	chr15:30,436,458-30,529,803	93345	No consensus call	0.17	na	196	Native 1400-pixel review image	chr15-30434572-INV-97097.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr15-30618104-INV-1535102	chr15:30,618,103-32,153,204	1535101	Recurrent	0.11	direct	197	Native 1400-pixel review image	chr15-30618104-INV-1535102.chimp.webp	
-chr15-32475961-INV-97199	chr15:32,477,828-32,571,283	93455	No consensus call	0.02	inverted	198	Native 1400-pixel review image	chr15-32475961-INV-97199.chimp.webp	
-chr15-82330919-INV-26880	chr15:82,330,918-82,357,797	26879	No consensus call	0.19	na	199	Native 1400-pixel review image	chr15-82330919-INV-26880.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr15-82360483-INV-154653	chr15:82,360,482-82,515,134	154652	No consensus call	0.08	na	200	Native 1400-pixel review image	chr15-82360483-INV-154653.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr15-84373376-INV-43322	chr15:84,373,375-84,416,696	43321	Recurrent	0.56	na	201	Native 1400-pixel review image	chr15-84373376-INV-43322.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr16-1226779-INV-28828	chr16:1,245,200-1,247,503	2303	No consensus call	0.93	direct	202	Native 1400-pixel review image	chr16-1226779-INV-28828.chimp.webp	
-chr16-14907776-INV-120705	chr16:14,907,775-15,028,479	120704	No consensus call	0.43	na	203	Native 1400-pixel review image	chr16-14907776-INV-120705.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr16-15028481-INV-133352	chr16:14,954,790-15,100,859	146069	Recurrent	0.77	na	204	Native 1400-pixel review image	chr16-15028481-INV-133352.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr16-15384483-INV-891665	chr16:15,384,482-16,276,146	891664	Single-event	0.01	na	205	Native 1400-pixel review image	chr16-15384483-INV-891665.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr16-16721274-INV-1352270	chr16:16,721,273-18,073,542	1352269	Recurrent	0.08	direct	206	Native 1400-pixel review image	chr16-16721274-INV-1352270.chimp.webp	
-chr16-18337349-INV-19325	chr16:18,337,348-18,356,673	19325	No consensus call	0.27	na	207	Native 1400-pixel review image	chr16-18337349-INV-19325.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr16-20506047-INV-15848	chr16:20,506,046-20,521,893	15847	No consensus call	0.14	na	208	Native 1400-pixel review image	chr16-20506047-INV-15848.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr16-21583512-INV-848871	chr16:21,583,511-22,432,381	848870	No consensus call	0.94	na	209	Native 1400-pixel review image	chr16-21583512-INV-848871.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr16-21864965-INV-567418	chr16:21,864,964-22,432,381	567417	No consensus call	0.94	direct	210	Native 1400-pixel review image	chr16-21864965-INV-567418.chimp.webp	
-chr16-28471894-INV-165758	chr16:28,471,892-28,637,651	165759	Recurrent	0.36	direct	211	Native 1400-pixel review image	chr16-28471894-INV-165758.chimp.webp	
-chr16-28709345-INV-67143	chr16:28,709,344-28,776,487	67143	No consensus call	0.23	na	212	Native 1400-pixel review image	chr16-28709345-INV-67143.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr16-32364221-INV-164223	chr16:32,364,220-32,528,442	164222	No consensus call	0.12	na	213	Native 1400-pixel review image	chr16-32364221-INV-164223.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr16-32755979-INV-123613	chr16:32,755,978-32,879,590	123612	No consensus call	0.36	na	214	Native 1400-pixel review image	chr16-32755979-INV-123613.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr16-32991172-INV-111580	chr16:32,991,171-33,102,750	111579	No consensus call	0.35	na	215	Native 1400-pixel review image	chr16-32991172-INV-111580.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr16-34507815-INV-13045	chr16:34,507,814-34,520,859	13045	No consensus call	0.01	na	216	Native 1400-pixel review image	chr16-34507815-INV-13045.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr16-34577842-INV-2694	chr16:34,577,841-34,580,535	2694	No consensus call	0.86	na	217	Native 1400-pixel review image	chr16-34577842-INV-2694.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr16-35945424-INV-12423	chr16:35,946,683-35,952,382	5699	Single-event	0.97	direct	218	Native 1400-pixel review image	chr16-35945424-INV-12423.chimp.webp	
-chr16-46383781-INV-325	chr16:46,383,780-46,384,105	325	No consensus call	0.5	na	219	Native 1400-pixel review image	chr16-46383781-INV-325.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr16-48616946-INV-494	chr16:48,616,945-48,617,439	494	No consensus call	0.34	na	220	Native 1400-pixel review image	chr16-48616946-INV-494.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr16-75204855-INV-19244	chr16:75,206,214-75,222,748	16534	Single-event	0.84	na	221	Native 1400-pixel review image	chr16-75204855-INV-19244.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr16-85155144-INV-1053	chr16:85,155,339-85,156,001	662	No consensus call	0.58	na	222	Native 1400-pixel review image	chr16-85155144-INV-1053.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr17-3052058-INV-200164	chr17:3,082,008-3,221,835	139827	Single-event	0.01	direct	223	Native 1400-pixel review image	chr17-3052058-INV-200164.chimp.webp	
-chr17-5982217-INV-1513	chr17:5,982,838-5,983,104	266	No consensus call	0.73	na	224	Native 1400-pixel review image	chr17-5982217-INV-1513.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr17-16823491-INV-1560701	chr17:16,823,490-18,384,190	1560700	Single-event	0.02	na	225	Native 1400-pixel review image	chr17-16823491-INV-1560701.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr17-18677352-INV-146444	chr17:18,622,359-18,823,773	201414	No consensus call	0.02	na	226	Native 1400-pixel review image	chr17-18677352-INV-146444.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr17-30616357-INV-14733	chr17:30,621,881-30,625,589	3708	No consensus call	0.5	na	227	Native 1400-pixel review image	chr17-30616357-INV-14733.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr17-36109570-INV-114204	chr17:36,109,569-36,223,772	114203	No consensus call	0.07	na	228	Native 1400-pixel review image	chr17-36109570-INV-114204.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr17-37415091-INV-607	chr17:37,415,181-37,415,638	457	No consensus call	0.5	direct	229	Native 1400-pixel review image	chr17-37415091-INV-607.chimp.webp	
-chr17-43231917-INV-93156	chr17:43,232,908-43,321,964	89056	No consensus call	0.98	na	230	Native 1400-pixel review image	chr17-43231917-INV-93156.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr17-43263149-INV-59735	chr17:43,263,148-43,322,883	59735	No consensus call	0.98	na	231	Native 1400-pixel review image	chr17-43263149-INV-59735.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr17-45573557-INV-11603	chr17:45,573,556-45,585,158	11602	Single-event	0.25	na	232	Native 1400-pixel review image	chr17-45573557-INV-11603.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr17-45585160-INV-706887	chr17:45,585,159-46,292,045	706886	Single-event	0.11	na	233	True vector source	chr17_17q21.31-v6.pdf	Not callable; specific reason was not recorded in the manual-review dataset
-chr17-60019740-INV-107140	chr17:60,035,640-60,110,888	75248	No consensus call	0.09	direct	234	Native 1400-pixel review image	chr17-60019740-INV-107140.chimp.webp	
-chr17-76181651-INV-1551	chr17:76,181,937-76,182,932	995	No consensus call	0.1	direct	235	Native 1400-pixel review image	chr17-76181651-INV-1551.chimp.webp	
-chr18-12141485-INV-8631	chr18:12,145,103-12,146,503	1400	No consensus call	0.75	direct	236	Native 1400-pixel review image	chr18-12141485-INV-8631.chimp.webp	
-chr18-29783948-INV-395	chr18:29,783,947-29,784,342	395	No consensus call	0.13	direct	237	Native 1400-pixel review image	chr18-29783948-INV-395.chimp.webp	
-chr19-43355096-INV-25294	chr19:43,365,871-43,369,065	3194	No consensus call	0.01	direct	238	Native 1400-pixel review image	chr19-43355096-INV-25294.chimp.webp	
-chr19-47959661-INV-2131536	chr19:47,959,660-50,091,195	2131535	No consensus call	0.02	direct	239	Native 1400-pixel review image	chr19-47959661-INV-2131536.chimp.webp	
-chr20-10807400-INV-1454	chr20:10,807,797-10,808,434	637	No consensus call	0.41	na	240	Native 1400-pixel review image	chr20-10807400-INV-1454.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr20-24397727-INV-8419	chr20:24,397,726-24,406,144	8418	Single-event	0.01	direct	241	Native 1400-pixel review image	chr20-24397727-INV-8419.chimp.webp	
-chr20-25846149-INV-163496	chr20:25,846,148-26,009,643	163495	No consensus call	0.17	inverted	242	Native 1400-pixel review image	chr20-25846149-INV-163496.chimp.webp	
-chr20-28495292-INV-12996	chr20:28,495,291-28,508,286	12995	No consensus call	0.87	na	243	Native 1400-pixel review image	chr20-28495292-INV-12996.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr20-28751289-INV-1342	chr20:28,751,288-28,752,630	1342	No consensus call	0.5	na	244	Native 1400-pixel review image	chr20-28751289-INV-1342.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr20-29257747-INV-162005	chr20:29,257,746-29,419,750	162004	Single-event	0.01	na	245	Native 1400-pixel review image	chr20-29257747-INV-162005.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr20-47827034-INV-77611	chr20:47,841,016-47,888,238	47222	Single-event	0.01	direct	246	Native 1400-pixel review image	chr20-47827034-INV-77611.chimp.webp	
-chr21-13205468-INV-15566	chr21:13,205,437-13,221,054	15617	No consensus call	0.05	na	247	Native 1400-pixel review image	chr21-13205468-INV-15566.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr21-13992018-INV-65632	chr21:13,987,773-14,056,796	69023	Single-event	0.03	direct	248	Native 1400-pixel review image	chr21-13992018-INV-65632.chimp.webp	
-chr21-19877735-INV-192437	chr21:19,877,734-20,070,170	192436	Single-event	0.01	direct	249	Native 1400-pixel review image	chr21-19877735-INV-192437.chimp.webp	
-chr21-26001839-INV-547	chr21:26,001,836-26,002,391	555	No consensus call	0.8	na	250	Native 1400-pixel review image	chr21-26001839-INV-547.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr21-26648370-INV-1039	chr21:26,648,368-26,649,407	1039	No consensus call	0.57	direct	251	Native 1400-pixel review image	chr21-26648370-INV-1039.chimp.webp	
-chr21-43821743-INV-13374	chr21:43,821,742-43,835,116	13374	Single-event	0.01	direct	252	Native 1400-pixel review image	chr21-43821743-INV-13374.chimp.webp	
-chr22-21201772-INV-78695	chr22:21,201,771-21,280,466	78695	No consensus call	0.03	na	253	Native 1400-pixel review image	chr22-21201772-INV-78695.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr22-21442678-INV-15944	chr22:21,443,089-21,491,761	48672	No consensus call	0.67	na	254	Native 1400-pixel review image	chr22-21442678-INV-15944.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chr22-23968095-INV-5062	chr22:23,969,582-23,971,740	2158	No consensus call	0.17	inverted	255	Native 1400-pixel review image	chr22-23968095-INV-5062.chimp.webp	
-chrX-6219014-INV-1337	chrX:6,219,005-6,220,343	1338	No consensus call	0.51	na	256	Native 1400-pixel review image	chrX-6219014-INV-1337.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chrX-14711418-INV-1780	chrX:14,711,416-14,713,197	1781	No consensus call	0.03	direct	257	Native 1400-pixel review image	chrX-14711418-INV-1780.chimp.webp	
-chrX-45687777-INV-4877	chrX:45,689,038-45,691,227	2189	No consensus call	0.02	na	258	Native 1400-pixel review image	chrX-45687777-INV-4877.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chrX-48395426-INV-4575	chrX:48,396,314-48,399,110	2796	No consensus call	0.31	na	259	Native 1400-pixel review image	chrX-48395426-INV-4575.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chrX-51667498-INV-58316	chrX:51,692,963-51,700,363	7400	No consensus call	0.68	inverted	260	Native 1400-pixel review image	chrX-51667498-INV-58316.chimp.webp	
-chrX-52040360-INV-173922	chrX:52,077,120-52,176,974	99854	Recurrent	0.36	inverted	261	Native 1400-pixel review image	chrX-52040360-INV-173922.chimp.webp	
-chrX-52492352-INV-19975	chrX:52,502,274-52,510,614	8340	No consensus call	0.78	na	262	Native 1400-pixel review image	chrX-52492352-INV-19975.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chrX-52880292-INV-93962	chrX:52,921,572-52,934,581	13009	No consensus call	0.61	na	263	Native 1400-pixel review image	chrX-52880292-INV-93962.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chrX-55480174-INV-12894	chrX:55,480,141-55,493,063	12922	No consensus call	0.44	na	264	Native 1400-pixel review image	chrX-55480174-INV-12894.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chrX-63182245-INV-13735	chrX:63,185,600-63,193,343	7743	No consensus call	0.4	na	265	Native 1400-pixel review image	chrX-63182245-INV-13735.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chrX-71702807-INV-75580	chrX:71,702,806-71,778,386	75580	No consensus call	0.41	direct	266	Native 1400-pixel review image	chrX-71702807-INV-75580.chimp.webp	
-chrX-72996081-INV-91407	chrX:72,997,772-73,077,479	79707	Recurrent	0.2	direct	267	Native 1400-pixel review image	chrX-72996081-INV-91407.chimp.webp	
-chrX-76141867-INV-11379	chrX:76,146,153-76,148,949	2796	No consensus call	0.52	na	268	Native 1400-pixel review image	chrX-76141867-INV-11379.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chrX-101597550-INV-18696	chrX:101,602,193-101,611,599	9406	No consensus call	0.59	na	269	Native 1400-pixel review image	chrX-101597550-INV-18696.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chrX-102317111-INV-52896	chrX:102,338,170-102,348,934	10764	No consensus call	0.56	na	270	Native 1400-pixel review image	chrX-102317111-INV-52896.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chrX-103954976-INV-128112	chrX:103,989,434-104,049,428	59994	Recurrent	0.63	na	271	Native 1400-pixel review image	chrX-103954976-INV-128112.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chrX-106266349-INV-33658	chrX:106,266,279-106,275,333	9054	No consensus call	0.39	na	272	Native 1400-pixel review image	chrX-106266349-INV-33658.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chrX-112504687-INV-12274	chrX:112,504,686-112,516,959	12273	Single-event	0.01	direct	273	Native 1400-pixel review image	chrX-112504687-INV-12274.chimp.webp	
-chrX-120080219-INV-75364	chrX:120,087,101-120,149,199	62098	No consensus call	0.25	inverted	274	Native 1400-pixel review image	chrX-120080219-INV-75364.chimp.webp	
-chrX-135116507-INV-139642	chrX:135,165,183-135,207,322	42139	No consensus call	0.4	na	275	Native 1400-pixel review image	chrX-135116507-INV-139642.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chrX-135619381-INV-52316	chrX:135,623,647-135,665,679	42032	No consensus call	0.06	direct	276	Native 1400-pixel review image	chrX-135619381-INV-52316.chimp.webp	
-chrX-135733567-INV-16180	chrX:135,734,732-135,748,584	13852	No consensus call	0.22	na	277	Native 1400-pixel review image	chrX-135733567-INV-16180.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chrX-135718085-INV-149049	chrX:135,765,135-135,776,630	11495	No consensus call	0.9	na	278	Native 1400-pixel review image	chrX-135718085-INV-149049.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chrX-135765868-INV-28891	chrX:135,765,867-135,794,758	28891	No consensus call	0.5	na	279	Native 1400-pixel review image	chrX-135765868-INV-28891.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chrX-141110161-INV-122718	chrX:141,110,160-141,232,877	122717	No consensus call	0.11	direct	280	Native 1400-pixel review image	chrX-141110161-INV-122718.chimp.webp	
-chrX-141573056-INV-28779	chrX:141,585,256-141,589,189	3933	No consensus call	0.36	direct	281	Native 1400-pixel review image	chrX-141573056-INV-28779.chimp.webp	
-chrX-149599491-INV-56477	chrX:149,599,490-149,655,967	56477	Recurrent	0.08	na	282	Native 1400-pixel review image	chrX-149599491-INV-56477.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chrX-149654273-INV-94882	chrX:149,681,035-149,722,249	41214	Recurrent	0.61	na	283	Native 1400-pixel review image	chrX-149654273-INV-94882.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chrX-149747303-INV-21480	chrX:149,747,302-149,768,782	21480	No consensus call	0.08	na	284	Native 1400-pixel review image	chrX-149747303-INV-21480.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chrX-152678163-INV-111649	chrX:152,729,753-152,738,707	8954	Recurrent	0.4	na	285	Native 1400-pixel review image	chrX-152678163-INV-111649.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chrX-153066070-INV-17879	chrX:153,074,418-153,075,612	1194	No consensus call	0.49	direct	286	Native 1400-pixel review image	chrX-153066070-INV-17879.chimp.webp	
-chrX-153067814-INV-226118	chrX:153,149,748-153,250,226	100478	Recurrent	0.6	direct	287	Native 1400-pixel review image	chrX-153067814-INV-226118.chimp.webp	
-chrX-154339398-INV-53354	chrX:154,347,246-154,384,867	37621	Recurrent	0.44	inverted	288	Native 1400-pixel review image	chrX-154339398-INV-53354.chimp.webp	
-chrX-154555919-INV-93915	chrX:154,591,327-154,613,096	21769	Recurrent	0.43	na	289	Native 1400-pixel review image	chrX-154555919-INV-93915.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chrX-155366835-INV-100636	chrX:155,386,727-155,453,982	67255	Recurrent	0.15	direct	290	Native 1400-pixel review image	chrX-155366835-INV-100636.chimp.webp	
-chrY-6243098-INV-97551	chrY:6,243,097-6,340,647	97550	No consensus call	0.47	na	291	Native 1400-pixel review image	chrY-6243098-INV-97551.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chrY-6452943-INV-3310852	chrY:6,452,942-9,763,793	3310851	No consensus call	0.1	na	292	Native 1400-pixel review image	chrY-6452943-INV-3310852.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chrY-9797299-INV-19841	chrY:9,797,298-9,817,138	19840	No consensus call	0.43	na	293	Native 1400-pixel review image	chrY-9797299-INV-19841.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chrY-10367645-INV-52339	chrY:10,367,644-10,419,983	52339	No consensus call	0.13	na	294	Native 1400-pixel review image	chrY-10367645-INV-52339.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chrY-14014802-INV-12509	chrY:14,019,657-14,023,071	3414	No consensus call	0.67	direct	295	Native 1400-pixel review image	chrY-14014802-INV-12509.chimp.webp	
-chrY-15874908-INV-30002	chrY:15,883,580-15,896,218	12638	No consensus call	0.23	na	296	Native 1400-pixel review image	chrY-15874908-INV-30002.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chrY-16256794-INV-67832	chrY:16,269,646-16,315,779	46133	No consensus call	0.37	na	297	Native 1400-pixel review image	chrY-16256794-INV-67832.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chrY-17949448-INV-6854	chrY:17,949,447-17,956,300	6853	No consensus call	0.7	na	298	Native 1400-pixel review image	chrY-17949448-INV-6854.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chrY-18632163-INV-54113	chrY:18,640,355-18,667,145	26790	No consensus call	0.13	na	299	Native 1400-pixel review image	chrY-18632163-INV-54113.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chrY-21013458-INV-38445	chrY:21,021,692-21,063,744	42052	No consensus call	0.6	na	300	Native 1400-pixel review image	chrY-21013458-INV-38445.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chrY-21052503-INV-12528	chrY:21,053,790-21,063,744	9954	No consensus call	0.53	na	301	Native 1400-pixel review image	chrY-21052503-INV-12528.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chrY-22204072-INV-180018	chrY:22,204,071-22,384,088	180017	No consensus call	0.17	na	302	Native 1400-pixel review image	chrY-22204072-INV-180018.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
-chrY-22207319-INV-117968	chrY:22,207,318-22,325,285	117967	No consensus call	0.17	na	303	Native 1400-pixel review image	chrY-22207319-INV-117968.chimp.webp	Not callable; specific reason was not recorded in the manual-review dataset
+page	inversion_id	chromosome	start	end	cytoband	recurrence_class	chimpanzee_orientation_call	source_pdf
+1	chr1-13084312-INV-62181	chr1	13104252	13122521	p36.21	Recurrent	na	plots/chr1-13084312-INV-62181.pdf
+2	chr1-25338356-INV-24067	chr1	25324280	25369060	p36.11	Single-event	na	plots/chr1-25338356-INV-24067.pdf
+3	chr1-81642914-INV-66617	chr1	81650508	81707447	p31.1	Single-event	direct	plots/chr1-81642914-INV-66617.pdf
+4	chr1-108311808-INV-57118	chr1	108310642	108383736	p13.3	Recurrent	na	plots/chr1-108311808-INV-57118.pdf
+5	chr1-144376210-INV-224591	chr1	144376209	144600799	q21.1	Single-event	na	plots/chr1-144376210-INV-224591.pdf
+6	chr1-149842162-INV-9508	chr1	149843518	149850293	q21.2	Single-event	direct	plots/chr1-149842162-INV-9508.pdf
+7	chr1-248128774-INV-300084	chr1	248128773	248428856	q44	Single-event	direct	plots/chr1-248128774-INV-300084.pdf
+8	chr2-45062769-INV-12977	chr2	45065588	45081777	p21	Single-event	direct	plots/chr2-45062769-INV-12977.pdf
+9	chr2-87987172-INV-23268233	chr2	87987171	111255403	q11.2	Single-event	na	plots/chr2-87987172-INV-23268233.pdf
+10	chr2-87995842-INV-184695	chr2	87995841	88180536	p11.2	Single-event	direct	plots/chr2-87995842-INV-184695.pdf
+11	chr2-91832041-INV-180624	chr2	91832040	92012663	p11.1	Recurrent	na	plots/chr2-91832041-INV-180624.pdf
+12	chr2-95800192-INV-224213	chr2	95800191	96024403	q11.1	Recurrent	na	plots/chr2-95800192-INV-224213.pdf
+13	chr2-130138213-INV-1062391	chr2	130138212	131200602	q21.1	Single-event	na	plots/chr2-130138213-INV-1062391.pdf
+14	chr2-130138213-INV-1392323	chr2	130138212	131530534	q21.1	Single-event	na	plots/chr2-130138213-INV-1392323.pdf
+15	chr3-75454478-INV-1238	chr3	75454477	75455715	p12.3	Single-event	direct	plots/chr3-75454478-INV-1238.pdf
+16	chr3-195749464-INV-230745	chr3	195749463	195980207	q29	Recurrent	direct	plots/chr3-195749464-INV-230745.pdf
+17	chr4-33098029-INV-7075	chr4	33098066	33104924	p15.1	Single-event	direct	plots/chr4-33098029-INV-7075.pdf
+18	chr5-71009587-INV-84412	chr5	71009586	71093997	q13.2	Single-event	na	plots/chr5-71009587-INV-84412.pdf
+19	chr5-112179912-INV-56689	chr5	112179911	112236600	q22.2	Single-event	direct	plots/chr5-112179912-INV-56689.pdf
+20	chr5-124425561-INV-121098	chr5	124425560	124546657	q23.2	Single-event	direct	plots/chr5-124425561-INV-121098.pdf
+21	chr5-177946130-INV-57824	chr5	177946129	178003952	q35.3	Single-event	na	plots/chr5-177946130-INV-57824.pdf
+22	chr5-179633880-INV-24659	chr5	179643529	179651253	q35.3	Single-event	direct	plots/chr5-179633880-INV-24659.pdf
+23	chr6-76111919-INV-44661	chr6	76109081	76158474	q14.1	Single-event	direct	plots/chr6-76111919-INV-44661.pdf
+24	chr6-123106042-INV-3793	chr6	123106049	123109821	q22.31	Single-event	direct	plots/chr6-123106042-INV-3793.pdf
+25	chr6-141867315-INV-29159	chr6	141866310	141898728	q24.1	Single-event	direct	plots/chr6-141867315-INV-29159.pdf
+26	chr6-167181003-INV-209976	chr6	167209001	167357782	q27	Single-event	direct	plots/chr6-167181003-INV-209976.pdf
+27	chr7-5989047-INV-746598	chr7	5989046	6735643	p22.1	Recurrent	inverted	plots/chr7-5989047-INV-746598.pdf
+28	chr7-33990522-INV-19762	chr7	33990735	34010143	p14.3	Single-event	direct	plots/chr7-33990522-INV-19762.pdf
+29	chr7-54220528-INV-101153	chr7	54234014	54308393	p11.2	Single-event	direct	plots/chr7-54220528-INV-101153.pdf
+30	chr7-57835189-INV-284465	chr7	57835188	58119653	p11.2	Single-event	na	plots/chr7-57835189-INV-284465.pdf
+31	chr7-60911892-INV-666133	chr7	60911891	61578023	q11.1	Recurrent	na	plots/chr7-60911892-INV-666133.pdf
+32	chr7-62290675-INV-72470	chr7	62290674	62363143	q11.21	Recurrent	na	plots/chr7-62290675-INV-72470.pdf
+33	chr7-62408487-INV-47959	chr7	62408486	62456444	q11.21	Recurrent	na	plots/chr7-62408487-INV-47959.pdf
+34	chr7-65219158-INV-312667	chr7	65219157	65531823	q11.21	Recurrent	inverted	plots/chr7-65219158-INV-312667.pdf
+35	chr7-70955928-INV-18020	chr7	70961198	70973901	q11.22	Single-event	direct	plots/chr7-70955928-INV-18020.pdf
+36	chr7-73113990-INV-1685041	chr7	73113989	74799029	q11.23	Recurrent	na	plots/chr7-73113990-INV-1685041.pdf
+37	chr7-74799031-INV-480422	chr7	74869950	75058098	q11.23	Recurrent	na	plots/chr7-74799031-INV-480422.pdf
+38	chr7-97445827-INV-13775	chr7	97445822	97459601	q21.3	Single-event	direct	plots/chr7-97445827-INV-13775.pdf
+39	chr8-2340295-INV-42058	chr8	2343351	2378385	p23.2	Recurrent	direct	plots/chr8-2340295-INV-42058.pdf
+40	chr8-7301025-INV-5297356	chr8	7301024	12598379	p23.1	Recurrent	direct	plots/chr8-7301025-INV-5297356.pdf
+41	chr9-12016541-INV-55306	chr9	12004038	12074552	p23	Single-event	direct	plots/chr9-12016541-INV-55306.pdf
+42	chr9-85796067-INV-6026	chr9	85797070	85801040	q21.33	Single-event	direct	plots/chr9-85796067-INV-6026.pdf
+43	chr9-87942698-INV-167577	chr9	87942696	88110274	q22.1	Single-event	na	plots/chr9-87942698-INV-167577.pdf
+44	chr10-15742645-INV-17942	chr10	15742803	15760427	p13	Single-event	direct	plots/chr10-15742645-INV-17942.pdf
+45	chr10-46135869-INV-77646	chr10	46144703	46204851	q11.22	Single-event	na	plots/chr10-46135869-INV-77646.pdf
+46	chr10-46983452-INV-484782	chr10	46983451	47468232	q11.22	Recurrent	na	plots/chr10-46983452-INV-484782.pdf
+47	chr10-55007454-INV-5370	chr10	55007431	55013434	q21.1	Single-event	direct	plots/chr10-55007454-INV-5370.pdf
+48	chr10-65465442-INV-4580	chr10	65465445	65470067	q21.3	Single-event	direct	plots/chr10-65465442-INV-4580.pdf
+49	chr10-79542902-INV-674513	chr10	79542901	80217413	q22.3	Single-event	inverted	plots/chr10-79542902-INV-674513.pdf
+50	chr11-18246600-INV-21672	chr11	18249084	18265819	p15.1	Single-event	direct	plots/chr11-18246600-INV-21672.pdf
+51	chr11-50136371-INV-206505	chr11	50154999	50324102	p11.12	Recurrent	inverted	plots/chr11-50136371-INV-206505.pdf
+52	chr11-71571191-INV-6980	chr11	71571819	71576724	q13.4	Single-event	direct	plots/chr11-71571191-INV-6980.pdf
+53	chr11-89920625-INV-3224	chr11	89920623	89923848	q14.3	Recurrent	na	plots/chr11-89920625-INV-3224.pdf
+54	chr12-46897663-INV-16289	chr12	46896694	46915975	q13.11	Single-event	direct	plots/chr12-46897663-INV-16289.pdf
+55	chr12-75713181-INV-18615	chr12	75713180	75731794	q21.2	Single-event	direct	plots/chr12-75713181-INV-18615.pdf
+56	chr12-131312082-INV-332759	chr12	131312081	131644839	q24.33	Single-event	direct	plots/chr12-131312082-INV-332759.pdf
+57	chr13-48199211-INV-7451	chr13	48199250	48206639	q14.2	Single-event	direct	plots/chr13-48199211-INV-7451.pdf
+58	chr13-52310303-INV-10653	chr13	52310302	52320954	q14.3	Single-event	na	plots/chr13-52310303-INV-10653.pdf
+59	chr13-53902574-INV-190801	chr13	53902573	54093373	q14.3	Single-event	direct	plots/chr13-53902574-INV-190801.pdf
+60	chr13-64598738-INV-17482	chr13	64598737	64616218	q21.31	Single-event	direct	plots/chr13-64598738-INV-17482.pdf
+61	chr14-60604531-INV-8718	chr14	60606118	60611659	q23.1	Single-event	direct	plots/chr14-60604531-INV-8718.pdf
+62	chr14-85872201-INV-17070	chr14	85872200	85889269	q31.3	Single-event	direct	plots/chr14-85872201-INV-17070.pdf
+63	chr15-23295577-INV-22616	chr15	23295576	23318191	q11.2	Single-event	na	plots/chr15-23295577-INV-22616.pdf
+64	chr15-23345460-INV-5044410	chr15	23345459	28389868	q12	Single-event	inverted	plots/chr15-23345460-INV-5044410.pdf
+65	chr15-30618104-INV-1535102	chr15	30618103	32153204	q13.3	Recurrent	direct	plots/chr15-30618104-INV-1535102.pdf
+66	chr15-84373376-INV-43322	chr15	84373375	84416696	q25.2	Recurrent	na	plots/chr15-84373376-INV-43322.pdf
+67	chr16-15028481-INV-133352	chr16	14954790	15100859	p13.11	Recurrent	na	plots/chr16-15028481-INV-133352.pdf
+68	chr16-15384483-INV-891665	chr16	15384482	16276146	p13.11	Single-event	na	plots/chr16-15384483-INV-891665.pdf
+69	chr16-16721274-INV-1352270	chr16	16721273	18073542	p12.3	Recurrent	direct	plots/chr16-16721274-INV-1352270.pdf
+70	chr16-28471894-INV-165758	chr16	28471892	28637651	p11.2	Recurrent	direct	plots/chr16-28471894-INV-165758.pdf
+71	chr16-35945424-INV-12423	chr16	35946683	35952382	p11.1	Single-event	direct	plots/chr16-35945424-INV-12423.pdf
+72	chr16-75204855-INV-19244	chr16	75206214	75222748	q23.1	Single-event	na	plots/chr16-75204855-INV-19244.pdf
+73	chr17-3052058-INV-200164	chr17	3082008	3221835	p13.3	Single-event	direct	plots/chr17-3052058-INV-200164.pdf
+74	chr17-16823491-INV-1560701	chr17	16823490	18384190	p11.2	Single-event	na	plots/chr17-16823491-INV-1560701.pdf
+75	chr17-45573557-INV-11603	chr17	45573556	45585158	q21.31	Single-event	na	plots/chr17-45573557-INV-11603.pdf
+76	chr17-45585160-INV-706887	chr17	45585159	46292045	q21.31	Single-event	na	plots/chr17-45585160-INV-706887.pdf
+77	chr20-24397727-INV-8419	chr20	24397726	24406144	p11.21	Single-event	direct	plots/chr20-24397727-INV-8419.pdf
+78	chr20-29257747-INV-162005	chr20	29257746	29419750	q11.1	Single-event	na	plots/chr20-29257747-INV-162005.pdf
+79	chr20-47827034-INV-77611	chr20	47841016	47888238	q13.13	Single-event	direct	plots/chr20-47827034-INV-77611.pdf
+80	chr21-13992018-INV-65632	chr21	13987773	14056796	q11.2	Single-event	direct	plots/chr21-13992018-INV-65632.pdf
+81	chr21-19877735-INV-192437	chr21	19877734	20070170	q21.1	Single-event	direct	plots/chr21-19877735-INV-192437.pdf
+82	chr21-43821743-INV-13374	chr21	43821742	43835116	q22.3	Single-event	direct	plots/chr21-43821743-INV-13374.pdf
+83	chrX-52040360-INV-173922	chrX	52077120	52176974	p11.22	Recurrent	inverted	plots/chrX-52040360-INV-173922.pdf
+84	chrX-72996081-INV-91407	chrX	72997772	73077479	q13.2	Recurrent	direct	plots/chrX-72996081-INV-91407.pdf
+85	chrX-103954976-INV-128112	chrX	103989434	104049428	q22.2	Recurrent	na	plots/chrX-103954976-INV-128112.pdf
+86	chrX-112504687-INV-12274	chrX	112504686	112516959	q23	Single-event	direct	plots/chrX-112504687-INV-12274.pdf
+87	chrX-149599491-INV-56477	chrX	149599490	149655967	q28	Recurrent	na	plots/chrX-149599491-INV-56477.pdf
+88	chrX-149654273-INV-94882	chrX	149681035	149722249	q28	Recurrent	na	plots/chrX-149654273-INV-94882.pdf
+89	chrX-152678163-INV-111649	chrX	152729753	152738707	q28	Recurrent	na	plots/chrX-152678163-INV-111649.pdf
+90	chrX-153067814-INV-226118	chrX	153149748	153250226	q28	Recurrent	direct	plots/chrX-153067814-INV-226118.pdf
+91	chrX-154339398-INV-53354	chrX	154347246	154384867	q28	Recurrent	inverted	plots/chrX-154339398-INV-53354.pdf
+92	chrX-154555919-INV-93915	chrX	154591327	154613096	q28	Recurrent	na	plots/chrX-154555919-INV-93915.pdf
+93	chrX-155366835-INV-100636	chrX	155386727	155453982	q28	Recurrent	direct	plots/chrX-155366835-INV-100636.pdf

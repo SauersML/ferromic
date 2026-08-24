@@ -1,0 +1,1 @@
+SVbyEye alignments between GRCh38 (top) and panTro6 (bottom) across the 93 consensus-classified inversions. Green and blue indicate forward and reverse alignments, respectively. Red dashed boxes indicate the inversion coordinates in GRCh38. Loci are ordered by genomic position.
