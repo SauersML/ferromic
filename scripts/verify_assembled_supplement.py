@@ -102,9 +102,9 @@ def verify(template: Path, assembled: Path) -> None:
     figure_page_starts = document._element.body.xpath(
         ".//w:p[w:pPr/w:pageBreakBefore][.//w:drawing]"
     )
-    if len(figure_page_starts) != 113:
+    if len(figure_page_starts) != 67:
         raise RuntimeError(
-            "Expected page-break-before on 21 main figures and 92 subsequent "
+            "Expected page-break-before on 21 main figures and 46 subsequent "
             f"appendix plots; found {len(figure_page_starts)}"
         )
     standalone_page_breaks = document._element.body.xpath(
@@ -154,8 +154,8 @@ def verify(template: Path, assembled: Path) -> None:
 
     print(
         "Verified assembled supplement: S1-S21 ordered; response-only panel omitted; "
-        "93-caption fixed-size portrait SVbyEye appendix present; template formatting "
-        "parts and page geometry unchanged."
+        "93-caption full-width, two-plots-per-page portrait SVbyEye appendix present; "
+        "template formatting parts and page geometry unchanged."
     )
 
 

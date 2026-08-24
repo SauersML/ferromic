@@ -126,7 +126,7 @@ jobs:
           python stats/phewas_within_ancestry_figures.py
           python stats/svbyeye_supplement.py
 
-      - name: Verify all 21 figure inputs and the 93-page alignment source
+      - name: Verify all 21 figure inputs and the 47-page paired alignment source
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -148,13 +148,20 @@ jobs:
               'output/pdf/svbyeye/Supplemental_File_SVbyEye_consensus_93_loci.pdf'
           )
           pages = PdfReader(source).pages
-          assert len(pages) == 93
+          assert len(pages) == 47
           page_sizes = {
               (float(page.mediabox.width), float(page.mediabox.height))
               for page in pages
           }
           assert len(page_sizes) == 1, f'mixed SVbyEye page sizes: {page_sizes}'
-          print(f'canonical SVbyEye PDF page size (points): {next(iter(page_sizes))}')
+          source_plot = next(Path('.svbyeye-consensus-93/plots').glob('*.pdf'))
+          source_page = PdfReader(source_plot).pages[0]
+          expected_size = (
+              float(source_page.mediabox.width),
+              2 * float(source_page.mediabox.height),
+          )
+          assert page_sizes == {expected_size}, (page_sizes, expected_size)
+          print(f'paired SVbyEye PDF page size (points): {expected_size}')
           PY
 
       - name: Assemble and structurally validate the new DOCX
@@ -200,7 +207,7 @@ jobs:
           )
           print(f'assembled supplement PDF page size (points): {(page_width, page_height)}')
           assert len(pages) == expected
-          assert expected >= 114
+          assert 68 <= expected < 114
 
           thumbnails = []
           for page in pages:
