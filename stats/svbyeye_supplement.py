@@ -1,54 +1,25 @@
-"""Build publication-quality SVbyEye supplementary PDFs.
-
-The four redrawn examples are retained as vector graphics. For every other
-locus, the complete native-resolution chimpanzee-versus-GRCh38 review image is
-embedded without resizing or JPEG recompression.
-"""
+#!/usr/bin/env python3
+"""Assemble the canonical boxed SVbyEye plots for the 93 consensus loci."""
 
 from __future__ import annotations
 
+import argparse
 import csv
+import hashlib
 import io
 import json
-import math
-import shutil
 from pathlib import Path
 
 import pymupdf
-from PIL import Image
 from pypdf import PdfReader, PdfWriter, Transformation
-from reportlab.lib.colors import HexColor, white
-from reportlab.lib.utils import ImageReader
+from reportlab.lib.colors import white
 from reportlab.pdfgen import canvas
 
 
 REPO = Path(__file__).resolve().parents[1]
-DATA = REPO / "data"
-IMAGE_DIR = REPO / "web" / "figures-site" / "public" / "inversions" / "img"
-VECTOR_SOURCE_DIR = REPO / ".svbyeye-preview"
+DEFAULT_SOURCE_DIR = REPO / ".svbyeye-consensus-93"
 OUTPUT_DIR = REPO / "output" / "pdf" / "svbyeye"
-PER_LOCUS_DIR = OUTPUT_DIR / "per_locus"
-VECTOR_DIR = OUTPUT_DIR / "vector_examples"
-
-PAGE_WIDTH = 1080.0
-PAGE_HEIGHT = 540.0
-MARGIN = 32.0
-PLOT_TOP = 468.0
-PLOT_BOTTOM = 44.0
-INDEX_ROWS_PER_PAGE = 31
-
-CALL_LABELS = {
-    "direct": "GRCh38 orientation ancestral",
-    "inverted": "GRCh38 orientation derived",
-    "na": "Not callable",
-}
-
-VECTOR_SOURCES = {
-    "chr8-7301025-INV-5297356": "chr8_8p23.1-v6.pdf",
-    "chr12-46897663-INV-16289": "chr12_12q13.11-v6.pdf",
-    "chr15-23345460-INV-5044410": "chr15_15q11.2-v6.pdf",
-    "chr17-45585160-INV-706887": "chr17_17q21.31-v6.pdf",
-}
+PLOT_SCRIPT = REPO / "svbyeye" / "bin" / "plot_chimp_hires.R"
 
 EXAMPLE_IDS = (
     "chr8-7301025-INV-5297356",
@@ -56,435 +27,219 @@ EXAMPLE_IDS = (
 )
 
 
-def chromosome_key(record: dict) -> tuple[int, int]:
-    chrom = record["chrom"].removeprefix("chr")
-    rank = {"X": 23, "Y": 24}.get(chrom, int(chrom) if chrom.isdigit() else 99)
-    return rank, int(record["start"])
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
-def load_records() -> list[dict]:
-    payload = json.loads((DATA / "chimp_alignment_responses.json").read_text())
-    records = sorted(payload["responses"], key=chromosome_key)
-    if len(records) != 292:
-        raise RuntimeError(f"Expected 292 reviewed loci, found {len(records)}")
-
-    counts = {call: 0 for call in CALL_LABELS}
-    for record in records:
-        call = record["classification"]
-        if call not in counts:
-            raise RuntimeError(f"Unexpected orientation call: {call}")
-        counts[call] += 1
-        image_path = IMAGE_DIR / record["image_file"]
-        if not image_path.is_file():
-            raise FileNotFoundError(image_path)
-    expected = {"direct": 121, "inverted": 12, "na": 159}
-    if counts != expected:
-        raise RuntimeError(f"Unexpected orientation counts: {counts}; expected {expected}")
-    return records
+def chromosome_key(row: dict[str, str]) -> tuple[int, int]:
+    chromosome = row["chrom"].removeprefix("chr")
+    rank = 23 if chromosome == "X" else int(chromosome)
+    return rank, int(row["inv_start"])
 
 
-def load_properties() -> dict[str, dict[str, object]]:
-    properties: dict[str, dict[str, object]] = {}
-    with (DATA / "inv_properties.tsv").open(newline="") as handle:
+def load_source_manifest(source_dir: Path) -> list[dict[str, str]]:
+    manifest = source_dir / "manifest.tsv"
+    provenance_path = source_dir / "provenance.json"
+    if not manifest.is_file() or not provenance_path.is_file():
+        raise FileNotFoundError(f"Incomplete SVbyEye source bundle: {source_dir}")
+    with manifest.open(newline="") as handle:
+        rows = list(csv.DictReader(handle, delimiter="\t"))
+    if len(rows) != 93 or len({row["inv_id"] for row in rows}) != 93:
+        raise RuntimeError("SVbyEye source bundle must contain exactly 93 unique loci")
+    if rows != sorted(rows, key=chromosome_key):
+        raise RuntimeError("SVbyEye source manifest is not in genomic order")
+
+    provenance = json.loads(provenance_path.read_text())
+    expected = {
+        "schema_version": 1,
+        "locus_count": 93,
+        "generator": "svbyeye/bin/plot_chimp_hires.R",
+        "generator_sha256": sha256(PLOT_SCRIPT),
+    }
+    for key, value in expected.items():
+        if provenance.get(key) != value:
+            raise RuntimeError(
+                f"SVbyEye source provenance mismatch for {key}: "
+                f"expected {value!r}, observed {provenance.get(key)!r}"
+            )
+    return rows
+
+
+def load_consensus_properties() -> dict[str, str]:
+    properties: dict[str, str] = {}
+    with (REPO / "data" / "inv_properties.tsv").open(newline="") as handle:
         for row in csv.DictReader(handle, delimiter="\t"):
             consensus = row["0_single_1_recur_consensus"].strip()
-            recurrence = {
-                "0": "Single-event",
-                "1": "Recurrent",
-            }.get(consensus, "No consensus call")
-            af = row["Inverted_AF"].strip()
-            properties[row["OrigID"]] = {
-                "recurrence": recurrence,
-                "inverted_af": af if af else "NA",
-                "consensus_recurrence": consensus in {"0", "1"},
-            }
+            if consensus in {"0", "1"}:
+                properties[row["OrigID"]] = "Single-event" if consensus == "0" else "Recurrent"
+    if len(properties) != 93:
+        raise RuntimeError(f"Expected 93 consensus properties, found {len(properties)}")
     return properties
 
 
-def make_base_page(record: dict, metadata: dict, source_type: str) -> bytes:
-    buffer = io.BytesIO()
-    pdf = canvas.Canvas(buffer, pagesize=(PAGE_WIDTH, PAGE_HEIGHT), pageCompression=1, invariant=1)
-    pdf.setTitle(record["inv_id"])
-    pdf.setFillColor(HexColor("#15324A"))
-    pdf.setFont("Helvetica-Bold", 15)
-    pdf.drawString(MARGIN, 510, record["inv_id"])
-    pdf.setFillColor(HexColor("#405363"))
-    pdf.setFont("Helvetica", 10)
-    pdf.drawRightString(PAGE_WIDTH - MARGIN, 510, record["region"])
-
-    call = CALL_LABELS[record["classification"]]
-    details = (
-        f"{metadata['recurrence']}   |   inverted AF: {metadata['inverted_af']}"
-        f"   |   chimpanzee call: {call}"
-    )
-    pdf.setFont("Helvetica", 10.5)
-    pdf.drawString(MARGIN, 491, details)
-    pdf.setStrokeColor(HexColor("#D8E0E6"))
-    pdf.setLineWidth(0.7)
-    pdf.line(MARGIN, 480, PAGE_WIDTH - MARGIN, 480)
-    pdf.setFillColor(HexColor("#657580"))
-    pdf.setFont("Helvetica", 8.5)
-    pdf.drawString(
-        MARGIN,
-        20,
-        "Chimpanzee (panTro6) versus GRCh38 orientation-review image.",
-    )
-    pdf.drawRightString(PAGE_WIDTH - MARGIN, 20, source_type)
-    pdf.save()
-    return buffer.getvalue()
+def load_orientation_calls() -> dict[str, str]:
+    payload = json.loads((REPO / "data" / "chimp_alignment_responses.json").read_text())
+    calls = {row["inv_id"]: row["classification"] for row in payload["responses"]}
+    if set(calls.values()) - {"direct", "inverted", "na"}:
+        raise RuntimeError("Unexpected chimpanzee-orientation call")
+    return calls
 
 
-def add_native_image(page, image_path: Path) -> None:
-    with Image.open(image_path) as image:
-        pixel_width, pixel_height = image.size
-    max_width = PAGE_WIDTH - 2 * MARGIN
-    max_height = PLOT_TOP - PLOT_BOTTOM
-    scale = min(max_width / pixel_width, max_height / pixel_height)
-    width = pixel_width * scale
-    height = pixel_height * scale
-    x = (PAGE_WIDTH - width) / 2
-    y = PLOT_BOTTOM + (max_height - height) / 2
-
-    overlay = io.BytesIO()
-    pdf = canvas.Canvas(overlay, pagesize=(PAGE_WIDTH, PAGE_HEIGHT), pageCompression=1, invariant=1)
-    pdf.drawImage(
-        ImageReader(str(image_path)),
-        x,
-        y,
-        width=width,
-        height=height,
-        preserveAspectRatio=True,
-        mask="auto",
-    )
-    pdf.save()
-    page.merge_page(PdfReader(io.BytesIO(overlay.getvalue())).pages[0])
-
-
-def add_vector_plot(page, source_path: Path) -> None:
-    source = PdfReader(str(source_path)).pages[0]
-    source_width = float(source.mediabox.width)
-    source_height = float(source.mediabox.height)
-    max_width = PAGE_WIDTH - 2 * MARGIN
-    max_height = PLOT_TOP - PLOT_BOTTOM
-    scale = min(max_width / source_width, max_height / source_height)
-    x = (PAGE_WIDTH - source_width * scale) / 2
-    y = PLOT_BOTTOM + (max_height - source_height * scale) / 2
-    page.merge_transformed_page(
-        source,
-        Transformation().scale(scale).translate(x, y),
-        over=True,
-    )
+def source_pages(
+    source_dir: Path, rows: list[dict[str, str]]
+) -> tuple[list[tuple[dict[str, str], Path]], tuple[float, float]]:
+    result = []
+    expected_size: tuple[float, float] | None = None
+    for row in rows:
+        path = source_dir / "plots" / f"{row['inv_id']}.pdf"
+        if not path.is_file() or path.stat().st_size == 0:
+            raise FileNotFoundError(path)
+        reader = PdfReader(str(path))
+        if len(reader.pages) != 1:
+            raise RuntimeError(f"Expected one-page source plot: {path}")
+        page = reader.pages[0]
+        size = (float(page.mediabox.width), float(page.mediabox.height))
+        if expected_size is None:
+            expected_size = size
+        elif size != expected_size:
+            raise RuntimeError(
+                f"Mixed SVbyEye source page sizes: expected {expected_size}, found {size} in {path}"
+            )
+        result.append((row, path))
+    assert expected_size is not None
+    return result, expected_size
 
 
-def write_locus_pdf(record: dict, metadata: dict) -> str:
-    vector_name = VECTOR_SOURCES.get(record["inv_id"])
-    source_type = "True vector source" if vector_name else "Native 1400-pixel review image"
-    page = PdfReader(io.BytesIO(make_base_page(record, metadata, source_type))).pages[0]
-    if vector_name:
-        add_vector_plot(page, VECTOR_SOURCE_DIR / vector_name)
-    else:
-        add_native_image(page, IMAGE_DIR / record["image_file"])
-
-    output_path = PER_LOCUS_DIR / f"{record['inv_id']}.pdf"
+def write_consensus_pdf(pages: list[tuple[dict[str, str], Path]]) -> Path:
+    output = OUTPUT_DIR / "Supplemental_File_SVbyEye_consensus_93_loci.pdf"
     writer = PdfWriter()
-    writer.add_page(page)
-    writer.add_metadata({
-        "/Title": record["inv_id"],
-        "/Subject": "SVbyEye chimpanzee-versus-GRCh38 orientation review",
-    })
-    with output_path.open("wb") as handle:
+    for _, path in pages:
+        writer.add_page(PdfReader(str(path)).pages[0])
+    writer.add_metadata(
+        {
+            "/Title": "SVbyEye alignments for 93 consensus-classified inversions",
+            "/Subject": "Canonical panTro6-versus-GRCh38 boxed inversion plots",
+        }
+    )
+    with output.open("wb") as handle:
         writer.write(handle)
-    return source_type
+    return output
 
 
-def write_vector_copies() -> None:
-    for filename in VECTOR_SOURCES.values():
-        source = VECTOR_SOURCE_DIR / filename
-        if not source.is_file():
-            raise FileNotFoundError(source)
-        shutil.copyfile(source, VECTOR_DIR / filename)
-
-
-def merge_source_on_page(page, source_path: Path, x: float, y: float, width: float) -> None:
-    source = PdfReader(str(source_path)).pages[0]
-    source_width = float(source.mediabox.width)
-    scale = width / source_width
+def merge_plot(page, source: Path, x: float, y: float, width: float) -> None:
+    plot = PdfReader(str(source)).pages[0]
+    scale = width / float(plot.mediabox.width)
     page.merge_transformed_page(
-        source,
+        plot,
         Transformation().scale(scale).translate(x, y),
         over=True,
     )
 
 
-def write_example_figure() -> Path:
-    output_path = OUTPUT_DIR / "Supplemental_Figure_SVbyEye_orientation_examples.pdf"
+def write_example_figure(by_id: dict[str, Path]) -> Path:
+    output = OUTPUT_DIR / "Supplemental_Figure_SVbyEye_orientation_examples.pdf"
     buffer = io.BytesIO()
-    pdf = canvas.Canvas(buffer, pagesize=(PAGE_WIDTH, 950), pageCompression=1, invariant=1)
-    pdf.setFillColor(white)
-    pdf.rect(0, 0, PAGE_WIDTH, 950, fill=1, stroke=0)
-    pdf.save()
+    background = canvas.Canvas(buffer, pagesize=(1080, 950), pageCompression=1, invariant=1)
+    background.setFillColor(white)
+    background.rect(0, 0, 1080, 950, fill=1, stroke=0)
+    background.save()
     page = PdfReader(io.BytesIO(buffer.getvalue())).pages[0]
-    merge_source_on_page(page, VECTOR_SOURCE_DIR / VECTOR_SOURCES[EXAMPLE_IDS[0]], 35, 480, 1010)
-    merge_source_on_page(page, VECTOR_SOURCE_DIR / VECTOR_SOURCES[EXAMPLE_IDS[1]], 35, 18, 1010)
+    merge_plot(page, by_id[EXAMPLE_IDS[0]], 35, 480, 1010)
+    merge_plot(page, by_id[EXAMPLE_IDS[1]], 35, 18, 1010)
 
     writer = PdfWriter()
     writer.add_page(page)
-    writer.add_metadata({
-        "/Title": "Representative SVbyEye orientation-polarization alignments",
-        "/Subject": "8p23.1 direct and 15q11.2 inverted examples",
-    })
-    with output_path.open("wb") as handle:
+    writer.add_metadata(
+        {
+            "/Title": "Examples of inversion alignments to chimpanzee used for polarization",
+            "/Subject": "8p23.1 and 15q11.2 SVbyEye alignments",
+        }
+    )
+    with output.open("wb") as handle:
         writer.write(handle)
-    document = pymupdf.open(output_path)
+
+    document = pymupdf.open(output)
     pixmap = document[0].get_pixmap(matrix=pymupdf.Matrix(2.5, 2.5), alpha=False)
     pixmap.save(OUTPUT_DIR / "Supplemental_Figure_SVbyEye_orientation_examples.png")
     document.close()
-    return output_path
+    return output
 
 
-def write_legend() -> Path:
-    path = OUTPUT_DIR / "Supplemental_Figure_SVbyEye_orientation_examples_legend.txt"
-    path.write_text(
-        "Figure S[X]. Representative chimpanzee-versus-GRCh38 alignments used for "
-        "orientation polarization. Dashed red boxes mark the human inversion boundaries. "
-        "(A) At 8p23.1, the chimpanzee alignment has the same orientation inside the "
-        "interval and in the flanks, supporting the GRCh38 orientation as ancestral. "
-        "(B) At 15q11.2, alignment orientation reverses within the inversion while the "
-        "flanks retain the same orientation, supporting the GRCh38 orientation as "
-        "derived. Ribbon color denotes alignment strand.\n"
+def write_legends() -> None:
+    (OUTPUT_DIR / "Supplemental_Figure_SVbyEye_orientation_examples_legend.txt").write_text(
+        "Figure S[X]. Examples of inversion alignments to chimpanzee used for polarization. "
+        "SVbyEye shows alignments between GRCh38 (top) and panTro6 (bottom) across "
+        "(A) the recurrent 8p23.1 inversion and (B) the single-event 15q11.2 inversion. "
+        "Green and blue indicate forward and reverse alignments, respectively. Red dashed "
+        "boxes indicate the inversion coordinates in GRCh38. The alignment in (A) indicates "
+        "that the inversion is ancestral, whereas the alignment in (B) indicates that the "
+        "inversion is derived.\n"
     )
-    return path
-
-
-def write_audit_legend() -> Path:
-    path = OUTPUT_DIR / "Supplemental_File_SVbyEye_all_292_loci_legend.txt"
-    path.write_text(
-        "Supplemental File S[X]. Chimpanzee-versus-GRCh38 alignments used for "
-        "orientation polarization at all 292 reviewed inversion loci. Loci are ordered "
-        "by genomic position. Each page reports the inversion coordinates, recurrence "
-        "classification, inverted allele frequency, and manual orientation call. Calls "
-        "were based on alignment orientation within the inversion relative to both "
-        "flanks: ancestral indicates that the GRCh38 orientation matches chimpanzee, "
-        "derived indicates that it is reversed relative to chimpanzee, and not callable "
-        "indicates insufficient or ambiguous alignment. A uniformly reversed chimpanzee "
-        "contig across both the locus and its flanks was not interpreted as evidence that "
-        "the human orientation is derived. Contents pages and the accompanying TSV provide "
-        "the complete locus-to-page audit trail. Four redrawn examples are retained as "
-        "vector graphics; all other pages retain the complete native resolution of the "
-        "original review image.\n"
+    (OUTPUT_DIR / "Supplemental_File_SVbyEye_consensus_93_loci_legend.txt").write_text(
+        "SVbyEye alignments between GRCh38 (top) and panTro6 (bottom) across the 93 "
+        "consensus-classified inversions. Green and blue indicate forward and reverse "
+        "alignments, respectively. Red dashed boxes indicate the inversion coordinates "
+        "in GRCh38. Loci are ordered by genomic position.\n"
     )
-    return path
 
 
-def draw_cover(pdf: canvas.Canvas, records: list[dict]) -> None:
-    pdf.setFillColor(HexColor("#15324A"))
-    pdf.rect(0, 0, PAGE_WIDTH, PAGE_HEIGHT, fill=1, stroke=0)
-    pdf.setFillColor(white)
-    pdf.setFont("Helvetica-Bold", 30)
-    pdf.drawString(62, 416, "SVbyEye orientation-polarization audit")
-    pdf.setFont("Helvetica", 16)
-    pdf.drawString(62, 382, "Chimpanzee (panTro6) versus GRCh38 alignments for 292 inversion loci")
-
-    counts = {call: sum(r["classification"] == call for r in records) for call in CALL_LABELS}
-    pdf.setFont("Helvetica-Bold", 17)
-    pdf.drawString(62, 304, f"{counts['direct']} ancestral   |   {counts['inverted']} derived   |   {counts['na']} not callable")
-    pdf.setFont("Helvetica", 12)
-    text = pdf.beginText(62, 254)
-    text.setLeading(19)
-    text.textLine("Each locus page records the inversion coordinates, recurrence classification,")
-    text.textLine("inverted allele frequency, and manual chimpanzee-orientation call.")
-    text.textLine("The contents pages provide the complete locus-to-page audit trail.")
-    text.textLine("Four redrawn examples are vector graphics; all remaining plots retain the")
-    text.textLine("complete native resolution of the original review image.")
-    pdf.drawText(text)
-    pdf.setFont("Helvetica", 9)
-    pdf.drawString(62, 48, "Generated from the reviewed callset and source plots in the ferromic analysis repository.")
-
-
-def draw_index_page(pdf: canvas.Canvas, rows: list[dict], index_number: int) -> None:
-    pdf.setFillColor(HexColor("#15324A"))
-    pdf.setFont("Helvetica-Bold", 18)
-    pdf.drawString(MARGIN, 508, f"Contents ({index_number})")
-    headers = (("Locus", 32), ("Coordinates", 310), ("Recurrence", 548), ("Chimp call", 700), ("Page", 990))
-    pdf.setFont("Helvetica-Bold", 9)
-    for label, x in headers:
-        pdf.drawString(x, 482, label)
-    pdf.setStrokeColor(HexColor("#AAB7C0"))
-    pdf.line(MARGIN, 475, PAGE_WIDTH - MARGIN, 475)
-
-    y = 458
-    pdf.setFont("Helvetica", 8.1)
-    for row in rows:
-        if row["classification"] == "direct":
-            call = "Ancestral"
-        elif row["classification"] == "inverted":
-            call = "Derived"
-        else:
-            call = "Not callable"
-        pdf.setFillColor(HexColor("#263842"))
-        pdf.drawString(32, y, row["inv_id"])
-        pdf.drawString(310, y, row["region"])
-        pdf.drawString(548, y, row["recurrence"])
-        pdf.drawString(700, y, call)
-        pdf.drawRightString(1038, y, str(row["combined_page"]))
-        y -= 14.1
-
-
-def write_front_matter(records: list[dict], index_rows: list[dict]) -> bytes:
-    buffer = io.BytesIO()
-    pdf = canvas.Canvas(buffer, pagesize=(PAGE_WIDTH, PAGE_HEIGHT), pageCompression=1, invariant=1)
-    draw_cover(pdf, records)
-    pdf.showPage()
-    for page_number in range(math.ceil(len(index_rows) / INDEX_ROWS_PER_PAGE)):
-        start = page_number * INDEX_ROWS_PER_PAGE
-        draw_index_page(pdf, index_rows[start:start + INDEX_ROWS_PER_PAGE], page_number + 1)
-        pdf.showPage()
-    pdf.save()
-    return buffer.getvalue()
-
-
-def write_index(index_rows: list[dict]) -> Path:
-    path = OUTPUT_DIR / "svbyeye_locus_index.tsv"
+def write_index(
+    rows: list[dict[str, str]], properties: dict[str, str], calls: dict[str, str]
+) -> Path:
+    output = OUTPUT_DIR / "svbyeye_locus_index.tsv"
     fields = (
+        "page",
         "inversion_id",
-        "coordinates",
-        "size_bp",
+        "chromosome",
+        "start",
+        "end",
+        "cytoband",
         "recurrence_class",
-        "inverted_allele_frequency",
         "chimpanzee_orientation_call",
-        "combined_pdf_page",
-        "source_type",
-        "source_file",
-        "exclusion_reason",
+        "source_pdf",
     )
-    with path.open("w", newline="") as handle:
+    with output.open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields, delimiter="\t")
         writer.writeheader()
-        for row in index_rows:
-            writer.writerow({
-                "inversion_id": row["inv_id"],
-                "coordinates": row["region"],
-                "size_bp": row["size_bp"],
-                "recurrence_class": row["recurrence"],
-                "inverted_allele_frequency": row["inverted_af"],
-                "chimpanzee_orientation_call": row["classification"],
-                "combined_pdf_page": row["combined_page"],
-                "source_type": row["source_type"],
-                "source_file": row["source_file"],
-                "exclusion_reason": (
-                    "Not callable; specific reason was not recorded in the manual-review dataset"
-                    if row["classification"] == "na" else ""
-                ),
-            })
-    return path
-
-
-def write_audit_pdf(records: list[dict], index_rows: list[dict]) -> Path:
-    output_path = OUTPUT_DIR / "Supplemental_File_SVbyEye_all_292_loci.pdf"
-    writer = PdfWriter()
-    for page in PdfReader(io.BytesIO(write_front_matter(records, index_rows))).pages:
-        writer.add_page(page)
-    for record in records:
-        locus_path = PER_LOCUS_DIR / f"{record['inv_id']}.pdf"
-        writer.add_page(PdfReader(str(locus_path)).pages[0])
-    writer.add_metadata({
-        "/Title": "SVbyEye orientation-polarization audit for 292 inversion loci",
-        "/Subject": "Complete chimpanzee-versus-GRCh38 alignment audit",
-    })
-    with output_path.open("wb") as handle:
-        writer.write(handle)
-    return output_path
-
-
-def native_figure_page(image_path: Path):
-    with Image.open(image_path) as image:
-        width, height = image.size
-    buffer = io.BytesIO()
-    pdf = canvas.Canvas(buffer, pagesize=(width, height), pageCompression=1, invariant=1)
-    pdf.drawImage(
-        ImageReader(str(image_path)),
-        0,
-        0,
-        width=width,
-        height=height,
-        preserveAspectRatio=True,
-        mask="auto",
-    )
-    pdf.save()
-    return PdfReader(io.BytesIO(buffer.getvalue())).pages[0]
-
-
-def write_consensus_pdf(records: list[dict], properties: dict[str, dict[str, object]]) -> Path:
-    consensus_records = [
-        record for record in records
-        if properties[record["inv_id"]]["consensus_recurrence"]
-    ]
-    if len(consensus_records) != 93:
-        raise RuntimeError(
-            f"Expected 93 loci with consensus recurrence calls, found {len(consensus_records)}"
-        )
-
-    output_path = OUTPUT_DIR / "Supplemental_File_SVbyEye_consensus_93_loci.pdf"
-    writer = PdfWriter()
-    for record in consensus_records:
-        vector_name = VECTOR_SOURCES.get(record["inv_id"])
-        if vector_name:
-            page = PdfReader(str(VECTOR_SOURCE_DIR / vector_name)).pages[0]
-        else:
-            page = native_figure_page(IMAGE_DIR / record["image_file"])
-        writer.add_page(page)
-    writer.add_metadata({
-        "/Title": "SVbyEye figures for 93 inversions with consensus recurrence calls",
-        "/Subject": "Chimpanzee-versus-GRCh38 alignment figures",
-    })
-    with output_path.open("wb") as handle:
-        writer.write(handle)
-    return output_path
+        for page, row in enumerate(rows, start=1):
+            writer.writerow(
+                {
+                    "page": page,
+                    "inversion_id": row["inv_id"],
+                    "chromosome": row["chrom"],
+                    "start": row["inv_start"],
+                    "end": row["inv_end"],
+                    "cytoband": row["label"],
+                    "recurrence_class": properties[row["inv_id"]],
+                    "chimpanzee_orientation_call": calls[row["inv_id"]],
+                    "source_pdf": f"plots/{row['inv_id']}.pdf",
+                }
+            )
+    return output
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--source-dir", type=Path, default=DEFAULT_SOURCE_DIR)
+    args = parser.parse_args()
+
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    PER_LOCUS_DIR.mkdir(parents=True, exist_ok=True)
-    VECTOR_DIR.mkdir(parents=True, exist_ok=True)
-
-    records = load_records()
-    properties = load_properties()
-    missing_properties = [record["inv_id"] for record in records if record["inv_id"] not in properties]
-    if missing_properties:
-        raise RuntimeError(f"Missing inversion properties: {missing_properties[:5]}")
-
-    write_vector_copies()
-    index_page_count = math.ceil(len(records) / INDEX_ROWS_PER_PAGE)
-    first_locus_page = 2 + index_page_count
-    index_rows = []
-    for offset, record in enumerate(records):
-        metadata = properties[record["inv_id"]]
-        source_type = write_locus_pdf(record, metadata)
-        if (offset + 1) % 25 == 0 or offset + 1 == len(records):
-            print(f"Built {offset + 1}/{len(records)} per-locus PDFs")
-        index_rows.append({
-            **record,
-            **metadata,
-            "combined_page": first_locus_page + offset,
-            "source_type": source_type,
-            "source_file": (
-                VECTOR_SOURCES[record["inv_id"]]
-                if record["inv_id"] in VECTOR_SOURCES else record["image_file"]
-            ),
-        })
-
-    example_path = write_example_figure()
-    legend_path = write_legend()
-    audit_legend_path = write_audit_legend()
-    index_path = write_index(index_rows)
-    audit_path = write_audit_pdf(records, index_rows)
-    consensus_path = write_consensus_pdf(records, properties)
-    print(f"Example figure: {example_path}")
-    print(f"Legend: {legend_path}")
-    print(f"Audit legend: {audit_legend_path}")
-    print(f"Index: {index_path}")
-    print(f"Audit supplement: {audit_path}")
-    print(f"Consensus supplement: {consensus_path}")
+    rows = load_source_manifest(args.source_dir)
+    properties = load_consensus_properties()
+    calls = load_orientation_calls()
+    if {row["inv_id"] for row in rows} != set(properties):
+        raise RuntimeError("Source bundle does not match the 93 consensus-classified loci")
+    pages, page_size = source_pages(args.source_dir, rows)
+    by_id = {row["inv_id"]: path for row, path in pages}
+    write_example_figure(by_id)
+    write_consensus_pdf(pages)
+    write_legends()
+    write_index(rows, properties, calls)
+    print(f"Built 93 canonical boxed SVbyEye pages at fixed size {page_size}")
 
 
 if __name__ == "__main__":

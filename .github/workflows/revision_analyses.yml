@@ -17,6 +17,9 @@ on:
       - '.github/workflows/revision_analyses.yml'
       - 'reproducibility/manuscript_sources.json'
       - 'scripts/fetch_manuscript_sources.py'
+      - 'svbyeye/bin/plot_chimp_hires.R'
+      - 'svbyeye/bin/prepare_chimp_consensus_targets.py'
+      - 'svbyeye/bin/render_chimp_consensus.py'
       - 'stats/**'
       - 'cds/pipeline_lib.py'
       - 'data/inv_properties.tsv'
@@ -28,12 +31,14 @@ on:
       - 'data/per_site_diversity_output.falsta.gz'
       - 'data/per_site_fst_output.falsta.gz'
       - 'data/chimp_alignment_responses.json'
-      - 'web/figures-site/public/inversions/img/**'
   pull_request:
     paths:
       - '.github/workflows/revision_analyses.yml'
       - 'reproducibility/manuscript_sources.json'
       - 'scripts/fetch_manuscript_sources.py'
+      - 'svbyeye/bin/plot_chimp_hires.R'
+      - 'svbyeye/bin/prepare_chimp_consensus_targets.py'
+      - 'svbyeye/bin/render_chimp_consensus.py'
       - 'stats/**'
 
 concurrency:
@@ -62,15 +67,24 @@ jobs:
 
       - name: Fetch and verify pinned SVbyEye plots
         run: |
+          set -euo pipefail
           python scripts/fetch_manuscript_sources.py \
-            --source svbyeye_chr8_vector \
-            --source svbyeye_chr12_vector \
-            --source svbyeye_chr15_vector \
-            --source svbyeye_chr17_vector \
-            --output-dir .svbyeye-preview
+            --source svbyeye_consensus_93_boxed_bundle \
+            --output-dir "$RUNNER_TEMP/svbyeye"
+          mkdir -p .svbyeye-consensus-93
+          tar -xzf "$RUNNER_TEMP/svbyeye/svbyeye-consensus-93-boxed.tar.gz" \
+            --no-same-owner --no-same-permissions \
+            -C .svbyeye-consensus-93
+          test -s .svbyeye-consensus-93/manifest.tsv
+          test -s .svbyeye-consensus-93/provenance.json
+          test "$(find .svbyeye-consensus-93/plots -maxdepth 1 -type f -name '*.pdf' | wc -l)" -eq 93
 
       - name: Build and verify SVbyEye supplement
         run: |
+          set -euo pipefail
+          rm -f -- \
+            output/pdf/svbyeye/Supplemental_File_SVbyEye_all_292_loci.pdf \
+            output/pdf/svbyeye/Supplemental_File_SVbyEye_all_292_loci_legend.txt
           python stats/svbyeye_supplement.py
           python - <<'PY'
           from pathlib import Path
@@ -79,15 +93,20 @@ jobs:
 
           output = Path("output/pdf/svbyeye")
           example = output / "Supplemental_Figure_SVbyEye_orientation_examples.pdf"
-          supplement = output / "Supplemental_File_SVbyEye_all_292_loci.pdf"
           consensus = output / "Supplemental_File_SVbyEye_consensus_93_loci.pdf"
           image = output / "Supplemental_Figure_SVbyEye_orientation_examples.png"
           index = output / "svbyeye_locus_index.tsv"
 
           assert len(PdfReader(example).pages) == 1
-          assert len(PdfReader(supplement).pages) == 303
-          assert len(PdfReader(consensus).pages) == 93
-          assert sum(1 for _ in index.open()) == 293
+          pages = PdfReader(consensus).pages
+          assert len(pages) == 93
+          page_sizes = {
+              (float(page.mediabox.width), float(page.mediabox.height))
+              for page in pages
+          }
+          assert len(page_sizes) == 1, f"mixed SVbyEye page sizes: {page_sizes}"
+          print(f"canonical SVbyEye PDF page size (points): {next(iter(page_sizes))}")
+          assert sum(1 for _ in index.open()) == 94
           with Image.open(image) as rendered:
               assert rendered.size == (2700, 2375)
           PY
@@ -105,22 +124,24 @@ jobs:
             output/pdf/svbyeye/Supplemental_Figure_SVbyEye_orientation_examples.pdf
             output/pdf/svbyeye/Supplemental_Figure_SVbyEye_orientation_examples.png
             output/pdf/svbyeye/Supplemental_Figure_SVbyEye_orientation_examples_legend.txt
-            output/pdf/svbyeye/Supplemental_File_SVbyEye_all_292_loci.pdf
             output/pdf/svbyeye/Supplemental_File_SVbyEye_consensus_93_loci.pdf
-            output/pdf/svbyeye/Supplemental_File_SVbyEye_all_292_loci_legend.txt
+            output/pdf/svbyeye/Supplemental_File_SVbyEye_consensus_93_loci_legend.txt
             output/pdf/svbyeye/svbyeye_locus_index.tsv
           )
           for f in "${files[@]}"; do
             test -f "$f"
             git add -f -- "$f"
           done
+          git rm -f --ignore-unmatch -- \
+            output/pdf/svbyeye/Supplemental_File_SVbyEye_all_292_loci.pdf \
+            output/pdf/svbyeye/Supplemental_File_SVbyEye_all_292_loci_legend.txt
 
           if git diff --staged --quiet; then
             echo "SVbyEye supplement is current."
             exit 0
           fi
 
-          git commit -m "Regenerate SVbyEye supplement [skip ci]"
+          git commit -m "Regenerate SVbyEye supplement"
           git pull https://${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git main \
             --rebase --autostash --strategy=recursive -X ours
 
@@ -145,9 +166,8 @@ jobs:
             output/pdf/svbyeye/Supplemental_Figure_SVbyEye_orientation_examples.pdf
             output/pdf/svbyeye/Supplemental_Figure_SVbyEye_orientation_examples.png
             output/pdf/svbyeye/Supplemental_Figure_SVbyEye_orientation_examples_legend.txt
-            output/pdf/svbyeye/Supplemental_File_SVbyEye_all_292_loci.pdf
             output/pdf/svbyeye/Supplemental_File_SVbyEye_consensus_93_loci.pdf
-            output/pdf/svbyeye/Supplemental_File_SVbyEye_all_292_loci_legend.txt
+            output/pdf/svbyeye/Supplemental_File_SVbyEye_consensus_93_loci_legend.txt
             output/pdf/svbyeye/svbyeye_locus_index.tsv
           if-no-files-found: error
 

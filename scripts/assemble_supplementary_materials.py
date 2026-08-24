@@ -4,7 +4,7 @@
 The source DOCX is never written. Existing figure blocks are cloned from it,
 revision figures are inserted using its image and caption formatting, and the
 93 consensus-locus GRCh38-versus-panTro6 SVbyEye plots are appended as a
-landscape appendix rather than promoted to numbered supplementary figures.
+portrait appendix rather than promoted to numbered supplementary figures.
 """
 
 from __future__ import annotations
@@ -25,7 +25,6 @@ from zipfile import ZIP_DEFLATED, ZipFile
 import pymupdf
 from PIL import Image
 from docx import Document
-from docx.enum.section import WD_ORIENT, WD_SECTION
 from docx.oxml import OxmlElement
 from docx.shared import Inches
 
@@ -273,12 +272,12 @@ def consensus_loci() -> list[dict[str, str]]:
     return selected
 
 
-def render_pdf_page_jpeg(page, target_width: int = 1800) -> tuple[bytes, int, int]:
+def render_pdf_page_png(page, target_width: int = 2400) -> tuple[bytes, int, int]:
     scale = target_width / page.rect.width
     pixmap = page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), alpha=False)
     image = Image.frombytes("RGB", (pixmap.width, pixmap.height), pixmap.samples)
     output = io.BytesIO()
-    image.save(output, format="JPEG", quality=95, subsampling=0, optimize=True)
+    image.save(output, format="PNG", optimize=True)
     return output.getvalue(), image.width, image.height
 
 
@@ -299,21 +298,7 @@ def append_svbyeye(document, pdf_path: Path, image_template, caption_template, h
             f"SVbyEye PDF has {source.page_count} pages; expected {len(loci)}"
         )
 
-    original = document.sections[-1]
-    portrait_width = original.page_width
-    portrait_height = original.page_height
-    section = document.add_section(WD_SECTION.NEW_PAGE)
-    section.orientation = WD_ORIENT.LANDSCAPE
-    section.page_width = portrait_height
-    section.page_height = portrait_width
-    section.top_margin = original.top_margin
-    section.bottom_margin = original.bottom_margin
-    section.left_margin = original.left_margin
-    section.right_margin = original.right_margin
-    section.header_distance = original.header_distance
-    section.footer_distance = original.footer_distance
-
-    add_caption(
+    appendix_heading = add_caption(
         document,
         caption_template,
         heading_run,
@@ -321,16 +306,26 @@ def append_svbyeye(document, pdf_path: Path, image_template, caption_template, h
         SVBYEYE_APPENDIX_TITLE,
         "Chimpanzee (panTro6) versus human GRCh38 alignments used for orientation polarization.",
     )
+    set_page_break_before(appendix_heading._p)
 
+    expected_pixels = None
     for index, (page, locus) in enumerate(zip(source, loci), start=1):
-        payload, width_px, height_px = render_pdf_page_jpeg(page)
-        scale = min(9.0 / width_px, 5.45 / height_px)
+        payload, width_px, height_px = render_pdf_page_png(page)
+        pixels = (width_px, height_px)
+        if expected_pixels is None:
+            expected_pixels = pixels
+        elif pixels != expected_pixels:
+            raise RuntimeError(
+                f"SVbyEye page {index} rendered at {pixels}; expected {expected_pixels}"
+            )
+        width_inches = 6.5
+        height_inches = width_inches * height_px / width_px
         image_paragraph = add_picture_bytes(
             document,
             image_template,
             payload,
-            width_px * scale,
-            height_px * scale,
+            width_inches,
+            height_inches,
         )
         if index > 1:
             set_page_break_before(image_paragraph._p)
