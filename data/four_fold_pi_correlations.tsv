@@ -9,6 +9,6 @@ recurrence_classified	wholeLocus	wholeCDS	whole-locus vs whole-CDS orientation d
 recurrence_classified	wholeLocus	wholeCDS	whole-locus vs whole-CDS orientation difference: loci agreeing in sign (12 of 22)	22	sign_agreement_fraction	0.545455	0.831812
 recurrence_classified	wholeLocus	fourfold	wholeLocus vs fourfold pi levels across locus-orientation observations	52	spearman_rho_levels	0.578711	6.99206e-06
 recurrence_classified	wholeCDS	fourfold	wholeCDS vs fourfold pi levels across locus-orientation observations	52	spearman_rho_levels	0.712258	3.19293e-09
-recurrence_classified	fourfold_half_A	fourfold_half_B	split-half self-correlation of the 4-fold orientation difference (95% range -0.346-0.405, 2000 random splits)	26	split_half_r_hh	0.023659
-recurrence_classified	fourfold_half_A	fourfold_half_B	attainable correlation with a perfectly-agreeing measure (Spearman-Brown sqrt of full-length reliability) (95% range 0.000-0.760, 2000 random splits)	26	split_half_ceiling	0.214998
-recurrence_classified	fourfold_half_A	fourfold_half_B	half-length 4-fold orientation difference vs whole-locus (95% range 0.133-0.647, 2000 random splits)	26	split_half_r_half_whole	0.412528
+recurrence_classified	fourfold_half_A	fourfold_half_B	split-half self-correlation of the 4-fold orientation difference (95% range -0.346-0.405, 2000 random splits)	26	split_half_r_hh	0.023659	
+recurrence_classified	fourfold_half_A	fourfold_half_B	attainable correlation with a perfectly-agreeing measure (Spearman-Brown sqrt of full-length reliability) (95% range 0.000-0.760, 2000 random splits)	26	split_half_ceiling	0.214998	
+recurrence_classified	fourfold_half_A	fourfold_half_B	half-length 4-fold orientation difference vs whole-locus (95% range 0.133-0.647, 2000 random splits)	26	split_half_r_half_whole	0.412528	
