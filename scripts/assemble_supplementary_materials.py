@@ -4,7 +4,8 @@
 The source DOCX is never written. Existing figure blocks are cloned from it,
 revision figures are inserted using its image and caption formatting, and the
 93 consensus-locus GRCh38-versus-panTro6 SVbyEye plots are appended as a
-portrait appendix rather than promoted to numbered supplementary figures.
+two-plots-per-page portrait appendix rather than promoted to numbered
+supplementary figures.
 """
 
 from __future__ import annotations
@@ -48,6 +49,8 @@ CALL_LABELS = {
     "inverted": "derived",
     "na": "not callable",
 }
+SVBYEYE_PLOTS_PER_PAGE = 2
+SVBYEYE_FRAME_WIDTH_IN = 6.5
 
 IMMUTABLE_TEMPLATE_PARTS = (
     "word/styles.xml",
@@ -272,9 +275,15 @@ def consensus_loci() -> list[dict[str, str]]:
     return selected
 
 
-def render_pdf_page_png(page, target_width: int = 2400) -> tuple[bytes, int, int]:
-    scale = target_width / page.rect.width
-    pixmap = page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), alpha=False)
+def render_pdf_region_png(
+    page, clip: pymupdf.Rect, target_width: int = 2400
+) -> tuple[bytes, int, int]:
+    scale = target_width / clip.width
+    pixmap = page.get_pixmap(
+        matrix=pymupdf.Matrix(scale, scale),
+        clip=clip,
+        alpha=False,
+    )
     image = Image.frombytes("RGB", (pixmap.width, pixmap.height), pixmap.samples)
     output = io.BytesIO()
     image.save(output, format="PNG", optimize=True)
@@ -293,9 +302,11 @@ def insert_front_matter_appendix_line(document, figure_range_paragraph, referenc
 def append_svbyeye(document, pdf_path: Path, image_template, caption_template, heading_run, body_run):
     source = pymupdf.open(pdf_path)
     loci = consensus_loci()
-    if source.page_count != len(loci):
+    expected_pages = (len(loci) + SVBYEYE_PLOTS_PER_PAGE - 1) // SVBYEYE_PLOTS_PER_PAGE
+    if source.page_count != expected_pages:
         raise RuntimeError(
-            f"SVbyEye PDF has {source.page_count} pages; expected {len(loci)}"
+            f"SVbyEye PDF has {source.page_count} pages; expected {expected_pages} "
+            "with two plots per page"
         )
 
     appendix_heading = add_caption(
@@ -308,9 +319,29 @@ def append_svbyeye(document, pdf_path: Path, image_template, caption_template, h
     )
     set_page_break_before(appendix_heading._p)
 
+    expected_page_size = None
     expected_pixels = None
-    for index, (page, locus) in enumerate(zip(source, loci), start=1):
-        payload, width_px, height_px = render_pdf_page_png(page)
+    for index, locus in enumerate(loci, start=1):
+        page = source[(index - 1) // SVBYEYE_PLOTS_PER_PAGE]
+        page_size = (page.rect.width, page.rect.height)
+        if expected_page_size is None:
+            expected_page_size = page_size
+            if page.rect.height <= page.rect.width / 2:
+                raise RuntimeError(f"Unexpected paired SVbyEye page geometry: {page_size}")
+        elif page_size != expected_page_size:
+            raise RuntimeError(
+                f"SVbyEye page size changed at alignment {index}: "
+                f"expected {expected_page_size}, found {page_size}"
+            )
+        half_height = page.rect.height / SVBYEYE_PLOTS_PER_PAGE
+        position = (index - 1) % SVBYEYE_PLOTS_PER_PAGE
+        clip = pymupdf.Rect(
+            0,
+            position * half_height,
+            page.rect.width,
+            (position + 1) * half_height,
+        )
+        payload, width_px, height_px = render_pdf_region_png(page, clip)
         pixels = (width_px, height_px)
         if expected_pixels is None:
             expected_pixels = pixels
@@ -318,16 +349,15 @@ def append_svbyeye(document, pdf_path: Path, image_template, caption_template, h
             raise RuntimeError(
                 f"SVbyEye page {index} rendered at {pixels}; expected {expected_pixels}"
             )
-        width_inches = 6.5
-        height_inches = width_inches * height_px / width_px
+        height_inches = SVBYEYE_FRAME_WIDTH_IN * height_px / width_px
         image_paragraph = add_picture_bytes(
             document,
             image_template,
             payload,
-            width_inches,
+            SVBYEYE_FRAME_WIDTH_IN,
             height_inches,
         )
-        if index > 1:
+        if index > 1 and index % SVBYEYE_PLOTS_PER_PAGE == 1:
             set_page_break_before(image_paragraph._p)
         call = CALL_LABELS[locus["classification"]]
         heading = (

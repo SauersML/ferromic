@@ -99,13 +99,20 @@ jobs:
 
           assert len(PdfReader(example).pages) == 1
           pages = PdfReader(consensus).pages
-          assert len(pages) == 93
+          assert len(pages) == 47
           page_sizes = {
               (float(page.mediabox.width), float(page.mediabox.height))
               for page in pages
           }
           assert len(page_sizes) == 1, f"mixed SVbyEye page sizes: {page_sizes}"
-          print(f"canonical SVbyEye PDF page size (points): {next(iter(page_sizes))}")
+          source_plot = next(Path('.svbyeye-consensus-93/plots').glob('*.pdf'))
+          source_page = PdfReader(source_plot).pages[0]
+          expected_size = (
+              float(source_page.mediabox.width),
+              2 * float(source_page.mediabox.height),
+          )
+          assert page_sizes == {expected_size}, (page_sizes, expected_size)
+          print(f"paired SVbyEye PDF page size (points): {expected_size}")
           assert sum(1 for _ in index.open()) == 94
           with Image.open(image) as rendered:
               assert rendered.size == (2700, 2375)

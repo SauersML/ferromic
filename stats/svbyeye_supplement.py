@@ -25,6 +25,7 @@ EXAMPLE_IDS = (
     "chr8-7301025-INV-5297356",
     "chr15-23345460-INV-5044410",
 )
+PLOTS_PER_PAGE = 2
 
 
 def sha256(path: Path) -> str:
@@ -114,15 +115,32 @@ def source_pages(
     return result, expected_size
 
 
-def write_consensus_pdf(pages: list[tuple[dict[str, str], Path]]) -> Path:
+def write_consensus_pdf(
+    pages: list[tuple[dict[str, str], Path]], source_size: tuple[float, float]
+) -> Path:
     output = OUTPUT_DIR / "Supplemental_File_SVbyEye_consensus_93_loci.pdf"
+    source_width, source_height = source_size
     writer = PdfWriter()
-    for _, path in pages:
-        writer.add_page(PdfReader(str(path)).pages[0])
+    for offset in range(0, len(pages), PLOTS_PER_PAGE):
+        combined = writer.add_blank_page(
+            width=source_width,
+            height=source_height * PLOTS_PER_PAGE,
+        )
+        for position, (_, path) in enumerate(pages[offset : offset + PLOTS_PER_PAGE]):
+            plot = PdfReader(str(path)).pages[0]
+            y = source_height if position == 0 else 0
+            combined.merge_transformed_page(
+                plot,
+                Transformation().translate(0, y),
+                over=True,
+            )
     writer.add_metadata(
         {
             "/Title": "SVbyEye alignments for 93 consensus-classified inversions",
-            "/Subject": "Canonical panTro6-versus-GRCh38 boxed inversion plots",
+            "/Subject": (
+                "Canonical panTro6-versus-GRCh38 boxed inversion plots, "
+                "two full-width plots per page"
+            ),
         }
     )
     with output.open("wb") as handle:
@@ -183,7 +201,8 @@ def write_legends() -> None:
         "SVbyEye alignments between GRCh38 (top) and panTro6 (bottom) across the 93 "
         "consensus-classified inversions. Green and blue indicate forward and reverse "
         "alignments, respectively. Red dashed boxes indicate the inversion coordinates "
-        "in GRCh38. Loci are ordered by genomic position.\n"
+        "in GRCh38. Two full-width loci are shown per page, ordered top-to-bottom "
+        "and then by genomic position.\n"
     )
 
 
@@ -193,6 +212,7 @@ def write_index(
     output = OUTPUT_DIR / "svbyeye_locus_index.tsv"
     fields = (
         "page",
+        "position_on_page",
         "inversion_id",
         "chromosome",
         "start",
@@ -203,12 +223,15 @@ def write_index(
         "source_pdf",
     )
     with output.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fields, delimiter="\t")
+        writer = csv.DictWriter(
+            handle, fieldnames=fields, delimiter="\t", lineterminator="\n"
+        )
         writer.writeheader()
-        for page, row in enumerate(rows, start=1):
+        for index, row in enumerate(rows):
             writer.writerow(
                 {
-                    "page": page,
+                    "page": index // PLOTS_PER_PAGE + 1,
+                    "position_on_page": "top" if index % PLOTS_PER_PAGE == 0 else "bottom",
                     "inversion_id": row["inv_id"],
                     "chromosome": row["chrom"],
                     "start": row["inv_start"],
@@ -236,10 +259,15 @@ def main() -> None:
     pages, page_size = source_pages(args.source_dir, rows)
     by_id = {row["inv_id"]: path for row, path in pages}
     write_example_figure(by_id)
-    write_consensus_pdf(pages)
+    consensus = write_consensus_pdf(pages, page_size)
     write_legends()
     write_index(rows, properties, calls)
-    print(f"Built 93 canonical boxed SVbyEye pages at fixed size {page_size}")
+    output_pages = len(PdfReader(str(consensus)).pages)
+    output_size = (page_size[0], page_size[1] * PLOTS_PER_PAGE)
+    print(
+        f"Built 93 canonical boxed SVbyEye plots on {output_pages} pages "
+        f"at fixed size {output_size} (two full-width plots per page)"
+    )
 
 
 if __name__ == "__main__":
