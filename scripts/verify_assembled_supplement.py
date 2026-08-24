@@ -11,7 +11,6 @@ from pathlib import Path
 from zipfile import ZipFile
 
 from docx import Document
-from docx.enum.section import WD_ORIENT
 
 
 REPO = Path(__file__).resolve().parents[1]
@@ -116,16 +115,47 @@ def verify(template: Path, assembled: Path) -> None:
             "Standalone page-break paragraphs can create blank rendered pages; "
             f"found {len(standalone_page_breaks)}"
         )
-    if len(document.sections) != 2:
-        raise RuntimeError(f"Expected portrait main section plus landscape appendix; found {len(document.sections)}")
-    if document.sections[0].orientation == WD_ORIENT.LANDSCAPE:
-        raise RuntimeError("Main supplementary-figure section is not portrait")
-    if document.sections[1].orientation != WD_ORIENT.LANDSCAPE:
-        raise RuntimeError("SVbyEye appendix section is not landscape")
+    if len(document.sections) != 1:
+        raise RuntimeError(
+            "The supplement must retain one original-format portrait section; "
+            f"found {len(document.sections)} sections"
+        )
+    template_document = Document(template)
+    expected_section = template_document.sections[0]
+    observed_section = document.sections[0]
+    page_geometry = (
+        "page_width",
+        "page_height",
+        "top_margin",
+        "bottom_margin",
+        "left_margin",
+        "right_margin",
+        "header_distance",
+        "footer_distance",
+    )
+    for attribute in page_geometry:
+        expected = getattr(expected_section, attribute)
+        observed = getattr(observed_section, attribute)
+        if observed != expected:
+            raise RuntimeError(
+                f"Original page geometry changed for {attribute}: "
+                f"expected {expected}, observed {observed}"
+            )
+
+    extents = document._element.body.xpath(".//w:drawing/wp:inline/wp:extent")
+    appendix_extents = [
+        (int(extent.get("cx")), int(extent.get("cy"))) for extent in extents[-93:]
+    ]
+    if len(appendix_extents) != 93 or len(set(appendix_extents)) != 1:
+        raise RuntimeError(
+            f"All 93 SVbyEye plots must have one fixed rendered size; found "
+            f"{sorted(set(appendix_extents))}"
+        )
 
     print(
         "Verified assembled supplement: S1-S21 ordered; response-only panel omitted; "
-        "93-caption SVbyEye appendix present; template formatting parts unchanged."
+        "93-caption fixed-size portrait SVbyEye appendix present; template formatting "
+        "parts and page geometry unchanged."
     )
 
 

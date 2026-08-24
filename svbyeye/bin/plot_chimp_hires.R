@@ -3,8 +3,8 @@
 # Publication-resolution human–chimpanzee alignment plot for one inversion.
 # Human (GRCh38) is always the upper target track. Chimpanzee (panTro6) is the
 # lower query track, reoriented when necessary so the predominant alignment in
-# the two flanks is forward. Breakpoint ticks are drawn only beside the human
-# track; they do not imply that an exact orthologous chimpanzee breakpoint exists.
+# the two flanks is forward. A shallow red box marks the inversion only on the
+# human track; it does not imply exact orthologous chimpanzee breakpoints.
 
 suppressPackageStartupMessages({
   library(SVbyEye)
@@ -12,10 +12,10 @@ suppressPackageStartupMessages({
 })
 
 args <- commandArgs(trailingOnly = TRUE)
-if (length(args) != 9) {
+if (length(args) != 8) {
   stop(
     "usage: plot_chimp_hires.R PAF OUT_PREFIX INV_ID CHROM INV_START ",
-    "INV_END REGION_OFFSET RECURRENCE LABEL"
+    "INV_END REGION_OFFSET LABEL"
   )
 }
 
@@ -26,8 +26,7 @@ chrom <- args[[4]]
 inv_start <- as.numeric(args[[5]])
 inv_end <- as.numeric(args[[6]])
 region_offset <- as.numeric(args[[7]])
-recurrence <- args[[8]]
-label <- args[[9]]
+label <- args[[8]]
 
 inv_length <- inv_end - inv_start
 if (!is.finite(inv_length) || inv_length <= 0) {
@@ -118,9 +117,8 @@ combined_support <- left_support + right_support
 left_vote <- dominant_strand(left_support)
 right_vote <- dominant_strand(right_support)
 combined_vote <- dominant_strand(combined_support)
-if (is.na(combined_vote)) {
-  stop("The selected chimpanzee sequence has no aligned bases in either flank")
-}
+interior_support <- strand_support(plot_paf, inv_start, inv_end)
+interior_vote <- dominant_strand(interior_support)
 
 left_rows <- plot_paf[
   overlap_length(plot_paf$t.start, plot_paf$t.end, window_start, inv_start) > 0,
@@ -143,7 +141,13 @@ right_gap <- if (nrow(right_rows) > 0) {
   Inf
 }
 
-if (!is.na(left_vote) && !is.na(right_vote) && left_vote == right_vote) {
+if (is.na(combined_vote)) {
+  if (is.na(interior_vote)) {
+    stop("The selected chimpanzee sequence has no alignment in the plotting window")
+  }
+  axis_vote <- interior_vote
+  axis_rule <- "interior alignment only; no aligned flank sequence"
+} else if (!is.na(left_vote) && !is.na(right_vote) && left_vote == right_vote) {
   axis_vote <- left_vote
   axis_rule <- "concordant left and right flanks"
 } else if (!is.na(left_vote) && !is.na(right_vote)) {

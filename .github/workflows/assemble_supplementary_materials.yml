@@ -12,6 +12,8 @@ on:
       - 'scripts/verify_assembled_supplement.py'
       - 'stats/supplementary_inventory.py'
       - 'stats/verify_supplementary_inventory.py'
+      - 'stats/svbyeye_supplement.py'
+      - 'svbyeye/bin/plot_chimp_hires.R'
       - 'stats/four_fold_pi.py'
       - 'stats/recurrence_sd_figure.py'
       - 'stats/divergence_da_dxy_by_type.py'
@@ -35,9 +37,17 @@ on:
   pull_request:
     paths:
       - '.github/workflows/assemble_supplementary_materials.yml'
+      - 'reproducibility/templates/INV_MS_SupplementaryMaterials_v3.8.final.docx'
+      - 'reproducibility/manuscript_sources.json'
+      - 'scripts/fetch_manuscript_sources.py'
       - 'scripts/assemble_supplementary_materials.py'
       - 'scripts/verify_assembled_supplement.py'
       - 'stats/supplementary_inventory.py'
+      - 'stats/verify_supplementary_inventory.py'
+      - 'stats/svbyeye_supplement.py'
+      - 'svbyeye/bin/plot_chimp_hires.R'
+      - 'data/inv_properties.tsv'
+      - 'data/chimp_alignment_responses.json'
 
 permissions:
   contents: read
@@ -68,7 +78,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install \
             python-docx==1.2.0 pymupdf==1.26.4 pillow==11.3.0 \
-            pypdf==5.9.0 numpy==2.2.6 pandas==2.3.3 scipy==1.15.3 \
+            pypdf==5.9.0 reportlab==4.4.3 numpy==2.2.6 pandas==2.3.3 scipy==1.15.3 \
             statsmodels==0.14.5 matplotlib==3.10.3
 
       - name: Install Word rendering stack and manuscript fonts
@@ -89,19 +99,32 @@ jobs:
           set -euo pipefail
           python scripts/fetch_manuscript_sources.py \
             --source supplementary_materials_template \
+            --source svbyeye_consensus_93_boxed_bundle \
             --output-dir "$RUNNER_TEMP/manuscript-sources"
+          mkdir -p .svbyeye-consensus-93
+          tar -xzf \
+            "$RUNNER_TEMP/manuscript-sources/svbyeye-consensus-93-boxed.tar.gz" \
+            --no-same-owner --no-same-permissions \
+            -C .svbyeye-consensus-93
+          test -s .svbyeye-consensus-93/manifest.tsv
+          test -s .svbyeye-consensus-93/provenance.json
+          test "$(find .svbyeye-consensus-93/plots -maxdepth 1 -type f -name '*.pdf' | wc -l)" -eq 93
           python stats/verify_supplementary_inventory.py \
             --write-tsv output/supplementary_materials/supplementary_inventory.tsv
 
       - name: Rebuild revision figure assets from their recorded tables
         run: |
           set -euo pipefail
+          rm -f -- \
+            output/pdf/svbyeye/Supplemental_File_SVbyEye_all_292_loci.pdf \
+            output/pdf/svbyeye/Supplemental_File_SVbyEye_all_292_loci_legend.txt
           (cd data && python ../stats/four_fold_pi.py --from-table)
           python stats/recurrence_sd_figure.py
           (cd data && python ../stats/divergence_da_dxy_by_type.py)
           python stats/figure2a_repolarized.py
           python stats/imputation_benchmark_figure.py
           python stats/phewas_within_ancestry_figures.py
+          python stats/svbyeye_supplement.py
 
       - name: Verify all 21 figure inputs and the 93-page alignment source
         run: |
@@ -124,7 +147,14 @@ jobs:
           source = Path(
               'output/pdf/svbyeye/Supplemental_File_SVbyEye_consensus_93_loci.pdf'
           )
-          assert len(PdfReader(source).pages) == 93
+          pages = PdfReader(source).pages
+          assert len(pages) == 93
+          page_sizes = {
+              (float(page.mediabox.width), float(page.mediabox.height))
+              for page in pages
+          }
+          assert len(page_sizes) == 1, f'mixed SVbyEye page sizes: {page_sizes}'
+          print(f'canonical SVbyEye PDF page size (points): {next(iter(page_sizes))}')
           PY
 
       - name: Assemble and structurally validate the new DOCX
@@ -159,6 +189,16 @@ jobs:
           pdf = root / 'Supplementary_Materials_final.pdf'
           pages = sorted((root / 'rendered').glob('page-*.png'))
           expected = len(PdfReader(pdf).pages)
+          page_sizes = {
+              (float(page.mediabox.width), float(page.mediabox.height))
+              for page in PdfReader(pdf).pages
+          }
+          assert len(page_sizes) == 1, f'mixed rendered page sizes: {page_sizes}'
+          page_width, page_height = next(iter(page_sizes))
+          assert page_width < page_height, (
+              f'assembled supplement is not portrait: {(page_width, page_height)}'
+          )
+          print(f'assembled supplement PDF page size (points): {(page_width, page_height)}')
           assert len(pages) == expected
           assert expected >= 114
 
@@ -198,4 +238,10 @@ jobs:
             output/supplementary_materials/supplementary_inventory.tsv
             output/supplementary_materials/render_audit.txt
             output/supplementary_materials/contact_sheet_*.jpg
+            output/pdf/svbyeye/Supplemental_Figure_SVbyEye_orientation_examples.pdf
+            output/pdf/svbyeye/Supplemental_Figure_SVbyEye_orientation_examples.png
+            output/pdf/svbyeye/Supplemental_Figure_SVbyEye_orientation_examples_legend.txt
+            output/pdf/svbyeye/Supplemental_File_SVbyEye_consensus_93_loci.pdf
+            output/pdf/svbyeye/Supplemental_File_SVbyEye_consensus_93_loci_legend.txt
+            output/pdf/svbyeye/svbyeye_locus_index.tsv
           if-no-files-found: error

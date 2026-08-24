@@ -1,5 +1,42 @@
 # SVbyEye inversion visualization pipeline
 
+## Publication panTro6 plots for the 93 consensus loci
+
+The manuscript supplement uses only the publication renderer
+`bin/plot_chimp_hires.R`.  Every page has two tracks—human GRCh38 above and
+chimpanzee panTro6 below—and a shallow dashed red rectangle on the human track
+marks the inversion.  Full-height breakpoint lines, population-orientation
+tracks, and the older manual-review images are not supplement inputs.
+
+The complete source set is generated with one combined alignment so panTro6 is
+scanned once:
+
+```bash
+python3 bin/prepare_chimp_consensus_targets.py \
+  --properties data/inv_properties.tsv \
+  --reference /path/to/hg38.no_alt.fa \
+  --cytobands /path/to/cytoBand.txt.gz \
+  --fasta work/targets.consensus93.fa \
+  --manifest work/manifest.tsv
+
+samtools faidx work/targets.consensus93.fa
+minimap2 -x asm20 -c --eqx --secondary=yes -N 50 -t 8 \
+  work/targets.consensus93.fa panTro6.fa.gz > work/all.consensus93.paf
+
+python3 bin/render_chimp_consensus.py \
+  --manifest work/manifest.tsv \
+  --paf work/all.consensus93.paf \
+  --plot-script bin/plot_chimp_hires.R \
+  --rscript /path/to/SVbyEye/environment/bin/Rscript \
+  --output-dir work/rendered
+```
+
+The immutable rendered bundle is checksum-pinned in
+`reproducibility/manuscript_sources.json`.  GitHub Actions downloads that bundle
+and `stats/svbyeye_supplement.py` verifies the generator hash, locus set, genomic
+order, and identical PDF media boxes before assembling the 93-page source and
+the two-locus numbered example figure.
+
 Visualize every inversion in the callset by aligning phased human assemblies
 (HGSVC3) plus chimpanzee to GRCh38 and reading alignment orientation across each
 locus. Built on the [SVbyEye](https://github.com/daewoooo/SVbyEye) R package.
