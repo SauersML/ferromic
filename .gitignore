@@ -21,6 +21,8 @@ env/
 *.vcf
 *.bed
 *.png
+!simulations/refsim/demography_model_fluxall.png
+!simulations/refsim/fluxsweep2_fpr_power.png
 *.pdf
 .DS_Store
 

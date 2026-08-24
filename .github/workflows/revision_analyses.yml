@@ -366,6 +366,7 @@ jobs:
           python stats/recurrence_sd_figure.py
           python stats/divergence_decomposition_figure.py
           python stats/figure2a_repolarized.py
+          python stats/imputation_benchmark_figure.py
 
       - name: Imputation threshold reconciliation
         run: python stats/imputation_threshold_summary.py
@@ -381,9 +382,12 @@ jobs:
 
       - name: Rebuild and independently verify the supplementary tables workbook
         run: |
+          python stats/verify_supplementary_inventory.py \
+            --write-tsv web/figures-site/public/downloads/supplementary_inventory.tsv
           python stats/generate_tables.py
           python stats/verify_supplementary_workbook.py \
             web/figures-site/public/downloads/supplementary_tables.xlsx
+          python stats/verify_supplementary_inventory.py
 
       - name: Commit and push regenerated tables
         if: github.event_name != 'pull_request'
@@ -481,8 +485,14 @@ jobs:
             data/revision_claim_audit.tsv
             data/recurrence_sd_figure.png
             data/divergence_decomposition.png
+            data/divergence_fst_dxy_da_by_type.pdf
+            data/divergence_fst_dxy_da_by_type.png
+            data/four_fold_pi.pdf
+            data/four_fold_pi.png
+            data/imputation_benchmark_HsInv0284.png
             results/figure2a_repolarized/*
             web/figures-site/public/downloads/supplementary_tables.xlsx
+            web/figures-site/public/downloads/supplementary_inventory.tsv
           if-no-files-found: error
 
   ages-multi-snp:
