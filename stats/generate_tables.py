@@ -1140,7 +1140,7 @@ EXPECTED_SUPPLEMENTARY_DATA_ROWS = (
     8,     # S5  Gene-flux simulation sweep
     93,    # S6  Inversion catalog
     35,    # S7  Coding-site diversity
-    26,    # S8  4-fold diversity concordance
+    13,    # S8  4-fold diversity concordance
     93,    # S9  Chimpanzee polarity per locus
     9,     # S10 Genomic-architecture controls
     93,    # S11 Divergence between orientations
