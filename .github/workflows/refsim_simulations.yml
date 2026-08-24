@@ -211,6 +211,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           files=(simulations/refsim/gene_flux_results.csv
+                 simulations/refsim/gene_flux_summary.tsv
                  simulations/refsim/gene_flux_results.md
                  simulations/refsim/sweep_gene_flux.json
                  simulations/refsim/fluxsweep_provenance.json)

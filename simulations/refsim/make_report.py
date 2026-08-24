@@ -131,6 +131,38 @@ def write_csv(cs, path):
     print("wrote", path)
 
 
+def write_summary(cs, rows, path):
+    """Write the pooled scenario-by-flux table used as Supplementary Table S5."""
+    single, recurrent = scenario_names(cs)
+    labels = {single: "single-event", recurrent: "recurrent"}
+    fields = ["scenario", "m_flux", "n_cells", "replicates_per_cell", "reps",
+              "n_called", "trend_p"]
+    with open(path, "w", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fields, delimiter="\t")
+        writer.writeheader()
+        for scenario in (single, recurrent):
+            trend_p = armitage_trend(rows, scenario)["p"]
+            for flux in flux_values(cs):
+                selected = [c for c in cs
+                            if c["scenario"] == scenario and c["m_flux"] == flux]
+                per_cell = {c["reps"] for c in selected}
+                if len(selected) != 12 or len(per_cell) != 1:
+                    raise SystemExit(
+                        f"{scenario}, flux={flux}: expected 12 equally replicated grid cells; "
+                        f"observed {len(selected)} cells with replicate counts {sorted(per_cell)}"
+                    )
+                writer.writerow({
+                    "scenario": labels[scenario],
+                    "m_flux": repr(flux),
+                    "n_cells": len(selected),
+                    "replicates_per_cell": next(iter(per_cell)),
+                    "reps": sum(c["reps"] for c in selected),
+                    "n_called": sum(c["n_called"] for c in selected),
+                    "trend_p": repr(trend_p),
+                })
+    print("wrote", path)
+
+
 def _grid(cs, sc, rho, depth, FLUX):
     return [next((c for c in cs if c["scenario"] == sc and c["depth"] == depth
                   and c["rho"] == rho and abs(c["m_flux"] - m) < 1e-30), None)
@@ -408,6 +440,7 @@ def main(argv=None):
         raise SystemExit("no input rows found")
     cs = cells(rows)
     write_csv(cs, os.path.join(args.outdir, f"{args.prefix}_results.csv"))
+    write_summary(cs, rows, os.path.join(args.outdir, f"{args.prefix}_summary.tsv"))
     write_md(cs, os.path.join(args.outdir, f"{args.prefix}_results.md"), rows=rows)
     with open(os.path.join(args.outdir, f"sweep_{args.prefix}.json"), "w") as fh:
         json.dump(cs, fh, indent=2)

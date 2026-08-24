@@ -172,7 +172,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install numpy==2.2.6 pandas==2.3.3 scipy==1.15.3 \
             statsmodels==0.14.5 matplotlib==3.10.3 \
-            xlsxwriter openpyxl pillow pypdf reportlab tqdm
+            xlsxwriter==3.2.5 openpyxl==3.1.5 pillow==11.2.1 \
+            pypdf==5.6.0 reportlab==4.4.1 tqdm==4.67.1
 
       - name: Fetch and verify immutable external sources
         run: |
@@ -335,7 +336,10 @@ jobs:
           python ../stats/cds_conservation_calibration.py
 
       - name: Corrected CDS reanalysis (R2 #1)
-        run: python stats/robust_cds_reanalysis.py
+        run: |
+          python stats/robust_cds_reanalysis.py
+          python stats/per_gene_cds_permutation.py
+          python stats/cds_permutation_joint_control.py
 
       - name: Non-circular SD-architecture recurrence check (R1)
         working-directory: data
@@ -369,14 +373,17 @@ jobs:
       - name: Breakpoint-decay Spearman variants
         run: python stats/decay_spearman_variants.py
 
-      - name: Rebuild supplementary tables workbook
-        run: python stats/generate_tables.py
-
       # --- reproducibility assertions ---------------------------------------
       # These numbers are quoted in the response letter. If a regeneration moves
       # them, the run must fail rather than silently rewrite the record.
       - name: Assert and inventory the non-PheWAS revision numbers
         run: python stats/verify_revision_outputs.py
+
+      - name: Rebuild and independently verify the supplementary tables workbook
+        run: |
+          python stats/generate_tables.py
+          python stats/verify_supplementary_workbook.py \
+            web/figures-site/public/downloads/supplementary_tables.xlsx
 
       - name: Commit and push regenerated tables
         if: github.event_name != 'pull_request'
@@ -404,6 +411,10 @@ jobs:
             data/robust_cds_reanalysis_inversion_effects.tsv
             data/robust_cds_reanalysis_power.tsv
             data/robust_cds_reanalysis_report.md
+            data/per_gene_cds_permutation.tsv
+            data/cds_permutation_joint_control.tsv
+            data/cds_permutation_calibration.tsv
+            data/cds_permutation_power.tsv
             data/decay_spearman_variants.tsv
             data/imputation_threshold_summary.tsv
             data/divergence_middle_vs_flank.tsv
@@ -460,6 +471,7 @@ jobs:
             data/four_fold_pi_tests.tsv
             data/pin_pis_tests.tsv
             data/cds_*.tsv
+            data/per_gene_cds_permutation.tsv
             data/robust_cds_reanalysis_*
             data/recurrence_sd_*.tsv
             data/inversion_architecture_covariates.tsv

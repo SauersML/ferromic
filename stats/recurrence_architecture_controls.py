@@ -599,7 +599,15 @@ def crt_inference(y, r, Z, log_scale=False, rng=None):
         return 0.5 * (near + far)
 
     lo, hi = bound(-1), bound(+1)
-    out = dict(n=int(n), est=obs, ci_lo=float(lo), ci_hi=float(hi), p=float(p))
+    out = dict(
+        n=int(n),
+        n_recur=int((r == 1).sum()),
+        n_single=int((r == 0).sum()),
+        est=obs,
+        ci_lo=float(lo),
+        ci_hi=float(hi),
+        p=float(p),
+    )
     if log_scale:
         out.update(ratio=math.exp(obs), ratio_lo=math.exp(lo), ratio_hi=math.exp(hi))
     return out
@@ -629,8 +637,8 @@ def build_crt_summary(loci, eps, COVS, COVS_EXT):
                 effect=res["ratio"] if is_ratio else res["est"],
                 ci_lo=res["ratio_lo"] if is_ratio else res["ci_lo"],
                 ci_hi=res["ratio_hi"] if is_ratio else res["ci_hi"],
-                p=res["p"], n=res["n"], n_recur=int(r.sum()),
-                n_single=int((1 - r).sum()),
+                p=res["p"], n=res["n"], n_recur=res["n_recur"],
+                n_single=res["n_single"],
                 scale="ratio" if is_ratio else "difference"))
     return pd.DataFrame(rows)
 
