@@ -100,6 +100,22 @@ def verify(template: Path, assembled: Path) -> None:
     drawings = document._element.body.xpath(".//w:drawing")
     if len(drawings) != 114:
         raise RuntimeError(f"Expected 21 + 93 = 114 drawings; found {len(drawings)}")
+    figure_page_starts = document._element.body.xpath(
+        ".//w:p[w:pPr/w:pageBreakBefore][.//w:drawing]"
+    )
+    if len(figure_page_starts) != 113:
+        raise RuntimeError(
+            "Expected page-break-before on 21 main figures and 92 subsequent "
+            f"appendix plots; found {len(figure_page_starts)}"
+        )
+    standalone_page_breaks = document._element.body.xpath(
+        ".//w:br[@w:type='page']"
+    )
+    if standalone_page_breaks:
+        raise RuntimeError(
+            "Standalone page-break paragraphs can create blank rendered pages; "
+            f"found {len(standalone_page_breaks)}"
+        )
     if len(document.sections) != 2:
         raise RuntimeError(f"Expected portrait main section plus landscape appendix; found {len(document.sections)}")
     if document.sections[0].orientation == WD_ORIENT.LANDSCAPE:

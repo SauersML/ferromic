@@ -26,7 +26,7 @@ import pymupdf
 from PIL import Image
 from docx import Document
 from docx.enum.section import WD_ORIENT, WD_SECTION
-from docx.enum.text import WD_BREAK
+from docx.oxml import OxmlElement
 from docx.shared import Inches
 
 
@@ -158,9 +158,11 @@ def template_runs(caption_template):
     return bold, normal
 
 
-def add_page_break(document) -> None:
-    paragraph = document.add_paragraph()
-    paragraph.add_run().add_break(WD_BREAK.PAGE)
+def set_page_break_before(paragraph_element) -> None:
+    properties = paragraph_element.get_or_add_pPr()
+    for existing in properties.xpath("./w:pageBreakBefore"):
+        properties.remove(existing)
+    properties.append(OxmlElement("w:pageBreakBefore"))
 
 
 def fit_inches(image: Image.Image, max_width: float, max_height: float) -> tuple[float, float]:
@@ -236,8 +238,9 @@ def remove_original_figure_section(document) -> None:
 
 
 def add_cloned_block(document, image_element, caption_element, old_number: int, new_number: int):
-    add_page_break(document)
-    document._element.body.insert(-1, copy.deepcopy(image_element))
+    image = copy.deepcopy(image_element)
+    set_page_break_before(image)
+    document._element.body.insert(-1, image)
     caption = copy.deepcopy(caption_element)
     replace_prefix(caption, f"Figure S{old_number}.", f"Figure S{new_number}.")
     document._element.body.insert(-1, caption)
@@ -320,17 +323,17 @@ def append_svbyeye(document, pdf_path: Path, image_template, caption_template, h
     )
 
     for index, (page, locus) in enumerate(zip(source, loci), start=1):
-        if index > 1:
-            add_page_break(document)
         payload, width_px, height_px = render_pdf_page_jpeg(page)
         scale = min(9.0 / width_px, 5.45 / height_px)
-        add_picture_bytes(
+        image_paragraph = add_picture_bytes(
             document,
             image_template,
             payload,
             width_px * scale,
             height_px * scale,
         )
+        if index > 1:
+            set_page_break_before(image_paragraph._p)
         call = CALL_LABELS[locus["classification"]]
         heading = (
             f"SVbyEye alignment {index} of 93. "
@@ -385,8 +388,10 @@ def assemble(template: Path, output: Path, svbyeye_pdf: Path) -> None:
         asset = REPO / figure.asset
         if not asset.is_file():
             raise FileNotFoundError(asset)
-        add_page_break(document)
-        add_picture_paragraph(document, image_template, asset, 6.5, 6.8)
+        image_paragraph = add_picture_paragraph(
+            document, image_template, asset, 6.5, 6.8
+        )
+        set_page_break_before(image_paragraph._p)
         add_caption(
             document,
             caption_template,
