@@ -1133,10 +1133,10 @@ FINAL_SUPPLEMENTARY_TABLE_ORDER = (
 # obsolete table, accidental filtering, or a partial upstream export a hard
 # failure instead of a silently different workbook.
 EXPECTED_SUPPLEMENTARY_DATA_ROWS = (
-    17,    # S1  Old recurrent events
-    17,    # S2  Young recurrent events
-    17,    # S3  Recent recurrent events
-    17,    # S4  Very recent recurrent events
+    18,    # S1  Old recurrent events
+    18,    # S2  Young recurrent events
+    18,    # S3  Recent recurrent events
+    18,    # S4  Very recent recurrent events
     8,     # S5  Gene-flux simulation sweep
     93,    # S6  Inversion catalog
     35,    # S7  Coding-site diversity
