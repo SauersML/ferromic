@@ -60,8 +60,9 @@ sample to come from a particular descendant population.
 The public GitHub commit contains the recurrent generator but omits the
 historical ``singleINV_m1.py`` source. The exact archived file from the original
 MSI analysis tree is vendored at ``upstream_archive/singleINV_m1.py`` and its
-SHA-256 is checked before every workflow run. Its model is ported directly by
-``demography_single`` and the ``single`` rows of the deterministic grid.
+SHA-256 is checked before every workflow run. The response model uses its
+one-split topology but applies the Methods' 90% bottleneck: the
+orientation-changing child has 10% of its immediate parent's effective size.
 """
 from __future__ import annotations
 
@@ -324,16 +325,16 @@ def demography_single(t_inv_years, m_flux=0.0):
     models are run at t_inv in {500, 250, 100, 50} kya. There is no second inverted
     deme and no sister direct deme -- those exist only in the recurrent model.
 
-    Deme sizes are upstream's own: ``singleINV_m1.py`` gives the inverted deme
-    ``N_a / 100`` and the direct deme ``N_a``, and merges inverted into direct at
-    ``Tsp_p0_p1`` with an empty migration matrix. Direct lineages therefore never
-    enter the inverted deme -- the tree carries exactly one orientation change.
-    (The Methods say the bottleneck is a "90% reduction"; the code applies 99%.)
+    The archived ``singleINV_m1.py`` gives the inverted deme ``N_a / 100``, but
+    the Methods specify a 90% reduction. The response analysis therefore uses
+    ``N_a / 10`` for the orientation-changing child and ``N_a`` for the child
+    retaining the ancestral orientation. Direct lineages never enter the
+    inverted deme, so the tree carries exactly one orientation change.
     """
     import msprime
 
     de = msprime.Demography()
-    de.add_population(name="P_I", description="INV group", initial_size=N_A / 100)
+    de.add_population(name="P_I", description="INV group", initial_size=N_A / 10)
     de.add_population(name="P_D", description="DIR group", initial_size=N_A)
     de.add_population(name="P00", description="Ancestral group", initial_size=N_A)
     if m_flux > 0:

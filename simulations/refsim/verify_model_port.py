@@ -94,7 +94,7 @@ def structural_checks() -> None:
     single = refsim.demography_single(depth["t_inv"], 0.0)
     single_sizes = {population.name: population.initial_size
                     for population in single.populations}
-    if single_sizes != {"P_I": 60, "P_D": 6000, "P00": 6000}:
+    if single_sizes != {"P_I": 600, "P_D": 6000, "P00": 6000}:
         raise SystemExit(f"single-event effective sizes differ: {single_sizes}")
 
 
@@ -158,8 +158,9 @@ def main() -> None:
     structural_checks()
     continuous_flux_checks()
     grid_checks(ledger["response_grid"])
-    print("Verified public recurrent source, archived single-event port, "
-          "unconstrained sampling grid, and continuous all-interval gene flux.")
+    print("Verified public recurrent source, archived single-event topology, "
+          "Methods-consistent 10% child size, unconstrained sampling grid, "
+          "and continuous all-interval gene flux.")
 
 
 if __name__ == "__main__":

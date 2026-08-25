@@ -10,8 +10,9 @@ the immutable upstream source at commit
 
 Each simulated locus is processed as follows:
 
-1. simulate the byte-verified, vendored two-population single-event model or the public
-   nine-population recurrent model with `msprime`;
+1. simulate the archived one-split single-event topology with the Methods'
+   10%-of-parent orientation-changing child, or the public nine-population
+   recurrent model, with `msprime`;
 2. retain biallelic sites and construct a full-length haplotype alignment on
    the upstream `inputFiles/temp.fa` reference backbone;
 3. infer the maximum-likelihood tree with IQ-TREE 2.1.2 using the upstream
@@ -27,8 +28,9 @@ by IQ-TREE but are not used to make the recurrence call.
 
 The response's gene-flux analysis comes from the `gene_flux` grid:
 
-- `single`: the exact archived `upstream_archive/singleINV_m1.py`
-  two-population, one-divergence model;
+- `single`: the archived `upstream_archive/singleINV_m1.py` two-population,
+  one-divergence topology, with its 1%-of-parent child size corrected to the
+  Methods' 10%-of-parent value;
 - `recurrent`: the public `recurrentINV_m1.2pop.py` nine-population model.
 
 The recurrent arm preserves the public generator's sampling without any

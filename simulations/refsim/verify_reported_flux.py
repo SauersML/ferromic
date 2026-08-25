@@ -36,7 +36,7 @@ def main() -> None:
     single = [row for row in rows if row["scenario"] == "single"]
     if any(row["frac_admix_i"] != 1.0 or row["frac_admix_d"] != 0.0
            for row in single):
-        raise SystemExit("single-event rows do not use the archived two-population model")
+        raise SystemExit("single-event rows do not use the one-split two-population model")
 
     recurrent = [row for row in rows if row["scenario"] == "recurrent"]
     for row in recurrent:
