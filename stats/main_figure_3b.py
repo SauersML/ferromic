@@ -148,35 +148,83 @@ def render(data: pd.DataFrame, output: Path, *, composite: bool = False) -> None
 
     labelled = plotted.loc[significant].copy()
     x_range = x_max - x_min
-    for side in (-1, 1):
-        group = labelled.loc[np.where(labelled["delta"] < 0, -1, 1) == side].copy()
-        if group.empty:
-            continue
-        label_y = spread_labels(
-            group["minus_log10_p"].to_numpy(),
-            lower=threshold_y + (0.4 if composite else 0.25),
-            upper=y_max - (1.25 if composite else 0.16),
-            gap=0.55 if composite else 0.34,
-        )
-        label_x_offset = side * x_range * 0.038
-        for (_, row), y_text in zip(group.iterrows(), label_y):
+    if composite:
+        # Hand-tuned in final panel coordinates after inspecting the complete
+        # four-panel render. These fixed positions keep all 13 labels clear of
+        # one another, the legends, the FDR line, and the panel boundary.
+        label_positions = {
+            "PDXDC1": (-0.64, 5.90),
+            "SULT1A2": (-0.60, 5.52),
+            "DEFB136": (-0.35, 5.50),
+            "MFHAS1": (-0.58, 3.78),
+            "FAM167A": (-0.49, 3.27),
+            "NTAN1": (-0.47, 2.58),
+            "PINX1": (-0.28, 2.92),
+            "ZNF92": (0.58, 5.35),
+            "MTMR9": (0.34, 4.08),
+            "CLDN23": (0.42, 3.53),
+            "SPPL2C": (0.61, 3.58),
+            "TNKS": (0.44, 3.02),
+            "MAPT": (0.56, 2.62),
+        }
+        observed_labels = set(labelled["gene_name"])
+        if observed_labels != set(label_positions):
+            raise ValueError(
+                "Significant-gene labels changed: "
+                f"missing={sorted(set(label_positions) - observed_labels)}, "
+                f"unexpected={sorted(observed_labels - set(label_positions))}"
+            )
+        for _, row in labelled.iterrows():
+            x_text, y_text = label_positions[row["gene_name"]]
             ax.annotate(
                 row["gene_name"],
                 xy=(row["delta"], row["minus_log10_p"]),
-                xytext=(row["delta"] + label_x_offset, y_text),
-                ha="left" if side > 0 else "right",
+                xytext=(x_text, y_text),
+                ha="left" if x_text > row["delta"] else "right",
                 va="center",
-                fontsize=10.2,
+                fontsize=9.2,
                 fontweight="semibold",
                 arrowprops={
                     "arrowstyle": "-",
                     "color": "#aaaaaa",
-                    "lw": 0.65,
+                    "lw": 0.6,
                     "shrinkA": 1,
                     "shrinkB": 4,
                 },
                 zorder=5,
             )
+    else:
+        for side in (-1, 1):
+            group = labelled.loc[
+                np.where(labelled["delta"] < 0, -1, 1) == side
+            ].copy()
+            if group.empty:
+                continue
+            label_y = spread_labels(
+                group["minus_log10_p"].to_numpy(),
+                lower=threshold_y + 0.25,
+                upper=y_max - 0.16,
+                gap=0.34,
+            )
+            label_x_offset = side * x_range * 0.038
+            for (_, row), y_text in zip(group.iterrows(), label_y):
+                ax.annotate(
+                    row["gene_name"],
+                    xy=(row["delta"], row["minus_log10_p"]),
+                    xytext=(row["delta"] + label_x_offset, y_text),
+                    ha="left" if side > 0 else "right",
+                    va="center",
+                    fontsize=10.2,
+                    fontweight="semibold",
+                    arrowprops={
+                        "arrowstyle": "-",
+                        "color": "#aaaaaa",
+                        "lw": 0.65,
+                        "shrinkA": 1,
+                        "shrinkB": 4,
+                    },
+                    zorder=5,
+                )
 
     ax.text(
         x_min + 0.025 * x_range,
@@ -203,7 +251,8 @@ def render(data: pd.DataFrame, output: Path, *, composite: bool = False) -> None
         ncol=2,
         frameon=False,
         handletextpad=0.35,
-        columnspacing=1.2,
+        columnspacing=1.0,
+        fontsize=9.2 if composite else None,
     )
 
     legend_levels = [0.35 * pair_max, 0.65 * pair_max, pair_max]
@@ -217,10 +266,12 @@ def render(data: pd.DataFrame, output: Path, *, composite: bool = False) -> None
         [f"{int(round(value)):,} pairs" for value in legend_levels],
         title="Total pairs (circle size)",
         loc="upper left" if composite else "lower left",
-        bbox_to_anchor=(0.47, 0.99 if composite else 1.015),
+        bbox_to_anchor=(0.58 if composite else 0.47, 0.99 if composite else 1.015),
         frameon=False,
         handletextpad=0.7,
         labelspacing=0.8,
+        fontsize=9.2 if composite else None,
+        title_fontsize=9.2 if composite else None,
     )
     ax.add_artist(recurrence_legend)
 
