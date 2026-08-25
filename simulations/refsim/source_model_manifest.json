@@ -10,6 +10,7 @@
   },
   "archived_single_event": {
     "msi_path": "/projects/standard/hsiehph/hsiehph/projects/inversionSimulation/forINV_sim_ms/msprime_singleINV_old/scripts/singleINV_m1.py",
+    "vendored_path": "upstream_archive/singleINV_m1.py",
     "sha256": "0c503d899b64c38318546a16799703eb36dbdcb7edb540639057ac738242cfa2",
     "ancestral_effective_size": 6000,
     "direct_effective_size": 6000,

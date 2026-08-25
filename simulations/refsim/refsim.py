@@ -58,8 +58,9 @@ exactly: the production analysis does not condition either mixture or force a
 sample to come from a particular descendant population.
 
 The public GitHub commit contains the recurrent generator but omits the
-historical ``singleINV_m1.py`` source. The latter remains present in the original
-MSI analysis tree; its model and manifests are ported directly by
+historical ``singleINV_m1.py`` source. The exact archived file from the original
+MSI analysis tree is vendored at ``upstream_archive/singleINV_m1.py`` and its
+SHA-256 is checked before every workflow run. Its model is ported directly by
 ``demography_single`` and the ``single`` rows of the deterministic grid.
 """
 from __future__ import annotations
