@@ -1,18 +1,21 @@
 """Summarize and plot the within-ancestry-PC PheWAS sensitivity analysis.
 
 The existing ancestry-stratified estimates in ``data/phewas_results.tsv`` used
-the 16 global All of Us genetic principal components.  The six tables under
-``data/phewas_within_ancestry`` repeat the analysis after fitting 16 components
-separately inside each All of Us genetic-ancestry group.  This script compares
-those two otherwise matched estimates for the 39 pooled FDR-significant
-inversion-phenotype associations (37 unique phenotypes).
+the 16 global All of Us genetic principal components. The aggregate association
+table ``data/within_ancestry_pc_phewas_results.tsv`` contains the sensitivity
+models fit with 16 components estimated separately inside each All of Us genetic
+ancestry group. This script compares the complete original and sensitivity
+configurations for the 39 pooled FDR-significant inversion-phenotype associations
+(37 unique phenotypes). The sensitivity run defines category control exclusions
+from its 37 active phenotypes, whereas the original run used its full active
+phenotype map; this is not a participant-matched PC-only swap.
 
 Outputs
 -------
 data/phewas_within_ancestry_correspondence.tsv
 results/phewas_within_ancestry/correspondence_summary.tsv
 results/phewas_within_ancestry/correspondence_summary.json
-results/phewas_within_ancestry/effect_correspondence.pdf and .png
+results/phewas_within_ancestry/effect_pvalue_correspondence.pdf and .png
 """
 
 from __future__ import annotations
@@ -24,6 +27,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 import numpy as np
 import pandas as pd
 from scipy import stats
@@ -33,15 +37,16 @@ from _figstyle import CATEGORICAL, apply
 
 REPO = Path(__file__).resolve().parents[1]
 DATA = REPO / "data"
-INPUT_DIR = DATA / "phewas_within_ancestry"
 RESULT_DIR = REPO / "results" / "phewas_within_ancestry"
 
 ORIGINAL_RESULTS = DATA / "phewas_results.tsv"
+WITHIN_ANCESTRY_RESULTS = DATA / "within_ancestry_pc_phewas_results.tsv"
 OUT_COMPARISON = DATA / "phewas_within_ancestry_correspondence.tsv"
 OUT_SUMMARY = RESULT_DIR / "correspondence_summary.tsv"
 OUT_JSON = RESULT_DIR / "correspondence_summary.json"
-OUT_CORRESPONDENCE_PDF = RESULT_DIR / "effect_correspondence.pdf"
-OUT_CORRESPONDENCE_PNG = RESULT_DIR / "effect_correspondence.png"
+OUT_CORRESPONDENCE_PDF = RESULT_DIR / "effect_pvalue_correspondence.pdf"
+OUT_CORRESPONDENCE_PNG = RESULT_DIR / "effect_pvalue_correspondence.png"
+POINT_ORDER_SEED = 20260825
 
 POPULATIONS = (
     ("EUR", "European"),
@@ -108,19 +113,33 @@ def load_original_hits() -> pd.DataFrame:
 
 
 def load_new_population(population: str) -> pd.DataFrame:
-    path = INPUT_DIR / f"phewas_{population.lower()}_within_ancestry_pcs.tsv"
-    table = pd.read_csv(path, sep="\t", low_memory=False)
+    table = pd.read_csv(WITHIN_ANCESTRY_RESULTS, sep="\t", low_memory=False)
     missing = REQUIRED_NEW_COLUMNS - set(table.columns)
     if missing:
-        raise ValueError(f"{path} is missing {sorted(missing)}")
+        raise ValueError(
+            f"{WITHIN_ANCESTRY_RESULTS} is missing {sorted(missing)}"
+        )
+    if "population" not in table.columns:
+        raise ValueError(f"{WITHIN_ANCESTRY_RESULTS} is missing population")
+    table = table[table["population"].astype(str).str.upper().eq(population)].copy()
+    if table.empty:
+        raise ValueError(
+            f"{WITHIN_ANCESTRY_RESULTS} has no rows for population {population}"
+        )
     if table.duplicated(["Inversion", "Phenotype"]).any():
-        raise ValueError(f"{path} has duplicate inversion-phenotype rows")
+        raise ValueError(
+            f"{WITHIN_ANCESTRY_RESULTS} has duplicate {population} "
+            "inversion-phenotype rows"
+        )
     if not (
         pd.to_numeric(table["N_Total"], errors="coerce")
         == pd.to_numeric(table["N_Cases"], errors="coerce")
         + pd.to_numeric(table["N_Controls"], errors="coerce")
     ).all():
-        raise ValueError(f"{path} contains inconsistent sample counts")
+        raise ValueError(
+            f"{WITHIN_ANCESTRY_RESULTS} contains inconsistent {population} "
+            "sample counts"
+        )
     return table
 
 
@@ -228,10 +247,25 @@ def build_comparison() -> pd.DataFrame:
         joined["within_ci_valid"] = _boolean(joined["within_ci_valid"])
         joined["existing_beta"] = np.log(joined["existing_or"])
 
+        valid_p_values = (
+            np.isfinite(joined["existing_p"])
+            & np.isfinite(joined["within_p"])
+            & joined["existing_p"].gt(0)
+            & joined["existing_p"].le(1)
+            & joined["within_p"].gt(0)
+            & joined["within_p"].le(1)
+        )
         joined["evaluable"] = (
             np.isfinite(joined["existing_beta"])
             & np.isfinite(joined["within_beta"])
             & joined["within_p_valid"]
+            & valid_p_values
+        )
+        joined["existing_neg_log10_p"] = np.where(
+            valid_p_values, -np.log10(joined["existing_p"]), np.nan
+        )
+        joined["within_neg_log10_p"] = np.where(
+            valid_p_values, -np.log10(joined["within_p"]), np.nan
         )
         joined["direction_concordant"] = np.where(
             joined["evaluable"],
@@ -247,19 +281,22 @@ def build_comparison() -> pd.DataFrame:
             "beta_shift_within_minus_existing"
         ].abs()
 
-        reason = pd.Series("", index=joined.index, dtype=object)
+        reason = pd.Series("evaluable", index=joined.index, dtype=object)
         reason.loc[~np.isfinite(joined["existing_beta"])] = (
             "existing_stratified_estimate_unavailable"
         )
         missing_new = joined["within_beta"].isna()
-        reason.loc[missing_new & reason.eq("")] = (
+        reason.loc[missing_new & reason.eq("evaluable")] = (
             "not_evaluated_minimum_cases_or_controls"
         )
         if "within_skip_reason" in joined:
             explicit = joined["within_skip_reason"].fillna("").astype(str)
             reason.loc[explicit.ne("")] = explicit.loc[explicit.ne("")]
-        reason.loc[~joined["within_p_valid"] & reason.eq("")] = (
+        reason.loc[~joined["within_p_valid"] & reason.eq("evaluable")] = (
             "within_ancestry_model_invalid"
+        )
+        reason.loc[~valid_p_values & reason.eq("evaluable")] = (
+            "invalid_or_missing_p_value"
         )
         joined["not_evaluable_reason"] = reason
         records.append(joined)
@@ -276,6 +313,9 @@ def summarize(comparison: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     overall_r = float(stats.pearsonr(
         evaluable["existing_beta"], evaluable["within_beta"]
     ).statistic)
+    overall_p_rho = float(stats.spearmanr(
+        evaluable["existing_neg_log10_p"], evaluable["within_neg_log10_p"]
+    ).statistic)
     same = int(evaluable["direction_concordant"].sum())
 
     rows = []
@@ -283,6 +323,11 @@ def summarize(comparison: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
         group = evaluable[evaluable["population"] == population]
         r = float(
             stats.pearsonr(group["existing_beta"], group["within_beta"]).statistic
+        )
+        p_rho = float(
+            stats.spearmanr(
+                group["existing_neg_log10_p"], group["within_neg_log10_p"]
+            ).statistic
         )
         concordant = int(group["direction_concordant"].sum())
         rows.append(
@@ -293,6 +338,7 @@ def summarize(comparison: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
                 "n_direction_concordant": concordant,
                 "direction_concordance_percent": float(100 * concordant / len(group)),
                 "pearson_r_log_or": r,
+                "spearman_rho_neg_log10_p": p_rho,
                 "median_absolute_beta_shift": float(
                     group["absolute_beta_shift"].median()
                 ),
@@ -312,6 +358,7 @@ def summarize(comparison: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
         "direction_concordant_comparisons": same,
         "direction_concordance_percent": float(100 * same / len(evaluable)),
         "pearson_r_log_or": overall_r,
+        "spearman_rho_neg_log10_p": overall_p_rho,
         "median_absolute_beta_shift": float(
             evaluable["absolute_beta_shift"].median()
         ),
@@ -335,50 +382,172 @@ def summarize(comparison: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     return table, summary
 
 
+def _style_correspondence_axis(ax: plt.Axes) -> None:
+    ax.set_axisbelow(True)
+    ax.grid(color="#e2e2e2", linewidth=0.55)
+    ax.tick_params(length=3)
+
+
+def _scatter_populations(
+    ax: plt.Axes,
+    data: pd.DataFrame,
+    x_column: str,
+    y_column: str,
+    seed: int,
+) -> None:
+    # Randomize only the painter's order. Coordinates are unchanged: this is not
+    # jitter, and the fixed seed makes the visual exactly reproducible in GHA.
+    order = np.random.default_rng(seed).permutation(len(data))
+    plotted = data.iloc[order]
+    ax.scatter(
+        plotted[x_column],
+        plotted[y_column],
+        s=15,
+        color=plotted["population"].map(POPULATION_COLORS),
+        alpha=0.39,
+        edgecolor="white",
+        linewidth=0.3,
+        zorder=3,
+    )
+
+
 def plot_correspondence(comparison: pd.DataFrame) -> None:
-    evaluable = comparison[comparison["evaluable"]]
-    fig, axes = plt.subplots(2, 3, figsize=(9.0, 6.7), constrained_layout=True)
-
-    for ax, (population, population_label) in zip(axes.flat, POPULATIONS):
-        group = evaluable[evaluable["population"] == population]
-        limit = 1.10 * max(
-            0.15,
-            group["existing_beta"].abs().max(),
-            group["within_beta"].abs().max(),
-        )
-        r = stats.pearsonr(group["existing_beta"], group["within_beta"]).statistic
-        color = POPULATION_COLORS[population]
-
-        ax.plot([-limit, limit], [-limit, limit], color="#888888", lw=0.9, zorder=0)
-        ax.scatter(
-            group["existing_beta"],
-            group["within_beta"],
-            s=25,
-            color=color,
-            alpha=0.76,
-            edgecolor="white",
-            linewidth=0.35,
-            zorder=2,
+    evaluable = comparison[comparison["evaluable"]].copy()
+    if len(evaluable) != 187:
+        raise ValueError(
+            "Expected 187 evaluable ancestry-association comparisons; found "
+            f"{len(evaluable)}"
         )
 
-        ax.set_xlim(-limit, limit)
-        ax.set_ylim(-limit, limit)
-        ax.set_aspect("equal", adjustable="box")
-        ax.set_title(f"{population_label} ({population})", loc="left", fontweight="bold")
+    fig, (effect_ax, pvalue_ax) = plt.subplots(1, 2, figsize=(8.0, 4.25))
+    fig.subplots_adjust(left=0.09, right=0.98, bottom=0.16, top=0.76, wspace=0.34)
+
+    _scatter_populations(
+        effect_ax, evaluable, "existing_beta", "within_beta", POINT_ORDER_SEED
+    )
+    effect_limit = 1.08 * max(
+        0.15,
+        evaluable["existing_beta"].abs().max(),
+        evaluable["within_beta"].abs().max(),
+    )
+    effect_ax.plot(
+        [-effect_limit, effect_limit],
+        [-effect_limit, effect_limit],
+        color="#666666",
+        linewidth=0.95,
+        zorder=1,
+    )
+    effect_ax.axhline(0, color="#b5b5b5", linewidth=0.65, zorder=0)
+    effect_ax.axvline(0, color="#b5b5b5", linewidth=0.65, zorder=0)
+    effect_ax.set_xlim(-effect_limit, effect_limit)
+    effect_ax.set_ylim(-effect_limit, effect_limit)
+    effect_ax.set_aspect("equal", adjustable="box")
+    effect_ax.set_xlabel("Global-PC log odds ratio")
+    effect_ax.set_ylabel("Within-ancestry-PC log odds ratio")
+    effect_r = stats.pearsonr(
+        evaluable["existing_beta"], evaluable["within_beta"]
+    ).statistic
+    effect_ax.text(
+        0.04,
+        0.96,
+        f"Pearson r = {effect_r:.3f}\nn = {len(evaluable)}",
+        transform=effect_ax.transAxes,
+        ha="left",
+        va="top",
+    )
+    _style_correspondence_axis(effect_ax)
+
+    _scatter_populations(
+        pvalue_ax,
+        evaluable,
+        "existing_neg_log10_p",
+        "within_neg_log10_p",
+        POINT_ORDER_SEED + 1,
+    )
+    pvalue_limit = 1.08 * max(
+        1.5,
+        evaluable["existing_neg_log10_p"].max(),
+        evaluable["within_neg_log10_p"].max(),
+    )
+    pvalue_ax.plot(
+        [0, pvalue_limit],
+        [0, pvalue_limit],
+        color="#666666",
+        linewidth=0.95,
+        zorder=1,
+    )
+    nominal_threshold = -np.log10(0.05)
+    pvalue_ax.axhline(
+        nominal_threshold,
+        color="#a8a8a8",
+        linestyle=(0, (3, 2)),
+        linewidth=0.75,
+        zorder=0,
+    )
+    pvalue_ax.axvline(
+        nominal_threshold,
+        color="#a8a8a8",
+        linestyle=(0, (3, 2)),
+        linewidth=0.75,
+        zorder=0,
+    )
+    pvalue_ax.set_xlim(0, pvalue_limit)
+    pvalue_ax.set_ylim(0, pvalue_limit)
+    pvalue_ax.set_aspect("equal", adjustable="box")
+    pvalue_ax.set_xlabel(r"Global-PC $-\log_{10}(P)$")
+    pvalue_ax.set_ylabel(r"Within-ancestry-PC $-\log_{10}(P)$")
+    pvalue_rho = stats.spearmanr(
+        evaluable["existing_neg_log10_p"],
+        evaluable["within_neg_log10_p"],
+    ).statistic
+    pvalue_ax.text(
+        0.04,
+        0.96,
+        rf"Spearman $\rho$ = {pvalue_rho:.3f}" + f"\nn = {len(evaluable)}",
+        transform=pvalue_ax.transAxes,
+        ha="left",
+        va="top",
+    )
+    _style_correspondence_axis(pvalue_ax)
+
+    for label, ax in zip(("A", "B"), (effect_ax, pvalue_ax)):
         ax.text(
-            0.03,
-            0.97,
-            f"r = {r:.3f}",
+            -0.17,
+            1.06,
+            label,
             transform=ax.transAxes,
+            fontsize=13,
+            fontweight="bold",
             ha="left",
             va="top",
-            fontsize=8,
         )
 
-    fig.supxlabel("Global-PC log(OR)")
-    fig.supylabel("Within-ancestry-PC log(OR)")
+    legend_handles = [
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            linestyle="none",
+            markersize=5.5,
+            markerfacecolor=POPULATION_COLORS[population],
+            markeredgecolor="white",
+            markeredgewidth=0.4,
+            label=f"{population_label} ({population})",
+        )
+        for population, population_label in POPULATIONS
+    ]
+    fig.legend(
+        handles=legend_handles,
+        loc="upper center",
+        bbox_to_anchor=(0.53, 0.98),
+        ncol=3,
+        frameon=False,
+        handletextpad=0.35,
+        columnspacing=1.15,
+    )
+
     fig.savefig(OUT_CORRESPONDENCE_PDF)
-    fig.savefig(OUT_CORRESPONDENCE_PNG, dpi=240)
+    fig.savefig(OUT_CORRESPONDENCE_PNG, dpi=400, facecolor="white")
     plt.close(fig)
 
 
@@ -399,7 +568,8 @@ def main() -> None:
     print(
         f"Compared {summary['evaluable_association_population_comparisons']} "
         "evaluable association-population estimates: "
-        f"r={summary['pearson_r_log_or']:.4f}, "
+        f"effect r={summary['pearson_r_log_or']:.4f}, "
+        f"p-value rho={summary['spearman_rho_neg_log10_p']:.4f}, "
         f"{summary['direction_concordance_percent']:.1f}% same direction, "
         f"median |delta beta|={summary['median_absolute_beta_shift']:.4f}."
     )

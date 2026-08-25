@@ -7,10 +7,26 @@ on:
     paths:
       - '.github/workflows/export_manuscript_figures.yml'
       - 'scripts/export_manuscript_figures.py'
+      - 'scripts/annotate_main_figure_2a.py'
+      - 'scripts/replace_main_figure_3b.py'
+      - 'stats/main_figure_3b.py'
+      - 'stats/phewas_within_ancestry_figures.py'
+      - 'data/cds_permutation_joint_control.tsv'
+      - 'data/per_gene_cds_permutation.tsv'
+      - 'data/phewas_results.tsv'
+      - 'data/within_ancestry_pc_phewas_results.tsv'
   pull_request:
     paths:
       - '.github/workflows/export_manuscript_figures.yml'
       - 'scripts/export_manuscript_figures.py'
+      - 'scripts/annotate_main_figure_2a.py'
+      - 'scripts/replace_main_figure_3b.py'
+      - 'stats/main_figure_3b.py'
+      - 'stats/phewas_within_ancestry_figures.py'
+      - 'data/cds_permutation_joint_control.tsv'
+      - 'data/per_gene_cds_permutation.tsv'
+      - 'data/phewas_results.tsv'
+      - 'data/within_ancestry_pc_phewas_results.tsv'
 
 permissions:
   contents: read
@@ -35,7 +51,8 @@ jobs:
       - name: Install PDF export dependencies
         run: |
           python -m pip install --disable-pip-version-check \
-            pillow==11.3.0 pypdf==5.9.0 reportlab==4.4.3
+            matplotlib==3.10.5 pandas==2.3.1 pillow==11.3.0 \
+            pypdf==5.9.0 reportlab==4.4.3 scipy==1.15.3
 
       - name: Download and verify the revised manuscripts
         run: |
@@ -60,8 +77,27 @@ jobs:
             --supplement "$RUNNER_TEMP/manuscripts/supplement.docx" \
             --output-dir output/manuscript_figures/all_figures_pdf \
             --supplementary-count 20 \
-            --expected-main-figure-3-sha256 fe073af00fc0aaae5dd7b7d7ae6c2d20a2e9313b8e6025781f3bd46d6dcc89a5
-          test "$(find output/manuscript_figures/all_figures_pdf -maxdepth 1 -type f -name '*.pdf' | wc -l)" -eq 24
+            --expected-base-main-figure-3-sha256 fe073af00fc0aaae5dd7b7d7ae6c2d20a2e9313b8e6025781f3bd46d6dcc89a5
+          python scripts/annotate_main_figure_2a.py \
+            --base output/manuscript_figures/all_figures_pdf/Figure_2.pdf \
+            --output "$RUNNER_TEMP/Figure_2.annotated.pdf"
+          mv "$RUNNER_TEMP/Figure_2.annotated.pdf" \
+            output/manuscript_figures/all_figures_pdf/Figure_2.pdf
+          python stats/main_figure_3b.py \
+            --output output/manuscript_figures/all_figures_pdf/Figure_3B.pdf
+          python stats/main_figure_3b.py \
+            --output "$RUNNER_TEMP/Figure_3B.composite.pdf" \
+            --composite
+          python scripts/replace_main_figure_3b.py \
+            --base output/manuscript_figures/all_figures_pdf/Figure_3.pdf \
+            --panel-b "$RUNNER_TEMP/Figure_3B.composite.pdf" \
+            --output "$RUNNER_TEMP/Figure_3.corrected.pdf"
+          mv "$RUNNER_TEMP/Figure_3.corrected.pdf" \
+            output/manuscript_figures/all_figures_pdf/Figure_3.pdf
+          python stats/phewas_within_ancestry_figures.py
+          cp results/phewas_within_ancestry/effect_pvalue_correspondence.pdf \
+            output/manuscript_figures/all_figures_pdf/Figure_S18.pdf
+          test "$(find output/manuscript_figures/all_figures_pdf -maxdepth 1 -type f -name '*.pdf' | wc -l)" -eq 25
 
       - name: Upload all figure PDFs
         uses: actions/upload-artifact@v4
