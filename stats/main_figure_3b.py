@@ -103,8 +103,15 @@ def render(data: pd.DataFrame, output: Path, *, composite: bool = False) -> None
     threshold_p = float(plotted.loc[significant, "joint_p"].max())
     threshold_y = -np.log10(threshold_p)
 
+    pair_min = float(plotted["total_pairs"].min())
     pair_max = float(plotted["total_pairs"].max())
-    point_sizes = 2 * (60 + 400 * plotted["total_pairs"] / pair_max)
+
+    def marker_area(values):
+        values = np.asarray(values, dtype=float)
+        scaled = (values - pair_min) / (pair_max - pair_min)
+        return 45 + 605 * np.power(scaled, 1.15)
+
+    point_sizes = marker_area(plotted["total_pairs"])
 
     fig, ax = plt.subplots(
         figsize=(6.0, 4.2) if composite else (8.4, 6.2),
@@ -116,14 +123,14 @@ def render(data: pd.DataFrame, output: Path, *, composite: bool = False) -> None
     ax.axhspan(threshold_y, plotted["minus_log10_p"].max() + 0.65,
                color="#f5f5f5", zorder=0)
     ax.axhline(threshold_y, color="#777777", lw=1.0, ls=(0, (4, 3)), zorder=1)
-    ax.axvline(0, color="#777777", lw=0.9, zorder=1)
+    ax.vlines(0, ymin=-0.12, ymax=5.55, color="#777777", lw=0.9, zorder=1)
 
     ax.scatter(
         plotted.loc[~significant, "delta"],
         plotted.loc[~significant, "minus_log10_p"],
         c=colors[~significant],
         s=point_sizes[~significant],
-        alpha=0.36,
+        alpha=0.14,
         edgecolors="white",
         linewidths=0.65,
         rasterized=False,
@@ -134,7 +141,7 @@ def render(data: pd.DataFrame, output: Path, *, composite: bool = False) -> None
         plotted.loc[significant, "minus_log10_p"],
         c=colors[significant],
         s=point_sizes[significant],
-        alpha=0.70,
+        alpha=0.88,
         edgecolors="white",
         linewidths=0.75,
         zorder=4,
@@ -142,7 +149,7 @@ def render(data: pd.DataFrame, output: Path, *, composite: bool = False) -> None
 
     x_min = float(plotted["delta"].min()) - 0.16
     x_max = float(plotted["delta"].max()) + 0.16
-    y_max = float(plotted["minus_log10_p"].max()) + (2.0 if composite else 0.62)
+    y_max = 6.0
     ax.set_xlim(x_min, x_max)
     ax.set_ylim(-0.12, y_max)
 
@@ -236,7 +243,7 @@ def render(data: pd.DataFrame, output: Path, *, composite: bool = False) -> None
     )
     ax.set_xlabel("Δ proportion identical (Inverted − Direct)")
     ax.set_ylabel("−log₁₀(permutation p)")
-    ax.text(-0.055, 1.02 if composite else 1.105, "B", transform=ax.transAxes,
+    ax.text(-0.055, 1.14 if composite else 1.105, "B", transform=ax.transAxes,
             fontsize=22,
             fontweight="bold", ha="left", va="top")
     recurrence_legend = ax.legend(
@@ -246,8 +253,8 @@ def render(data: pd.DataFrame, output: Path, *, composite: bool = False) -> None
             Line2D([], [], marker="o", ls="", color=original_colors["recurrent"],
                    markersize=8, label="Recurrent"),
         ],
-        loc="upper left" if composite else "lower left",
-        bbox_to_anchor=(0.04, 0.99 if composite else 1.015),
+        loc="lower left",
+        bbox_to_anchor=(0.02 if composite else 0.04, 1.015),
         ncol=2,
         frameon=False,
         handletextpad=0.35,
@@ -255,9 +262,9 @@ def render(data: pd.DataFrame, output: Path, *, composite: bool = False) -> None
         fontsize=9.2 if composite else None,
     )
 
-    legend_levels = [0.35 * pair_max, 0.65 * pair_max, pair_max]
+    legend_levels = [pair_min, 0.5 * (pair_min + pair_max), pair_max]
     size_handles = [
-        ax.scatter([], [], s=2 * (60 + 400 * value / pair_max),
+        ax.scatter([], [], s=marker_area([value])[0],
                    color="#b9b7c9", alpha=0.75, edgecolor="white", linewidth=0.7)
         for value in legend_levels
     ]
@@ -265,8 +272,8 @@ def render(data: pd.DataFrame, output: Path, *, composite: bool = False) -> None
         size_handles,
         [f"{int(round(value)):,} pairs" for value in legend_levels],
         title="Total pairs (circle size)",
-        loc="upper left" if composite else "lower left",
-        bbox_to_anchor=(0.58 if composite else 0.47, 0.99 if composite else 1.015),
+        loc="lower left",
+        bbox_to_anchor=(0.55 if composite else 0.47, 1.015),
         frameon=False,
         handletextpad=0.7,
         labelspacing=0.8,
