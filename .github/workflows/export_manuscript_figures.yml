@@ -1,0 +1,71 @@
+name: Export all manuscript figures
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/export_manuscript_figures.yml'
+      - 'scripts/export_manuscript_figures.py'
+  pull_request:
+    paths:
+      - '.github/workflows/export_manuscript_figures.yml'
+      - 'scripts/export_manuscript_figures.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: manuscript-figures-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install PDF export dependencies
+        run: |
+          python -m pip install --disable-pip-version-check \
+            pillow==11.3.0 pypdf==5.9.0 reportlab==4.4.3
+
+      - name: Download and verify the revised manuscripts
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/manuscripts"
+          curl --fail --location --retry 3 \
+            --output "$RUNNER_TEMP/manuscripts/main.docx" \
+            https://github.com/SauersML/ferromic/releases/download/manuscript-analysis-sources-v3/INV.MS-MainText.v3.7.1.final.1.docx
+          curl --fail --location --retry 3 \
+            --output "$RUNNER_TEMP/manuscripts/supplement.docx" \
+            https://github.com/SauersML/ferromic/releases/download/manuscript-analysis-sources-v3/INV.MS-SupplementaryMaterials.v3.7.final.1.docx
+          echo '2f9274bca277fa4a401408982436f0671c98ecb749b974cc420c4a0a5097d17c  main.docx' \
+            | (cd "$RUNNER_TEMP/manuscripts" && sha256sum --check)
+          echo '6a27bc28f52c033a3517d573f123c208ec63b4d5a06698c1c90230c8ff65859f  supplement.docx' \
+            | (cd "$RUNNER_TEMP/manuscripts" && sha256sum --check)
+
+      - name: Export and verify every numbered figure PDF
+        run: |
+          set -euo pipefail
+          python scripts/export_manuscript_figures.py \
+            --main "$RUNNER_TEMP/manuscripts/main.docx" \
+            --supplement "$RUNNER_TEMP/manuscripts/supplement.docx" \
+            --output-dir output/manuscript_figures/all_figures_pdf \
+            --supplementary-count 20 \
+            --expected-main-figure-3-sha256 fe073af00fc0aaae5dd7b7d7ae6c2d20a2e9313b8e6025781f3bd46d6dcc89a5
+          test "$(find output/manuscript_figures/all_figures_pdf -maxdepth 1 -type f -name '*.pdf' | wc -l)" -eq 24
+
+      - name: Upload all figure PDFs
+        uses: actions/upload-artifact@v4
+        with:
+          name: all-manuscript-figures-pdf
+          path: output/manuscript_figures/all_figures_pdf/
+          if-no-files-found: error
