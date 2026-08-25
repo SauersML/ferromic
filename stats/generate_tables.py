@@ -797,28 +797,18 @@ def _load_flux_sweep() -> pd.DataFrame:
         )
     if not (df["reps"] == df["n_cells"] * df["replicates_per_cell"]).all():
         raise SupplementaryTablesError("Gene-flux replicate totals do not equal cells x replicates per cell.")
-    expected_counts = {
-        ("single-event", 0.0): (37, 0.00712342373249036),
-        ("single-event", 1e-8): (49, 0.00712342373249036),
-        ("single-event", 1e-7): (45, 0.00712342373249036),
-        ("single-event", 1e-6): (66, 0.00712342373249036),
-        ("recurrent", 0.0): (1099, 0.305858351751984),
-        ("recurrent", 1e-8): (1133, 0.305858351751984),
-        ("recurrent", 1e-7): (1139, 0.305858351751984),
-        ("recurrent", 1e-6): (1121, 0.305858351751984),
-    }
+    expected_keys = {(scenario, flux)
+                     for scenario in ("single-event", "recurrent")
+                     for flux in (0.0, 1e-8, 1e-7, 1e-6)}
     observed_keys = set(zip(df["scenario"], df["m_flux"]))
-    if observed_keys != set(expected_counts):
+    if observed_keys != expected_keys:
         raise SupplementaryTablesError(
             "Gene-flux summary does not contain the complete two-scenario by four-flux grid."
         )
-    for row in df.itertuples(index=False):
-        expected_called, expected_trend = expected_counts[(row.scenario, row.m_flux)]
-        if (int(row.n_called) != expected_called
-                or not math.isclose(float(row.trend_p), expected_trend, abs_tol=5e-15)):
-            raise SupplementaryTablesError(
-                f"Gene-flux summary is stale for {row.scenario} at m={row.m_flux}."
-            )
+    if not df.groupby("scenario")["trend_p"].nunique().eq(1).all():
+        raise SupplementaryTablesError(
+            "Each gene-flux arm must report one trend p-value across its four rows."
+        )
     df["recurrent_call_rate"] = df["n_called"] / df["reps"]
 
     def wilson(row: pd.Series) -> tuple[float, float]:

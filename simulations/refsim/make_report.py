@@ -1,17 +1,18 @@
 #!/usr/bin/env python
 """Aggregate the per-replicate reference-pipeline output into the flux tables/figure.
 
-Input: the per-locus CSVs written by ``run_grid.py --task flux`` (one per shard).
+Input: per-locus CSVs written by ``run_grid.py --task gene_flux`` (one per shard).
 Output: ``flux_results.csv`` (one row per grid cell), ``flux_results.md``, and
 ``flux_fpr_power.png``.
 
 Every rate here is the upstream classifier's: ``call_recurrent`` is
-``minMutHomoplasy >= 2`` on the IQ-TREE ML tree. For ``scenario = single_repo`` the
+``minMutHomoplasy >= 2`` on the IQ-TREE ML tree. For ``scenario = single`` the
 recurrent-call rate is the false-positive rate; for ``scenario = recurrent`` it
-is the detection rate. The ``m_flux = 0`` column is upstream's own model with no
-between-orientation exchange, so it is the reference FPR / power that the
-manuscript's Fig. 1G reports; the remaining columns are this repository's flux
-extension.
+is the detection rate. At ``m_flux = 0``, the single arm is the archived
+``singleINV_m1.py`` model and the recurrent arm is the public
+``recurrentINV_m1.2pop.py`` model. The remaining columns add continuous,
+symmetric exchange between every pair of opposite-orientation populations for
+every interval in which the pair coexists.
 """
 from __future__ import annotations
 
@@ -78,6 +79,10 @@ def load(patterns):
                         call=int(r["call_recurrent"]),
                         n_sites=int(r["n_sites"]),
                         seed=int(r["seed"]),
+                        inv_freq=float(r["inv_freq"]),
+                        sample_size=int(r["sample_size"]),
+                        frac_admix_i=float(r["frac_admix_i"]),
+                        frac_admix_d=float(r["frac_admix_d"]),
                     ))
     return rows
 
@@ -400,8 +405,13 @@ def plot(cs, path):
                borderpad=0.8, labelspacing=0.5)
     fig.tight_layout(rect=(0, 0.23, 1, 1.0))
     fig.savefig(path)
+    stem, extension = os.path.splitext(path)
+    if extension.lower() != ".pdf":
+        fig.savefig(stem + ".pdf")
     plt.close(fig)
     print("wrote", path)
+    if extension.lower() != ".pdf":
+        print("wrote", stem + ".pdf")
 
 
 

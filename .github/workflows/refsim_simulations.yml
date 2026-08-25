@@ -9,7 +9,7 @@ name: Reference Recurrence Simulations
 # 240-haplotype locus, against ~7 s/locus on a 128-core MSI node -- IQ-TREE on a
 # 200 kbp alignment does not fit a small runner well. So:
 #
-#   fluxsweep3 11,520 loci / 64 shards = 180 each (the reported analysis)
+#   gene_flux 11,520 loci / 64 shards = 180 each (the reported analysis)
 #
 # An earlier version of this comment claimed 15-25 min per flux shard; that was
 # extrapolated from MSI timings and was wrong by roughly an order of magnitude.
@@ -22,6 +22,21 @@ name: Reference Recurrence Simulations
 # Not run on push except when the simulation code itself changes.
 
 on:
+  push:
+    paths:
+      - '.github/workflows/refsim_simulations.yml'
+      - 'reproducibility/manuscript_sources.json'
+      - 'scripts/fetch_manuscript_sources.py'
+      - 'simulations/refsim/inputFiles/temp.fa'
+      - 'simulations/refsim/make_demography_fig.py'
+      - 'simulations/refsim/make_report.py'
+      - 'simulations/refsim/refsim.py'
+      - 'simulations/refsim/requirements.txt'
+      - 'simulations/refsim/run_grid.py'
+      - 'simulations/refsim/source_model_manifest.json'
+      - 'simulations/refsim/validate_grid.py'
+      - 'simulations/refsim/verify_model_port.py'
+      - 'simulations/refsim/verify_reported_flux.py'
   workflow_dispatch:
     inputs:
       commit:
@@ -43,7 +58,7 @@ concurrency:
 
 env:
   IQTREE_VERSION: 2.1.2
-  TASK: fluxsweep3
+  TASK: gene_flux
   NSHARDS: ${{ github.event.inputs.nshards || '64' }}
   REPS: ${{ github.event.inputs.reps || '' }}
 
@@ -67,7 +82,7 @@ jobs:
   simulate:
     needs: plan
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    timeout-minutes: 600
     strategy:
       fail-fast: false
       # Capped below the account's concurrent-runner limit so this workflow
@@ -99,6 +114,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install --requirement simulations/refsim/requirements.txt
+
+      - name: Audit model ports and all-interval gene flux
+        run: |
+          python simulations/refsim/verify_model_port.py \
+            --upstream-root /tmp/inversion-simulation-upstream/inversionSimulation-3f845a2b4e017842d1d6648210f148faab616e17
 
       - name: Install IQ-TREE 2
         run: |
@@ -178,17 +198,18 @@ jobs:
           }
           python validate_grid.py --task "${TASK}" \
             --inputs "out/${TASK}_shard*.csv" \
-            --provenance fluxsweep_provenance.json
+            --provenance gene_flux_provenance.json
 
       - name: Rebuild and assert the reported gene-flux results
         if: github.event.inputs.reps == ''
         working-directory: simulations/refsim
         run: |
           set -euo pipefail
-          python make_report.py 'out/fluxsweep3_shard*.csv' \
+          python make_report.py 'out/gene_flux_shard*.csv' \
             --prefix gene_flux
           python verify_reported_flux.py \
-            --rows 'out/fluxsweep3_shard*.csv'
+            --rows 'out/gene_flux_shard*.csv'
+          python make_demography_fig.py --out gene_flux_model.png
 
       - name: Verify every tracked gzip still decompresses
         run: |
@@ -214,8 +235,12 @@ jobs:
                  simulations/refsim/gene_flux_summary.tsv
                  simulations/refsim/gene_flux_results.md
                  simulations/refsim/sweep_gene_flux.json
-                 simulations/refsim/fluxsweep_provenance.json)
-          figures=(simulations/refsim/gene_flux_fpr_power.png)
+                 simulations/refsim/gene_flux_provenance.json
+                 simulations/refsim/source_model_manifest.json)
+          figures=(simulations/refsim/gene_flux_fpr_power.png
+                   simulations/refsim/gene_flux_fpr_power.pdf
+                   simulations/refsim/gene_flux_model.png
+                   simulations/refsim/gene_flux_model.pdf)
           for f in "${files[@]}"; do
             test -f "$f"
             git add -- "$f"
@@ -251,4 +276,5 @@ jobs:
             simulations/refsim/*_provenance.json
             simulations/refsim/sweep_*.json
             simulations/refsim/*.png
+            simulations/refsim/*.pdf
           if-no-files-found: error
