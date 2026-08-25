@@ -110,10 +110,14 @@ jobs:
         run: |
           set -euo pipefail
           python scripts/fetch_manuscript_sources.py \
-            --source main_text_manuscript \
             --source supplementary_materials_template \
             --source svbyeye_consensus_93_boxed_bundle \
             --output-dir "$RUNNER_TEMP/manuscript-sources"
+          curl --fail --location --retry 3 \
+            --output "$RUNNER_TEMP/manuscript-sources/INV.MS-MainText.v3.7.1.final.1.docx" \
+            https://github.com/SauersML/ferromic/releases/download/manuscript-analysis-sources-v3/INV.MS-MainText.v3.7.1.final.1.docx
+          echo '2f9274bca277fa4a401408982436f0671c98ecb749b974cc420c4a0a5097d17c  INV.MS-MainText.v3.7.1.final.1.docx' \
+            | (cd "$RUNNER_TEMP/manuscript-sources" && sha256sum --check --strict)
           mkdir -p .svbyeye-consensus-93
           tar -xzf \
             "$RUNNER_TEMP/manuscript-sources/svbyeye-consensus-93-boxed.tar.gz" \
