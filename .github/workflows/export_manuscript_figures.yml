@@ -108,6 +108,14 @@ jobs:
             output/manuscript_figures/all_figures_pdf/Figure_S5.pdf
           cp simulations/refsim/gene_flux_fpr_power.pdf \
             output/manuscript_figures/all_figures_pdf/Figure_S6.pdf
+          mv output/manuscript_figures/all_figures_pdf/Figure_S15.pdf \
+            "$RUNNER_TEMP/Figure_S15.population_frequencies.pdf"
+          mv output/manuscript_figures/all_figures_pdf/Figure_S16.pdf \
+            output/manuscript_figures/all_figures_pdf/Figure_S15.pdf
+          mv "$RUNNER_TEMP/Figure_S15.population_frequencies.pdf" \
+            output/manuscript_figures/all_figures_pdf/Figure_S16.pdf
+          mv output/manuscript_figures/all_figures_pdf/Figure_S17.pdf \
+            output/manuscript_figures/all_figures_pdf/Figure_S18.pdf
           python stats/phewas_within_ancestry_figures.py
           cp results/phewas_within_ancestry/effect_pvalue_correspondence.pdf \
             output/manuscript_figures/all_figures_pdf/Figure_S17.pdf
