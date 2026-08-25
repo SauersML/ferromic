@@ -18,9 +18,6 @@ Tables produced (data/table_response_*.tsv):
   architecture_controls recurrence effects under covariate adjustment and
                         matching, including recombination rate and genomic
                         compartment                              (Reviewer 3.3)
-  phewas_lambda         genomic-control factor per inversion, its bootstrap CI,
-                        and how ancestry-informative each inversion is
-                                                                 (Reviewer 3.4)
   within_ancestry_meta  every reported association re-estimated inside ancestry
                         groups and meta-analysed                 (Reviewer 3.4)
   gene_span             whole-gene versus CDS haplotype identity, per gene
@@ -222,40 +219,6 @@ def architecture_controls():
                "per-locus architecture covariates used by those controls")
 
 
-def phewas_lambda():
-    df = _read("phewas_lambda_gc.tsv")
-    if df is not None:
-        out = df.rename(columns={
-            "inversion": "Inversion ID", "label": "Locus",
-            "n_tests": "Phecodes tested",
-            "lambda_gc": "Genomic control factor (lambda)",
-            "lambda_lo": "lambda, 95% CI lower",
-            "lambda_hi": "lambda, 95% CI upper",
-            "lambda_excl_significant":
-                "lambda excluding family-significant associations",
-            "lambda_ncases_ge1000":
-                "lambda restricted to phecodes with >= 1000 cases",
-            "n_tests_ncases_ge1000": "Phecodes with >= 1000 cases",
-            "dosage_fst_between_ancestry":
-                "Between-ancestry FST of imputed dosage",
-            "n_family_significant": "Associations at BH q < 0.05"})
-        _write(out, "phewas_lambda",
-               "genomic-control calibration per inversion")
-
-    hits = _read("phewas_lambda_significant_hits.tsv")
-    if hits is not None:
-        out = hits.rename(columns={
-            "Phenotype": "Phecode", "inv_label": "Locus",
-            "Inversion": "Inversion ID", "OR": "Odds ratio",
-            "n_cases": "Cases", "p": "p-value",
-            "q_global": "BH q-value", "lambda_used": "lambda applied",
-            "p_gc": "p-value after genomic control",
-            "q_gc": "BH q-value after genomic control",
-            "category": "Phenotype category"})
-        _write(out, "phewas_hits_genomic_control",
-               "reported associations before and after genomic control")
-
-
 def within_ancestry():
     df = _read("phewas_within_ancestry_meta.tsv")
     if df is None:
@@ -406,7 +369,7 @@ def ages_tag_snps():
 def main():
     print("Building response supplementary tables into data/")
     for fn in (four_fold, pin_pis, divergence, chimp_polarization,
-               architecture_controls, phewas_lambda, within_ancestry,
+               architecture_controls, within_ancestry,
                gene_span, population_frequency, imputation_benchmark,
                ages_tag_snps):
         print(f"\n{fn.__name__}:")
