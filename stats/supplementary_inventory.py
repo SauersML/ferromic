@@ -9,6 +9,13 @@ absent from ``FINAL_SUPPLEMENTARY_FIGURES``.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
+
+
+GENE_FLUX_CAPTION = (
+    Path(__file__).resolve().parents[1]
+    / "simulations/refsim/gene_flux_caption.txt"
+).read_text(encoding="utf-8").strip()
 
 
 @dataclass(frozen=True)
@@ -43,7 +50,7 @@ FINAL_SUPPLEMENTARY_FIGURES = (
         "revision figure",
         None,
         "simulations/refsim/gene_flux_fpr_power.png",
-        "Color indicates divergence time (500, 250, 100, or 50 kya). For recurrent inversions, events are simulated at (500, 250, 100), (250, 100, 50), (100, 50, 25), or (50, 25, 10) kya. Left: False-positive rate for single-event models: a higher rate indicates more false recurrence classifications. Right: Power to reject the single-event model under recurrent models. Color indicates the age of the inversion event; line style indicates recombination rate. Each point is the average of 120 runs across inversion frequencies of 0.01, 0.02, 0.05, 0.1, 0.25, and 0.5. Error bars are 95% Wilson score intervals. The overall false-positive rate increases with gene flux (two-sided Cochran–Armitage test for trend, p = 3.9 × 10⁻¹¹) but remains below 5%. At the highest flux, the false-positive rate is 1.7% (95% C.I.: 1.2–2.6%). Power did not vary significantly with flux (p = 0.446).",
+        GENE_FLUX_CAPTION,
     ),
     SupplementaryFigure(
         7,
