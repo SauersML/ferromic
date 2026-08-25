@@ -19,7 +19,7 @@ observed recurrent calls concentrated in the part of parameter space where the
 classifier is unreliable? If they were, the recurrent/single-event contrasts would
 be partly an artefact of where the classifier fails.
 
-Inputs:  simulations/refsim/fluxsweep2_results.csv  (or _partial_)
+Inputs:  simulations/refsim/gene_flux_results.csv
          data/inversion_architecture_covariates.tsv
          data/inv_properties.tsv
 Outputs: data/recurrence_call_reliability.tsv
@@ -42,10 +42,7 @@ _REPO = os.path.dirname(_STATS)
 _DATA = os.path.join(_REPO, "data")
 _SIM = os.path.join(_REPO, "simulations", "refsim")
 
-SWEEP_CANDIDATES = [
-    os.path.join(_SIM, "fluxsweep2_results.csv"),
-    os.path.join(_SIM, "fluxsweep2_partial_results.csv"),
-]
+SWEEP = os.path.join(_SIM, "gene_flux_results.csv")
 ARCH = os.path.join(_DATA, "inversion_architecture_covariates.tsv")
 INVPROPS = os.path.join(_DATA, "inv_properties.tsv")
 OUT_TSV = os.path.join(_DATA, "recurrence_call_reliability.tsv")
@@ -81,9 +78,9 @@ def cm_per_mb_to_rho(cm_per_mb):
 
 
 def main():
-    sweep_path = next((p for p in SWEEP_CANDIDATES if os.path.exists(p)), None)
-    if sweep_path is None:
-        sys.exit("no fluxsweep2 results found; run the sweep first")
+    sweep_path = SWEEP
+    if not os.path.exists(sweep_path):
+        sys.exit("gene_flux_results.csv is missing; run the production sweep")
     print(f"sweep: {os.path.basename(sweep_path)}")
     sw = pd.read_csv(sweep_path)
     single = sw[sw["scenario"].str.startswith(SINGLE_SCENARIO_PREFIX)]

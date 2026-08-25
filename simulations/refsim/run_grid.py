@@ -4,8 +4,9 @@
 Manuscript and sensitivity grids scored by the upstream classifier (IQ-TREE ML
 tree + Fitch parsimony on the orientation trait, ``minMutHomoplasy >= 2`` = recurrent):
 
-``fluxsweep`` is the reported gene-flux analysis. It uses ``single_repo`` and
-``recurrent``, four time depths, three recombination rates, four flux rates, six
+``gene_flux`` is the reported gene-flux analysis. It uses the historical
+single-event generator and the public recurrent generator, four time depths,
+three recombination rates, four flux rates, six
 inversion frequencies, 20 replicates per cell, 240 haplotypes, and seeds starting
 at 9,000,000. ``replicate`` is the corresponding zero-flux power grid. ``growth``
 and ``rgrowth`` are separate frequency-trajectory sensitivity analyses.
@@ -31,11 +32,7 @@ import refsim  # noqa: E402
 TIME_DEPTHS = refsim.TIME_DEPTHS
 RHOS = [0.0, 1e-8, 1e-6]
 FLUX = [0.0, 1e-9, 1e-8, 1e-7, 1e-6]
-# Upstream has one demography; a locus is single-event when the inverted
-# admixture draw lands on 0 or 1. "single_upstream" is that locus.
-# single_repo constrains the direct draw to the non-sister clade, which is
-# what Fig. 1A depicts; single_upstream leaves it free, as the script does.
-SCENARIOS = ["single_upstream", "single_repo", "recurrent"]
+SCENARIOS = ["single", "recurrent"]
 M_WITHIN = 1e-8
 
 FLUX_SAMPLE_HAP = 240
@@ -67,46 +64,11 @@ EXTREME_SEED0 = 500_000
 #
 # The ladder is in multiples of the model's own within-orientation gene flow
 # (``M_WITHIN`` = 1e-8): none, 1x, 10x, 100x.
-FLUXSWEEP_FLUX = [0.0, 1e-8, 1e-7, 1e-6]
-FLUXSWEEP_SEED0 = 3_000_000
+GENE_FLUX_RATES = [0.0, 1e-8, 1e-7, 1e-6]
+GENE_FLUX_SEED0 = 9_000_000
 # Generous; the run is bounded by --max-seconds, not by this. Replicate is the
 # outer loop, so whatever the wall clock allows is a balanced grid.
-FLUXSWEEP_REPS = 20
-
-# Second flux sweep, on ONE demography for both arms.
-#
-# The first sweep pairs "single" (the two-deme model read literally off the
-# Methods paragraph) with "upstream" (the nine-deme manifest run with both
-# admixture draws free). Those are different demographies, and "upstream" is a
-# mixture that also contains genuinely single-origin replicates, so its call
-# rate is a detection rate rather than power against a recurrent truth. Reading
-# a false-positive rate off one arm and a power off the other means the two
-# halves of the figure do not describe the same model, which is exactly the
-# ambiguity flagged in review.
-#
-# "fluxsweep2" fixes both arms to the nine-deme upstream demography and lets the
-# inverted admixture draw decide the truth: single_upstream conditions it on a
-# single inverted origin, recurrent conditions it on both. The false-positive
-# rate and the power are then measured on the same model, and one demography
-# figure describes both panels.
-FLUXSWEEP2_SCENARIOS = ["single_upstream", "recurrent"]
-FLUXSWEEP2_REPS = 20
-FLUXSWEEP2_SEED0 = 6_000_000
-
-# Third flux sweep, on the pair the MANUSCRIPT depicts.
-#
-# fluxsweep2 uses single_upstream, which is what the upstream *script* does: the
-# inverted draw is conditioned on one origin and the direct draw is left free.
-# Manuscript Fig. 1A draws something more specific -- the direct sample taken
-# from the non-sister deme, i.e. fD = 1 - fI -- which is `single_repo`. Keeping
-# direct lineages out of the inverted clade's ancestral group lowers the
-# false-positive rate, and the manuscript reports a rate below 5%, which neither
-# single_upstream (0.26) nor the two-deme model (0.007, and exactly zero at every
-# no-flux cell) reproduces. This grid runs the depicted pair so the sweep's
-# false-positive arm is the model the published figure describes.
-FLUXSWEEP3_SCENARIOS = ["single_repo", "recurrent"]
-FLUXSWEEP3_REPS = 20
-FLUXSWEEP3_SEED0 = 9_000_000
+GENE_FLUX_REPS = 20
 
 # Frequency-trajectory comparison for Reviewer 1. Same axes as the replication,
 # minus the flux ladder, run twice: once on the published constant-size
@@ -134,7 +96,7 @@ RGROWTH_SEED0 = 5_000_000
 # list. "upstream" is the manifest run as-is, both admixture draws free, which is
 # what produces the recurrent power curve.
 REPL_FREQS = [0.01, 0.02, 0.05, 0.10, 0.25, 0.50]
-REPL_SCENARIOS = ["single", "upstream"]
+REPL_SCENARIOS = ["single", "recurrent"]
 REPL_REPS = 100
 REPL_SEED0 = 2_000_000
 
@@ -168,39 +130,19 @@ def build_grid(task, reps=None):
                 rows.append(dict(scenario=sc, depth=depth, rho=rho, m_flux=0.0,
                                  inv_freq=freq, sample_size=FLUX_SAMPLE_HAP,
                                  seed=REPL_SEED0 + cell * reps + r))
-    elif task == "fluxsweep":
-        reps = reps or FLUXSWEEP_REPS
+    elif task == "gene_flux":
+        reps = reps or GENE_FLUX_REPS
         # Replicate is the OUTER loop so the grid is swept a full replicate at a
         # time. A run cut short by the wall clock then loses whole replicates
         # spread evenly over every cell, rather than whole cells off the end.
         cells = list(itertools.product(REPL_SCENARIOS, TIME_DEPTHS, RHOS,
-                                       FLUXSWEEP_FLUX, REPL_FREQS))
+                                       GENE_FLUX_RATES, REPL_FREQS))
         for r in range(reps):
             for cell, (sc, depth, rho, m, freq) in enumerate(cells):
                 rows.append(dict(scenario=sc, depth=depth, rho=rho,
                                  m_flux=m, inv_freq=freq,
                                  sample_size=FLUX_SAMPLE_HAP,
-                                 seed=FLUXSWEEP_SEED0 + cell * reps + r))
-    elif task == "fluxsweep2":
-        reps = reps or FLUXSWEEP2_REPS
-        cells = list(itertools.product(FLUXSWEEP2_SCENARIOS, TIME_DEPTHS, RHOS,
-                                       FLUXSWEEP_FLUX, REPL_FREQS))
-        for r in range(reps):
-            for cell, (sc, depth, rho, m, freq) in enumerate(cells):
-                rows.append(dict(scenario=sc, depth=depth, rho=rho,
-                                 m_flux=m, inv_freq=freq,
-                                 sample_size=FLUX_SAMPLE_HAP,
-                                 seed=FLUXSWEEP2_SEED0 + cell * reps + r))
-    elif task == "fluxsweep3":
-        reps = reps or FLUXSWEEP3_REPS
-        cells = list(itertools.product(FLUXSWEEP3_SCENARIOS, TIME_DEPTHS, RHOS,
-                                       FLUXSWEEP_FLUX, REPL_FREQS))
-        for r in range(reps):
-            for cell, (sc, depth, rho, m, freq) in enumerate(cells):
-                rows.append(dict(scenario=sc, depth=depth, rho=rho,
-                                 m_flux=m, inv_freq=freq,
-                                 sample_size=FLUX_SAMPLE_HAP,
-                                 seed=FLUXSWEEP3_SEED0 + cell * reps + r))
+                                 seed=GENE_FLUX_SEED0 + cell * reps + r))
     elif task == "growth":
         reps = reps or GROWTH_REPS
         cells = list(itertools.product(GROWTH_SCENARIOS, TIME_DEPTHS, RHOS,
@@ -269,8 +211,7 @@ def _run_one(job):
             job["scenario"], times["t01_23"], times["t0_1"], times["t2_3"],
             job["sample_size"], job["inv_freq"], job["rho"],
             job.get("m_const", M_WITHIN),
-            job["seed"], m_flux=job["m_flux"], t_inv_years=times.get("t_inv"),
-            flux_scope=job.get("flux_scope", "leaves"))
+            job["seed"], m_flux=job["m_flux"], t_inv_years=times.get("t_inv"))
         mapping = refsim.mapping_hap_SV(sample_ids)
         aln = os.path.join(workdir, "locus.fa")
         n_sites = refsim.write_fasta(aln, mts, sample_ids, _BACKBONE)
@@ -318,16 +259,11 @@ def _run_one(job):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--task", required=True, choices=["flux", "trainset", "extreme", "replicate", "fluxsweep", "fluxsweep2", "fluxsweep3", "growth", "rgrowth"])
+    ap.add_argument("--task", required=True, choices=["flux", "trainset", "extreme", "replicate", "gene_flux", "growth", "rgrowth"])
     ap.add_argument("--shard", type=int, default=0)
     ap.add_argument("--nshards", type=int, default=1)
     ap.add_argument("--procs", type=int, default=int(os.environ.get("SLURM_CPUS_PER_TASK", 8)))
     ap.add_argument("--reps", type=int, default=None)
-    ap.add_argument("--flux-scope", default="leaves", choices=["leaves", "all"],
-                    help="where between-orientation flux acts (see "
-                         "refsim.demography). The grid and its seeds are "
-                         "unchanged, so a 'leaves' and an 'all' run are paired "
-                         "locus for locus.")
     ap.add_argument("--m-const", type=float, default=None,
                     help="override within-orientation migration (default 1e-8). "
                          "The legacy manifest's panmixia rows use 1, which "
@@ -355,7 +291,6 @@ def main(argv=None):
 
     grid = build_grid(args.task, args.reps)
     for j in grid:
-        j["flux_scope"] = args.flux_scope
         if args.m_const is not None:
             j["m_const"] = args.m_const
     mine = [j for i, j in enumerate(grid) if i % args.nshards == args.shard]
@@ -394,7 +329,7 @@ def main(argv=None):
             elif w is None:
                 fields = sorted(row)
                 lead = [f for f in ("scenario", "label", "depth", "rho", "m_flux",
-                                    "flux_scope", "inv_freq", "sample_size",
+                                    "inv_freq", "sample_size",
                                     "seed", "tree_n_events", "call_recurrent",
                                     "n_sites") if f in fields]
                 w = csv.DictWriter(fh, fieldnames=lead + [f for f in fields

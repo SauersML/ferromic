@@ -15,9 +15,10 @@ the reader. The three claims, quoted from the Results:
 3. "it tends to overestimate the number of inversion events ... especially for
    younger events."
 
-The single-event arm is the two-population model of Fig. 1A, run at the first
-event of each triple -- 500 / 250 / 100 / 50 kya, the four depths the Methods
-list. The power arm is the manifest run as-is, both admixture draws free.
+The single-origin arm uses the archived two-population ``singleINV_m1.py``
+model. The recurrent arm uses the public nine-population
+``recurrentINV_m1.2pop.py`` model and its two independent random sampling
+mixtures.
 
     python replicate_manuscript.py 'out/replicate_shard*.csv'
 """
@@ -133,9 +134,9 @@ def claim_two(rows):
     print("CLAIM 2  at rho = 1e-8, power 66-92% above 5% frequency,")
     print("         falling to 28% below 5%")
     print("=" * 78)
-    up = [r for r in rows if r["scenario"] == "upstream" and r["rho"] == 1e-8]
+    up = [r for r in rows if r["scenario"] == "recurrent" and r["rho"] == 1e-8]
     if not up:
-        print("  no upstream rows at rho = 1e-8")
+        print("  no recurrent rows at rho = 1e-8")
         return
     print("\nPower by frequency and depth (rho = 1e-8):\n")
     freqs = sorted({r["freq"] for r in up})
@@ -174,10 +175,10 @@ def claim_three(rows):
     print("=" * 78)
     print("\nInferred events (truth: 1 for single-event, 3 for recurrent):\n")
     print("%-14s %-26s %-26s" % ("depth", "single: mean (median)",
-                                 "upstream: mean (median)"))
+                                 "recurrent: mean (median)"))
     for d in DEPTHS:
         cells = []
-        for sc in ("single", "upstream"):
+        for sc in ("single", "recurrent"):
             rs = [r for r in rows if r["scenario"] == sc and r["depth"] == d]
             if not rs:
                 cells.append("%-26s" % "-")

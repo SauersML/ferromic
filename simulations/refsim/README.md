@@ -10,7 +10,8 @@ the immutable upstream source at commit
 
 Each simulated locus is processed as follows:
 
-1. simulate the nine-deme structured coalescent with `msprime`;
+1. simulate the archived two-population single-event model or the public
+   nine-population recurrent model with `msprime`;
 2. retain biallelic sites and construct a full-length haplotype alignment on
    the upstream `inputFiles/temp.fa` reference backbone;
 3. infer the maximum-likelihood tree with IQ-TREE 2.1.2 using the upstream
@@ -24,15 +25,20 @@ by IQ-TREE but are not used to make the recurrence call.
 
 ## Reported gene-flux analysis
 
-The response's gene-flux numbers come from the `fluxsweep` grid. Both arms use
-the shared nine-deme demography:
+The response's gene-flux analysis comes from the `gene_flux` grid:
 
-- `single_repo`: one inverted origin is sampled and direct haplotypes are
-  sampled from the opposite ancestral clade (`fD = 1 - fI`);
-- `recurrent`: both inverted origins are represented in the sample.
+- `single`: the archived `singleINV_m1.py` two-population, one-divergence model;
+- `recurrent`: the public `recurrentINV_m1.2pop.py` nine-population model.
 
-Symmetric between-orientation migration is added among extant leaf demes as the
-analogue of gene conversion and double crossing over. The grid uses:
+The recurrent arm preserves the public generator's sampling without any
+constraint: the inverted mixture and direct mixture are two independent draws
+from `random.randint(0, 10) / 10`. The single-event arm has no mixture because
+there is exactly one direct population and one inverted population.
+
+Symmetric between-orientation migration is added between every pair of
+opposite-orientation populations for the entire interval in which both exist,
+including ancestral populations. This is the analogue of gene conversion and
+double crossing over. The grid uses:
 
 - flux `m`: 0, 1e-8, 1e-7, and 1e-6 per lineage per generation;
 - inversion frequencies: 0.01, 0.02, 0.05, 0.10, 0.25, and 0.50;
@@ -41,14 +47,10 @@ analogue of gene conversion and double crossing over. The grid uses:
   the six inversion frequencies; and
 - 240 sampled haplotypes and seeds 9,000,000 through 9,011,519.
 
-This is the analysis that gives a maximum-flux single-event false-positive rate
-of 4.6% (95% Wilson CI 3.6-5.8%), a two-sided Cochran-Armitage trend p = 0.0071,
-and no trend in recurrent-event power (p = 0.3059). These values are regenerated
-by `make_report.py`; they are not hard-coded into that script.
-
-The literal two-deme `single` model is retained only for the separate
-frequency-trajectory sensitivity analysis. It is not the source of the reported
-gene-flux results.
+The exact counts, Wilson intervals, and two-sided Cochran-Armitage trend tests
+are regenerated from the per-locus results by `make_report.py`; they are not
+inputs to the analysis. `verify_reported_flux.py` additionally checks every
+recurrent row against the two independent mixture draws implied by its seed.
 
 ## Reproduction
 
@@ -59,12 +61,13 @@ every input shard. The GitHub Actions workflow
 simulation grids from source. On MSI/Sioux, the reported sweep can be run with:
 
 ```bash
-sbatch --array=0-7 --export=ALL,TASK=fluxsweep,TAG=fluxsweep \
+sbatch --array=0-7 --export=ALL,TASK=gene_flux,TAG=gene_flux \
   refsim.sbatch
-python validate_grid.py --task fluxsweep \
-  --inputs 'out/fluxsweep_shard*.csv' \
-  --provenance fluxsweep_provenance.json
-python make_report.py 'out/fluxsweep_shard*.csv' --prefix gene_flux
+python validate_grid.py --task gene_flux \
+  --inputs 'out/gene_flux_shard*.csv' \
+  --provenance gene_flux_provenance.json
+python make_report.py 'out/gene_flux_shard*.csv' --prefix gene_flux
+python verify_reported_flux.py --rows 'out/gene_flux_shard*.csv'
 ```
 
 The MSI wrapper pins the historical MSI IQ-TREE 2.1.2 module and verifies its

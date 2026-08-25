@@ -6,12 +6,13 @@ This module reproduces, step for step, the recurrence inference of
 so that every recurrence number in this repository is produced by the *same*
 method rather than by an approximation of it.
 
-Correspondence to the upstream repository
------------------------------------------
+Correspondence to the original simulation sources
+-------------------------------------------------
 =========================================  ==================================
 upstream file                              function here
 =========================================  ==================================
 scripts/recurrentINV_m1.2pop.py            ``demography`` / ``simulate``
+scripts/singleINV_m1.py                     ``demography_single`` / ``simulate``
 scripts/ancestralstateInVCF.forINVsim.py   ``site_table`` / ``mapping_hap_SV``
 scripts/phasedVCF2Fasta.py                 ``write_fasta``
 scripts/rmFASTAseqs.py                     ``write_fasta`` (``seq2beRM`` filter)
@@ -48,44 +49,18 @@ parsimony score unchanged:
 
 Single vs. recurrent origin
 ---------------------------
-Upstream has **one** demography and one script. Whether a replicate is a
-single-event or a recurrent locus is not a property of the model but of the
-sample, decided by a single line of ``recurrentINV_m1.2pop.py``::
+The original analysis has two distinct generators. ``singleINV_m1.py`` is a
+two-population model with one inversion event. ``recurrentINV_m1.2pop.py`` is a
+nine-population model with three inversion events. The latter independently
+draws the contribution from each of the two inverted demes and each of the two
+direct demes as ``random.randint(0, 10) / 10``. Those draws are preserved
+exactly: the production analysis does not condition either mixture or force a
+sample to come from a particular descendant population.
 
-    frac_admixI = random.randint(0,10)/10
-
-The sampled inverted deme ``P_I`` is admixed from ``P1_I`` and ``P2_I`` in
-proportions ``[fI, 1 - fI]``. When that draw lands on 0 or 1 -- two of its eleven
-values -- every sampled inverted haplotype descends from one inverted deme, which
-is one inversion origin. Otherwise both origins contribute. So a single-event
-locus is an upstream replicate whose draw came up 0 or 1, and no separate
-demography is needed. Manuscript Fig. 1A draws exactly that: three demes, two
-direct and one inverted, because the unsampled inverted deme contributes nothing.
-
-The manuscript analysis uses two sampling regimes on the shared nine-deme
-structured-coalescent model:
-
-``single_repo``
-    One inverted origin is represented, and direct haplotypes are sampled from
-    the opposite ancestral clade (``fD = 1 - fI``). This is the single-origin
-    regime used for the reported false-positive rates.
-``recurrent``
-    Both inverted origins are represented in the sample. This is the regime
-    used for the reported power.
-
-The remaining sampling regimes are diagnostics and sensitivity models, not the
-source of the reported gene-flux values:
-
-``single_upstream``
-    ``fI`` in {0, 1}, with the public script's unconstrained direct draw.
-``upstream``
-    both draws untouched; the mixture upstream actually produces.
-``single_repo``
-    Listed above because it is the reported single-origin sampling regime.
-
-The public upstream repository has no single-event generator.
-``demography_single`` is therefore retained only for the separate demographic
-sensitivity analysis; it is not the source of the reported gene-flux numbers.
+The public GitHub commit contains the recurrent generator but omits the
+historical ``singleINV_m1.py`` source. The latter remains present in the original
+MSI analysis tree; its model and manifests are ported directly by
+``demography_single`` and the ``single`` rows of the deterministic grid.
 """
 from __future__ import annotations
 
@@ -152,16 +127,11 @@ def _flux_pairs(Tsp_p01_p23, Tsp_p0_p1, Tsp_p2_p3):
     """Every opposite-orientation deme pair that is ever simultaneously active.
 
     Yields ``(deme_a, deme_b, t_start)`` in generations, where ``t_start`` is the
-    oldest-going time at which both demes of the pair exist. The four leaf pairs
-    start at 0; the ancestral pairs start when the younger of the two appears.
-
-    The ancestral demes carry the orientation of upstream's own names: ``Pa_I``
-    is its "Ancestral INV group", ``Pa_D`` its "Ancestral DIR group". That label
-    is a clade label rather than a per-lineage state -- ``Pa_I`` is the ancestor
-    of both ``P1_I`` (inverted) and ``P0_D`` (direct) -- so treating it as an
-    inverted deme is a modelling choice, not something the upstream model
-    asserts. It is the choice the model's own naming implies, and the one the
-    demography figure draws.
+    oldest-going time at which both demes of the pair exist. A population's
+    orientation is the state it carries during that interval: the first event
+    creates ``Pa_I`` and ``Pa_D``; the later events create the four descendant
+    populations. Enumerating overlapping lifetimes keeps flux on continuously
+    as population splits replace ancestors with descendants.
     """
     spans = {                          # name: (orientation, start, end)
         "P0_D": ("D", 0.0, Tsp_p0_p1), "P1_I": ("I", 0.0, Tsp_p0_p1),
@@ -183,34 +153,17 @@ def _flux_pairs(Tsp_p01_p23, Tsp_p0_p1, Tsp_p2_p3):
 
 
 def demography(t01_23_years, t0_1_years, t2_3_years, m_const, frac_admix_i,
-               frac_admix_d, m_flux=0.0, flux_scope="leaves"):
+               frac_admix_d, m_flux=0.0):
     """The upstream 9-deme structured-coalescent model.
 
     ``m_flux`` is this repository's *only* addition: symmetric migration between
     opposite-orientation demes (the gene-conversion / double-crossover analogue).
     At ``m_flux = 0`` the demography is upstream's, unchanged.
 
-    ``flux_scope`` decides *when* that flux acts:
-
-    ``"leaves"``
-        Only between the four sampled demes, which is where ``set_symmetric_
-        migration_rate`` puts it and therefore what every committed sweep ran.
-        Because msprime zeroes a deme's migration rates when it merges into its
-        ancestor, flux switches off deme by deme as the splits are passed: with
-        the ``young`` depths it acts on all four pairs for 0-50 kya, on
-        ``P0_D``-``P1_I`` alone for 50-100 kya, and **not at all** from 100 kya
-        back to the root at 250 kya, where only ``Pa_I`` and ``Pa_D`` are left.
-
-    ``"all"``
-        Flux between every opposite-orientation pair of demes for the whole time
-        both exist, ancestral demes included (see ``_flux_pairs``). The two
-        orientations are then partially connected over the model's entire
-        history rather than only over its most recent stretch.
+    Flux acts between every opposite-orientation pair for the entire interval in
+    which both demes exist, including ancestral demes (see ``_flux_pairs``).
     """
     import msprime
-
-    if flux_scope not in ("leaves", "all"):
-        raise ValueError(f"unknown flux_scope {flux_scope!r}")
 
     Tsp_p01_p23 = t01_23_years / GENERATION_TIME
     Tsp_p0_p1 = t0_1_years / GENERATION_TIME
@@ -234,9 +187,9 @@ def demography(t01_23_years, t0_1_years, t2_3_years, m_const, frac_admix_i,
     # --- migration; m_flux = 0 reproduces upstream exactly) ---
     if m_flux > 0:
         for a, b, t_start in _flux_pairs(Tsp_p01_p23, Tsp_p0_p1, Tsp_p2_p3):
-            if t_start <= 0:                       # the four sampled-deme pairs
+            if t_start <= 0:
                 de.set_symmetric_migration_rate([a, b], m_flux)
-            elif flux_scope == "all":
+            else:
                 de.add_symmetric_migration_rate_change(
                     time=t_start, populations=[a, b], rate=m_flux)
         de.set_symmetric_migration_rate(["P_I", "P_D"], m_flux)
@@ -254,8 +207,7 @@ def demography(t01_23_years, t0_1_years, t2_3_years, m_const, frac_admix_i,
 
 def demography_recurrent_growth(t01_23_years, t0_1_years, t2_3_years,
                                 inv_freq, frac_admix_i, frac_admix_d,
-                                m_const=0.0, m_flux=0.0, flux_scope="leaves",
-                                n_steps=96):
+                                m_const=0.0, m_flux=0.0, n_steps=96):
     """Recurrent model in which each of the three events starts as one haplotype.
 
     The published recurrent model gives every deme a fixed size -- 0.1 N_a for
@@ -339,7 +291,7 @@ def demography_recurrent_growth(t01_23_years, t0_1_years, t2_3_years,
         for a, b, t_start in _flux_pairs(T1, T2, T3):
             if t_start <= 0:
                 de.set_symmetric_migration_rate([a, b], m_flux)
-            elif flux_scope == "all":
+            else:
                 de.add_symmetric_migration_rate_change(
                     time=t_start, populations=[a, b], rate=m_flux)
         de.set_symmetric_migration_rate(["P_I", "P_D"], m_flux)
@@ -355,39 +307,10 @@ def demography_recurrent_growth(t01_23_years, t0_1_years, t2_3_years,
     return de
 
 
-def draw_admixture(scenario, rng):
-    """``frac_admixI`` / ``frac_admixD`` as drawn upstream, constrained by scenario.
-
-    Upstream: ``random.randint(0, 10) / 10`` for both.
-
-    ``recurrent`` constrains ``fI`` to the interior so both inverted origins are
-    sampled. ``upstream`` leaves both draws alone.
-
-    ``single_upstream`` conditions the public script on a single inverted origin. Upstream has one
-    demography and one script; whether a replicate is single-event or recurrent
-    is decided by ``frac_admixI`` alone. When that draw lands on 0 or 1 -- two of
-    its eleven values -- every sampled inverted haplotype descends from a single
-    inverted deme, which is a single inversion origin. Conditioning on those two
-    values is the same thing as running upstream and keeping those replicates.
-
-    The direct draw is left alone, because upstream leaves it alone.
-    Constraining it to the non-sister clade (``fD = 1 - fI``) keeps direct
-    lineages out of the inverted clade's ancestor and lowers the false-positive
-    rate. ``single_repo`` is that constraint and is the single-origin arm used
-    for the reported gene-flux values.
-    """
+def draw_admixture(rng):
+    """Draw the two mixture proportions exactly as the recurrent generator."""
+    frac_i = rng.randint(0, 10) / 10
     frac_d = rng.randint(0, 10) / 10
-    if scenario == "recurrent":
-        frac_i = rng.randint(1, 9) / 10            # interior -- two origins
-    elif scenario == "upstream":
-        frac_i = rng.randint(0, 10) / 10           # upstream's unconstrained draw
-    elif scenario == "single_upstream":
-        frac_i = float(rng.randint(0, 1))          # 0.0 or 1.0 -- one origin
-    elif scenario == "single_repo":
-        frac_i = float(rng.randint(0, 1))
-        frac_d = 1.0 - frac_i                      # direct from the non-sister deme
-    else:
-        raise ValueError(f"unknown scenario {scenario!r}")
     return frac_i, frac_d
 
 
@@ -494,22 +417,19 @@ def demography_growth(t_inv_years, inv_freq, m_flux=0.0, n_steps=64):
 # ---------------------------------------------------------------------------
 def simulate(scenario, t01_23_years, t0_1_years, t2_3_years, sample_size,
              inv_freq, rho, m_const, seed, m_flux=0.0, seq_length=SEQ_LENGTH,
-             t_inv_years=None, flux_scope="leaves"):
+             t_inv_years=None):
     """Return ``(tree_sequence, sample_ids, meta)``.
 
     ``sample_size`` is a haplotype count (upstream ``sampleHaploSize``); the
     inverted / direct split and the diploid rounding follow upstream exactly.
 
-    ``scenario="single"`` uses a separate one-divergence sensitivity model at
-    ``t_inv_years`` (see ``demography_single``). ``"single_repo"`` keeps the
-    full upstream demography and constrains the sampling to one inverted origin;
-    it is the arm used for the reported gene-flux false-positive rates.
+    ``scenario="single"`` uses the historical one-divergence model at
+    ``t_inv_years`` (see ``demography_single``). ``scenario="recurrent"`` uses
+    the public nine-deme generator and preserves both independent random mixture
+    draws exactly.
 
-    ``flux_scope`` is a no-op for ``scenario="single"``: that model has exactly
-    two demes, both alive for the whole interval between the present and the one
-    divergence, and only ``P00`` above it. Flux is therefore already acting
-    everywhere two demes coexist, so ``"leaves"`` and ``"all"`` give bit-identical
-    single-origin loci at every seed. Only the 9-deme recurrent model changes.
+    In every model, gene flux acts for the full interval during which opposite
+    orientations coexist.
     """
     import random
 
@@ -525,23 +445,22 @@ def simulate(scenario, t01_23_years, t0_1_years, t2_3_years, sample_size,
     if scenario in ("single", "single_growth"):
         if t_inv_years is None:
             raise ValueError(f"scenario {scenario!r} requires t_inv_years")
-        # Drawn and discarded so the RNG stream matches the other scenarios.
-        rng.randint(0, 10)
         if scenario == "single_growth":
             de = demography_growth(t_inv_years, inv_freq, m_flux=m_flux)
         else:
             de = demography_single(t_inv_years, m_flux=m_flux)
         frac_i, frac_d = 1.0, 0.0
     else:
-        base = "recurrent" if scenario == "recurrent_growth" else scenario
-        frac_i, frac_d = draw_admixture(base, rng)
+        if scenario not in ("recurrent", "recurrent_growth"):
+            raise ValueError(f"unknown scenario {scenario!r}")
+        frac_i, frac_d = draw_admixture(rng)
         if scenario == "recurrent_growth":
             de = demography_recurrent_growth(
                 t01_23_years, t0_1_years, t2_3_years, inv_freq, frac_i, frac_d,
-                m_const=m_const, m_flux=m_flux, flux_scope=flux_scope)
+                m_const=m_const, m_flux=m_flux)
         else:
             de = demography(t01_23_years, t0_1_years, t2_3_years, m_const,
-                            frac_i, frac_d, m_flux=m_flux, flux_scope=flux_scope)
+                            frac_i, frac_d, m_flux=m_flux)
 
     sample_ids = []
     for i, v in enumerate([num_inv_sample, num_direct_sample]):
@@ -703,7 +622,7 @@ def min_mutations(treefile, mapping_rows, outgroup=OUTGROUP):
 # ---------------------------------------------------------------------------
 def classify_locus(scenario, times, sample_size, inv_freq, rho, m_const, seed,
                    m_flux=0.0, workdir=None, backbone=None, keep=False,
-                   iqtree_binary=None, flux_scope="leaves"):
+                   iqtree_binary=None):
     """Simulate one locus and return the upstream recurrence result.
 
     Returns a dict with ``n_events`` (``minMutHomoplasy``), ``call_recurrent``
@@ -714,7 +633,7 @@ def classify_locus(scenario, times, sample_size, inv_freq, rho, m_const, seed,
     mts, sample_ids, meta = simulate(
         scenario, times["t01_23"], times["t0_1"], times["t2_3"], sample_size,
         inv_freq, rho, m_const, seed, m_flux=m_flux,
-        t_inv_years=times.get("t_inv"), flux_scope=flux_scope)
+        t_inv_years=times.get("t_inv"))
     mapping = mapping_hap_SV(sample_ids)
 
     tmp = workdir or tempfile.mkdtemp(prefix="refsim_")
@@ -760,20 +679,14 @@ TIME_DEPTHS = {
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--scenario", default="single_upstream",
-                    choices=["single_upstream", "single", "single_repo",
-                             "recurrent", "upstream"])
+    ap.add_argument("--scenario", default="single",
+                    choices=["single", "recurrent"])
     ap.add_argument("--depth", default="young", choices=sorted(TIME_DEPTHS))
     ap.add_argument("--sample-size", type=int, default=240)
     ap.add_argument("--inv-freq", type=float, default=0.1)
     ap.add_argument("--rho", type=float, default=0.0)
     ap.add_argument("--m-const", type=float, default=1e-8)
     ap.add_argument("--m-flux", type=float, default=0.0)
-    ap.add_argument("--flux-scope", default="leaves", choices=["leaves", "all"],
-                    help="'leaves': flux only between the four sampled demes "
-                         "(what every committed sweep ran). 'all': flux between "
-                         "every opposite-orientation pair for as long as both "
-                         "demes exist, ancestral demes included.")
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--keep", action="store_true")
     args = ap.parse_args(argv)
@@ -781,7 +694,7 @@ def main(argv=None):
     res = classify_locus(args.scenario, TIME_DEPTHS[args.depth],
                          args.sample_size, args.inv_freq, args.rho,
                          args.m_const, args.seed, m_flux=args.m_flux,
-                         keep=args.keep, flux_scope=args.flux_scope)
+                         keep=args.keep)
     print(res)
 
 

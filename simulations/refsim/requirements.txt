@@ -1,4 +1,6 @@
 biopython==1.88
+demes==0.2.3
+demesdraw==0.4.1
 matplotlib==3.11.1
 msprime==1.4.2
 numpy==2.4.6
