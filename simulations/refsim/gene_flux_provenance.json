@@ -1,0 +1,103 @@
+{
+  "depths": [
+    "old",
+    "recent",
+    "very_recent",
+    "young"
+  ],
+  "gene_flux_rates": [
+    0.0,
+    1e-08,
+    1e-07,
+    1e-06
+  ],
+  "identity_fields": [
+    "scenario",
+    "depth",
+    "rho",
+    "m_flux",
+    "inv_freq",
+    "sample_size",
+    "seed"
+  ],
+  "input_shards": [
+    {
+      "path": "gene_flux_shard0.csv",
+      "sha256": "b519b8190d631c4eb0184e2e3ca921e7abbcaa3ff5242eb8eab84ca66d33d2f5"
+    },
+    {
+      "path": "gene_flux_shard1.csv",
+      "sha256": "5e38328d5644c6cf6a14fb46e2e90620837254a03b78f501742393603c530794"
+    },
+    {
+      "path": "gene_flux_shard15.csv",
+      "sha256": "5d606a48094ef11c81b97aa22e642402823e05eeab0fb8412a42d8d318be06ff"
+    },
+    {
+      "path": "gene_flux_shard17.csv",
+      "sha256": "dedb4c19211f655d2872e6255122dad5cc36781f75f0b5c4bc96adfd49f29c06"
+    },
+    {
+      "path": "gene_flux_shard2.csv",
+      "sha256": "31bda6658dbb4b7f7f4ffa0c73e56c487ba1464dc3144aa398856ca059a6ffe8"
+    },
+    {
+      "path": "gene_flux_shard23.csv",
+      "sha256": "3263c3c6cc26f5842859e8cd5db8f64b393fdb580c44ab1cf2de70226c36a9d1"
+    },
+    {
+      "path": "gene_flux_shard25.csv",
+      "sha256": "d5060d9172a15b60fb18234a62249d1b90b86ea92114380618c489695a52a269"
+    },
+    {
+      "path": "gene_flux_shard3.csv",
+      "sha256": "5b863afacd6f2419e97386106c062ec06c37c1a38e3f7e751fa25534d5922738"
+    },
+    {
+      "path": "gene_flux_shard31.csv",
+      "sha256": "64a86b67ede299318149f4d07ca1b1aa7ed8c0422f96e187d54740cd7a9828b3"
+    },
+    {
+      "path": "gene_flux_shard4.csv",
+      "sha256": "07f09d1f4576f326189a3dea738c8fcbd59a6c812a822045f2d16a86de9fab07"
+    },
+    {
+      "path": "gene_flux_shard5.csv",
+      "sha256": "cbc7c8bce408dc6685efe6d1bed1244af4d6680480310ce0f1462648edf0c19d"
+    },
+    {
+      "path": "gene_flux_shard6.csv",
+      "sha256": "6c2c120e0ac33e1481715359e10bcd8cbf7197ffc915d92fa68f98000ae8e95c"
+    },
+    {
+      "path": "gene_flux_shard7.csv",
+      "sha256": "217eda1976c141586ed1c675dc652cd4f0092edbccc4922233326b3e35d98a63"
+    },
+    {
+      "path": "gene_flux_shard9.csv",
+      "sha256": "520a65a17820d001ae0bf017acf748eb744b825e745b0bb872fd4a164a395ed4"
+    }
+  ],
+  "inversion_frequencies": [
+    0.01,
+    0.02,
+    0.05,
+    0.1,
+    0.25,
+    0.5
+  ],
+  "recombination_rates": [
+    0.0,
+    1e-08,
+    1e-06
+  ],
+  "rows": 11520,
+  "sample_sizes": [
+    240
+  ],
+  "scenarios": [
+    "recurrent",
+    "single"
+  ],
+  "task": "gene_flux"
+}

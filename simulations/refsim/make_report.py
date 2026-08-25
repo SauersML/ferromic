@@ -346,10 +346,10 @@ def plot(cs, path):
     # that carries the result. Each axis is scaled to its own data, with the
     # 5% benchmark drawn on the false-positive panel to keep it readable
     # against the number the manuscript quotes.
-    fig, axes = plt.subplots(1, 2, figsize=(9.5, 4.7))
+    fig, axes = plt.subplots(1, 2, figsize=(9.5, 5.6))
     sc_single, sc_recur = scenario_names(cs)
     for ax, sc, title, ylab in (
-            (axes[0], sc_single, "Single-origin false-positive rate", "rate"),
+            (axes[0], sc_single, "Single-event false-positive rate", "rate"),
             (axes[1], sc_recur, "Recurrent power", "")):
         for depth in DEPTH_ORDER:
             for rho in rhos:
@@ -403,7 +403,7 @@ def plot(cs, path):
                bbox_to_anchor=(0.5, 0.01), frameon=True, framealpha=1.0,
                edgecolor="#CCCCCC", columnspacing=2.4, handlelength=2.4,
                borderpad=0.8, labelspacing=0.5)
-    fig.tight_layout(rect=(0, 0.23, 1, 1.0))
+    fig.tight_layout(rect=(0, 0.32, 1, 1.0))
     fig.savefig(path)
     stem, extension = os.path.splitext(path)
     if extension.lower() != ".pdf":
