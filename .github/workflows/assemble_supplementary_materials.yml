@@ -91,7 +91,8 @@ jobs:
           pip install \
             python-docx==1.2.0 pymupdf==1.26.4 pillow==11.3.0 \
             pypdf==5.9.0 reportlab==4.4.3 numpy==2.2.6 pandas==2.3.3 scipy==1.15.3 \
-            statsmodels==0.14.5 matplotlib==3.10.3
+            statsmodels==0.14.5 matplotlib==3.10.3 \
+            demes==0.2.3 demesdraw==0.4.1 msprime==1.4.2
 
       - name: Install Word rendering stack and manuscript fonts
         run: |
@@ -142,6 +143,8 @@ jobs:
           python stats/imputation_benchmark_figure.py
           python stats/phewas_within_ancestry_figures.py
           python stats/svbyeye_supplement.py
+          python simulations/refsim/make_demography_fig.py \
+            --out simulations/refsim/gene_flux_model.png
 
       - name: Verify all 20 figure inputs and the 47-page paired alignment source
         run: |
