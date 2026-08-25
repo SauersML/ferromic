@@ -335,7 +335,7 @@ def plot_model(path):
     ax_a.set_xlim(540, 0)
     ax_a.set_ylim(5e-5, 0.25)
 
-    pub = [refsim.N_A / 100] * len(FREQS)
+    pub = [refsim.N_A / 10] * len(FREQS)
     traj = [refsim.N_A * f for f in FREQS]
     ax_b.plot(FREQS, pub, lw=1.8, ls=":", marker="o", ms=4, color="#333333",
               label="constant size")

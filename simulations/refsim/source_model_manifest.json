@@ -14,7 +14,9 @@
     "sha256": "0c503d899b64c38318546a16799703eb36dbdcb7edb540639057ac738242cfa2",
     "ancestral_effective_size": 6000,
     "direct_effective_size": 6000,
-    "inverted_effective_size": 60,
+    "archived_inverted_effective_size": 60,
+    "response_inverted_effective_size": 600,
+    "response_child_fraction_of_parent": 0.1,
     "migration_rate": 0.0
   },
   "response_grid": {
