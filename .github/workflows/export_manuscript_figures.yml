@@ -7,6 +7,7 @@ on:
     paths:
       - '.github/workflows/export_manuscript_figures.yml'
       - 'scripts/export_manuscript_figures.py'
+      - 'scripts/annotate_main_figure_2a.py'
       - 'scripts/replace_main_figure_3b.py'
       - 'stats/main_figure_3b.py'
       - 'stats/phewas_within_ancestry_figures.py'
@@ -18,6 +19,7 @@ on:
     paths:
       - '.github/workflows/export_manuscript_figures.yml'
       - 'scripts/export_manuscript_figures.py'
+      - 'scripts/annotate_main_figure_2a.py'
       - 'scripts/replace_main_figure_3b.py'
       - 'stats/main_figure_3b.py'
       - 'stats/phewas_within_ancestry_figures.py'
@@ -76,6 +78,11 @@ jobs:
             --output-dir output/manuscript_figures/all_figures_pdf \
             --supplementary-count 20 \
             --expected-base-main-figure-3-sha256 fe073af00fc0aaae5dd7b7d7ae6c2d20a2e9313b8e6025781f3bd46d6dcc89a5
+          python scripts/annotate_main_figure_2a.py \
+            --base output/manuscript_figures/all_figures_pdf/Figure_2.pdf \
+            --output "$RUNNER_TEMP/Figure_2.annotated.pdf"
+          mv "$RUNNER_TEMP/Figure_2.annotated.pdf" \
+            output/manuscript_figures/all_figures_pdf/Figure_2.pdf
           python stats/main_figure_3b.py \
             --output output/manuscript_figures/all_figures_pdf/Figure_3B.pdf
           python stats/main_figure_3b.py \
