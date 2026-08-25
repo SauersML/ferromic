@@ -235,6 +235,7 @@ jobs:
           files=(simulations/refsim/gene_flux_results.csv
                  simulations/refsim/gene_flux_summary.tsv
                  simulations/refsim/gene_flux_results.md
+                 simulations/refsim/gene_flux_caption.txt
                  simulations/refsim/sweep_gene_flux.json
                  simulations/refsim/gene_flux_provenance.json
                  simulations/refsim/source_model_manifest.json)
@@ -255,7 +256,7 @@ jobs:
             echo "No changes to commit."
             exit 0
           fi
-          git commit -m "Regenerate reference recurrence simulations [skip ci]"
+          git commit -m "Regenerate reference recurrence simulations"
           git pull https://${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git main \
             --rebase --autostash --strategy=recursive -X ours
           for attempt in 1 2 3; do
@@ -274,6 +275,7 @@ jobs:
           path: |
             simulations/refsim/*_results.csv
             simulations/refsim/*_results.md
+            simulations/refsim/*_caption.txt
             simulations/refsim/*_provenance.json
             simulations/refsim/sweep_*.json
             simulations/refsim/*.png

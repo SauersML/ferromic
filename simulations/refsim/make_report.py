@@ -2,8 +2,8 @@
 """Aggregate the per-replicate reference-pipeline output into the flux tables/figure.
 
 Input: per-locus CSVs written by ``run_grid.py --task gene_flux`` (one per shard).
-Output: ``flux_results.csv`` (one row per grid cell), ``flux_results.md``, and
-``flux_fpr_power.png``.
+Output: ``flux_results.csv`` (one row per grid cell), ``flux_results.md``,
+``flux_caption.txt``, and ``flux_fpr_power.png``.
 
 Every rate here is the upstream classifier's: ``call_recurrent`` is
 ``minMutHomoplasy >= 2`` on the IQ-TREE ML tree. For ``scenario = single`` the
@@ -165,6 +165,63 @@ def write_summary(cs, rows, path):
                     "n_called": sum(c["n_called"] for c in selected),
                     "trend_p": repr(trend_p),
                 })
+    print("wrote", path)
+
+
+def _format_p(p):
+    if p >= 0.001:
+        return f"{p:.3g}"
+    exponent = math.floor(math.log10(p)) if p > 0 else 0
+    mantissa = p / (10 ** exponent) if p > 0 else 0
+    return f"{mantissa:.2g} × 10^{exponent}"
+
+
+def write_caption(cs, rows, path):
+    """Write the numerical S6 legend from the exact aggregated grid."""
+    single, recurrent = scenario_names(cs)
+    fluxes = flux_values(cs)
+    cell_reps = {c["reps"] for c in cs}
+    if cell_reps != {120}:
+        raise SystemExit(f"expected 120 runs per plotted point; observed {sorted(cell_reps)}")
+
+    max_flux = fluxes[-1]
+    highest = [r for r in rows
+               if r["scenario"] == single and r["m_flux"] == max_flux]
+    k = sum(r["call"] for r in highest)
+    n = len(highest)
+    lo, hi = wilson_ci(k, n)
+    fpr = k / n
+    fpr_test = armitage_trend(rows, single)
+    power_test = armitage_trend(rows, recurrent)
+    fpr_trend = fpr_test["p"]
+    power_trend = power_test["p"]
+    threshold = ("but remains below 5%" if
+                 max(armitage_trend(rows, single)["rates"]) < 0.05 else
+                 "and is not uniformly below 5%")
+    if fpr_trend >= 0.05:
+        fpr_word = "did not vary significantly"
+    else:
+        fpr_word = "increased" if fpr_test["z"] > 0 else "decreased"
+    power_word = "varied" if power_trend < 0.05 else "did not vary"
+
+    caption = (
+        "Color indicates divergence time (500, 250, 100, or 50 kya). For recurrent "
+        "inversions, events are simulated at (500, 250, 100), (250, 100, 50), "
+        "(100, 50, 25), or (50, 25, 10) kya. Left: False-positive rate for "
+        "single-event models: a higher rate indicates more false recurrence "
+        "classifications. Right: Power to reject the single-event model under "
+        "recurrent models. Color indicates the age of the inversion event; line "
+        "style indicates recombination rate. Each point is the average of 120 runs "
+        "across inversion frequencies of 0.01, 0.02, 0.05, 0.1, 0.25, and 0.5. "
+        f"Error bars are 95% Wilson score intervals. The overall false-positive "
+        f"rate {fpr_word} with gene flux (two-sided Cochran–Armitage test for trend, "
+        f"p = {_format_p(fpr_trend)}) {threshold}. At the highest flux, the "
+        f"false-positive rate is {100 * fpr:.1f}% (95% C.I.: "
+        f"{100 * lo:.1f}–{100 * hi:.1f}%). Power {power_word} significantly with "
+        f"flux (p = {_format_p(power_trend)})."
+    )
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(caption + "\n")
     print("wrote", path)
 
 
@@ -452,6 +509,7 @@ def main(argv=None):
     write_csv(cs, os.path.join(args.outdir, f"{args.prefix}_results.csv"))
     write_summary(cs, rows, os.path.join(args.outdir, f"{args.prefix}_summary.tsv"))
     write_md(cs, os.path.join(args.outdir, f"{args.prefix}_results.md"), rows=rows)
+    write_caption(cs, rows, os.path.join(args.outdir, f"{args.prefix}_caption.txt"))
     with open(os.path.join(args.outdir, f"sweep_{args.prefix}.json"), "w") as fh:
         json.dump(cs, fh, indent=2)
     try:
