@@ -36,8 +36,10 @@ on:
       - 'data/imputation_benchmark_HsInv0284_summary.tsv'
       - 'data/phewas_results.tsv'
       - 'data/within_ancestry_pc_phewas_results.tsv'
-      - 'simulations/refsim/demography_model_fluxall.png'
-      - 'simulations/refsim/fluxsweep2_fpr_power.png'
+      - 'simulations/refsim/make_demography_fig.py'
+      - 'simulations/refsim/refsim.py'
+      - 'simulations/refsim/gene_flux_fpr_power.png'
+      - 'simulations/refsim/gene_flux_fpr_power.pdf'
       - 'output/pdf/svbyeye/Supplemental_Figure_SVbyEye_orientation_examples.png'
       - 'output/pdf/svbyeye/Supplemental_File_SVbyEye_consensus_93_loci.pdf'
   pull_request:
@@ -60,6 +62,10 @@ on:
       - 'svbyeye/bin/plot_chimp_hires.R'
       - 'data/inv_properties.tsv'
       - 'data/chimp_alignment_responses.json'
+      - 'simulations/refsim/make_demography_fig.py'
+      - 'simulations/refsim/refsim.py'
+      - 'simulations/refsim/gene_flux_fpr_power.png'
+      - 'simulations/refsim/gene_flux_fpr_power.pdf'
 
 permissions:
   contents: read
