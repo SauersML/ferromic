@@ -143,7 +143,7 @@ jobs:
           python stats/phewas_within_ancestry_figures.py
           python stats/svbyeye_supplement.py
 
-      - name: Verify all 21 figure inputs and the 47-page paired alignment source
+      - name: Verify all 20 figure inputs and the 47-page paired alignment source
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -209,7 +209,7 @@ jobs:
             --main "$RUNNER_TEMP/manuscript-sources/INV.MS-MainText.v3.7.1.final.1.docx" \
             --supplement output/supplementary_materials/Supplementary_Materials_final.docx \
             --output-dir output/manuscript_figures/all_figures_pdf \
-            --supplementary-count 21 \
+            --supplementary-count 20 \
             --expected-base-main-figure-3-sha256 fe073af00fc0aaae5dd7b7d7ae6c2d20a2e9313b8e6025781f3bd46d6dcc89a5
           python scripts/annotate_main_figure_2a.py \
             --base output/manuscript_figures/all_figures_pdf/Figure_2.pdf \
@@ -228,8 +228,8 @@ jobs:
           mv "$RUNNER_TEMP/Figure_3.corrected.pdf" \
             output/manuscript_figures/all_figures_pdf/Figure_3.pdf
           cp results/phewas_within_ancestry/effect_pvalue_correspondence.pdf \
-            output/manuscript_figures/all_figures_pdf/Figure_S18.pdf
-          test "$(find output/manuscript_figures/all_figures_pdf -maxdepth 1 -type f -name '*.pdf' | wc -l)" -eq 26
+            output/manuscript_figures/all_figures_pdf/Figure_S17.pdf
+          test "$(find output/manuscript_figures/all_figures_pdf -maxdepth 1 -type f -name '*.pdf' | wc -l)" -eq 25
 
       - name: Verify every rendered page and make contact sheets
         run: |
@@ -253,7 +253,7 @@ jobs:
           )
           print(f'assembled supplement PDF page size (points): {(page_width, page_height)}')
           assert len(pages) == expected
-          assert 68 <= expected < 114
+          assert 67 <= expected < 113
 
           thumbnails = []
           for page in pages:

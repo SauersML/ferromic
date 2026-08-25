@@ -18,7 +18,7 @@ sys.path.insert(0, str(REPO / "stats"))
 
 from supplementary_inventory import (  # noqa: E402
     FINAL_SUPPLEMENTARY_FIGURES,
-    RESPONSE_ONLY_FIGURE_TITLE,
+    RESPONSE_ONLY_FIGURE_TITLES,
     SUPPLEMENT_TEMPLATE,
     SUPPLEMENT_TEMPLATE_SHA256,
     SVBYEYE_APPENDIX_TITLE,
@@ -70,8 +70,8 @@ def verify(template: Path, assembled: Path) -> None:
 
     captions = [text for text in texts if FIGURE_RE.match(text)]
     numbers = [int(FIGURE_RE.match(text).group(1)) for text in captions]
-    if numbers != list(range(1, 22)):
-        raise RuntimeError(f"Expected exactly ordered captions S1-S21; found {numbers}")
+    if numbers != list(range(1, 21)):
+        raise RuntimeError(f"Expected exactly ordered captions S1-S20; found {numbers}")
     for caption, figure in zip(captions, FINAL_SUPPLEMENTARY_FIGURES):
         expected = f"Figure S{figure.number}. {figure.title}"
         if not caption.startswith(expected):
@@ -80,9 +80,10 @@ def verify(template: Path, assembled: Path) -> None:
                 f"expected prefix={expected!r}\nobserved={caption[:180]!r}"
             )
 
-    if RESPONSE_ONLY_FIGURE_TITLE in full_text:
-        raise RuntimeError("Response-only tagging-SNP panel was promoted into the supplement")
-    if "Figs. S1 to S21" not in texts or "Tables S1 to S21" not in texts:
+    promoted = [title for title in RESPONSE_ONLY_FIGURE_TITLES if title in full_text]
+    if promoted:
+        raise RuntimeError(f"Response-only figures were promoted into the supplement: {promoted}")
+    if "Figs. S1 to S20" not in texts or "Tables S1 to S21" not in texts:
         raise RuntimeError("Front-matter figure/table ranges were not updated")
     if "SVbyEye alignments for 93 consensus-classified inversions" not in texts:
         raise RuntimeError("Front matter does not list the SVbyEye appendix")
@@ -97,14 +98,14 @@ def verify(template: Path, assembled: Path) -> None:
         raise RuntimeError("SVbyEye appendix locus identifiers are not unique")
 
     drawings = document._element.body.xpath(".//w:drawing")
-    if len(drawings) != 114:
-        raise RuntimeError(f"Expected 21 + 93 = 114 drawings; found {len(drawings)}")
+    if len(drawings) != 113:
+        raise RuntimeError(f"Expected 20 + 93 = 113 drawings; found {len(drawings)}")
     figure_page_starts = document._element.body.xpath(
         ".//w:p[w:pPr/w:pageBreakBefore][.//w:drawing]"
     )
-    if len(figure_page_starts) != 67:
+    if len(figure_page_starts) != 66:
         raise RuntimeError(
-            "Expected page-break-before on 21 main figures and 46 subsequent "
+            "Expected page-break-before on 20 numbered figures and 46 subsequent "
             f"appendix plots; found {len(figure_page_starts)}"
         )
     standalone_page_breaks = document._element.body.xpath(
@@ -143,19 +144,29 @@ def verify(template: Path, assembled: Path) -> None:
             )
 
     extents = document._element.body.xpath(".//w:drawing/wp:inline/wp:extent")
-    appendix_extents = [
-        (int(extent.get("cx")), int(extent.get("cy"))) for extent in extents[-93:]
+    figure_extents = [
+        (int(extent.get("cx")), int(extent.get("cy"))) for extent in extents
     ]
-    if len(appendix_extents) != 93 or len(set(appendix_extents)) != 1:
+    main_figure_extents = figure_extents[:20]
+    appendix_extents = figure_extents[20:]
+    if (
+        len(figure_extents) != 113
+        or len(set(main_figure_extents)) != 1
+        or len(set(appendix_extents)) != 1
+        or main_figure_extents[0][0] != appendix_extents[0][0]
+        or main_figure_extents[0][1] <= appendix_extents[0][1]
+    ):
         raise RuntimeError(
-            f"All 93 SVbyEye plots must have one fixed rendered size; found "
-            f"{sorted(set(appendix_extents))}"
+            "Expected one fixed frame for the 20 numbered figures and one shorter, "
+            "full-width frame for the 93 SVbyEye plots; found "
+            f"main={sorted(set(main_figure_extents))}, "
+            f"appendix={sorted(set(appendix_extents))}"
         )
 
     print(
-        "Verified assembled supplement: S1-S21 ordered; response-only panel omitted; "
-        "93-caption full-width, two-plots-per-page portrait SVbyEye appendix present; "
-        "template formatting parts and page geometry unchanged."
+        "Verified assembled supplement: S1-S20 ordered; response-only figures omitted; "
+        "all 93 SVbyEye drawings use a full-width two-per-page frame; 93-caption "
+        "portrait appendix present; template formatting parts and page geometry unchanged."
     )
 
 
