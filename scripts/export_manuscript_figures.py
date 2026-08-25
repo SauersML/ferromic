@@ -132,14 +132,14 @@ def export(
     supplementary_document: Path,
     output_dir: Path,
     supplementary_count: int,
-    expected_main_figure_3_sha256: str,
+    expected_base_main_figure_3_sha256: str,
 ) -> None:
     sources = numbered_sources(main_document, prefix="", expected_count=4)
     observed_figure_3_sha256 = hashlib.sha256(sources[2].payload).hexdigest()
-    if observed_figure_3_sha256 != expected_main_figure_3_sha256:
+    if observed_figure_3_sha256 != expected_base_main_figure_3_sha256:
         raise ValueError(
-            "Main Figure 3 does not match the revised CDS figure: "
-            f"expected {expected_main_figure_3_sha256}, "
+            "Base Main Figure 3 does not match the pinned A/C/D source: "
+            f"expected {expected_base_main_figure_3_sha256}, "
             f"observed {observed_figure_3_sha256}"
         )
     sources.extend(
@@ -209,14 +209,14 @@ def main() -> None:
     parser.add_argument("--supplement", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--supplementary-count", type=int, default=21)
-    parser.add_argument("--expected-main-figure-3-sha256", required=True)
+    parser.add_argument("--expected-base-main-figure-3-sha256", required=True)
     args = parser.parse_args()
     export(
         args.main,
         args.supplement,
         args.output_dir,
         args.supplementary_count,
-        args.expected_main_figure_3_sha256,
+        args.expected_base_main_figure_3_sha256,
     )
 
 
