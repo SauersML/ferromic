@@ -328,6 +328,28 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         group="Associations",
     ),
     FigureTask(
+        name="Within-ancestry-PC PheWAS sensitivity",
+        script=Path("stats/phewas_within_ancestry_figures.py"),
+        outputs=(
+            Path("results/phewas_within_ancestry/effect_pvalue_correspondence.pdf"),
+            Path("results/phewas_within_ancestry/effect_pvalue_correspondence.png"),
+            Path("results/phewas_within_ancestry/correspondence_summary.tsv"),
+            Path("results/phewas_within_ancestry/correspondence_summary.json"),
+            Path("data/phewas_within_ancestry_correspondence.tsv"),
+        ),
+        dependencies=(
+            "data/phewas_results.tsv",
+            "data/within_ancestry_pc_phewas_results.tsv",
+        ),
+        python_dependencies=("matplotlib", "pandas", "scipy"),
+        note=(
+            "Generates the two-panel global-PC versus within-ancestry-PC "
+            "effect-size and nominal-p-value correspondence figure from "
+            "aggregate association results only."
+        ),
+        group="Associations",
+    ),
+    FigureTask(
         name="Weir vs Hudson FST scatterplots",
         script=Path("stats/estimators_fst.py"),
         outputs=(
@@ -391,7 +413,6 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         script=Path("stats/CDS_plots.py"),
         outputs=(
             Path("cds_proportion_identical_by_category_violin.pdf"),
-            Path("cds_conservation_volcano.pdf"),
             Path("mapt_cds_polymorphism_heatmap.pdf"),
             Path("cds_conservation_table.tsv"),
         ),
@@ -401,6 +422,19 @@ FIGURE_TASKS: Sequence[FigureTask] = (
             "inv_properties.tsv",
         ),
         long_running=True,
+        group="CDS",
+    ),
+    FigureTask(
+        name="Corrected main Figure 3B CDS permutation panel",
+        script=Path("stats/main_figure_3b.py"),
+        outputs=(
+            Path("data/main_figure_3b.pdf"),
+            Path("data/main_figure_3b.png"),
+        ),
+        dependencies=(
+            "data/cds_permutation_joint_control.tsv",
+            "data/per_gene_cds_permutation.tsv",
+        ),
         group="CDS",
     ),
     FigureTask(

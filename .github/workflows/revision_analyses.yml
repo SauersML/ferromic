@@ -367,6 +367,7 @@ jobs:
           python stats/robust_cds_reanalysis.py
           python stats/per_gene_cds_permutation.py
           python stats/cds_permutation_joint_control.py
+          python stats/main_figure_3b.py
 
       - name: Non-circular SD-architecture recurrence check (R1)
         working-directory: data
@@ -446,6 +447,8 @@ jobs:
             data/cds_permutation_joint_control.tsv
             data/cds_permutation_calibration.tsv
             data/cds_permutation_power.tsv
+            data/main_figure_3b.pdf
+            data/main_figure_3b.png
             data/decay_spearman_variants.tsv
             data/imputation_threshold_summary.tsv
             data/divergence_middle_vs_flank.tsv
@@ -502,6 +505,8 @@ jobs:
             data/four_fold_pi_tests.tsv
             data/pin_pis_tests.tsv
             data/cds_*.tsv
+            data/main_figure_3b.pdf
+            data/main_figure_3b.png
             data/per_gene_cds_permutation.tsv
             data/robust_cds_reanalysis_*
             data/recurrence_sd_*.tsv

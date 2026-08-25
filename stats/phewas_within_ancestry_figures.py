@@ -46,6 +46,7 @@ OUT_SUMMARY = RESULT_DIR / "correspondence_summary.tsv"
 OUT_JSON = RESULT_DIR / "correspondence_summary.json"
 OUT_CORRESPONDENCE_PDF = RESULT_DIR / "effect_pvalue_correspondence.pdf"
 OUT_CORRESPONDENCE_PNG = RESULT_DIR / "effect_pvalue_correspondence.png"
+POINT_ORDER_SEED = 20260825
 
 POPULATIONS = (
     ("EUR", "European"),
@@ -392,19 +393,22 @@ def _scatter_populations(
     data: pd.DataFrame,
     x_column: str,
     y_column: str,
+    seed: int,
 ) -> None:
-    for population, _ in POPULATIONS:
-        group = data[data["population"] == population]
-        ax.scatter(
-            group[x_column],
-            group[y_column],
-            s=30,
-            color=POPULATION_COLORS[population],
-            alpha=0.78,
-            edgecolor="white",
-            linewidth=0.4,
-            zorder=3,
-        )
+    # Randomize only the painter's order. Coordinates are unchanged: this is not
+    # jitter, and the fixed seed makes the visual exactly reproducible in GHA.
+    order = np.random.default_rng(seed).permutation(len(data))
+    plotted = data.iloc[order]
+    ax.scatter(
+        plotted[x_column],
+        plotted[y_column],
+        s=15,
+        color=plotted["population"].map(POPULATION_COLORS),
+        alpha=0.39,
+        edgecolor="white",
+        linewidth=0.3,
+        zorder=3,
+    )
 
 
 def plot_correspondence(comparison: pd.DataFrame) -> None:
@@ -419,7 +423,7 @@ def plot_correspondence(comparison: pd.DataFrame) -> None:
     fig.subplots_adjust(left=0.09, right=0.98, bottom=0.16, top=0.76, wspace=0.34)
 
     _scatter_populations(
-        effect_ax, evaluable, "existing_beta", "within_beta"
+        effect_ax, evaluable, "existing_beta", "within_beta", POINT_ORDER_SEED
     )
     effect_limit = 1.08 * max(
         0.15,
@@ -458,6 +462,7 @@ def plot_correspondence(comparison: pd.DataFrame) -> None:
         evaluable,
         "existing_neg_log10_p",
         "within_neg_log10_p",
+        POINT_ORDER_SEED + 1,
     )
     pvalue_limit = 1.08 * max(
         1.5,

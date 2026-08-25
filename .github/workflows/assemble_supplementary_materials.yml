@@ -9,6 +9,11 @@ on:
       - 'reproducibility/templates/INV_MS_SupplementaryMaterials_v3.8.final.docx'
       - 'reproducibility/manuscript_sources.json'
       - 'scripts/assemble_supplementary_materials.py'
+      - 'scripts/export_manuscript_figures.py'
+      - 'scripts/replace_main_figure_3b.py'
+      - 'stats/main_figure_3b.py'
+      - 'data/cds_permutation_joint_control.tsv'
+      - 'data/per_gene_cds_permutation.tsv'
       - 'scripts/verify_assembled_supplement.py'
       - 'stats/supplementary_inventory.py'
       - 'stats/verify_supplementary_inventory.py'
@@ -41,6 +46,11 @@ on:
       - 'reproducibility/manuscript_sources.json'
       - 'scripts/fetch_manuscript_sources.py'
       - 'scripts/assemble_supplementary_materials.py'
+      - 'scripts/export_manuscript_figures.py'
+      - 'scripts/replace_main_figure_3b.py'
+      - 'stats/main_figure_3b.py'
+      - 'data/cds_permutation_joint_control.tsv'
+      - 'data/per_gene_cds_permutation.tsv'
       - 'scripts/verify_assembled_supplement.py'
       - 'stats/supplementary_inventory.py'
       - 'stats/verify_supplementary_inventory.py'
@@ -98,6 +108,7 @@ jobs:
         run: |
           set -euo pipefail
           python scripts/fetch_manuscript_sources.py \
+            --source main_text_manuscript \
             --source supplementary_materials_template \
             --source svbyeye_consensus_93_boxed_bundle \
             --output-dir "$RUNNER_TEMP/manuscript-sources"
@@ -185,6 +196,30 @@ jobs:
             output/supplementary_materials/Supplementary_Materials_final.pdf \
             output/supplementary_materials/rendered/page
 
+      - name: Export every numbered main and supplementary figure as PDF
+        run: |
+          set -euo pipefail
+          python scripts/export_manuscript_figures.py \
+            --main "$RUNNER_TEMP/manuscript-sources/INV.MS-MainText.v3.7.1.final.1.docx" \
+            --supplement output/supplementary_materials/Supplementary_Materials_final.docx \
+            --output-dir output/manuscript_figures/all_figures_pdf \
+            --supplementary-count 21 \
+            --expected-base-main-figure-3-sha256 fe073af00fc0aaae5dd7b7d7ae6c2d20a2e9313b8e6025781f3bd46d6dcc89a5
+          python stats/main_figure_3b.py \
+            --output output/manuscript_figures/all_figures_pdf/Figure_3B.pdf
+          python stats/main_figure_3b.py \
+            --output "$RUNNER_TEMP/Figure_3B.composite.pdf" \
+            --composite
+          python scripts/replace_main_figure_3b.py \
+            --base output/manuscript_figures/all_figures_pdf/Figure_3.pdf \
+            --panel-b "$RUNNER_TEMP/Figure_3B.composite.pdf" \
+            --output "$RUNNER_TEMP/Figure_3.corrected.pdf"
+          mv "$RUNNER_TEMP/Figure_3.corrected.pdf" \
+            output/manuscript_figures/all_figures_pdf/Figure_3.pdf
+          cp results/phewas_within_ancestry/effect_pvalue_correspondence.pdf \
+            output/manuscript_figures/all_figures_pdf/Figure_S18.pdf
+          test "$(find output/manuscript_figures/all_figures_pdf -maxdepth 1 -type f -name '*.pdf' | wc -l)" -eq 26
+
       - name: Verify every rendered page and make contact sheets
         run: |
           python - <<'PY'
@@ -235,11 +270,12 @@ jobs:
               handle.write('Blank pages: 0\n')
           PY
 
-      - name: Upload assembled supplementary materials
+      - name: Upload assembled manuscript materials and every figure PDF
         uses: actions/upload-artifact@v4
         with:
-          name: supplementary-materials-final
+          name: manuscript-materials-final
           path: |
+            output/manuscript_figures/all_figures_pdf/
             output/supplementary_materials/Supplementary_Materials_final.docx
             output/supplementary_materials/Supplementary_Materials_final.pdf
             output/supplementary_materials/supplementary_inventory.tsv
