@@ -119,6 +119,7 @@ jobs:
           python stats/phewas_within_ancestry_figures.py
           cp results/phewas_within_ancestry/effect_pvalue_correspondence.pdf \
             output/manuscript_figures/all_figures_pdf/Figure_S17.pdf
+          rm output/manuscript_figures/all_figures_pdf/manifest.tsv
           test "$(find output/manuscript_figures/all_figures_pdf -maxdepth 1 -type f -name '*.pdf' | wc -l)" -eq 25
 
       - name: Upload all figure PDFs
