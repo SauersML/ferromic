@@ -1,0 +1,30 @@
+{
+  "public_recurrent": {
+    "commit": "3f845a2b4e017842d1d6648210f148faab616e17",
+    "generator": "scripts/recurrentINV_m1.2pop.py",
+    "manifest": "inputFiles/model_manifest.young.tbl",
+    "sample_haplotypes": 240,
+    "inversion_frequencies": [0.01, 0.02, 0.05, 0.1, 0.25, 0.5],
+    "recombination_rates": [0.0, 1e-8, 1e-6],
+    "within_orientation_migration": 1e-8
+  },
+  "archived_single_event": {
+    "msi_path": "/projects/standard/hsiehph/hsiehph/projects/inversionSimulation/forINV_sim_ms/msprime_singleINV_old/scripts/singleINV_m1.py",
+    "sha256": "0c503d899b64c38318546a16799703eb36dbdcb7edb540639057ac738242cfa2",
+    "ancestral_effective_size": 6000,
+    "direct_effective_size": 6000,
+    "inverted_effective_size": 60,
+    "migration_rate": 0.0
+  },
+  "response_grid": {
+    "single_event_ages_years": [500000, 250000, 100000, 50000],
+    "recurrent_event_ages_years": [
+      [500000, 250000, 100000],
+      [250000, 100000, 50000],
+      [100000, 50000, 25000],
+      [50000, 25000, 10000]
+    ],
+    "gene_flux_rates": [0.0, 1e-8, 1e-7, 1e-6],
+    "replicates_per_frequency": 20
+  }
+}

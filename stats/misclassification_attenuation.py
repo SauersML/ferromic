@@ -30,7 +30,7 @@ A parametric bootstrap over loci gives intervals, and the whole curve is traced
 across the plausible range of f so the conclusion does not rest on one number.
 
 Inputs:  data/recurrence_controls_covariates.tsv   (per-locus pi by orientation)
-         simulations/refsim/fluxsweep2_results.csv (or _partial_)
+         simulations/refsim/gene_flux_results.csv
 Outputs: data/misclassification_attenuation.tsv
          data/misclassification_attenuation.pdf / .png
 """
@@ -51,8 +51,7 @@ _DATA = os.path.join(_REPO, "data")
 _SIM = os.path.join(_REPO, "simulations", "refsim")
 
 COV = os.path.join(_DATA, "recurrence_controls_covariates.tsv")
-SWEEP_CANDIDATES = [os.path.join(_SIM, "fluxsweep2_results.csv"),
-                    os.path.join(_SIM, "fluxsweep2_partial_results.csv")]
+SWEEP = os.path.join(_SIM, "gene_flux_results.csv")
 OUT_TSV = os.path.join(_DATA, "misclassification_attenuation.tsv")
 OUT_PDF = os.path.join(_DATA, "misclassification_attenuation.pdf")
 OUT_PNG = os.path.join(_DATA, "misclassification_attenuation.png")
@@ -119,9 +118,9 @@ def deattenuate(delta_lab_rec, delta_lab_sin, n_rec, n_sin, fpr, power):
 
 
 def main():
-    sweep_path = next((p for p in SWEEP_CANDIDATES if os.path.exists(p)), None)
-    if sweep_path is None or not os.path.exists(COV):
-        sys.exit("need the sweep results and recurrence_controls_covariates.tsv")
+    sweep_path = SWEEP
+    if not os.path.exists(sweep_path) or not os.path.exists(COV):
+        sys.exit("need gene_flux_results.csv and recurrence_controls_covariates.tsv")
 
     rho, fpr, power, n_s, n_r = sweep_rates(sweep_path)
     print(f"sweep: {os.path.basename(sweep_path)}")
