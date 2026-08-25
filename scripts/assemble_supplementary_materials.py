@@ -27,6 +27,7 @@ import pymupdf
 from PIL import Image
 from docx import Document
 from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 from docx.shared import Inches
 
 
@@ -49,8 +50,14 @@ CALL_LABELS = {
     "inverted": "derived",
     "na": "not callable",
 }
+FIGURE_FRAME_WIDTH_IN = 6.5
+FIGURE_FRAME_HEIGHT_IN = 5.75
+FIGURE_FRAME_WIDTH_PX = 2400
+FIGURE_FRAME_HEIGHT_PX = round(
+    FIGURE_FRAME_WIDTH_PX * FIGURE_FRAME_HEIGHT_IN / FIGURE_FRAME_WIDTH_IN
+)
 SVBYEYE_PLOTS_PER_PAGE = 2
-SVBYEYE_FRAME_WIDTH_IN = 6.5
+SVBYEYE_FRAME_WIDTH_IN = FIGURE_FRAME_WIDTH_IN
 
 IMMUTABLE_TEMPLATE_PARTS = (
     "word/styles.xml",
@@ -167,22 +174,32 @@ def set_page_break_before(paragraph_element) -> None:
     properties.append(OxmlElement("w:pageBreakBefore"))
 
 
-def fit_inches(image: Image.Image, max_width: float, max_height: float) -> tuple[float, float]:
-    width_px, height_px = image.size
-    scale = min(max_width / width_px, max_height / height_px)
-    return width_px * scale, height_px * scale
+def fixed_canvas(payload: bytes) -> bytes:
+    with Image.open(io.BytesIO(payload)) as source:
+        image = source.convert("RGBA")
+        image.thumbnail(
+            (FIGURE_FRAME_WIDTH_PX, FIGURE_FRAME_HEIGHT_PX),
+            Image.Resampling.LANCZOS,
+        )
+        canvas = Image.new(
+            "RGBA", (FIGURE_FRAME_WIDTH_PX, FIGURE_FRAME_HEIGHT_PX), "white"
+        )
+        x = (canvas.width - image.width) // 2
+        y = (canvas.height - image.height) // 2
+        canvas.alpha_composite(image, (x, y))
+        output = io.BytesIO()
+        canvas.convert("RGB").save(output, format="PNG", optimize=True)
+        return output.getvalue()
 
 
-def add_picture_paragraph(document, source, image_path: Path, max_width: float, max_height: float):
-    with Image.open(image_path) as image:
-        width, height = fit_inches(image, max_width, max_height)
-    shape = document.add_picture(str(image_path), width=Inches(width), height=Inches(height))
-    element = shape._inline
-    while not element.tag.endswith("}p"):
-        element = element.getparent()
-    paragraph = next(p for p in document.paragraphs if p._p is element)
-    copy_paragraph_properties(source, paragraph)
-    return paragraph
+def add_picture_paragraph(document, source, image_path: Path):
+    return add_picture_bytes(
+        document,
+        source,
+        fixed_canvas(image_path.read_bytes()),
+        FIGURE_FRAME_WIDTH_IN,
+        FIGURE_FRAME_HEIGHT_IN,
+    )
 
 
 def add_picture_bytes(document, source, payload: bytes, width: float, height: float):
@@ -239,10 +256,22 @@ def remove_original_figure_section(document) -> None:
             body.remove(element)
 
 
-def add_cloned_block(document, image_element, caption_element, old_number: int, new_number: int):
-    image = copy.deepcopy(image_element)
-    set_page_break_before(image)
-    document._element.body.insert(-1, image)
+def add_cloned_block(
+    document,
+    image_template,
+    image_payload: bytes,
+    caption_element,
+    old_number: int,
+    new_number: int,
+):
+    image = add_picture_bytes(
+        document,
+        image_template,
+        fixed_canvas(image_payload),
+        FIGURE_FRAME_WIDTH_IN,
+        FIGURE_FRAME_HEIGHT_IN,
+    )
+    set_page_break_before(image._p)
     caption = copy.deepcopy(caption_element)
     replace_prefix(caption, f"Figure S{old_number}.", f"Figure S{new_number}.")
     document._element.body.insert(-1, caption)
@@ -349,13 +378,12 @@ def append_svbyeye(document, pdf_path: Path, image_template, caption_template, h
             raise RuntimeError(
                 f"SVbyEye page {index} rendered at {pixels}; expected {expected_pixels}"
             )
-        height_inches = SVBYEYE_FRAME_WIDTH_IN * height_px / width_px
         image_paragraph = add_picture_bytes(
             document,
             image_template,
             payload,
             SVBYEYE_FRAME_WIDTH_IN,
-            height_inches,
+            SVBYEYE_FRAME_WIDTH_IN * height_px / width_px,
         )
         if index > 1 and index % SVBYEYE_PLOTS_PER_PAGE == 1:
             set_page_break_before(image_paragraph._p)
@@ -389,10 +417,17 @@ def assemble(template: Path, output: Path, svbyeye_pdf: Path) -> None:
         paragraph for paragraph in document.paragraphs if FIGURE_RE.match(paragraph.text.strip())
     )
     heading_run, body_run = template_runs(caption_template)
+    image_payloads = {}
+    for number, element in image_blocks.items():
+        blips = element.xpath(".//a:blip")
+        if len(blips) != 1:
+            raise RuntimeError(f"Expected one embedded image for original Figure S{number}")
+        relationship = blips[0].get(qn("r:embed"))
+        image_payloads[number] = document.part.related_parts[relationship].blob
 
     figure_range = next(p for p in document.paragraphs if p.text.strip() == "Figs. S1 to S13")
     table_range = next(p for p in document.paragraphs if p.text.strip() == "Tables S1 to S20")
-    replace_paragraph_text(figure_range, "Figs. S1 to S13", "Figs. S1 to S21")
+    replace_paragraph_text(figure_range, "Figs. S1 to S13", "Figs. S1 to S20")
     replace_paragraph_text(table_range, "Tables S1 to S20", "Tables S1 to S21")
     insert_front_matter_appendix_line(document, figure_range, figure_range)
 
@@ -402,7 +437,8 @@ def assemble(template: Path, output: Path, svbyeye_pdf: Path) -> None:
         if figure.original_number is not None:
             add_cloned_block(
                 document,
-                image_blocks[figure.original_number],
+                image_template,
+                image_payloads[figure.original_number],
                 caption_blocks[figure.original_number],
                 figure.original_number,
                 figure.number,
@@ -413,9 +449,7 @@ def assemble(template: Path, output: Path, svbyeye_pdf: Path) -> None:
         asset = REPO / figure.asset
         if not asset.is_file():
             raise FileNotFoundError(asset)
-        image_paragraph = add_picture_paragraph(
-            document, image_template, asset, 6.5, 6.8
-        )
+        image_paragraph = add_picture_paragraph(document, image_template, asset)
         set_page_break_before(image_paragraph._p)
         add_caption(
             document,
