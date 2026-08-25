@@ -70,9 +70,9 @@ POS_RECURRENT = {"direct_1": 0, "ancestral_inverted": 0.5 * GAP,
 # The single-event panel is upstream's own ``singleINV_m1.py``: two populations
 # and one divergence. This is not a simplification of the recurrent model -- it
 # is a separate script, with its own demography, and it is what produced the
-# manuscript's single-event false-positive rates. The inverted deme is N_a/100,
-# the direct deme and the ancestor are N_a, and the migration matrix is empty, so
-# direct lineages never enter the inverted deme.
+# manuscript's single-event false-positive rates. For this revision, the
+# orientation-changing child is corrected to the Methods' N_a/10; the direct
+# child and the ancestor are N_a. Direct lineages never enter the inverted deme.
 POS_SINGLE = {"inverted": 0, "ancestral_unoriented": 0.5 * GAP, "direct": GAP}
 
 
