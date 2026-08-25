@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import re
 from itertools import combinations
@@ -51,6 +52,28 @@ def public_source_checks(root: Path, ledger: dict) -> None:
         raise SystemExit("public model_manifest.young.tbl differs from the 18-row grid")
     if (root / "inputFiles" / "model_manifest.young.test.tbl").exists():
         raise SystemExit("unexpected test manifest in the pinned public repository")
+
+
+def archived_single_checks(ledger: dict) -> None:
+    path = HERE / ledger["vendored_path"]
+    payload = path.read_bytes()
+    observed_hash = hashlib.sha256(payload).hexdigest()
+    if observed_hash != ledger["sha256"]:
+        raise SystemExit(
+            "vendored single-event source changed: "
+            f"{observed_hash} != {ledger['sha256']}"
+        )
+    compact = re.sub(r"\s+", "", payload.decode("utf-8"))
+    required = (
+        "N_a=6000",
+        "initial_size=N_a)",
+        "initial_size=N_a/100)",
+        "mig_mat=[[0,0],[0,0]]",
+        "MassMigration(time=Tsp_p0_p1,source=1,destination=0,proportion=1.0)",
+    )
+    missing = [token for token in required if token not in compact]
+    if missing:
+        raise SystemExit(f"archived single-event source changed; missing {missing}")
 
 
 def structural_checks() -> None:
@@ -131,6 +154,7 @@ def main() -> None:
     args = parser.parse_args()
     ledger = json.loads(LEDGER.read_text(encoding="utf-8"))
     public_source_checks(args.upstream_root, ledger["public_recurrent"])
+    archived_single_checks(ledger["archived_single_event"])
     structural_checks()
     continuous_flux_checks()
     grid_checks(ledger["response_grid"])

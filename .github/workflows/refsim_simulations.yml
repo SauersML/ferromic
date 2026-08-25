@@ -34,6 +34,7 @@ on:
       - 'simulations/refsim/requirements.txt'
       - 'simulations/refsim/run_grid.py'
       - 'simulations/refsim/source_model_manifest.json'
+      - 'simulations/refsim/upstream_archive/singleINV_m1.py'
       - 'simulations/refsim/validate_grid.py'
       - 'simulations/refsim/verify_model_port.py'
       - 'simulations/refsim/verify_reported_flux.py'
