@@ -148,6 +148,7 @@ jobs:
           python stats/figure2a_repolarized.py
           python stats/imputation_benchmark_figure.py
           python stats/phewas_within_ancestry_figures.py
+          python stats/tag_vs_imputed_concordance.py
           python stats/svbyeye_supplement.py
           python simulations/refsim/make_demography_fig.py \
             --out simulations/refsim/gene_flux_model.png

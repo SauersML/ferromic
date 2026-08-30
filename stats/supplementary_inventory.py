@@ -1,9 +1,11 @@
 """Canonical final ordering of supplementary figures and tables.
 
 The response letter contains several figures shown only to reviewers.  They are
-not automatically supplementary figures.  In particular, the 17q21.31
-tagging-SNP-versus-imputed-dosage panel is response-only and is deliberately
-absent from ``FINAL_SUPPLEMENTARY_FIGURES``.
+not automatically supplementary figures.  The 17q21.31
+tagging-SNP-versus-imputed-dosage comparison was Figure S11 of the submitted
+supplement; the revision re-ran it against the single tagging SNP used in
+Table S21 (``stats/tag_vs_imputed_concordance.py``) and that regenerated
+panel is Figure S19.
 """
 
 from __future__ import annotations
@@ -12,10 +14,25 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-GENE_FLUX_CAPTION = (
+_GENE_FLUX_CAPTION_PATH = (
     Path(__file__).resolve().parents[1]
     / "simulations/refsim/gene_flux_caption.txt"
-).read_text(encoding="utf-8").strip()
+)
+
+# The caption is regenerated from the simulation grid by
+# ``simulations/refsim/make_report.py``. Importing this module must not fail
+# when the grid has not been regenerated in the current checkout (for example
+# on a runner that only assembles figures), so fall back to a placeholder that
+# is obvious in any assembled document rather than raising at import time.
+try:
+    GENE_FLUX_CAPTION = _GENE_FLUX_CAPTION_PATH.read_text(
+        encoding="utf-8"
+    ).strip()
+except FileNotFoundError:  # pragma: no cover - depends on checkout contents
+    GENE_FLUX_CAPTION = (
+        "[gene-flux caption unavailable: run simulations/refsim/make_report.py "
+        "to regenerate simulations/refsim/gene_flux_caption.txt]"
+    )
 
 
 @dataclass(frozen=True)
@@ -112,8 +129,17 @@ FINAL_SUPPLEMENTARY_FIGURES = (
         "(A) Comparison of inversion effect estimates obtained using global and within-ancestry principal components. (B) Comparison of inversion p-values obtained using global and within-ancestry principal components.",
     ),
     SupplementaryFigure(18, "phenotype_categories", "Category-level meta-analysis of disease associations", "original Figure S10", 10, None, None),
-    SupplementaryFigure(19, "family_history", "Concordance between family and personal history for 17q21.31 allele associations", "original Figure S12", 12, None, None),
-    SupplementaryFigure(20, "heritability", "Correlations between heritability and inversion effects", "original Figure S13", 13, None, None),
+    SupplementaryFigure(
+        19,
+        "tag_snp_concordance",
+        "Comparison of 17q21.31 PheWAS results using imputed inversion dosage versus tagging-SNP dosage",
+        "revision figure",
+        None,
+        "data/tag_vs_imputed_concordance.png",
+        "(A) Association p-values from the imputed inversion dosage analysis and the tagging-SNP analysis, colored by significance. (B) Effect estimates for the two dosage measures. Gray points had BH q ≥ 0.05 in both analyses, blue points were significant using imputed dosage only, orange points were significant using tagging-SNP dosage only, and green points were significant in both analyses. This figure replaces Figure S11 of the original submission, which compared p-values against a three-SNP unanimity hard call; the tagging-SNP association results are given in Table S21.",
+    ),
+    SupplementaryFigure(20, "family_history", "Concordance between family and personal history for 17q21.31 allele associations", "original Figure S12", 12, None, None),
+    SupplementaryFigure(21, "heritability", "Correlations between heritability and inversion effects", "original Figure S13", 13, None, None),
 )
 
 
@@ -161,8 +187,6 @@ FINAL_SUPPLEMENTARY_TABLE_ORDER = (
 
 RESPONSE_ONLY_FIGURE_TITLES = (
     "Examples of inversion alignments to chimpanzee used for polarization",
-    "Comparison of 17q21.31 PheWAS results, showing imputed inversion dosage "
-    "versus tagging SNP dosage",
 )
 
 

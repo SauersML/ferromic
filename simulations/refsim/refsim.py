@@ -61,8 +61,8 @@ The public GitHub commit contains the recurrent generator but omits the
 historical ``singleINV_m1.py`` source. The exact archived file from the original
 MSI analysis tree is vendored at ``upstream_archive/singleINV_m1.py`` and its
 SHA-256 is checked before every workflow run. The response model uses its
-one-split topology but applies the Methods' 90% bottleneck: the
-orientation-changing child has 10% of its immediate parent's effective size.
+one-split topology with its own inverted-deme size, ``N_a/100`` (see
+``SINGLE_INV_FRACTION``; the Methods' 90% figure describes the recurrent model).
 """
 from __future__ import annotations
 
@@ -316,7 +316,19 @@ def draw_admixture(rng):
     return frac_i, frac_d
 
 
-def demography_single(t_inv_years, m_flux=0.0):
+# Inverted-deme size in the single-event model, as a fraction of the ancestral
+# size. ``UPSTREAM`` is the value in hsiehphLab/inversionSimulation's own
+# single-event generator (``singleINV_m1.py``: ``initial_size=N_a/100``), which
+# the lab published publicly on 2026-08-28 (commit 6ff2ce3c) with that value
+# unchanged. ``METHODS_BOTTLENECK`` is the 90%-reduction figure the Methods give
+# for orientation-changing children of the *recurrent* model. The two give very
+# different single-event false-positive rates, so the choice is explicit.
+SINGLE_INV_FRACTION_UPSTREAM = 1 / 100
+SINGLE_INV_FRACTION_METHODS_BOTTLENECK = 1 / 10
+SINGLE_INV_FRACTION = SINGLE_INV_FRACTION_UPSTREAM
+
+
+def demography_single(t_inv_years, m_flux=0.0, inv_size_fraction=None):
     """The manuscript's single-event model: one divergence, nothing else.
 
     Methods: "an inversion event creates a subpopulation (e.g., inverted
@@ -325,16 +337,20 @@ def demography_single(t_inv_years, m_flux=0.0):
     models are run at t_inv in {500, 250, 100, 50} kya. There is no second inverted
     deme and no sister direct deme -- those exist only in the recurrent model.
 
-    The archived ``singleINV_m1.py`` gives the inverted deme ``N_a / 100``, but
-    the Methods specify a 90% reduction. The response analysis therefore uses
-    ``N_a / 10`` for the orientation-changing child and ``N_a`` for the child
-    retaining the ancestral orientation. Direct lineages never enter the
-    inverted deme, so the tree carries exactly one orientation change.
+    The inverted deme is ``inv_size_fraction * N_a`` and the deme retaining the
+    ancestral orientation is ``N_a``. The default is upstream's own published
+    value (``N_a / 100``); pass
+    ``SINGLE_INV_FRACTION_METHODS_BOTTLENECK`` to run the 90%-reduction
+    sensitivity instead. Direct lineages never enter the inverted deme, so the
+    tree carries exactly one orientation change.
     """
     import msprime
 
+    fraction = (SINGLE_INV_FRACTION if inv_size_fraction is None
+                else inv_size_fraction)
     de = msprime.Demography()
-    de.add_population(name="P_I", description="INV group", initial_size=N_A / 10)
+    de.add_population(name="P_I", description="INV group",
+                      initial_size=N_A * fraction)
     de.add_population(name="P_D", description="DIR group", initial_size=N_A)
     de.add_population(name="P00", description="Ancestral group", initial_size=N_A)
     if m_flux > 0:

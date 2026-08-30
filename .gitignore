@@ -26,6 +26,8 @@ env/
 !simulations/refsim/gene_flux_model.pdf
 !simulations/refsim/gene_flux_fpr_power.png
 !simulations/refsim/gene_flux_fpr_power.pdf
+!simulations/refsim/gene_flux_10pct_fpr_power.png
+!simulations/refsim/gene_flux_10pct_fpr_power.pdf
 .DS_Store
 
 # VCF/tabix index blobs and local diff dumps — never commit

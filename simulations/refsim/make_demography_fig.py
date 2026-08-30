@@ -71,7 +71,7 @@ POS_RECURRENT = {"direct_1": 0, "ancestral_inverted": 0.5 * GAP,
 # and one divergence. This is not a simplification of the recurrent model -- it
 # is a separate script, with its own demography, and it is what produced the
 # manuscript's single-event false-positive rates. For this revision, the
-# orientation-changing child is corrected to the Methods' N_a/10; the direct
+# orientation-changing child keeps upstream's N_a/100 (refsim.SINGLE_INV_FRACTION); the direct
 # child and the ancestor are N_a. Direct lineages never enter the inverted deme.
 POS_SINGLE = {"inverted": 0, "ancestral_unoriented": 0.5 * GAP, "direct": GAP}
 

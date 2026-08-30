@@ -477,8 +477,12 @@ def main() -> None:
     audit, source_metadata = build_audit(
         args.output_csv, args.inv_properties, args.polarity_json
     )
-    plot_data = audit.loc[audit["included_in_plot"]].copy()
+    # Draw exactly the loci that enter the model: those with pi defined in
+    # both the ancestral and the derived orientation. Loci with pi in only one
+    # orientation are audited (figure2a_locus_audit.tsv) but not plotted, so
+    # the figure and its legend describe the same set of loci.
     model_data = audit.loc[audit["included_in_model"]].copy()
+    plot_data = model_data
     if plot_data.empty or model_data.empty:
         raise RuntimeError("No loci survived repolarization and quality filters")
     effects, model_summary = fit_model(model_data)
@@ -488,7 +492,8 @@ def main() -> None:
     summary = {
         **source_metadata,
         **model_summary,
-        "n_plot_loci": int(audit["included_in_plot"].sum()),
+        "n_plot_loci": int(audit["included_in_model"].sum()),
+        "n_polarized_loci": int(audit["included_in_plot"].sum()),
         "n_model_loci": int(audit["included_in_model"].sum()),
         "n_excluded_from_plot": int((~audit["included_in_plot"]).sum()),
         "n_excluded_from_model": int((~audit["included_in_model"]).sum()),

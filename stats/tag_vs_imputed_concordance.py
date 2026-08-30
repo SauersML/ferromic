@@ -7,10 +7,9 @@ SNPs, so the same phenome can be scanned twice, once with the imputed dosage and
 once with a tag SNP, and the two sets of results compared. If the imputation were
 failing at this locus the two scans would disagree.
 
-Three panels:
+Two panels:
   A  -log10 p from the two scans, across every phecode tested in both.
   B  effect sizes (log odds ratio) from the two scans.
-  C  agreement on which associations pass the family-wise threshold.
 
 Inputs:  data/phewas_results.tsv        (imputed dosage, all inversions)
          data/all_pop_phewas_tag.tsv    (tagging SNP, 17q21.31)
@@ -96,13 +95,18 @@ def main():
     both = int((sig_i & sig_t).sum())
     only_i = int((sig_i & ~sig_t).sum())
     only_t = int((~sig_i & sig_t).sum())
+    m["significance_group"] = "BH q >= 0.05 in both analyses"
+    m.loc[sig_i & ~sig_t, "significance_group"] = "Significant with imputed dosage only"
+    m.loc[~sig_i & sig_t, "significance_group"] = "Significant with tagging SNP only"
+    m.loc[sig_i & sig_t, "significance_group"] = "Significant in both analyses"
+    b = m.loc[ok_or].copy()
 
     print(f"  -log10 p    : Spearman rho = {rho_p:.3f} (p = {p_rho:.3g}), "
           f"Pearson r = {r_p:.3f}")
     print(f"  log OR      : Spearman rho = {rho_b:.3f} (p = {p_rho_b:.3g}), "
           f"Pearson r = {r_b:.3f}, slope = {slope:.3f}, "
           f"same direction {100 * same_dir:.1f}%")
-    print(f"  family-significant: {both} in both, {only_i} imputed only, "
+    print(f"  BH q < {ALPHA}: {both} in both, {only_i} imputed only, "
           f"{only_t} tag only")
 
     pd.DataFrame([
@@ -114,63 +118,61 @@ def main():
              spearman_p=np.nan, pearson_r=slope, n=int(ok_or.sum())),
         dict(quantity="same direction of effect", spearman_rho=np.nan,
              spearman_p=np.nan, pearson_r=same_dir, n=int(ok_or.sum())),
-        dict(quantity="family-significant in both", spearman_rho=np.nan,
+        dict(quantity="BH q < 0.05 in both analyses", spearman_rho=np.nan,
              spearman_p=np.nan, pearson_r=both, n=len(m)),
     ]).to_csv(OUT_TSV, sep="\t", index=False)
 
-    fig, axes = plt.subplots(1, 3, figsize=(13.2, 4.3))
+    fig, axes = plt.subplots(1, 2, figsize=(9.2, 4.3))
+
+    significance_styles = [
+        ("BH q >= 0.05 in both analyses", "#9AA9BF", 16, .55),
+        ("Significant with imputed dosage only", "#3B5BA5", 24, .9),
+        ("Significant with tagging SNP only", "#C2601F", 24, .9),
+        ("Significant in both analyses", "#2A7360", 28, .95),
+    ]
 
     ax = axes[0]
     lim = max(m["logp_imputed"].max(), m["logp_tag"].max()) * 1.06
-    ax.plot([0, lim], [0, lim], color="#999999", lw=.9, ls="--")
-    ax.scatter(m["logp_imputed"], m["logp_tag"], s=16, alpha=.55,
-               color="#3B5BA5", edgecolor="none")
-    ax.scatter(m.loc[sig_i | sig_t, "logp_imputed"],
-               m.loc[sig_i | sig_t, "logp_tag"], s=26, alpha=.95,
-               color="#C2601F", edgecolor="white", linewidth=.4,
-               label="family-significant in either")
+    for group, color, size, alpha in significance_styles:
+        selected = m["significance_group"] == group
+        ax.scatter(
+            m.loc[selected, "logp_imputed"],
+            m.loc[selected, "logp_tag"],
+            s=size,
+            alpha=alpha,
+            color=color,
+            edgecolor="none",
+            label=group,
+        )
     ax.set_xlim(0, lim)
     ax.set_ylim(0, lim)
-    ax.set_xlabel("imputed dosage,  $-\\log_{10}p$")
-    ax.set_ylabel("tagging SNP,  $-\\log_{10}p$")
-    ax.set_title(f"A  Same phenome, two genotypes\nSpearman $\\rho$ = {rho_p:.3f} "
-                 f"(n = {len(m)})", loc="left", fontsize=11)
-    ax.legend(frameon=False, fontsize=8, loc="lower right")
+    ax.set_xlabel(f"{LOCUS} imputed inversion dosage association,  $-\\log_{{10}}p$")
+    ax.set_ylabel(f"{LOCUS} tagging SNP association,  $-\\log_{{10}}p$")
+    ax.set_title("A", loc="left", fontsize=11)
+    handles, labels = ax.get_legend_handles_labels()
+    ax.legend(handles[1:], labels[1:], frameon=False, fontsize=8, loc="lower right")
 
     ax = axes[1]
     lo = min(b["beta_imputed"].min(), b["beta_tag"].min())
     hi = max(b["beta_imputed"].max(), b["beta_tag"].max())
     pad = .06 * (hi - lo)
-    ax.plot([lo - pad, hi + pad], [lo - pad, hi + pad], color="#999999",
-            lw=.9, ls="--")
-    ax.axhline(0, color="#dddddd", lw=.8)
-    ax.axvline(0, color="#dddddd", lw=.8)
-    ax.scatter(b["beta_imputed"], b["beta_tag"], s=16, alpha=.55,
-               color="#3B5BA5", edgecolor="none")
+    for group, color, size, alpha in significance_styles:
+        selected = b["significance_group"] == group
+        ax.scatter(
+            b.loc[selected, "beta_imputed"],
+            b.loc[selected, "beta_tag"],
+            s=size,
+            alpha=alpha,
+            color=color,
+            edgecolor="none",
+        )
     ax.set_xlim(lo - pad, hi + pad)
     ax.set_ylim(lo - pad, hi + pad)
-    ax.set_xlabel("imputed dosage,  $\\log$OR")
-    ax.set_ylabel("tagging SNP,  $\\log$OR")
-    ax.set_title(f"B  Same effects\nslope = {slope:.2f}, "
-                 f"{100 * same_dir:.0f}% same direction", loc="left", fontsize=11)
+    ax.set_xlabel(f"Effect using {LOCUS} imputed inversion dosage,  $\\log$OR")
+    ax.set_ylabel(f"Effect using {LOCUS} tagging SNP dosage,  $\\log$OR")
+    ax.set_title("B", loc="left", fontsize=11)
 
-    ax = axes[2]
-    counts = [both, only_i, only_t]
-    labels = ["both", "imputed\nonly", "tag SNP\nonly"]
-    cols = ["#2A7360", "#3B5BA5", "#C2601F"]
-    ax.bar(np.arange(3), counts, color=cols, width=.6)
-    for i, c in enumerate(counts):
-        ax.text(i, c + max(counts) * .02, str(c), ha="center", va="bottom",
-                fontsize=10)
-    ax.set_xticks(np.arange(3))
-    ax.set_xticklabels(labels, fontsize=9)
-    ax.set_ylabel(f"phecodes at BH q < {ALPHA}")
-    ax.set_ylim(0, max(counts) * 1.18)
-    ax.set_title("C  Same calls", loc="left", fontsize=11)
-
-    fig.suptitle(f"{LOCUS}: PheWAS from imputed inversion dosage versus a "
-                 f"tagging SNP", fontsize=12.5)
-    fig.tight_layout(rect=(0, 0, 1, .95))
+    fig.tight_layout()
     fig.savefig(OUT_PDF)
     fig.savefig(OUT_PNG, dpi=200)
     print(f"\nWrote {OUT_TSV}\n      {OUT_PDF} / {OUT_PNG}")
