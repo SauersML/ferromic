@@ -62,28 +62,28 @@ INV_RENAME_MAP: Dict[str, str] = {
 
 INVERSION_COLUMN_DEFS: Dict[str, str] = OrderedDict(
     [
-        ("Chromosome", "The chromosome number (GRCh38 reference)."),
-        ("Start", "The 1-based start coordinate of the inversion (GRCh38)."),
-        ("End", "The 1-based end coordinate of the inversion (GRCh38)."),
+        ("Chromosome", "Chromosome (GRCh38)."),
+        ("Start", "Inversion start coordinate, 1-based (GRCh38)."),
+        ("End", "Inversion end coordinate, 1-based (GRCh38)."),
         (
             "number recurrent events",
-            "The minimum number of orientation changes inferred on the haplotype tree by Porubsky et al. (2022).",
+            "Minimum number of orientation changes on the haplotype tree, from Porubsky et al. (2022).",
         ),
-        ("Inversion ID", "The unique identifier assigned to the inversion (format: chr-start-inv-id)."),
-        ("Size (kbp)", "The length of the inverted segment in kilobase pairs."),
+        ("Inversion ID", "Inversion identifier (chr-start-inv-id)."),
+        ("Size (kbp)", "Length of the inverted segment in kilobase pairs."),
         (
             "Inversion allele frequency",
-            "The frequency of the inverted allele observed in the phased reference panel (n=82 haplotypes).",
+            "Frequency of the inverted allele in the phased reference panel (82 haplotypes).",
         ),
-        ("verdictRecurrence_hufsah", "Recurrence classification based on the Hufsah algorithm."),
-        ("verdictRecurrence_benson", "Recurrence classification based on the Benson algorithm."),
+        ("verdictRecurrence_hufsah", "Recurrence classification from the Hufsah method."),
+        ("verdictRecurrence_benson", "Recurrence classification from the Benson method."),
         (
             "0_single_1_recur_consensus",
-            "Consensus recurrence status used throughout this study: 0 indicates a Single-event inversion (evolved via a single historical mutational event), 1 indicates a Recurrent inversion (evolved via multiple independent events).",
+            "Consensus recurrence status used throughout this study: 0 = single-event inversion (one mutational event), 1 = recurrent inversion (multiple independent events).",
         ),
         (
             "Hudson's FST",
-            "Hudson's fixation index (FST) comparing inverted (haplotype group 1) and direct (haplotype group 0) chromosomes across informative sites.",
+            "Hudson's FST between inverted (haplotype group 1) and direct (haplotype group 0) haplotypes at informative sites.",
         ),
         (
             "Direct haplotypes pi",
@@ -100,42 +100,42 @@ GENE_CONSERVATION_COLUMN_DEFS: Dict[str, str] = OrderedDict(
     [
         ("Gene", "HGNC gene symbol."),
         ("Transcript", "Ensembl transcript ID used for the CDS analysis."),
-        ("Inversion ID", "The identifier of the inversion overlapping this gene."),
+        ("Inversion ID", "Identifier of the inversion overlapping the gene."),
         ("Recurrence class", "Consensus recurrence class of the inversion locus."),
-        ("Direct haplotypes", "Number of direct-orientation haplotypes contributing the CDS."),
-        ("Inverted haplotypes", "Number of inverted-orientation haplotypes contributing the CDS."),
-        ("Sequence classes", "Number of distinct CDS sequence-identity classes across both orientations."),
+        ("Direct haplotypes", "Number of direct haplotypes contributing a coding sequence."),
+        ("Inverted haplotypes", "Number of inverted haplotypes contributing a coding sequence."),
+        ("Sequence classes", "Number of distinct coding sequences across both orientations."),
         (
             "Orientation more conserved",
-            "Indicates which haplotype orientation (Inverted or Direct) has a higher proportion of identical CDS pairs based on the sign of Δ.",
+            "Orientation (inverted or direct) with the higher proportion of identical coding-sequence pairs, from the sign of Δ.",
         ),
         (
             "Fixed CDS differences",
-            "Count of CDS sites where direct and inverted haplotype groups are each fixed to different alleles (strict fixed-difference criterion).",
+            "Number of coding sites at which direct and inverted haplotypes are fixed for different alleles.",
         ),
         (
             "Direct identical pair proportion",
-            "The fraction of pairwise comparisons among direct haplotypes that resulted in 100% identical amino acid sequences.",
+            "Fraction of pairs of direct haplotypes with identical coding sequences.",
         ),
         (
             "Inverted identical pair proportion",
-            "The fraction of pairwise comparisons among inverted haplotypes that resulted in 100% identical amino acid sequences.",
+            "Fraction of pairs of inverted haplotypes with identical coding sequences.",
         ),
         (
             "Δ (inverted − direct)",
-            "The difference in identical pair proportions (Inverted minus Direct). Positive values indicate higher conservation in the inverted orientation.",
+            "Inverted minus direct identical pair proportion; positive values mean higher conservation in the inverted orientation.",
         ),
         (
             "Permutation p-value",
-            "Two-sided p-value from the joint inversion-level permutation null, which shuffles orientation labels once per inversion and applies the same assignment to every gene in that inversion.",
+            "Two-sided p-value from the permutation null that shuffles orientation labels once per inversion and applies the same labels to every gene at that locus.",
         ),
         (
             "Westfall-Young FWER p-value",
-            "Westfall-Young adjusted p-value controlling the family-wise error rate under the joint permutation null.",
+            "Westfall–Young adjusted p-value (family-wise error rate) under the same permutation null.",
         ),
         (
             "Direct FDR q-value",
-            "False-discovery-rate q-value estimated directly from the joint permutation null across the 130 tested genes.",
+            "False discovery rate q-value from the permutation null across the 130 tested genes.",
         ),
     ]
 )
@@ -144,246 +144,246 @@ PHEWAS_COLUMN_DEFS: Dict[str, str] = OrderedDict(
     [
         (
             "Phenotype",
-            "The unique phecode string representing the disease phenotype (derived from ICD billing codes).",
+            "Phecode phenotype, derived from ICD billing codes.",
         ),
-        ("Inversion", "The unique identifier of the chromosomal inversion locus being tested."),
+        ("Inversion", "Inversion identifier."),
         (
             "BH_P_GLOBAL",
-            "Benjamini-Hochberg adjusted p-value (global FDR) corrected across all phenotypes and inversions tested in the study.",
+            "Benjamini–Hochberg adjusted p-value across all phenotypes and inversions tested.",
         ),
         (
             "N_Controls",
-            "The number of control participants (individuals without the phenotype) included in the analysis.",
+            "Number of controls (participants without the phenotype).",
         ),
         (
             "OR",
-            "The Odds Ratio (OR) representing the change in disease risk per copy of the inversion allele. Derived from the exponential of the logistic regression beta coefficient.",
+            "Odds ratio per copy of the inverted allele (exponential of the logistic regression coefficient).",
         ),
         (
             "CI_LO_OR",
-            "The lower bound of the 95% confidence interval for the Odds Ratio. Calculated via Profile Likelihood for Firth/Penalized models, or Wald/Score methods for standard MLE.",
+            "Lower bound of the 95% confidence interval for the odds ratio (profile likelihood for Firth fits; Wald or score for maximum likelihood fits).",
         ),
-        ("CI_HI_OR", "The upper bound of the 95% confidence interval for the Odds Ratio."),
+        ("CI_HI_OR", "Upper bound of the 95% confidence interval for the odds ratio."),
         (
             "N_Total",
-            "The total number of participants (Cases + Controls) included in the logistic regression model after quality control and exclusion of related individuals.",
+            "Number of participants (cases plus controls) in the model after quality control and removal of related individuals.",
         ),
-        ("N_Cases", "The number of case participants (individuals with the phenotype) included in the analysis."),
+        ("N_Cases", "Number of cases (participants with the phenotype)."),
         (
             "P_Value_unadjusted",
-            "The nominal p-value for the association. Derived from a Likelihood Ratio Test (LRT) for stable fits, or a Score Test/Firth Penalized Likelihood if the standard model failed to converge or exhibited separation.",
+            "Nominal p-value: likelihood ratio test for stable fits; score test or Firth penalized likelihood when the standard model did not converge or showed separation.",
         ),
         (
             "P_Source_x",
-            "The specific statistical test used to generate the p-value (e.g., 'lrt_mle', 'score_chi2', 'score_boot_mle'). Identifies if fallback methods were required.",
+            "Test that produced the p-value ('lrt_mle', 'score_chi2', or 'score_boot_mle').",
         ),
         (
             "CI_Method",
-            "The statistical method used to calculate the confidence intervals (e.g., 'profile' for robust likelihood-based intervals, or 'wald_mle').",
+            "Method for the confidence interval ('profile' or 'wald_mle').",
         ),
         (
             "Inference_Type",
-            "The statistical framework selected by the pipeline (e.g., 'mle', 'firth', 'score'). 'Firth' indicates penalized regression was used to handle rare case counts or separation.",
+            "Inference method ('mle', 'firth', or 'score'); 'firth' is penalized regression, used for rare phenotypes or separation.",
         ),
         (
             "Model_Notes",
-            "Diagnostic flags generated during model fitting (e.g., 'sex_restricted' if analysis was limited to one sex, 'ridge_seeded' if regularization was needed for convergence).",
+            "Diagnostic flags from model fitting, such as 'sex_restricted' (analysis limited to one sex) or 'ridge_seeded' (ridge regularization used to reach convergence).",
         ),
         (
             "Sig_Global",
-            "Boolean indicator (TRUE/FALSE) denoting if the association is statistically significant at the global FDR threshold (q < 0.05).",
+            "TRUE if the association passes the global FDR threshold (q < 0.05).",
         ),
         (
             "Beta",
-            "Logistic regression beta coefficient (log odds) for the inversion dosage term.",
+            "Logistic regression coefficient (log odds ratio) for inversion dosage.",
         ),
         (
             "P_LRT_AncestryxDosage",
-            "P-value from a Stage-2 Likelihood Ratio or Rao Score test comparing a model with 'Ancestry x Inversion' interaction terms against a base model. Tests if the inversion's effect size differs significantly by genetic ancestry.",
+            "P-value of the ancestry by inversion interaction (likelihood ratio or Rao score test of the model with interaction terms against the base model), testing whether the inversion effect differs by genetic ancestry.",
         ),
         (
             "P_Stage2_Valid",
-            "Boolean indicating if the Stage-2 ancestry interaction model converged successfully and produced a valid p-value.",
+            "TRUE if the ancestry interaction model converged and gave a valid p-value.",
         ),
         (
             "Stage2_P_Source",
-            "The method used to calculate the interaction p-value (e.g., 'rao_score' is used for robust multi-degree-of-freedom tests when multiple ancestry groups are present).",
+            "Test used for the interaction p-value ('rao_score' for multi-degree-of-freedom tests across several ancestry groups).",
         ),
         (
             "Stage2_Inference_Type",
-            "The statistical framework used for the Stage-2 interaction test.",
+            "Inference method for the interaction test.",
         ),
-        ("Stage2_Model_Notes", "Diagnostic notes specific to the Stage-2 interaction model fit."),
+        ("Stage2_Model_Notes", "Diagnostic flags from the interaction model fit."),
         (
             "EUR_N",
-            "Total participants included in the European ancestry stratum analysis.",
+            "Participants in the European ancestry stratum.",
         ),
         ("EUR_N_Cases", "Number of cases in the European ancestry stratum."),
         ("EUR_N_Controls", "Number of controls in the European ancestry stratum."),
         (
             "EUR_OR",
-            "Odds Ratio estimated specifically within the European ancestry stratum.",
+            "Odds ratio within the European ancestry stratum.",
         ),
         ("EUR_P", "Nominal p-value for the association within the European ancestry stratum."),
         (
             "EUR_P_Source",
-            "Source of the p-value for the European ancestry stratum (e.g., 'score_chi2' if case counts were low).",
+            "Test that produced the p-value in the European ancestry stratum.",
         ),
         (
             "EUR_Inference_Type",
-            "Statistical framework used for the European ancestry stratum (e.g., 'firth' if the stratum had low case counts).",
+            "Inference method in the European ancestry stratum.",
         ),
         ("EUR_CI_Method", "Method used for confidence intervals in the European ancestry stratum."),
-        ("EUR_CI_LO_OR", "Lower 95% CI bound for the European ancestry stratum."),
-        ("EUR_CI_HI_OR", "Upper 95% CI bound for the European ancestry stratum."),
+        ("EUR_CI_LO_OR", "Lower bound of the 95% confidence interval, European ancestry stratum."),
+        ("EUR_CI_HI_OR", "Upper bound of the 95% confidence interval, European ancestry stratum."),
         (
             "AFR_N",
-            "Total participants included in the African ancestry stratum analysis.",
+            "Participants in the African ancestry stratum.",
         ),
         ("AFR_N_Cases", "Number of cases in the African ancestry stratum."),
         ("AFR_N_Controls", "Number of controls in the African ancestry stratum."),
         (
             "AFR_OR",
-            "Odds Ratio estimated specifically within the African ancestry stratum.",
+            "Odds ratio within the African ancestry stratum.",
         ),
         ("AFR_P", "Nominal p-value for the association within the African ancestry stratum."),
         (
             "AFR_P_Source",
-            "Source of the p-value for the African ancestry stratum (e.g., 'score_chi2' if case counts were low).",
+            "Test that produced the p-value in the African ancestry stratum.",
         ),
         (
             "AFR_Inference_Type",
-            "Statistical framework used for the African ancestry stratum (e.g., 'firth' if the stratum had low case counts).",
+            "Inference method in the African ancestry stratum.",
         ),
         ("AFR_CI_Method", "Method used for confidence intervals in the African ancestry stratum."),
-        ("AFR_CI_LO_OR", "Lower 95% CI bound for the African ancestry stratum."),
-        ("AFR_CI_HI_OR", "Upper 95% CI bound for the African ancestry stratum."),
+        ("AFR_CI_LO_OR", "Lower bound of the 95% confidence interval, African ancestry stratum."),
+        ("AFR_CI_HI_OR", "Upper bound of the 95% confidence interval, African ancestry stratum."),
         (
             "AMR_N",
-            "Total participants included in the Admixed American ancestry stratum analysis.",
+            "Participants in the Admixed American ancestry stratum.",
         ),
         ("AMR_N_Cases", "Number of cases in the Admixed American ancestry stratum."),
         ("AMR_N_Controls", "Number of controls in the Admixed American ancestry stratum."),
         (
             "AMR_OR",
-            "Odds Ratio estimated specifically within the Admixed American ancestry stratum.",
+            "Odds ratio within the Admixed American ancestry stratum.",
         ),
         ("AMR_P", "Nominal p-value for the association within the Admixed American ancestry stratum."),
         (
             "AMR_P_Source",
-            "Source of the p-value for the Admixed American ancestry stratum (e.g., 'score_chi2' if case counts were low).",
+            "Test that produced the p-value in the Admixed American ancestry stratum.",
         ),
         (
             "AMR_Inference_Type",
-            "Statistical framework used for the Admixed American ancestry stratum (e.g., 'firth' if the stratum had low case counts).",
+            "Inference method in the Admixed American ancestry stratum.",
         ),
         ("AMR_CI_Method", "Method used for confidence intervals in the Admixed American ancestry stratum."),
-        ("AMR_CI_LO_OR", "Lower 95% CI bound for the Admixed American ancestry stratum."),
-        ("AMR_CI_HI_OR", "Upper 95% CI bound for the Admixed American ancestry stratum."),
+        ("AMR_CI_LO_OR", "Lower bound of the 95% confidence interval, Admixed American ancestry stratum."),
+        ("AMR_CI_HI_OR", "Upper bound of the 95% confidence interval, Admixed American ancestry stratum."),
         (
             "SAS_N",
-            "Total participants included in the South Asian ancestry stratum analysis.",
+            "Participants in the South Asian ancestry stratum.",
         ),
         ("SAS_N_Cases", "Number of cases in the South Asian ancestry stratum."),
         ("SAS_N_Controls", "Number of controls in the South Asian ancestry stratum."),
         (
             "SAS_OR",
-            "Odds Ratio estimated specifically within the South Asian ancestry stratum.",
+            "Odds ratio within the South Asian ancestry stratum.",
         ),
         ("SAS_P", "Nominal p-value for the association within the South Asian ancestry stratum."),
         (
             "SAS_P_Source",
-            "Source of the p-value for the South Asian ancestry stratum (e.g., 'score_chi2' if case counts were low).",
+            "Test that produced the p-value in the South Asian ancestry stratum.",
         ),
         (
             "SAS_Inference_Type",
-            "Statistical framework used for the South Asian ancestry stratum (e.g., 'firth' if the stratum had low case counts).",
+            "Inference method in the South Asian ancestry stratum.",
         ),
         ("SAS_CI_Method", "Method used for confidence intervals in the South Asian ancestry stratum."),
-        ("SAS_CI_LO_OR", "Lower 95% CI bound for the South Asian ancestry stratum."),
-        ("SAS_CI_HI_OR", "Upper 95% CI bound for the South Asian ancestry stratum."),
+        ("SAS_CI_LO_OR", "Lower bound of the 95% confidence interval, South Asian ancestry stratum."),
+        ("SAS_CI_HI_OR", "Upper bound of the 95% confidence interval, South Asian ancestry stratum."),
         (
             "EAS_N",
-            "Total participants included in the East Asian ancestry stratum analysis.",
+            "Participants in the East Asian ancestry stratum.",
         ),
         ("EAS_N_Cases", "Number of cases in the East Asian ancestry stratum."),
         ("EAS_N_Controls", "Number of controls in the East Asian ancestry stratum."),
         (
             "EAS_OR",
-            "Odds Ratio estimated specifically within the East Asian ancestry stratum.",
+            "Odds ratio within the East Asian ancestry stratum.",
         ),
         ("EAS_P", "Nominal p-value for the association within the East Asian ancestry stratum."),
         (
             "EAS_P_Source",
-            "Source of the p-value for the East Asian ancestry stratum (e.g., 'score_chi2' if case counts were low).",
+            "Test that produced the p-value in the East Asian ancestry stratum.",
         ),
         (
             "EAS_Inference_Type",
-            "Statistical framework used for the East Asian ancestry stratum (e.g., 'firth' if the stratum had low case counts).",
+            "Inference method in the East Asian ancestry stratum.",
         ),
         ("EAS_CI_Method", "Method used for confidence intervals in the East Asian ancestry stratum."),
-        ("EAS_CI_LO_OR", "Lower 95% CI bound for the East Asian ancestry stratum."),
-        ("EAS_CI_HI_OR", "Upper 95% CI bound for the East Asian ancestry stratum."),
+        ("EAS_CI_LO_OR", "Lower bound of the 95% confidence interval, East Asian ancestry stratum."),
+        ("EAS_CI_HI_OR", "Upper bound of the 95% confidence interval, East Asian ancestry stratum."),
         (
             "MID_N",
-            "Total participants included in the Middle Eastern ancestry stratum analysis.",
+            "Participants in the Middle Eastern ancestry stratum.",
         ),
         ("MID_N_Cases", "Number of cases in the Middle Eastern ancestry stratum."),
         ("MID_N_Controls", "Number of controls in the Middle Eastern ancestry stratum."),
         (
             "MID_OR",
-            "Odds Ratio estimated specifically within the Middle Eastern ancestry stratum.",
+            "Odds ratio within the Middle Eastern ancestry stratum.",
         ),
         ("MID_P", "Nominal p-value for the association within the Middle Eastern ancestry stratum."),
         (
             "MID_P_Source",
-            "Source of the p-value for the Middle Eastern ancestry stratum (e.g., 'score_chi2' if case counts were low).",
+            "Test that produced the p-value in the Middle Eastern ancestry stratum.",
         ),
         (
             "MID_Inference_Type",
-            "Statistical framework used for the Middle Eastern ancestry stratum (e.g., 'firth' if the stratum had low case counts).",
+            "Inference method in the Middle Eastern ancestry stratum.",
         ),
         ("MID_CI_Method", "Method used for confidence intervals in the Middle Eastern ancestry stratum."),
-        ("MID_CI_LO_OR", "Lower 95% CI bound for the Middle Eastern ancestry stratum."),
-        ("MID_CI_HI_OR", "Upper 95% CI bound for the Middle Eastern ancestry stratum."),
+        ("MID_CI_LO_OR", "Lower bound of the 95% confidence interval, Middle Eastern ancestry stratum."),
+        ("MID_CI_HI_OR", "Upper bound of the 95% confidence interval, Middle Eastern ancestry stratum."),
     ]
 )
 
 WITHIN_ANCESTRY_PHEWAS_COLUMN_DEFS: Dict[str, str] = OrderedDict(
     [
-        ("population", "All of Us genetic-ancestry group used for the stratified model."),
-        ("population_label", "Expanded label for the genetic-ancestry group."),
+        ("population", "All of Us genetic ancestry group."),
+        ("population_label", "Full name of the genetic ancestry group."),
         ("Inversion", "Inversion identifier."),
         ("locus", "Cytogenetic locus label, where available."),
         ("Phenotype", "Phecode-derived phenotype label."),
-        ("pooled_or", "Odds ratio from the original pooled multi-ancestry PheWAS."),
-        ("pooled_q", "Global BH-adjusted p-value from the original pooled PheWAS."),
+        ("pooled_or", "Odds ratio from the pooled PheWAS."),
+        ("pooled_q", "Global Benjamini–Hochberg adjusted p-value from the pooled PheWAS."),
         (
             "existing_or",
-            "Odds ratio from the existing ancestry-stratified model using 16 global principal components.",
+            "Odds ratio from the ancestry-stratified model with 16 global principal components.",
         ),
-        ("existing_p", "Nominal p-value from the existing ancestry-stratified model."),
-        ("within_or", "Odds ratio after replacing the global components with 16 components fitted within the ancestry group."),
-        ("within_p", "Nominal p-value from the within-ancestry-PC sensitivity model."),
+        ("existing_p", "Nominal p-value from the ancestry-stratified model with global principal components."),
+        ("within_or", "Odds ratio from the model with 16 principal components computed within the ancestry group."),
+        ("within_p", "Nominal p-value from the within-ancestry principal component model."),
         (
             "within_q_selected_set",
-            "BH-adjusted p-value within the preselected sensitivity set; this is not an independent replication statistic.",
+            "Benjamini–Hochberg adjusted p-value across the selected phenotype set; descriptive only, since the set was chosen from the pooled results.",
         ),
-        ("within_n_total", "Total participants in the within-ancestry-PC model."),
-        ("within_n_cases", "Cases in the within-ancestry-PC model."),
-        ("within_n_controls", "Controls in the within-ancestry-PC model."),
-        ("within_ci_lo_or", "Lower reported confidence bound for the within-ancestry-PC odds ratio."),
-        ("within_ci_hi_or", "Upper reported confidence bound for the within-ancestry-PC odds ratio."),
-        ("evaluable", "TRUE when both PC strategies produced valid estimates for direct comparison."),
+        ("within_n_total", "Participants in the within-ancestry principal component model."),
+        ("within_n_cases", "Cases in the within-ancestry principal component model."),
+        ("within_n_controls", "Controls in the within-ancestry principal component model."),
+        ("within_ci_lo_or", "Lower confidence bound for the within-ancestry odds ratio."),
+        ("within_ci_hi_or", "Upper confidence bound for the within-ancestry odds ratio."),
+        ("evaluable", "TRUE when both models gave valid estimates."),
         (
             "direction_concordant",
-            "TRUE when the existing and within-ancestry-PC log odds ratios have the same sign.",
+            "TRUE when the two log odds ratios have the same sign.",
         ),
         (
             "beta_shift_within_minus_existing",
-            "Within-ancestry-PC log odds ratio minus the existing stratified log odds ratio.",
+            "Log odds ratio from the within-ancestry model minus that from the global principal component model.",
         ),
-        ("absolute_beta_shift", "Absolute value of the change in log odds ratio."),
+        ("absolute_beta_shift", "Absolute value of that difference."),
         ("not_evaluable_reason", "Reason a comparison could not be evaluated."),
     ]
 )
@@ -394,7 +394,7 @@ def _phewas_desc(column: str, fallback: str) -> str:
 TAG_PHEWAS_COLUMN_DEFS: Dict[str, str] = OrderedDict(
     [
         ("Phenotype", _phewas_desc("Phenotype", "Phenotype identifier.")),
-        ("BH_P_GLOBAL", _phewas_desc("BH_P_GLOBAL", "Global Benjamini-Hochberg adjusted p-value.")),
+        ("BH_P_GLOBAL", _phewas_desc("BH_P_GLOBAL", "Global Benjamini–Hochberg adjusted p-value.")),
         ("P_Value_unadjusted", "Nominal p-value for the association using the tagging SNP model."),
         ("N_Total", _phewas_desc("N_Total", "Total participants analyzed.")),
         ("N_Cases", _phewas_desc("N_Cases", "Number of cases.")),
@@ -402,19 +402,19 @@ TAG_PHEWAS_COLUMN_DEFS: Dict[str, str] = OrderedDict(
         ("Beta", _phewas_desc("Beta", "Logistic regression beta coefficient.")),
         (
             "OR",
-            "Odds Ratio representing the change in disease risk per copy of the inversion haplotype (defined by tagging SNPs).",
+            "Odds ratio per copy of the inverted haplotype, as defined by the tagging SNP.",
         ),
         ("P_Valid", _phewas_desc("P_Valid", "Whether the p-value is valid.")),
         ("P_Source_x", _phewas_desc("P_Source", "Statistic used for the p-value.")),
         ("OR_CI95", _phewas_desc("OR_CI95", "95% confidence interval for the odds ratio.")),
         ("CI_Method", _phewas_desc("CI_Method", "Method used to compute the confidence interval.")),
-        ("CI_Sided", _phewas_desc("CI_Sided", "Indicates if CI is one- or two-sided.")),
+        ("CI_Sided", _phewas_desc("CI_Sided", "Whether the confidence interval is one- or two-sided.")),
         ("CI_Valid", _phewas_desc("CI_Valid", "Whether the confidence interval is valid.")),
         ("CI_LO_OR", _phewas_desc("CI_LO_OR", "Lower CI bound for odds ratio.")),
         ("CI_HI_OR", _phewas_desc("CI_HI_OR", "Upper CI bound for odds ratio.")),
         ("Used_Ridge", _phewas_desc("Used_Ridge", "TRUE if ridge regularization was used.")),
         ("Final_Is_MLE", _phewas_desc("Final_Is_MLE", "TRUE if final fit uses MLE.")),
-        ("Used_Firth", _phewas_desc("Used_Firth", "TRUE if Firth penalization was required.")),
+        ("Used_Firth", _phewas_desc("Used_Firth", "TRUE if Firth penalization was used.")),
         ("Inference_Type", _phewas_desc("Inference_Type", "Inference framework used.")),
         ("N_Total_Used", _phewas_desc("N_Total_Used", "Participants contributing to final model.")),
         ("N_Cases_Used", _phewas_desc("N_Cases_Used", "Case count contributing to final model.")),
@@ -436,24 +436,24 @@ TAG_PHEWAS_COLUMN_DEFS: Dict[str, str] = OrderedDict(
 
 CATEGORY_COLUMN_DEFS: Dict[str, str] = OrderedDict(
     [
-        ("Inversion", "The Inversion ID."),
-        ("Category", "The phecode category being tested."),
-        ("Phenotypes in category", "Total number of phenotypes in this category."),
-        ("Phenotypes included in GBJ", "Number of phenotypes passing QC that were included in the omnibus test."),
-        ("Phenotypes included in GLS", "Number of phenotypes included in the GLS directional meta-analysis."),
-        ("P_GBJ", "P-value for the GBJ omnibus test (testing if any signal exists in the category)."),
-        ("GLS test statistic", "Test statistic for the Generalized Least Squares directional meta-analysis."),
+        ("Inversion", "Inversion identifier."),
+        ("Category", "Phecode category."),
+        ("Phenotypes in category", "Number of phenotypes in the category."),
+        ("Phenotypes included in GBJ", "Number of phenotypes passing quality control and included in the GBJ test."),
+        ("Phenotypes included in GLS", "Number of phenotypes included in the GLS directional test."),
+        ("P_GBJ", "P-value of the GBJ test for any association within the category."),
+        ("GLS test statistic", "GLS test statistic for the direction of effect across the category."),
         ("P_GLS", "P-value for the GLS directional test."),
         (
             "Direction",
-            "The aggregate direction of effect (Increased Risk or Decreased Risk) if the GLS test is significant.",
+            "Direction of effect across the category (increased or decreased risk) when the GLS test is significant.",
         ),
-        ("N_Individuals", "Number of individuals contributing to the category-level analysis."),
+        ("N_Individuals", "Number of participants in the category analysis."),
         ("GBJ_Draws", "Number of Monte Carlo draws used to approximate the GBJ p-value."),
-        ("Phenotypes", "List or count of phenotypes in the category considered for GBJ."),
-        ("Phenotypes_GLS", "List or count of phenotypes in the category considered for GLS."),
-        ("BH_P_GBJ", "Benjamini-Hochberg adjusted p-value for the GBJ test."),
-        ("BH_P_GLS", "Benjamini-Hochberg adjusted p-value for the GLS test."),
+        ("Phenotypes", "Phenotypes in the GBJ test, separated by semicolons."),
+        ("Phenotypes_GLS", "Phenotypes in the GLS test, separated by semicolons."),
+        ("BH_P_GBJ", "Benjamini–Hochberg adjusted p-value for the GBJ test."),
+        ("BH_P_GLS", "Benjamini–Hochberg adjusted p-value for the GLS test."),
     ]
 )
 
@@ -461,46 +461,46 @@ IMPUTATION_COLUMN_DEFS: Dict[str, str] = OrderedDict(
     [
         (
             "Inversion",
-            "Inversion coordinates (chr:start-end, GRCh38) corresponding to the OrigID used for model training.",
+            "Inversion coordinates (chr:start-end, GRCh38).",
         ),
-        ("n_components", "Number of PLS components selected via cross-validation."),
+        ("n_components", "Number of PLS components chosen by cross-validation."),
         (
             "unbiased_pearson_r2",
-            "Pearson r² correlation between imputed and true dosage in held-out cross-validation folds.",
+            "Pearson r² between imputed and true dosage in held-out cross-validation folds.",
         ),
-        ("p_value", "P-value comparing the trained model against a null intercept-only model."),
-        ("p_fdr_bh", "FDR adjusted p-value."),
+        ("p_value", "P-value of the model against an intercept-only null."),
+        ("p_fdr_bh", "Benjamini–Hochberg adjusted p-value."),
         (
             "overall_allele_frequency_AoU",
-            "Allele frequency of the inverted allele across all (overall) populations in the All of Us dataset when imputation performance meets the unbiased Pearson r² > 0.5 threshold.",
+            "Inverted allele frequency in all All of Us participants; reported only when r² > 0.5.",
         ),
         (
             "afr_allele_frequency_AoU",
-            "Allele frequency of the inverted allele in African (afr) samples in the All of Us dataset when unbiased Pearson r² > 0.5.",
+            "Inverted allele frequency in All of Us participants of African genetic ancestry; reported only when r² > 0.5.",
         ),
         (
             "amr_allele_frequency_AoU",
-            "Allele frequency of the inverted allele in American (amr) samples in the All of Us dataset when unbiased Pearson r² > 0.5.",
+            "Inverted allele frequency in All of Us participants of Admixed American genetic ancestry; reported only when r² > 0.5.",
         ),
         (
             "eas_allele_frequency_AoU",
-            "Allele frequency of the inverted allele in East Asian (eas) samples in the All of Us dataset when unbiased Pearson r² > 0.5.",
+            "Inverted allele frequency in All of Us participants of East Asian genetic ancestry; reported only when r² > 0.5.",
         ),
         (
             "eur_allele_frequency_AoU",
-            "Allele frequency of the inverted allele in European (eur) samples in the All of Us dataset when unbiased Pearson r² > 0.5.",
+            "Inverted allele frequency in All of Us participants of European genetic ancestry; reported only when r² > 0.5.",
         ),
         (
             "mid_allele_frequency_AoU",
-            "Allele frequency of the inverted allele in Middle Eastern (mid) samples in the All of Us dataset when unbiased Pearson r² > 0.5.",
+            "Inverted allele frequency in All of Us participants of Middle Eastern genetic ancestry; reported only when r² > 0.5.",
         ),
         (
             "sas_allele_frequency_AoU",
-            "Allele frequency of the inverted allele in South Asian (sas) samples in the All of Us dataset when unbiased Pearson r² > 0.5.",
+            "Inverted allele frequency in All of Us participants of South Asian genetic ancestry; reported only when r² > 0.5.",
         ),
         (
             "Use",
-            "Boolean flag indicating if the inversion met the quality threshold (r² > 0.5 and q < 0.05) for inclusion in the PheWAS.",
+            "TRUE if the inversion met the threshold for the PheWAS (r² > 0.5 and q < 0.05).",
         ),
     ]
 )
@@ -509,46 +509,46 @@ BEST_TAGGING_COLUMN_DEFS: Dict[str, str] = OrderedDict(
     [
         (
             "inversion_region",
-            "Inversion interval (GRCh38/hg38 coordinates) reported by the tagging SNP pipeline (chr:start-end).",
+            "Inversion interval (chr:start-end, GRCh38).",
         ),
         (
             "p_x",
-            "P-value (P_X) from the ancient selection summary statistics corresponding to the tagging SNP (hg19/GRCh37).",
+            "AGES selection p-value (P_X) for the tagging SNP.",
         ),
-        ("s", "Selection coefficient estimate from the selection summary statistics (hg19/GRCh37)."),
-        ("REF", "Reference allele for the tagging SNP in the selection dataset."),
-        ("ALT", "Alternate allele for the tagging SNP in the selection dataset."),
-        ("AF", "Alternate allele frequency reported in the selection summary statistics."),
+        ("s", "AGES selection coefficient for the tagging SNP."),
+        ("REF", "Reference allele of the tagging SNP in AGES."),
+        ("ALT", "Alternate allele of the tagging SNP in AGES."),
+        ("AF", "Alternate allele frequency reported by AGES."),
         (
             "REF_freq_direct",
-            "Frequency of the REF allele among direct (haplotype group 0) chromosomes in the tagging SNP analysis.",
+            "Frequency of the reference allele among direct haplotypes.",
         ),
         (
             "REF_freq_inverted",
-            "Frequency of the REF allele among inverted (haplotype group 1) chromosomes in the tagging SNP analysis.",
+            "Frequency of the reference allele among inverted haplotypes.",
         ),
         (
             "ALT_freq_direct",
-            "Frequency of the ALT allele among direct (haplotype group 0) chromosomes in the tagging SNP analysis.",
+            "Frequency of the alternate allele among direct haplotypes.",
         ),
         (
             "ALT_freq_inverted",
-            "Frequency of the ALT allele among inverted (haplotype group 1) chromosomes in the tagging SNP analysis.",
+            "Frequency of the alternate allele among inverted haplotypes.",
         ),
         (
             "exclusion_reasons",
-            "Semicolon-delimited reasons why the tagging SNP did not pass quality filters (e.g., low r², low haplotype count, missing selection stats).",
+            "Reasons the tagging SNP failed quality filters (low r², low haplotype count, or missing selection statistics), separated by semicolons.",
         ),
         (
             "correlation_r",
-            "Pearson correlation (r) between the tagging SNP allele and inversion orientation (direct vs. inverted haplotypes).",
+            "Pearson correlation between the tagging SNP allele and inversion orientation.",
         ),
-        ("abs_r", "Absolute correlation |r| for the tagging SNP within the inversion region."),
-        ("hg37_coordinate", "Tagging SNP coordinate on GRCh37/hg19 in chr:pos format (e.g., chr1:10583)."),
-        ("hg38_coordinate", "Tagging SNP coordinate on GRCh38/hg38 in chr:pos format (e.g., chr1:10583)."),
+        ("abs_r", "Absolute value of that correlation."),
+        ("hg37_coordinate", "Tagging SNP position (chr:pos, GRCh37)."),
+        ("hg38_coordinate", "Tagging SNP position (chr:pos, GRCh38)."),
         (
             "bh_p_value",
-            "Benjamini–Hochberg adjusted p-value across inversions that passed tagging SNP quality filters (computed from P_X).",
+            "Benjamini–Hochberg adjusted P_X across inversions that passed quality filters.",
         ),
     ]
 )
@@ -559,39 +559,39 @@ SIMULATION_COLUMN_DEFS: Dict[str, str] = OrderedDict(
         ("Second inversion event (years ago)", "Time of the second inversion event."),
         ("Third inversion event (years ago)", "Time of the third inversion event."),
         ("Sample size (haplotypes)", "Number of haplotypes simulated."),
-        ("Inversion frequency", "Frequency of the inversion."),
-        ("Recombination rate (per generation per base pair)", "Recombination rate used in simulation."),
-        ("Gene flow (per generation per chromosome)", "Gene flow rate used in simulation."),
+        ("Inversion frequency", "Inversion frequency."),
+        ("Recombination rate (per generation per base pair)", "Recombination rate."),
+        ("Gene flow (per generation per chromosome)", "Gene flow rate between haplotype groups of the same orientation."),
     ]
 )
 
 PAML_COLUMN_DEFS: Dict[str, str] = OrderedDict(
     [
-        ("region", "The identifier of the genomic inversion region (e.g., chr17:42000-45000)."),
-        ("gene", "The gene symbol or identifier being analyzed."),
+        ("region", "Inversion region (chr:start-end)."),
+        ("gene", "Gene symbol."),
         (
             "status",
-            "The final result of the pipeline for this gene (success or partial_success rows are retained).",
+            "Pipeline status for the gene (success or partial_success).",
         ),
         ("cmc_p_value", "P-value for the Clade Model C test."),
-        ("cmc_bh_p_value", "Benjamini-Hochberg adjusted p-value for the Clade Model C test."),
+        ("cmc_bh_p_value", "Benjamini–Hochberg adjusted p-value for the Clade Model C test."),
         ("cmc_lrt_stat", "Likelihood ratio test statistic for the Clade Model C comparison."),
-        ("cmc_lnl_h1", "Log-likelihood of the alternative hypothesis (different ω for divergent sites)."),
-        ("cmc_lnl_h0", "Log-likelihood of the null hypothesis (shared ω for divergent sites)."),
-        ("cmc_p0", "Proportion of sites in site class 0 (strictly conserved)."),
+        ("cmc_lnl_h1", "Log-likelihood under the alternative model (different ω between clades at divergent sites)."),
+        ("cmc_lnl_h0", "Log-likelihood under the null model (shared ω at divergent sites)."),
+        ("cmc_p0", "Proportion of sites in site class 0 (conserved)."),
         ("cmc_p1", "Proportion of sites in site class 1 (neutral evolution)."),
-        ("cmc_p2", "Proportion of sites in site class 2 (divergent selection class of interest)."),
-        ("cmc_omega0", "dN/dS (ω) estimate for conserved site class 0."),
-        ("cmc_omega2_direct", "dN/dS (ω) estimate for divergent sites in the Direct clade."),
-        ("cmc_omega2_inverted", "dN/dS (ω) estimate for divergent sites in the Inverted clade."),
+        ("cmc_p2", "Proportion of sites in site class 2 (divergent between clades)."),
+        ("cmc_omega0", "dN/dS (ω) in site class 0."),
+        ("cmc_omega2_direct", "dN/dS (ω) at divergent sites in the direct clade."),
+        ("cmc_omega2_inverted", "dN/dS (ω) at divergent sites in the inverted clade."),
         ("cmc_kappa", "Estimated transition/transversion ratio (κ)."),
         (
             "n_leaves_pruned",
-            "Number of sequences retained after intersecting the region tree and gene alignment.",
+            "Number of sequences present in both the region tree and the gene alignment.",
         ),
         (
             "taxa_used",
-            "Semicolon-separated list of the exact samples included in the PAML analysis (reproducibility).",
+            "Samples included in the PAML analysis, separated by semicolons.",
         ),
     ]
 )
@@ -838,23 +838,23 @@ CODING_DIVERSITY_COLUMN_DEFS = {
     "region_end": "Inversion end coordinate (GRCh38).",
     "recurrence": "Consensus recurrence label (0 = single-event, 1 = recurrent).",
     "n_cds": "Coding sequences overlapping the locus.",
-    "n_cds_with_fourfold": "Coding sequences contributing 4-fold-degenerate sites.",
-    "fourfold_sites_direct": "4-fold-degenerate sites compared, direct haplotypes.",
-    "fourfold_sites_inverted": "4-fold-degenerate sites compared, inverted haplotypes.",
+    "n_cds_with_fourfold": "Coding sequences contributing 4-fold degenerate sites.",
+    "fourfold_sites_direct": "4-fold degenerate sites compared, direct haplotypes.",
+    "fourfold_sites_inverted": "4-fold degenerate sites compared, inverted haplotypes.",
     "pi_fourfold_direct": "Nucleotide diversity at 4-fold sites, direct haplotypes.",
     "pi_fourfold_inverted": "Nucleotide diversity at 4-fold sites, inverted haplotypes.",
-    "pi_wholeCDS_direct": "Nucleotide diversity across whole coding sequence, direct.",
-    "pi_wholeCDS_inverted": "Nucleotide diversity across whole coding sequence, inverted.",
-    "pi_wholeLocus_direct": "Nucleotide diversity across the whole locus, direct.",
-    "pi_wholeLocus_inverted": "Nucleotide diversity across the whole locus, inverted.",
-    "zerofold_sites_direct": "0-fold-degenerate sites compared, direct haplotypes.",
-    "zerofold_sites_inverted": "0-fold-degenerate sites compared, inverted haplotypes.",
+    "pi_wholeCDS_direct": "Nucleotide diversity across coding sequence, direct haplotypes.",
+    "pi_wholeCDS_inverted": "Nucleotide diversity across coding sequence, inverted haplotypes.",
+    "pi_wholeLocus_direct": "Nucleotide diversity across the whole locus, direct haplotypes.",
+    "pi_wholeLocus_inverted": "Nucleotide diversity across the whole locus, inverted haplotypes.",
+    "zerofold_sites_direct": "0-fold degenerate sites compared, direct haplotypes.",
+    "zerofold_sites_inverted": "0-fold degenerate sites compared, inverted haplotypes.",
     "piN_direct": "Nonsynonymous diversity (0-fold sites), direct haplotypes.",
     "piN_inverted": "Nonsynonymous diversity (0-fold sites), inverted haplotypes.",
     "piS_direct": "Synonymous diversity (4-fold sites), direct haplotypes.",
     "piS_inverted": "Synonymous diversity (4-fold sites), inverted haplotypes.",
-    "piN_piS_direct": "Ratio of nonsynonymous to synonymous diversity, direct.",
-    "piN_piS_inverted": "Ratio of nonsynonymous to synonymous diversity, inverted.",
+    "piN_piS_direct": "Ratio of nonsynonymous to synonymous diversity, direct haplotypes.",
+    "piN_piS_inverted": "Ratio of nonsynonymous to synonymous diversity, inverted haplotypes.",
 }
 
 DIVERGENCE_COLUMN_DEFS = {
@@ -878,28 +878,28 @@ AGES_ALL_TAGS_COLUMN_DEFS = {
     "pos_hg19": "Position (GRCh37), as queried in AGES.",
     "r_with_inversion": "Correlation between the SNP and inversion orientation.",
     "abs_r": "Absolute correlation with orientation.",
-    "alt_enriched_on": "Orientation on which the alternate allele is enriched.",
+    "alt_enriched_on": "Orientation in which the alternate allele is enriched.",
     "ages_S": "Selection coefficient reported by AGES for the tested allele.",
-    "ages_S_inverted_allele": "Selection coefficient signed to the inverted allele.",
+    "ages_S_inverted_allele": "Selection coefficient with sign relative to the inverted allele.",
     "ages_S_ci_lo": "Lower bound of the selection coefficient interval.",
     "ages_S_ci_hi": "Upper bound of the selection coefficient interval.",
     "ages_SE": "Standard error of the selection coefficient.",
     "ages_P_X": "AGES selection p-value.",
-    "ages_FDR": "Benjamini-Hochberg adjusted AGES p-value.",
+    "ages_FDR": "Benjamini–Hochberg adjusted AGES p-value.",
     "ages_FILTER": "AGES quality filter status.",
 }
 
 ARCHITECTURE_CONTROLS_COLUMN_DEFS = {
-    "outcome": "Quantity being compared between recurrence classes.",
-    "control": "Conditioning set used in the conditional-randomization test.",
-    "effect": "Estimated effect on the stated scale.",
+    "outcome": "Quantity compared between recurrence classes.",
+    "control": "Covariates conditioned on.",
+    "effect": "Estimated effect.",
     "ci_lo": "Lower bound of the 95% confidence interval.",
     "ci_hi": "Upper bound of the 95% confidence interval.",
     "p": "Two-sided p-value.",
     "n": "Loci contributing to the estimate.",
     "n_recur": "Recurrent loci contributing.",
     "n_single": "Single-event loci contributing.",
-    "scale": "Scale on which the effect is expressed.",
+    "scale": "Scale of the effect estimate.",
 }
 
 CHIMP_POLARITY_COLUMN_DEFS = {
@@ -908,19 +908,19 @@ CHIMP_POLARITY_COLUMN_DEFS = {
     "start": "Inversion start coordinate (GRCh38).",
     "end": "Inversion end coordinate (GRCh38).",
     "recurrence": "Consensus recurrence label.",
-    "chimp_call": "Which human arrangement is shared with the chimpanzee, from manual review.",
-    "flip_ref_polarity": "Whether the reference orientation had to be flipped to become ancestral.",
-    "included_in_plot": "Whether the locus enters the diversity figure.",
-    "included_in_model": "Whether the locus enters the statistical model.",
-    "plot_exclusion_reason": "Why the locus was excluded from the figure, if it was.",
-    "model_exclusion_reason": "Why the locus was excluded from the model, if it was.",
-    "pi_ancestral": "Nucleotide diversity among ancestral-orientation haplotypes.",
-    "pi_derived": "Nucleotide diversity among derived-orientation haplotypes.",
+    "chimp_call": "Human arrangement shared with chimpanzee, from manual review.",
+    "flip_ref_polarity": "Whether the GRCh38 reference arrangement is the derived one.",
+    "included_in_plot": "Whether the locus is included in the diversity figure.",
+    "included_in_model": "Whether the locus is included in the statistical model.",
+    "plot_exclusion_reason": "Reason for exclusion from the figure, if excluded.",
+    "model_exclusion_reason": "Reason for exclusion from the model, if excluded.",
+    "pi_ancestral": "Nucleotide diversity among haplotypes with the ancestral arrangement.",
+    "pi_derived": "Nucleotide diversity among haplotypes with the derived arrangement.",
 }
 
 IMPUTATION_BENCHMARK_COLUMN_DEFS = {
     "inversion": "Inversion locus.",
-    "comparison": "External genotype source compared against.",
+    "comparison": "External genotype source.",
     "n": "Samples compared.",
     "agreement_r2": "Squared Pearson correlation between imputed and external dosage.",
     "hard_call_concordance": "Fraction of samples agreeing after rounding to 0/1/2.",
@@ -930,35 +930,40 @@ IMPUTATION_BENCHMARK_COLUMN_DEFS = {
 
 FLUX_SWEEP_COLUMN_DEFS = {
     "scenario": "Simulated locus class: single-event or recurrent.",
-    "metric": "The recurrent-call rate is a false-positive rate for single-event loci and power for recurrent loci.",
-    "m_flux": "Between-orientation gene flux, per lineage per generation.",
-    "n_cells": "Number of inversion-age by recombination-rate grid cells pooled in this row.",
-    "replicates_per_cell": "Simulated loci per grid cell.",
-    "reps": "Total simulated loci pooled in this row.",
+    "metric": "Metric reported: false-positive rate for single-event loci, power for recurrent loci.",
+    "m_flux": "Gene flux between orientations, per lineage per generation.",
+    "n_cells": "Number of inversion age and recombination rate combinations combined in this row.",
+    "replicates_per_cell": "Simulated loci per combination.",
+    "reps": "Total simulated loci in this row.",
     "n_called": "Loci called recurrent by the reference classifier.",
-    "recurrent_call_rate": "Proportion called recurrent: the false-positive rate for single-event loci, the power for recurrent loci.",
+    "recurrent_call_rate": "Proportion of loci called recurrent (false-positive rate for single-event loci, power for recurrent loci).",
     "ci_low": "Lower bound of the Wilson 95% interval.",
     "ci_high": "Upper bound of the Wilson 95% interval.",
-    "trend_p": "Two-sided Cochran-Armitage trend-test p-value across the four gene-flux levels for this scenario.",
+    "trend_p": "Two-sided Cochran–Armitage trend p-value across the four gene flux levels, for this scenario.",
 }
 
 FOURFOLD_CORR_COLUMN_DEFS = {
-    "subset": "Consensus-classified loci with 4-fold sites in both orientations.",
+    "subset": "Loci with a consensus recurrence classification and 4-fold sites in both orientations.",
     "measure_x": "First diversity measure in the comparison.",
     "measure_y": "Second diversity measure in the comparison.",
-    "comparison": "Human-readable description of the comparison, including any interval.",
-    "n_loci": "Loci (or locus-orientation observations) contributing.",
+    "comparison": "Description of the comparison, including any interval.",
+    "n_loci": "Number of loci, or of locus by orientation observations for correlations of diversity levels.",
     "statistic": (
-        "Which concordance statistic the row reports: a Spearman correlation of "
-        "orientation differences or of diversity levels, the fraction of loci "
-        "agreeing in sign, or the median simulated correlation attainable if "
-        "agreement were perfect apart from 4-fold site-sampling noise."
+        "Statistic in the row: Spearman correlation of orientation differences or of "
+        "diversity levels; fraction of loci agreeing in sign; the median correlation in "
+        "simulations where the measures agree perfectly apart from sampling noise at "
+        "4-fold sites (noise ceiling); or a split-half statistic, in which the 4-fold "
+        "sites are divided at random into two halves: the correlation of the orientation "
+        "difference between halves, the attainable correlation with a perfectly agreeing "
+        "measure implied by that reliability (Spearman–Brown), or the correlation of the "
+        "half-length difference with the whole-locus difference."
     ),
     "value": "Value of the statistic.",
     "p_value": (
-        "Two-sided p-value for correlations and sign agreement; for noise "
-        "ceilings, the fraction of simulations at or below the observed "
-        "correlation."
+        "Two-sided p-value for correlations and sign agreement. For the noise "
+        "ceiling, the fraction of simulations with correlation at or below the "
+        "observed value. NA for split-half statistics, whose 95% ranges over random "
+        "splits are given in the comparison column."
     ),
 }
 
@@ -1165,7 +1170,7 @@ _EXPLICIT_LABELS = {
     "ancestral_allele": "Ancestral allele",
     "ancestral_allele_confidence": "Confidence in the ancestral allele call",
     "ancestral_allele_n_tag": "Tagging SNPs supporting the ancestral allele",
-    "bh_p_value": "Benjamini-Hochberg adjusted p-value",
+    "bh_p_value": "Benjamini–Hochberg adjusted p-value",
     "both_orientations": "Both orientations observed",
     "chr_std": "Chromosome",
     "clade_with_higher_omega2": "Orientation with the higher omega",
@@ -1202,7 +1207,7 @@ _EXPLICIT_LABELS = {
     "p_value": "p-value",
     "p_x": "p-value",
     "p2_divergent_class": "Proportion of codons in the divergent site class",
-    "p_fdr_bh": "Benjamini-Hochberg adjusted p-value",
+    "p_fdr_bh": "Benjamini–Hochberg adjusted p-value",
     "p_recurrent_insample": "Probability of recurrence (in-sample)",
     "p_recurrent_loo": "Probability of recurrence (leave-one-out)",
     "recurrence": "Recurrence",
@@ -1297,7 +1302,7 @@ _EXPLICIT_LABELS.update({
     "ages_S_ci_hi": "Selection coefficient upper CI",
     "ages_SE": "Selection coefficient standard error",
     "ages_P_X": "Selection p-value",
-    "ages_FDR": "Benjamini-Hochberg adjusted selection p-value",
+    "ages_FDR": "Benjamini–Hochberg adjusted selection p-value",
     "ages_FILTER": "AGES quality filter", "in_ages": "Present in AGES",
     "n": "Samples", "agreement_r2": "Imputed vs external r2",
     "hard_call_concordance": "Hard-call concordance",
@@ -1306,8 +1311,8 @@ _EXPLICIT_LABELS.update({
     "scenario": "Simulated locus class",
     "metric": "Performance metric",
     "m_flux": "Gene flux (per lineage per generation)",
-    "n_cells": "Grid cells pooled",
-    "replicates_per_cell": "Loci per grid cell",
+    "n_cells": "Age by recombination combinations",
+    "replicates_per_cell": "Loci per combination",
     "reps": "Simulated loci", "n_called": "Loci called recurrent",
     "recurrent_call_rate": "Proportion called recurrent",
     "trend_p": "Trend-test p-value",
@@ -2060,7 +2065,12 @@ def build_workbook(output_path: Path) -> None:
     register(
         SheetInfo(
             name="Old recurrent events",
-            description="Parameters used in simulations under different scenarios of old recurrent inversion events. Simulations were generated using a structured coalescent framework (Methods). The three inversion events are set to emerge at 500, 250, 100 thousand years ago. Six inversion frequencies (1%, 2%, 5%, 10%, 25%, and 50%) are considered.  Three recombination rates, including zero, 1e-8, and 1e-6 per generation per base pair are simulated. Gene flow is set as 1e-8 per generation per chromosome only between groups of haplotypes in the same orientations.",
+            description=(
+                "Parameters for the structured coalescent simulations of old recurrent inversion events (Methods). Three "
+                "inversion events arise at 500, 250, and 100 thousand years ago. Inversion frequency is 1%, 2%, 5%, 10%, 25%, or "
+                "50%, and the recombination rate is 0, 1e-8, or 1e-6 per base pair per generation. Gene flow occurs only between "
+                "haplotype groups of the same orientation, at 1e-8 per chromosome per generation."
+            ),
             column_defs=SIMULATION_COLUMN_DEFS,
             loader=lambda: _load_simulation_table(TABLE_S1),
         )
@@ -2069,7 +2079,12 @@ def build_workbook(output_path: Path) -> None:
     register(
         SheetInfo(
             name="Young recurrent events",
-            description="Parameters used in simulations under different scenarios of young recurrent inversion events. Simulations were generated using a structured coalescent framework (Methods). The three inversion events are set to emerge at 250, 100, 50 thousand years ago. Six inversion frequencies (1%, 2%, 5%, 10%, 25%, and 50%) are considered.  Three recombination rates, including zero, 1e-8, and 1e-6 per generation per base pair are simulated. Gene flow is set as 1e-8 per generation per chromosome only between groups of haplotypes in the same orientations.",
+            description=(
+                "Parameters for the structured coalescent simulations of young recurrent inversion events (Methods). Three "
+                "inversion events arise at 250, 100, and 50 thousand years ago. Inversion frequency is 1%, 2%, 5%, 10%, 25%, or "
+                "50%, and the recombination rate is 0, 1e-8, or 1e-6 per base pair per generation. Gene flow occurs only between "
+                "haplotype groups of the same orientation, at 1e-8 per chromosome per generation."
+            ),
             column_defs=SIMULATION_COLUMN_DEFS,
             loader=lambda: _load_simulation_table(TABLE_S2),
         )
@@ -2078,7 +2093,12 @@ def build_workbook(output_path: Path) -> None:
     register(
         SheetInfo(
             name="Recent recurrent events",
-            description="Parameters used in simulations under different scenarios of recent recurrent inversion events. Simulations were generated using a structured coalescent framework (Methods). The three inversion events are set to emerge at 100, 50, 25 thousand years ago. Six inversion frequencies (1%, 2%, 5%, 10%, 25%, and 50%) are considered.  Three recombination rates, including zero, 1e-8, and 1e-6 per generation per base pair are simulated. Gene flow is set as 1e-8 per generation per chromosome only between groups of haplotypes in the same orientations.",
+            description=(
+                "Parameters for the structured coalescent simulations of recent recurrent inversion events (Methods). Three "
+                "inversion events arise at 100, 50, and 25 thousand years ago. Inversion frequency is 1%, 2%, 5%, 10%, 25%, or "
+                "50%, and the recombination rate is 0, 1e-8, or 1e-6 per base pair per generation. Gene flow occurs only between "
+                "haplotype groups of the same orientation, at 1e-8 per chromosome per generation."
+            ),
             column_defs=SIMULATION_COLUMN_DEFS,
             loader=lambda: _load_simulation_table(TABLE_S3),
         )
@@ -2087,7 +2107,12 @@ def build_workbook(output_path: Path) -> None:
     register(
         SheetInfo(
             name="Very recent recurrent events",
-            description="Parameters used in simulations under different scenarios of very recent recurrent inversion events. Simulations were generated using a structured coalescent framework (Methods). The three inversion events are set to emerge at 50, 25, 10 thousand years ago. Six inversion frequencies (1%, 2%, 5%, 10%, 25%, and 50%) are considered.  Three recombination rates, including zero, 1e-8, and 1e-6 per generation per base pair are simulated. Gene flow is set as 1e-8 per generation per chromosome only between groups of haplotypes in the same orientations.",
+            description=(
+                "Parameters for the structured coalescent simulations of very recent recurrent inversion events (Methods). Three "
+                "inversion events arise at 50, 25, and 10 thousand years ago. Inversion frequency is 1%, 2%, 5%, 10%, 25%, or "
+                "50%, and the recombination rate is 0, 1e-8, or 1e-6 per base pair per generation. Gene flow occurs only between "
+                "haplotype groups of the same orientation, at 1e-8 per chromosome per generation."
+            ),
             column_defs=SIMULATION_COLUMN_DEFS,
             loader=lambda: _load_simulation_table(TABLE_S4),
         )
@@ -2098,14 +2123,12 @@ def build_workbook(output_path: Path) -> None:
             name="Inversion catalog",
             description=(
                 "The 93 balanced human chromosomal inversions analyzed in this study: 61 single-event and 32 recurrent loci. "
-                "Inversion calls, coordinates, and recurrence classifications are derived from Porubsky et al. (2022) "
-                "using Strand-seq and long-read sequencing on the 1000 Genomes Project panel (GRCh38 coordinates). "
+                "Inversion calls, coordinates, and recurrence classifications are from Porubsky et al. (2022), based on "
+                "Strand-seq and long-read sequencing of the 1000 Genomes Project panel (GRCh38 coordinates). The columns "
                 "Chromosome, Start, End, number recurrent events, Inversion ID, Size (kbp), Inversion allele frequency, "
-                "verdictRecurrence_hufsah, and verdictRecurrence_benson columns are sourced directly from Porubsky et al. "
-                "(2022). Only loci for which the two recurrence methods agree are included. NA in Hudson's FST, Direct "
-                "haplotypes pi, and Inverted haplotypes pi "
-                "reflects that these metrics could not be calculated because the region lacked polymorphisms or had too few "
-                "haplotypes."
+                "verdictRecurrence_hufsah, and verdictRecurrence_benson are taken directly from that study. Only loci on which "
+                "the two recurrence methods agree are included. NA in Hudson's FST, Direct haplotypes pi, and Inverted haplotypes "
+                "pi marks loci with no polymorphisms or too few haplotypes."
             ),
             column_defs=INVERSION_COLUMN_DEFS,
             loader=_load_inversion_catalog,
@@ -2116,10 +2139,10 @@ def build_workbook(output_path: Path) -> None:
         SheetInfo(
             name="CDS conservation genes",
             description=(
-                "Inversion-level permutation analysis of protein-coding gene conservation within inversion loci. The 130 genes "
-                "have at least four haplotypes in each orientation. Orientation labels were shuffled once per inversion and the "
-                "same assignment was applied to every gene at that locus, preserving within-inversion dependence. Tests quantify "
-                "differences in the proportion of identical coding-sequence pairs between inverted and direct haplotypes."
+                "Permutation test of protein-coding gene conservation for the 130 genes with at least four haplotypes in each "
+                "orientation. The statistic is the difference between inverted and direct haplotypes in the proportion of "
+                "identical coding-sequence pairs. Orientation labels were shuffled once per inversion and the same shuffled "
+                "labels were applied to every gene at that locus, preserving the dependence among genes at the same locus."
             ),
             column_defs=GENE_CONSERVATION_COLUMN_DEFS,
             loader=_load_gene_conservation,
@@ -2130,9 +2153,9 @@ def build_workbook(output_path: Path) -> None:
         SheetInfo(
             name="dN/dS (ω) results",
             description=(
-                "Results of the dN/dS (ω) analysis testing for genes with significantly different selective regimes between "
-                "direct and inverted orientations. Across all columns, NA indicates that the inversion–CDS pair was excluded, "
-                "for example due to an uninformative tree topology, insufficient haplotype counts, or PAML run failures."
+                "dN/dS (ω) tests for genes whose selective regime differs between direct and inverted haplotypes. NA marks "
+                "inversion–CDS pairs excluded because of an uninformative tree topology, too few haplotypes, or a failed PAML "
+                "run."
             ),
             column_defs=PAML_COLUMN_DEFS,
             loader=_load_paml_results,
@@ -2143,10 +2166,9 @@ def build_workbook(output_path: Path) -> None:
         SheetInfo(
             name="Imputation results",
             description=(
-                "Performance metrics for the machine learning models (Partial Least Squares regression) used to impute inversion "
-                "dosage from flanking SNP genotypes. Models were trained on the 82 phased haplotypes from the reference panel. "
-                "For allele frequency columns, values with an imputation accuracy below r^2 0.5 were omitted, so NA marks "
-                "instances where the frequency was not reported."
+                "Performance of the partial least squares regression models that impute inversion dosage from flanking SNP "
+                "genotypes. Models were trained on the 82 phased haplotypes of the reference panel. Allele frequencies are "
+                "reported only for inversions imputed with r² above 0.5; NA marks the rest."
             ),
             column_defs=IMPUTATION_COLUMN_DEFS,
             loader=_load_imputation_results,
@@ -2157,14 +2179,12 @@ def build_workbook(output_path: Path) -> None:
         SheetInfo(
             name="PheWAS results",
             description=(
-                "Phenome-wide association study (PheWAS) results linking imputed inversion dosages to electronic health record "
-                "(EHR) phenotypes in the NIH All of Us cohort (v8). Association tests were performed using logistic regression "
-                "adjusted for age, age squared, genetically inferred sex, and 16 global genetic principal components. For the "
-                "main PheWAS analysis, "
-                "NA values denote models that failed to converge or produced unstable fits. Interaction tests were only run when "
-                "the main result met the FDR threshold, so NA in interaction columns indicates the follow-up test was not "
-                "performed. Ancestry-specific analyses were likewise conditioned on main FDR significance; NA in those columns "
-                "means the test was skipped or the ancestry stratum had insufficient cases."
+                "Phenome-wide association study (PheWAS) of imputed inversion dosage against electronic health record phenotypes "
+                "in the NIH All of Us cohort (v8), using logistic regression adjusted for age, age squared, genetically inferred "
+                "sex, and 16 global genetic principal components. In the main-analysis columns, NA marks models that did not "
+                "converge or gave unstable fits. Interaction and ancestry-specific tests were run only for associations that "
+                "passed the main FDR threshold, so NA in those columns marks a test that was not run or an ancestry stratum with "
+                "too few cases."
             ),
             column_defs=PHEWAS_COLUMN_DEFS,
             loader=_load_phewas_results,
@@ -2175,12 +2195,12 @@ def build_workbook(output_path: Path) -> None:
         SheetInfo(
             name="Within-ancestry PC PheWAS",
             description=(
-                "Sensitivity analysis for residual fine-scale population structure. The 37 phenotypes implicated by the pooled "
-                "PheWAS were retested against all seven inversions separately within the AFR, AMR, EAS, EUR, MID, and SAS All of "
-                "Us genetic-ancestry groups. Each model adjusted for age, age squared, genetically inferred sex, and 16 principal "
-                "components fitted de novo within that group. The table compares these estimates with the existing ancestry-"
-                "stratified estimates that used the 16 global components. Because the phenotype set was selected from the pooled "
-                "findings, selected-set q-values are descriptive sensitivity statistics rather than independent replication tests."
+                "Sensitivity analysis for residual fine-scale population structure. The 37 phenotypes associated with an "
+                "inversion in the pooled PheWAS were retested against all seven inversions within each All of Us genetic ancestry "
+                "group (AFR, AMR, EAS, EUR, MID, and SAS), adjusting for age, age squared, genetically inferred sex, and 16 "
+                "principal components computed within that group. Estimates from the ancestry-stratified models with the 16 "
+                "global principal components are given alongside for comparison. Because these phenotypes were selected from the "
+                "pooled results, the q-values within the selected set are descriptive and are not independent replication tests."
             ),
             column_defs=WITHIN_ANCESTRY_PHEWAS_COLUMN_DEFS,
             loader=_load_within_ancestry_phewas,
@@ -2191,9 +2211,9 @@ def build_workbook(output_path: Path) -> None:
         SheetInfo(
             name="Phenotype categories",
             description=(
-                "Aggregate statistical tests assessing whether specific inversions are associated with entire categories of "
-                "phenotypes (e.g., 'Dermatologic'). Uses the Generalized Berk-Jones (GBJ) test for set-based significance and "
-                "Generalized Least Squares (GLS) for directional effects."
+                "Tests of association between each inversion and whole phenotype categories (for example, dermatologic), using "
+                "the generalized Berk–Jones (GBJ) test for set-based significance and generalized least squares (GLS) for the "
+                "direction of effect."
             ),
             column_defs=CATEGORY_COLUMN_DEFS,
             loader=_load_categories,
@@ -2204,11 +2224,10 @@ def build_workbook(output_path: Path) -> None:
         SheetInfo(
             name="Ancient DNA best tagging SNPs",
             description=(
-                "Top tagging SNP for each inversion locus, derived from the latest ancient DNA selection analysis of "
-                "West Eurasian genomes in the AGES database. Selection statistics (S and P_X) originate from that "
-                "ancient DNA summary table, allele frequencies are stratified by direct vs. inverted haplotypes, and "
-                "BH-adjusted p-values reflect Benjamini–Hochberg correction across inversions passing quality filters. NA values "
-                "appear when a locus was excluded for a reason documented in the exclusion_reasons column."
+                "Best tagging SNP for each inversion locus and its selection statistics (S and P_X) from the AGES ancient DNA "
+                "analysis of West Eurasian genomes. Allele frequencies are given separately for direct and inverted haplotypes. "
+                "Adjusted p-values are Benjamini–Hochberg corrected across the inversions that passed quality filters. NA marks "
+                "loci excluded for the reason given in the exclusion_reasons column."
             ),
             column_defs=BEST_TAGGING_COLUMN_DEFS,
             loader=_load_best_tagging_snps,
@@ -2219,10 +2238,9 @@ def build_workbook(output_path: Path) -> None:
         SheetInfo(
             name="17q21 tagging PheWAS",
             description=(
-                "Validation PheWAS for the 17q21 inversion locus using a tagging SNP (rs105255341) instead of imputed dosage. "
-                "This ensures that the pleiotropic effects observed (e.g., obesity vs. breast cancer protection) are robust to "
-                "the method of genotype determination. NA values indicate models that failed to converge or produced unstable "
-                "fits."
+                "PheWAS of the 17q21 inversion using the tagging SNP rs105255341 in place of imputed dosage, to check that the "
+                "associations at this locus do not depend on how the genotype was determined. NA marks models that did not "
+                "converge or gave unstable fits."
             ),
             column_defs=TAG_PHEWAS_COLUMN_DEFS,
             loader=_load_phewas_tagging,
@@ -2233,10 +2251,12 @@ def build_workbook(output_path: Path) -> None:
         SheetInfo(
             name="4-fold diversity concordance",
             description=(
-                "Spearman correlations between per-locus orientation differences (inverted minus direct) in "
-                "nucleotide diversity measured three ways: across the whole locus, across whole coding sequence, "
-                "and restricted to 4-fold degenerate sites. A locus contributes only when both orientations "
-                "have 4-fold sites and the locus has a consensus recurrence classification."
+                "Concordance between nucleotide diversity measured across the whole locus, across coding sequence, and at 4-fold "
+                "degenerate sites: Spearman correlations of the per-locus orientation difference (inverted minus direct) and of "
+                "diversity levels, the fraction of loci agreeing in sign, the correlation expected if the measures agreed "
+                "perfectly apart from sampling noise at 4-fold sites, and the split-half reliability of the 4-fold orientation "
+                "difference over random halves of the 4-fold sites. Loci are included if both orientations have 4-fold sites and "
+                "the locus has a consensus recurrence classification."
             ),
             column_defs=FOURFOLD_CORR_COLUMN_DEFS,
             loader=_load_fourfold_correlations,
@@ -2247,10 +2267,10 @@ def build_workbook(output_path: Path) -> None:
         SheetInfo(
             name="Gene-flux simulation sweep",
             description=(
-                "False-positive rate and power of the recurrence classifier across between-orientation gene flux under the "
-                "structured-coalescent model. Each row pools 12 inversion-age by recombination-rate cells with 120 simulated "
-                "loci per cell, for 11,520 loci overall. Rates carry Wilson 95% intervals. Trend p-values are from two-sided "
-                "Cochran-Armitage tests across the four gene-flux levels."
+                "False-positive rate and power of the recurrence classifier as a function of gene flux between orientations, "
+                "under the structured coalescent model. Each row combines 12 combinations of inversion age and recombination rate "
+                "with 120 simulated loci each (1,440 loci per row; 11,520 in total). Intervals are Wilson 95% intervals. Trend "
+                "p-values are from two-sided Cochran–Armitage tests across the four gene flux levels."
             ),
             column_defs=FLUX_SWEEP_COLUMN_DEFS,
             loader=_load_flux_sweep,
@@ -2261,9 +2281,10 @@ def build_workbook(output_path: Path) -> None:
         SheetInfo(
             name="Coding-site diversity",
             description=(
-                "Nucleotide diversity restricted to 4-fold-degenerate sites, and piN/piS at 0-fold and 4-fold sites, "
-                "per orientation, for inversion loci containing coding sequence. NA marks a quantity that is not defined "
-                "for that locus, usually because it has no coding sequence or no variation in one orientation."
+                "Per-orientation nucleotide diversity across the whole locus, across coding sequence, and at 4-fold degenerate "
+                "sites, together with piN (0-fold sites), piS (4-fold sites), and piN/piS, for inversion loci that overlap coding "
+                "sequence. NA marks a quantity that is undefined for that locus because one orientation has no comparable sites "
+                "or no synonymous variation."
             ),
             column_defs=CODING_DIVERSITY_COLUMN_DEFS,
             loader=_load_coding_site_diversity,
@@ -2274,9 +2295,9 @@ def build_workbook(output_path: Path) -> None:
         SheetInfo(
             name="Divergence between orientations",
             description=(
-                "Absolute (Dxy) and net (da) divergence between orientations at each locus, alongside Hudson's FST and the "
-                "within-orientation diversities it is built from. FST depends on within-group diversity, so a difference in "
-                "FST between recurrence classes need not reflect a difference in divergence."
+                "Absolute (Dxy) and net (da) divergence between orientations at each locus, with Hudson's FST and the "
+                "within-orientation nucleotide diversities that enter it. Because FST also depends on within-orientation "
+                "diversity, recurrence classes can differ in FST without differing in divergence."
             ),
             column_defs=DIVERGENCE_COLUMN_DEFS,
             loader=_load_divergence,
@@ -2287,9 +2308,10 @@ def build_workbook(output_path: Path) -> None:
         SheetInfo(
             name="Genomic-architecture controls",
             description=(
-                "Conditional-randomization tests of the orientation-by-recurrence diversity interaction and recurrence-class "
-                "differences in FST and da: without conditioning; conditioned on inversion length, inverted allele frequency, "
-                "local SNP density and CDS density; and additionally conditioned on recombination rate and chromosome-arm position."
+                "Conditional randomization tests of the orientation by recurrence interaction in diversity and of the recurrence "
+                "class differences in FST and da. Each test is reported unconditioned, conditioned on inversion length, inverted "
+                "allele frequency, local SNP density, and CDS density, and further conditioned on recombination rate and position "
+                "along the chromosome arm."
             ),
             column_defs=ARCHITECTURE_CONTROLS_COLUMN_DEFS,
             loader=_load_architecture_controls,
@@ -2300,9 +2322,9 @@ def build_workbook(output_path: Path) -> None:
         SheetInfo(
             name="Chimpanzee polarity per locus",
             description=(
-                "Manual review of panTro6-GRCh38 alignments deciding, for each locus, which human arrangement is ancestral, "
-                "and the diversity recomputed with haplotypes grouped as ancestral or derived. Loci excluded from the figure "
-                "or the model carry the reason for exclusion."
+                "Ancestral arrangement at each locus from manual review of panTro6 to GRCh38 alignments, with nucleotide "
+                "diversity recomputed for haplotypes grouped as ancestral or derived. For loci excluded from the figure or the "
+                "model, the reason is given in the exclusion columns."
             ),
             column_defs=CHIMP_POLARITY_COLUMN_DEFS,
             column_labels={"inv_id": "Original inversion ID"},
@@ -2314,9 +2336,8 @@ def build_workbook(output_path: Path) -> None:
         SheetInfo(
             name="Ancient DNA, all tagging SNPs",
             description=(
-                "Every tagging SNP at the four loci with an AGES selection result, not only the best one, so that the "
-                "selection signal can be judged against the whole set rather than a single marker. Coefficients are also "
-                "given signed to the inverted allele."
+                "All tagging SNPs, with their AGES selection statistics, at the four loci that have an AGES result. Selection "
+                "coefficients are also given with sign relative to the inverted allele."
             ),
             column_defs=AGES_ALL_TAGS_COLUMN_DEFS,
             loader=_load_ages_all_tags,
@@ -2327,8 +2348,8 @@ def build_workbook(output_path: Path) -> None:
         SheetInfo(
             name="Imputation external benchmarks",
             description=(
-                "Agreement between imputed inversion dosage and genotypes that were never used in training: experimental "
-                "calls at 6q24.1 (HsInv0284) and ScoreInvHap at 17q21.31 and 8p23.1."
+                "Agreement between imputed inversion dosage and external genotypes: experimental calls at 6q24.1 (HsInv0284) and "
+                "scoreInvHap calls at 17q21.31 and 8p23.1."
             ),
             column_defs=IMPUTATION_BENCHMARK_COLUMN_DEFS,
             loader=_load_imputation_benchmarks,
