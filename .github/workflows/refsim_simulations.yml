@@ -54,8 +54,14 @@ on:
         description: 'Shards to split across (default 64)'
         default: '64'
 concurrency:
+  # A full grid is 11,520 loci and runs for hours. Cancelling it on every
+  # subsequent push means it never finishes, and the artifacts it commits
+  # (gene_flux_summary.tsv, gene_flux_caption.txt, ...) never land -- which is
+  # what broke the supplementary-table, supplement-assembly and revision
+  # workflows that read them. Let an in-flight grid finish; a queued duplicate
+  # simply waits.
   group: refsim-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   IQTREE_VERSION: 2.1.2

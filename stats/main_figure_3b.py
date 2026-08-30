@@ -28,7 +28,7 @@ DEFAULT_INPUT = ROOT / "data" / "cds_permutation_joint_control.tsv"
 DEFAULT_PAIR_COUNTS = ROOT / "data" / "per_gene_cds_permutation.tsv"
 DEFAULT_OUTPUT = ROOT / "data" / "main_figure_3b.pdf"
 FDR_ALPHA = 0.05
-EXPECTED_GENES = 130
+EXPECTED_GENES = 66
 EXPECTED_SIGNIFICANT = 13
 
 
@@ -147,8 +147,10 @@ def render(data: pd.DataFrame, output: Path, *, composite: bool = False) -> None
         zorder=4,
     )
 
-    x_min = float(plotted["delta"].min()) - 0.16
-    x_max = float(plotted["delta"].max()) + 0.16
+    # Pad enough that the outward-placed gene labels (which extend away from
+    # their points) stay inside the axes instead of clipping at the spines.
+    x_min = float(plotted["delta"].min()) - (0.16 if composite else 0.27)
+    x_max = float(plotted["delta"].max()) + (0.16 if composite else 0.27)
     y_max = 6.0
     ax.set_xlim(x_min, x_max)
     ax.set_ylim(-0.12, y_max)

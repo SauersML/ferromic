@@ -16,7 +16,7 @@ the reader. The three claims, quoted from the Results:
    younger events."
 
 The single-origin arm uses the archived two-population ``singleINV_m1.py``
-topology with the Methods' 10%-of-parent child size. The recurrent arm uses the public nine-population
+topology with upstream's N_a/100 inverted deme. The recurrent arm uses the public nine-population
 ``recurrentINV_m1.2pop.py`` model and its two independent random sampling
 mixtures.
 

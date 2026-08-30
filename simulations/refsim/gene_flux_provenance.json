@@ -22,132 +22,60 @@
   ],
   "input_shards": [
     {
-      "path": "gene_flux_10pct_shard0.csv",
-      "sha256": "5408fb0bf78e416caceea52a0f6c133ed764b0525e687991b57b945c387ef064"
+      "path": "gene_flux_shard0.csv",
+      "sha256": "b519b8190d631c4eb0184e2e3ca921e7abbcaa3ff5242eb8eab84ca66d33d2f5"
     },
     {
-      "path": "gene_flux_10pct_shard1.csv",
-      "sha256": "0bc1c5fedaed8f024bc6642d08e5524fa23d79af97b2d83903418d84fe7d806d"
+      "path": "gene_flux_shard1.csv",
+      "sha256": "5e38328d5644c6cf6a14fb46e2e90620837254a03b78f501742393603c530794"
     },
     {
-      "path": "gene_flux_10pct_shard10.csv",
-      "sha256": "aace65c997b9da949edcec130e35930ad0efcb0ac92e0745594055617ffcf4e0"
+      "path": "gene_flux_shard15.csv",
+      "sha256": "5d606a48094ef11c81b97aa22e642402823e05eeab0fb8412a42d8d318be06ff"
     },
     {
-      "path": "gene_flux_10pct_shard11.csv",
-      "sha256": "ec5232447fa737b8a9c1aeb423ee492e9292f5d16a7130d0fc6795dc6a94fca0"
+      "path": "gene_flux_shard17.csv",
+      "sha256": "dedb4c19211f655d2872e6255122dad5cc36781f75f0b5c4bc96adfd49f29c06"
     },
     {
-      "path": "gene_flux_10pct_shard12.csv",
-      "sha256": "4914e371b7543705b6628ea6833373b03abe64d8e1c8094544c739f37dd9050a"
+      "path": "gene_flux_shard2.csv",
+      "sha256": "31bda6658dbb4b7f7f4ffa0c73e56c487ba1464dc3144aa398856ca059a6ffe8"
     },
     {
-      "path": "gene_flux_10pct_shard13.csv",
-      "sha256": "d0a4970fed747681157174c2a3ff9348c8c36d29e1668d7a56407e092f01ee33"
+      "path": "gene_flux_shard23.csv",
+      "sha256": "3263c3c6cc26f5842859e8cd5db8f64b393fdb580c44ab1cf2de70226c36a9d1"
     },
     {
-      "path": "gene_flux_10pct_shard14.csv",
-      "sha256": "117acb5f47965b299db8194da01b66746da72d195907d29a91135ab91f1f9199"
+      "path": "gene_flux_shard25.csv",
+      "sha256": "d5060d9172a15b60fb18234a62249d1b90b86ea92114380618c489695a52a269"
     },
     {
-      "path": "gene_flux_10pct_shard15.csv",
-      "sha256": "ddf32f7ba487d83a440d89668c4310ea6d5f12de5394d213afd2da2b3f4ce0f0"
+      "path": "gene_flux_shard3.csv",
+      "sha256": "5b863afacd6f2419e97386106c062ec06c37c1a38e3f7e751fa25534d5922738"
     },
     {
-      "path": "gene_flux_10pct_shard16.csv",
-      "sha256": "7a2e90506a578cac9620f7db844ace1757b88c50f15275005b24f503444144b3"
+      "path": "gene_flux_shard31.csv",
+      "sha256": "64a86b67ede299318149f4d07ca1b1aa7ed8c0422f96e187d54740cd7a9828b3"
     },
     {
-      "path": "gene_flux_10pct_shard17.csv",
-      "sha256": "70ab8833aa47549e6af3cfa70b60cd2af466807eeb464cac89049e3293a75dd3"
+      "path": "gene_flux_shard4.csv",
+      "sha256": "07f09d1f4576f326189a3dea738c8fcbd59a6c812a822045f2d16a86de9fab07"
     },
     {
-      "path": "gene_flux_10pct_shard18.csv",
-      "sha256": "ad7bd0c29a89c41eed356e902fdc466afdcb4471ca329f2745449eb4bd69f4a7"
+      "path": "gene_flux_shard5.csv",
+      "sha256": "cbc7c8bce408dc6685efe6d1bed1244af4d6680480310ce0f1462648edf0c19d"
     },
     {
-      "path": "gene_flux_10pct_shard19.csv",
-      "sha256": "d2ea7b9c7869baf78958fb1350dc8108a11b8cee03fa19c4290eed412904e4f2"
+      "path": "gene_flux_shard6.csv",
+      "sha256": "6c2c120e0ac33e1481715359e10bcd8cbf7197ffc915d92fa68f98000ae8e95c"
     },
     {
-      "path": "gene_flux_10pct_shard2.csv",
-      "sha256": "978e174581a6ad63cbd141ce37bcf6d39785d04b37fe67e6bb88d696f398f565"
+      "path": "gene_flux_shard7.csv",
+      "sha256": "217eda1976c141586ed1c675dc652cd4f0092edbccc4922233326b3e35d98a63"
     },
     {
-      "path": "gene_flux_10pct_shard20.csv",
-      "sha256": "84c605abcae9f053661827993fb19468467904fdc5b2508e3bb94d1b52f866e8"
-    },
-    {
-      "path": "gene_flux_10pct_shard21.csv",
-      "sha256": "f0568754eb0188f26ee6be50496a2ffa1b3e3db959ffbe6fbea240417d1113a7"
-    },
-    {
-      "path": "gene_flux_10pct_shard22.csv",
-      "sha256": "3da5eb72571fa701e867521ee6366912ae56c6cc92721b51918c892fe8a1cb8e"
-    },
-    {
-      "path": "gene_flux_10pct_shard23.csv",
-      "sha256": "07d877d9634bf13432386df1a7081f8d33c76dc90af1729acf379556a469fcad"
-    },
-    {
-      "path": "gene_flux_10pct_shard24.csv",
-      "sha256": "ccd629d22b8f3b8d62f5b367a14ae44989eb239f0e1c01e4b951fcc37fdbd35a"
-    },
-    {
-      "path": "gene_flux_10pct_shard25.csv",
-      "sha256": "be35c9af887a15847d98886e634e5b055328af094ee58bf9be93166d88ac173e"
-    },
-    {
-      "path": "gene_flux_10pct_shard26.csv",
-      "sha256": "d9444b3f1a72bd7485e8fee58a5aab56783451e3135393d11546816f9cda82b3"
-    },
-    {
-      "path": "gene_flux_10pct_shard27.csv",
-      "sha256": "7b1a6b6d492b5dca57d8d5e987819fd4f4e2a50e598fa387c58488f8b1e0f035"
-    },
-    {
-      "path": "gene_flux_10pct_shard28.csv",
-      "sha256": "d83563199acb1d5aa2e47d6a1f882b2ba0a4b65a3cb8a7266a21079e1f5ce6f0"
-    },
-    {
-      "path": "gene_flux_10pct_shard29.csv",
-      "sha256": "d8fb0731e771b689be222da04233d3796bb901527fd07c0670065530ad3fe871"
-    },
-    {
-      "path": "gene_flux_10pct_shard3.csv",
-      "sha256": "938e83e30cf4541a7b7139f100e5e4a8d964b85bb7a0219d217429434f3aa365"
-    },
-    {
-      "path": "gene_flux_10pct_shard30.csv",
-      "sha256": "35caba6ed791682b74b2f8a6db4a51f6945d75e79ec973eb1cc084b39c80b3c9"
-    },
-    {
-      "path": "gene_flux_10pct_shard31.csv",
-      "sha256": "b1b1ee8b4a327d6c8050be78a7c2d761b24e85491eb84aefa8d248fa4218f624"
-    },
-    {
-      "path": "gene_flux_10pct_shard4.csv",
-      "sha256": "a4eb6f9c48f6d2e3cfb33ad0eb10b80b5508b7fbb09b79eae2c97e06a8972e9b"
-    },
-    {
-      "path": "gene_flux_10pct_shard5.csv",
-      "sha256": "cdabfb93660f5308a7e4dfced24805778a4dc23d39f0d39acc51fb399db5f511"
-    },
-    {
-      "path": "gene_flux_10pct_shard6.csv",
-      "sha256": "87a2b0db8df1b2df550b855fd206e2fc3730c64ac9bab36530fb69ac709a83a8"
-    },
-    {
-      "path": "gene_flux_10pct_shard7.csv",
-      "sha256": "267da6ba073f0e985eaff76d027411a06af82f81908b5185e774174237bda100"
-    },
-    {
-      "path": "gene_flux_10pct_shard8.csv",
-      "sha256": "8bcf37848594aaeac605b8fc7cc47fce6f0a37be5f2a1b3c1e0308dd5d28ac0e"
-    },
-    {
-      "path": "gene_flux_10pct_shard9.csv",
-      "sha256": "eb0082fc8425932e8d3221c1f57071c288abd17a2e38b68beab27f562ee1e7d2"
+      "path": "gene_flux_shard9.csv",
+      "sha256": "520a65a17820d001ae0bf017acf748eb744b825e745b0bb872fd4a164a395ed4"
     }
   ],
   "inversion_frequencies": [

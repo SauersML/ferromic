@@ -135,7 +135,7 @@ GENE_CONSERVATION_COLUMN_DEFS: Dict[str, str] = OrderedDict(
         ),
         (
             "Direct FDR q-value",
-            "False discovery rate q-value from the permutation null across the 130 tested genes.",
+            "False discovery rate q-value from the permutation null across the 66 tested genes.",
         ),
     ]
 )
@@ -1117,7 +1117,7 @@ EXPECTED_SUPPLEMENTARY_DATA_ROWS = (
     93,    # S9  Chimpanzee polarity per locus
     9,     # S10 Genomic-architecture controls
     93,    # S11 Divergence between orientations
-    130,   # S12 CDS conservation genes
+    66,   # S12 CDS conservation genes
     206,   # S13 dN/dS results
     93,    # S14 Ancient DNA best tagging SNPs
     45,    # S15 Ancient DNA, all tagging SNPs
@@ -1620,9 +1620,13 @@ def _load_gene_conservation() -> pd.DataFrame:
         how="left",
         validate="one_to_one",
     )
-    if len(df) != 130 or df["transcript_id"].isna().any():
+    if len(df) != 66 or df["transcript_id"].isna().any():
         raise SupplementaryTablesError(
-            f"Expected 130 fully matched CDS permutation tests; observed {len(df)} rows."
+            f"Expected 66 fully matched CDS permutation tests; observed {len(df)} rows."
+        )
+    if not (df["n_seq_classes"] >= 2).all():
+        raise SupplementaryTablesError(
+            "The CDS permutation table contains a monomorphic gene (all haplotypes identical)."
         )
     numeric_cols = [
         "k_direct", "k_inverted", "n_seq_classes", "p_direct", "p_inverted",
@@ -2139,8 +2143,9 @@ def build_workbook(output_path: Path) -> None:
         SheetInfo(
             name="CDS conservation genes",
             description=(
-                "Permutation test of protein-coding gene conservation for the 130 genes with at least four haplotypes in each "
-                "orientation. The statistic is the difference between inverted and direct haplotypes in the proportion of "
+                "Permutation test of protein-coding gene conservation for the 66 genes with at least four haplotypes in each "
+                "orientation and at least two distinct coding sequences among the haplotypes (genes whose coding sequence is "
+                "identical across all haplotypes cannot differ between orientations and were excluded). The statistic is the difference between inverted and direct haplotypes in the proportion of "
                 "identical coding-sequence pairs. Orientation labels were shuffled once per inversion and the same shuffled "
                 "labels were applied to every gene at that locus, preserving the dependence among genes at the same locus."
             ),

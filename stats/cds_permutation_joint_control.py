@@ -50,6 +50,13 @@ from per_gene_cds_permutation import (  # noqa: E402
 OUT_JOINT = os.path.join(_DATA_DIR, "cds_permutation_joint_control.tsv")
 OUT_CALIB = os.path.join(_DATA_DIR, "cds_permutation_calibration.tsv")
 OUT_POWER = os.path.join(_DATA_DIR, "cds_permutation_power.tsv")
+OUT_MDE = os.path.join(_DATA_DIR, "cds_permutation_mde.tsv")
+OUT_POWER_DELTA = os.path.join(_DATA_DIR, "cds_permutation_power_bydelta.tsv")
+OUT_POWER_OBS = os.path.join(_DATA_DIR, "cds_permutation_power_observed.tsv")
+# Plot-resolution grid for the power curve; the reported quantities are the
+# curve itself and MDE80, not these values.
+DELTA_GRID = tuple(round(0.05 * i, 2) for i in range(1, 15))  # 0.05 .. 0.70
+OUT_POWER_CURVE = os.path.join(_DATA_DIR, "cds_permutation_power_curve.pdf")
 OUT_FIG = os.path.join(_DATA_DIR, "cds_permutation_joint_control.pdf")
 JACKKNIFE_TSV = os.path.join(_DATA_DIR, "gene_inversion_direct_inverted.tsv")
 
@@ -111,6 +118,17 @@ def load_loci():
             valid = cls >= 0
             k_inv_g = int(np.isin(np.where(valid)[0], L["inv_idx"]).sum())
             k_dir_g = int(valid.sum()) - k_inv_g
+            if g["n_classes"] < 2:
+                # Monomorphic CDS: every haplotype carries the identical
+                # sequence, so delta == 0 and p == 1 under every relabeling.
+                # The criterion is a function of the pooled data only
+                # (label-invariant), so excluding these genes is valid
+                # independent filtering (Bourgon 2010) exactly like the
+                # MIN_GROUP filter above; keeping them only pads the BH
+                # denominator with degenerate p = 1 tests. Genes with two
+                # classes but zero observed delta (fixed differences) are
+                # NOT excluded: their statistic varies under relabeling.
+                continue
             if min(k_inv_g, k_dir_g) >= MIN_GROUP:
                 kept.append(g)
         L["genes"] = kept
@@ -387,6 +405,35 @@ def main():
         "wy_fwer_p": wy_p,
         "direct_fdr_q": fdr,
     }).sort_values(["direct_fdr_q", "joint_p"])
+
+    # ---- minimum detectable effect per gene (no generative model needed) ----
+    # The permutation null alone fixes the instrument's resolution: the
+    # smallest |delta| that would reach a given p-value target at each gene.
+    # Reporting this next to the observed |delta| answers "what could this
+    # test ever have detected?" without inventing an alternative.
+    def mde_at(p_target: float) -> np.ndarray:
+        # tail_p counts ties as >=, so the detectable value is the null
+        # quantile at rank ceil((1 - p_target) * R): the smallest value v
+        # with #{null >= v}/R <= p_target.
+        k = int(np.ceil((1.0 - p_target) * R_DRAWS))
+        k = min(max(k, 0), R_DRAWS - 1)
+        return sorted_null[k, :] + 1e-12
+
+    fdr_thresholds = joint.loc[joint["direct_fdr_q"] < ALPHA, "joint_p"]
+    p_fdr_cut = float(fdr_thresholds.max()) if len(fdr_thresholds) else ALPHA / G
+    mde = pd.DataFrame({
+        "gene_name": [g["name"] for g in genes],
+        "inv_id": [g["inv_id"] for g in genes],
+        "k_inverted": [loci[g["inv_id"]]["k_inv"] for g in genes],
+        "observed_abs_delta": np.abs(obs),
+        "mde_abs_delta_nominal05": mde_at(ALPHA),
+        "mde_abs_delta_fdr": mde_at(p_fdr_cut),
+        "detectable_effect_exists_nominal05": mde_at(ALPHA) < 1.0,
+    }).sort_values("mde_abs_delta_fdr")
+    mde.to_csv(OUT_MDE, sep="\t", index=False)
+    print(f"Wrote {OUT_MDE}")
+    med = float(np.median(mde["mde_abs_delta_fdr"]))
+    print(f"median minimum detectable |delta| at the FDR threshold: {med:.3f}")
     joint.to_csv(OUT_JOINT, sep="\t", index=False)
 
     print(f"\nundefined-draw fraction in null: {nan_frac:.2e}")
@@ -520,7 +567,225 @@ def main():
             [["mean_abs_delta", "power_nominal", "power_fdr", "power_wy"]]
             .mean().round(3))
     print(summ.to_string())
-    print(f"\nWrote {OUT_JOINT}\nWrote {OUT_CALIB}\nWrote {OUT_POWER}")
+
+    # ---- power indexed by the true contrast size |delta| -------------------
+    # The founder-w alternative above is one specific biological scenario and
+    # only ever makes the inverted group MORE identical. Here the alternative
+    # is defined directly on the statistic: the synthetic inverted group's
+    # expected pair identity is p_dir +/- delta, in whichever directions the
+    # gene can express (identity lives in [0, 1]). Upward contrasts mix the
+    # empirical class pool with a point mass on a randomly drawn founder
+    # class; downward contrasts give haplotypes private singleton classes
+    # ("each lineage carries its own mutations"). Real direct group, real
+    # pool, real null and thresholds - only the effect is synthetic, and its
+    # size is the x-axis.
+    print(f"\n=== POWER BY TRUE CONTRAST |delta| (B = {POWER_B} per gene per "
+          f"delta per direction; same thresholds) ===")
+    delta_rows = []
+    for j, g in enumerate(genes):
+        L = loci[g["inv_id"]]
+        cls, valid = g["cls"], g["cls"] >= 0
+        pool = cls[valid]
+        hap_ids = np.where(valid)[0]
+        k_inv = int((np.isin(hap_ids, L["inv_idx"])).sum())
+        dir_ids = hap_ids[~np.isin(hap_ids, L["inv_idx"])]
+        k_dir = len(dir_ids)
+        if k_inv < 2 or k_dir < 2:
+            continue
+        cnt_dir = np.bincount(cls[dir_ids], minlength=g["n_classes"])
+        p_dir = float((cnt_dir * (cnt_dir - 1) // 2).sum()
+                      / (k_dir * (k_dir - 1) / 2))
+        n_pool = len(pool)
+        cnt_pool = np.bincount(pool, minlength=g["n_classes"])
+        freq = cnt_pool / n_pool
+        F_pool = float((freq ** 2).sum())
+        npairs_inv = k_inv * (k_inv - 1) / 2
+        for delta in DELTA_GRID:
+            for direction, h in (("up", p_dir + delta), ("down", p_dir - delta)):
+                if not (0.0 <= h <= 1.0):
+                    continue
+                if h >= F_pool:
+                    # point-mass mixture: identity(q) = a q^2 + b q + F_pool
+                    founders = pool[rng.integers(0, n_pool, POWER_B)]
+                    f_c = freq[founders]
+                    a = 1.0 - 2.0 * f_c + F_pool          # > 0 (pool not clonal)
+                    b = 2.0 * (f_c - F_pool)
+                    disc = np.maximum(b * b - 4.0 * a * (F_pool - h), 0.0)
+                    q = np.clip((-b + np.sqrt(disc)) / (2.0 * a), 0.0, 1.0)
+                    take = rng.random((POWER_B, k_inv)) < q[:, None]
+                    sim = pool[rng.integers(0, n_pool, (POWER_B, k_inv))]
+                    sim[take] = np.broadcast_to(founders[:, None],
+                                                sim.shape)[take]
+                    row = np.repeat(np.arange(POWER_B), k_inv)
+                    counts = np.zeros((POWER_B, g["n_classes"]), dtype=np.int64)
+                    np.add.at(counts, (row, sim.ravel()), 1)
+                else:
+                    # private singletons: identity(r) = (1 - r)^2 * F_pool
+                    r = 1.0 - np.sqrt(h / F_pool)
+                    keep = rng.random((POWER_B, k_inv)) >= r
+                    sim = pool[rng.integers(0, n_pool, (POWER_B, k_inv))]
+                    counts = np.zeros((POWER_B, g["n_classes"]), dtype=np.int64)
+                    rows_kept = np.repeat(np.arange(POWER_B), k_inv)[keep.ravel()]
+                    np.add.at(counts, (rows_kept, sim[keep]), 1)
+                p_inv = ((counts * (counts - 1) // 2).sum(axis=1) / npairs_inv)
+                d_sim = np.abs(p_inv - p_dir)
+                p_sim = tail_p(sorted_null[:, j], d_sim)
+                delta_rows.append({
+                    "gene_name": g["name"], "inv_id": g["inv_id"],
+                    "k_inverted": k_inv, "delta": delta,
+                    "direction": direction, "target_identity": h,
+                    "p_direct": p_dir,
+                    "mean_abs_delta": float(d_sim.mean()),
+                    "power_nominal": float((p_sim <= ALPHA).mean()),
+                    "power_fdr": float((p_sim <= t_fdr).mean()),
+                })
+    pdelta = pd.DataFrame(delta_rows)
+    pdelta.to_csv(OUT_POWER_DELTA, sep="\t", index=False)
+
+    # ---- power at each gene's OWN observed contrast (DIAGNOSTIC ONLY) ------
+    # WARNING: this is post-hoc ("observed") power - approximately a monotone
+    # transform of the observed p-value (Hoenig & Heisey 2001, Am Stat), and
+    # inflated by winner's curse for the significant genes. NEVER report these
+    # numbers as the power analysis. The reportable quantities are the
+    # power curve over the fixed grid of hypothesized contrasts (OUT_POWER_DELTA) and the
+    # minimum detectable effect (OUT_MDE). This table exists only as an
+    # internal cross-check that detected genes sit in the detectable regime.
+    obs_rows = []
+    for j, g in enumerate(genes):
+        L = loci[g["inv_id"]]
+        cls, valid = g["cls"], g["cls"] >= 0
+        pool = cls[valid]
+        hap_ids = np.where(valid)[0]
+        k_inv = int((np.isin(hap_ids, L["inv_idx"])).sum())
+        dir_ids = hap_ids[~np.isin(hap_ids, L["inv_idx"])]
+        k_dir = len(dir_ids)
+        if k_inv < 2 or k_dir < 2:
+            continue
+        cnt_dir = np.bincount(cls[dir_ids], minlength=g["n_classes"])
+        p_dir = float((cnt_dir * (cnt_dir - 1) // 2).sum()
+                      / (k_dir * (k_dir - 1) / 2))
+        n_pool = len(pool)
+        cnt_pool = np.bincount(pool, minlength=g["n_classes"])
+        freq = cnt_pool / n_pool
+        F_pool = float((freq ** 2).sum())
+        npairs_inv = k_inv * (k_inv - 1) / 2
+        h = float(np.clip(p_dir + obs[j], 0.0, 1.0))    # observed p_inv
+        if h >= F_pool:
+            founders = pool[rng.integers(0, n_pool, POWER_B)]
+            f_c = freq[founders]
+            a = 1.0 - 2.0 * f_c + F_pool
+            b = 2.0 * (f_c - F_pool)
+            disc = np.maximum(b * b - 4.0 * a * (F_pool - h), 0.0)
+            q = np.clip((-b + np.sqrt(disc)) / (2.0 * a), 0.0, 1.0)
+            take = rng.random((POWER_B, k_inv)) < q[:, None]
+            sim = pool[rng.integers(0, n_pool, (POWER_B, k_inv))]
+            sim[take] = np.broadcast_to(founders[:, None], sim.shape)[take]
+            row = np.repeat(np.arange(POWER_B), k_inv)
+            counts = np.zeros((POWER_B, g["n_classes"]), dtype=np.int64)
+            np.add.at(counts, (row, sim.ravel()), 1)
+        else:
+            r = 1.0 - np.sqrt(h / F_pool)
+            keep = rng.random((POWER_B, k_inv)) >= r
+            sim = pool[rng.integers(0, n_pool, (POWER_B, k_inv))]
+            counts = np.zeros((POWER_B, g["n_classes"]), dtype=np.int64)
+            rows_kept = np.repeat(np.arange(POWER_B), k_inv)[keep.ravel()]
+            np.add.at(counts, (rows_kept, sim[keep]), 1)
+        p_inv = ((counts * (counts - 1) // 2).sum(axis=1) / npairs_inv)
+        d_sim = np.abs(p_inv - p_dir)
+        p_sim = tail_p(sorted_null[:, j], d_sim)
+        obs_rows.append({
+            "gene_name": g["name"], "inv_id": g["inv_id"],
+            "k_inverted": k_inv,
+            "observed_delta": float(obs[j]),
+            "observed_abs_delta": float(abs(obs[j])),
+            "target_identity": h, "p_direct": p_dir,
+            "mean_abs_delta_sim": float(d_sim.mean()),
+            "power_nominal": float((p_sim <= ALPHA).mean()),
+            "power_fdr": float((p_sim <= t_fdr).mean()),
+            "significant_observed": bool(fdr[j] < ALPHA),
+        })
+    pobs = pd.DataFrame(obs_rows).sort_values("observed_abs_delta",
+                                              ascending=False)
+    pobs.to_csv(OUT_POWER_OBS, sep="\t", index=False)
+    sig = pobs[pobs.significant_observed]
+    print("\n=== POWER AT THE OBSERVED CONTRASTS ===")
+    print(pobs.head(16)[["gene_name", "observed_delta", "power_nominal",
+                         "power_fdr"]].round(3).to_string(index=False))
+    print(f"13 significant genes: power_nominal mean {sig.power_nominal.mean():.3f} "
+          f"median {sig.power_nominal.median():.3f} min {sig.power_nominal.min():.3f}; "
+          f"power_fdr mean {sig.power_fdr.mean():.3f} "
+          f"median {sig.power_fdr.median():.3f} min {sig.power_fdr.min():.3f}")
+    by_dir = (pdelta.groupby(["delta", "direction"])
+              [["mean_abs_delta", "power_nominal", "power_fdr"]]
+              .agg(["mean", "count"]).round(3))
+    print(by_dir.to_string())
+    per_gene_curve = (pdelta.groupby(["gene_name", "delta"])
+                      [["power_nominal", "power_fdr"]].mean().reset_index())
+    combined = (per_gene_curve.groupby("delta")
+                [["power_nominal", "power_fdr"]]
+                .agg(["mean", "count"]).round(3))
+    print("\ncombined (per-gene mean over feasible directions; count = genes"
+          " where the effect can exist):")
+    print(combined.to_string())
+
+    # ---- MDE80: smallest true difference each gene detects with 80% power --
+    # Interpolated on the gene's own curve; NaN when the curve never reaches
+    # 80% (those genes are counted, not dropped).
+    def _mde80(gcurve, col):
+        gcurve = gcurve.sort_values("delta")
+        y = gcurve[col].to_numpy()
+        x = gcurve["delta"].to_numpy()
+        above = np.nonzero(y >= 0.8)[0]
+        if len(above) == 0:
+            return np.nan
+        i = above[0]
+        if i == 0 or y[i] == y[i - 1]:
+            return float(x[i])
+        return float(x[i - 1] + (0.8 - y[i - 1]) / (y[i] - y[i - 1])
+                     * (x[i] - x[i - 1]))
+
+    mde80 = per_gene_curve.groupby("gene_name").apply(
+        lambda gg: pd.Series({
+            "mde80_nominal": _mde80(gg, "power_nominal"),
+            "mde80_fdr": _mde80(gg, "power_fdr"),
+        }), include_groups=False).reset_index()
+    mde_tbl = pd.read_csv(OUT_MDE, sep="\t").merge(mde80, on="gene_name",
+                                                    how="left")
+    mde_tbl.to_csv(OUT_MDE, sep="\t", index=False)
+    n80n = int(mde_tbl["mde80_nominal"].notna().sum())
+    n80f = int(mde_tbl["mde80_fdr"].notna().sum())
+    print(f"\nMDE80 nominal: median {mde_tbl.mde80_nominal.median():.3f} "
+          f"(defined for {n80n}/{len(mde_tbl)} genes; the rest never reach "
+          f"80% power in either direction)")
+    print(f"MDE80 FDR:     median {mde_tbl.mde80_fdr.median():.3f} "
+          f"(defined for {n80f}/{len(mde_tbl)} genes)")
+
+    # ---- power-curve figure (marks and short axis labels only) -------------
+    import matplotlib.pyplot as plt
+    curve = (per_gene_curve.groupby("delta")
+             [["power_nominal", "power_fdr"]].mean())
+    fig, ax = plt.subplots(figsize=(4.6, 3.4))
+    ax.plot(curve.index, curve["power_nominal"], color="#3b5b92", lw=1.8,
+            marker="o", ms=3.5, label="\u03b1 = 0.05")
+    ax.plot(curve.index, curve["power_fdr"], color="#c26d2b", lw=1.8,
+            marker="s", ms=3.2, label="FDR threshold")
+    ax.axhline(0.8, color="#999999", lw=0.8, ls=(0, (3, 3)))
+    hit_sizes = np.abs(obs[fdr < ALPHA])
+    ax.plot(hit_sizes, np.full_like(hit_sizes, -0.035), marker="|", ls="none",
+            color="#444444", ms=8, clip_on=False)
+    ax.set_xlim(0, float(max(DELTA_GRID)))
+    ax.set_ylim(-0.06, 1.02)
+    ax.set_xlabel("True difference in CDS pair identity")
+    ax.set_ylabel("Power")
+    ax.legend(frameon=False, loc="lower right", fontsize=8)
+    ax.spines[["top", "right"]].set_visible(False)
+    fig.tight_layout()
+    fig.savefig(OUT_POWER_CURVE)
+    fig.savefig(OUT_POWER_CURVE.replace(".pdf", ".png"), dpi=300)
+    plt.close(fig)
+    print(f"Wrote {OUT_POWER_CURVE}")
+    print(f"\nWrote {OUT_JOINT}\nWrote {OUT_CALIB}\nWrote {OUT_POWER}\n"
+          f"Wrote {OUT_POWER_DELTA}\nWrote {OUT_POWER_OBS}")
     make_figure()
 
 

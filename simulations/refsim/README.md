@@ -11,7 +11,7 @@ the immutable upstream source at commit
 Each simulated locus is processed as follows:
 
 1. simulate the archived one-split single-event topology with the Methods'
-   10%-of-parent orientation-changing child, or the public nine-population
+   upstream `N_a/100` inverted deme, or the public nine-population
    recurrent model, with `msprime`;
 2. retain biallelic sites and construct a full-length haplotype alignment on
    the upstream `inputFiles/temp.fa` reference backbone;
@@ -29,8 +29,8 @@ by IQ-TREE but are not used to make the recurrence call.
 The response's gene-flux analysis comes from the `gene_flux` grid:
 
 - `single`: the archived `upstream_archive/singleINV_m1.py` two-population,
-  one-divergence topology, with its 1%-of-parent child size corrected to the
-  Methods' 10%-of-parent value;
+  one-divergence topology with its own `N_a/100` inverted deme (the value in
+  the lab's published generator; see the section on deme size below);
 - `recurrent`: the public `recurrentINV_m1.2pop.py` nine-population model.
 
 The recurrent arm preserves the public generator's sampling without any
@@ -87,3 +87,31 @@ release archive with its independently pinned archive checksum.
 - `make_growth_report.py`: frequency-trajectory sensitivity summaries
 - `refsim.sbatch`: Sioux production wrapper
 - `setup_sioux.sbatch`: pinned Python environment setup
+
+## Single-event inverted-deme size: upstream vs the Methods' bottleneck
+
+The single-event arm's inverted deme has no unambiguous size in the sources.
+
+- `hsiehphLab/inversionSimulation` sets it to `N_a / 100`. That is the value in
+  the archived `singleINV_m1.py` vendored at `upstream_archive/`, and the lab
+  published the same file publicly on 2026-08-28 (commit `6ff2ce3c`,
+  `scripts/singleINV_m1.py` and `scripts/singleINV_m1.new.py`) with
+  `initial_size=N_a/100` unchanged.
+- The Methods describe a "90% reduction" for the orientation-changing child.
+  That sentence describes the *recurrent* model, whose inverted demes are
+  `0.1 * N_a`; the single-event sensitivity model is not described separately.
+
+The choice changes the single-event false-positive rate by an order of
+magnitude, so both grids are kept:
+
+| grid | inverted deme | FPR at m = 0 | FPR at m = 1e-6 | trend p |
+|---|---|---|---|---|
+| `gene_flux_*` (reported) | `N_a / 100` (upstream) | 0.0% | 1.7% (1.2-2.6%) | 3.9e-11 |
+| `gene_flux_10pct_*` (sensitivity) | `N_a / 10` (Methods bottleneck) | 7.8% | 10.4% (8.9-12.1%) | 7.6e-3 |
+
+The recurrent arm is identical in both (power 67.5% -> 69.0%, p = 0.446): the
+single-event demography does not enter it. Both grids agree that gene flux
+raises the false-positive rate and leaves power unchanged; they differ only in
+the baseline. `refsim.SINGLE_INV_FRACTION` selects the model and defaults to
+upstream's value; `verify_model_port.py` fails if the reported grid is
+regenerated with anything else.

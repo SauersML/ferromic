@@ -4,9 +4,20 @@
     "generator": "scripts/recurrentINV_m1.2pop.py",
     "manifest": "inputFiles/model_manifest.young.tbl",
     "sample_haplotypes": 240,
-    "inversion_frequencies": [0.01, 0.02, 0.05, 0.1, 0.25, 0.5],
-    "recombination_rates": [0.0, 1e-8, 1e-6],
-    "within_orientation_migration": 1e-8
+    "inversion_frequencies": [
+      0.01,
+      0.02,
+      0.05,
+      0.1,
+      0.25,
+      0.5
+    ],
+    "recombination_rates": [
+      0.0,
+      1e-08,
+      1e-06
+    ],
+    "within_orientation_migration": 1e-08
   },
   "archived_single_event": {
     "msi_path": "/projects/standard/hsiehph/hsiehph/projects/inversionSimulation/forINV_sim_ms/msprime_singleINV_old/scripts/singleINV_m1.py",
@@ -15,19 +26,46 @@
     "ancestral_effective_size": 6000,
     "direct_effective_size": 6000,
     "archived_inverted_effective_size": 60,
-    "response_inverted_effective_size": 600,
-    "response_child_fraction_of_parent": 0.1,
-    "migration_rate": 0.0
+    "response_inverted_effective_size": 60,
+    "response_child_fraction_of_parent": 0.01,
+    "migration_rate": 0.0,
+    "note": "The reported grid uses upstream's own published inverted-deme size, N_a/100, confirmed against hsiehphLab/inversionSimulation commit 6ff2ce3c (scripts/singleINV_m1.py, published 2026-08-28). The Methods' 90%-reduction figure describes the orientation-changing children of the recurrent model; running the single-event arm at N_a/10 instead is reported as a sensitivity (gene_flux_10pct_*)."
   },
   "response_grid": {
-    "single_event_ages_years": [500000, 250000, 100000, 50000],
-    "recurrent_event_ages_years": [
-      [500000, 250000, 100000],
-      [250000, 100000, 50000],
-      [100000, 50000, 25000],
-      [50000, 25000, 10000]
+    "single_event_ages_years": [
+      500000,
+      250000,
+      100000,
+      50000
     ],
-    "gene_flux_rates": [0.0, 1e-8, 1e-7, 1e-6],
+    "recurrent_event_ages_years": [
+      [
+        500000,
+        250000,
+        100000
+      ],
+      [
+        250000,
+        100000,
+        50000
+      ],
+      [
+        100000,
+        50000,
+        25000
+      ],
+      [
+        50000,
+        25000,
+        10000
+      ]
+    ],
+    "gene_flux_rates": [
+      0.0,
+      1e-08,
+      1e-07,
+      1e-06
+    ],
     "replicates_per_frequency": 20
   }
 }

@@ -5,7 +5,7 @@ Manuscript and sensitivity grids scored by the upstream classifier (IQ-TREE ML
 tree + Fitch parsimony on the orientation trait, ``minMutHomoplasy >= 2`` = recurrent):
 
 ``gene_flux`` is the reported gene-flux analysis. It uses the historical
-single-event topology with the Methods' 10%-of-parent child size and the public recurrent generator, four time depths,
+single-event topology with upstream's N_a/100 inverted deme and the public recurrent generator, four time depths,
 three recombination rates, four flux rates, six
 inversion frequencies, 20 replicates per cell, 240 haplotypes, and seeds starting
 at 9,000,000. ``replicate`` is the corresponding zero-flux power grid. ``growth``

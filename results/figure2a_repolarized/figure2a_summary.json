@@ -17,7 +17,8 @@
   "mean_pi_derived_recurrent": 0.0006053571428571428,
   "median_pi_ancestral_recurrent": 0.000561,
   "median_pi_derived_recurrent": 0.0005549999999999999,
-  "n_plot_loci": 57,
+  "n_plot_loci": 33,
+  "n_polarized_loci": 57,
   "n_model_loci": 33,
   "n_excluded_from_plot": 36,
   "n_excluded_from_model": 60,
@@ -35,15 +36,15 @@
   },
   "input_files": {
     "output_csv": {
-      "path": "/home/runner/work/ferromic/ferromic/data/output.csv",
+      "path": "/projects/standard/hsiehph/sauer354/figS9-20260829/data/output.csv",
       "sha256": "c19cd7af05d9100df4aca76599cfffd7e63ae46b081a67cca2e5d9c1fd8f7737"
     },
     "inv_properties": {
-      "path": "/home/runner/work/ferromic/ferromic/data/inv_properties.tsv",
+      "path": "/projects/standard/hsiehph/sauer354/figS9-20260829/data/inv_properties.tsv",
       "sha256": "fc6bcb95681737e6b838db8495e730e2e28e74d219f1905a0037dc066b04cc34"
     },
     "polarity_json": {
-      "path": "/home/runner/work/ferromic/ferromic/data/chimp_alignment_responses.json",
+      "path": "/projects/standard/hsiehph/sauer354/figS9-20260829/data/chimp_alignment_responses.json",
       "sha256": "5b869ebd2106509f83fea49234e0a2204ecd76ef1985d2215b1e921e1e4ff3e5"
     }
   }

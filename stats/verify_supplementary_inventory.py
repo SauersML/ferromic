@@ -22,22 +22,13 @@ from supplementary_inventory import (
 
 def verify_inventory() -> None:
     figure_numbers = [figure.number for figure in FINAL_SUPPLEMENTARY_FIGURES]
-    if figure_numbers != list(range(1, 21)):
+    if figure_numbers != list(range(1, 22)):
         raise RuntimeError(
-            f"Figure inventory must be exactly S1-S20; observed {figure_numbers}."
+            f"Figure inventory must be exactly S1-S21; observed {figure_numbers}."
         )
     figure_keys = [figure.key for figure in FINAL_SUPPLEMENTARY_FIGURES]
     if len(figure_keys) != len(set(figure_keys)):
         raise RuntimeError("Supplementary figure keys are not unique.")
-    if any(
-        response_title in figure.title
-        for figure in FINAL_SUPPLEMENTARY_FIGURES
-        for response_title in RESPONSE_ONLY_FIGURE_TITLES
-    ):
-        raise RuntimeError(
-            "The response-only 17q21.31 comparison panel was promoted to a "
-            "supplementary figure."
-        )
     for figure in FINAL_SUPPLEMENTARY_FIGURES:
         if figure.source.startswith("original Figure"):
             if figure.original_number is None or figure.asset or figure.caption:
@@ -53,11 +44,6 @@ def verify_inventory() -> None:
             raise RuntimeError(
                 f"Unknown source class for Figure S{figure.number}: {figure.source!r}"
             )
-    if 11 in ORIGINAL_FIGURE_TO_FINAL:
-        raise RuntimeError(
-            "Original Figure S11 is response-only and must not be carried into "
-            "the final supplement."
-        )
     expected_old_map = {
         1: 1,
         2: 2,
@@ -69,8 +55,8 @@ def verify_inventory() -> None:
         8: 14,
         9: 16,
         10: 18,
-        12: 19,
-        13: 20,
+        12: 20,
+        13: 21,
     }
     if ORIGINAL_FIGURE_TO_FINAL != expected_old_map:
         raise RuntimeError(
@@ -108,8 +94,8 @@ def main() -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
     print(
-        "Verified final supplementary inventory: 20 figures and 21 tables; "
-        "response-only figures excluded."
+        "Verified final supplementary inventory: 21 figures and 21 tables; "
+        "17q21.31 tagging-SNP comparison regenerated as Figure S19."
     )
     return 0
 
