@@ -70,7 +70,7 @@ def verify(template: Path, assembled: Path) -> None:
 
     captions = [text for text in texts if FIGURE_RE.match(text)]
     numbers = [int(FIGURE_RE.match(text).group(1)) for text in captions]
-    if numbers != list(range(1, 22)):
+    if numbers != list(range(1, 23)):
         raise RuntimeError(f"Expected exactly ordered captions S1-S22; found {numbers}")
     for caption, figure in zip(captions, FINAL_SUPPLEMENTARY_FIGURES):
         expected = f"Figure S{figure.number}. {figure.title}"
