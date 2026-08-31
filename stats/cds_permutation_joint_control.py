@@ -56,7 +56,7 @@ OUT_POWER_OBS = os.path.join(_DATA_DIR, "cds_permutation_power_observed.tsv")
 # Plot-resolution grid for the power curve; the reported quantities are the
 # curve itself and MDE80, not these values.
 DELTA_GRID = tuple(round(0.05 * i, 2) for i in range(1, 15))  # 0.05 .. 0.70
-OUT_POWER_CURVE = os.path.join(_DATA_DIR, "cds_permutation_power_curve.pdf")
+OUT_TEST_FIG = os.path.join(_DATA_DIR, "cds_permutation_calibration_power.pdf")
 OUT_FIG = os.path.join(_DATA_DIR, "cds_permutation_joint_control.pdf")
 JACKKNIFE_TSV = os.path.join(_DATA_DIR, "gene_inversion_direct_inverted.tsv")
 
@@ -760,30 +760,50 @@ def main():
     print(f"MDE80 FDR:     median {mde_tbl.mde80_fdr.median():.3f} "
           f"(defined for {n80f}/{len(mde_tbl)} genes)")
 
-    # ---- power-curve figure (marks and short axis labels only) -------------
+    # ---- combined calibration + power figure (one supplement figure) -------
     import matplotlib.pyplot as plt
-    curve = (per_gene_curve.groupby("delta")
-             [["power_nominal", "power_fdr"]].mean())
-    fig, ax = plt.subplots(figsize=(4.6, 3.4))
+    alphas = np.logspace(-4, np.log10(0.5), 60)
+    pooled_ranks = np.sort(ranks.ravel())
+    per_test = np.searchsorted(pooled_ranks, alphas, side="right") / pooled_ranks.size
+    curve = per_gene_curve.groupby("delta")[["power_nominal"]].mean()
+    fig, axes = plt.subplots(1, 2, figsize=(7.8, 3.4))
+    ax = axes[0]
+    ax.plot([1e-4, 0.5], [1e-4, 0.5], color="#999999", lw=0.8, ls=(0, (3, 3)))
+    ax.plot(alphas, np.maximum(per_test, 1e-6), color="#3b5b92", lw=1.8)
+    ax.set_xscale("log"); ax.set_yscale("log")
+    ax.set_xlim(1e-4, 0.5); ax.set_ylim(1e-4, 0.7)
+    from matplotlib.ticker import FuncFormatter
+    decimal = FuncFormatter(lambda v, _: f"{v:g}")
+    ax.xaxis.set_major_formatter(decimal)
+    ax.yaxis.set_major_formatter(decimal)
+    ax.set_xlabel("Nominal p threshold")
+    ax.set_ylabel("Realized per-test rate")
+    ax = axes[1]
     ax.plot(curve.index, curve["power_nominal"], color="#3b5b92", lw=1.8,
-            marker="o", ms=3.5, label="\u03b1 = 0.05")
-    ax.plot(curve.index, curve["power_fdr"], color="#c26d2b", lw=1.8,
-            marker="s", ms=3.2, label="FDR threshold")
+            marker="o", ms=3.5)
     ax.axhline(0.8, color="#999999", lw=0.8, ls=(0, (3, 3)))
-    hit_sizes = np.abs(obs[fdr < ALPHA])
-    ax.plot(hit_sizes, np.full_like(hit_sizes, -0.035), marker="|", ls="none",
-            color="#444444", ms=8, clip_on=False)
+    observed = np.abs(obs)
+    sig = fdr < ALPHA
+    ax.plot(observed[~sig], np.full_like(observed[~sig], -0.035), marker="o",
+            ls="none", color="#9a9a9a", ms=3.2, alpha=0.6,
+            markeredgecolor="none", clip_on=False,
+            label="Observed, q \u2265 0.05")
+    ax.plot(observed[sig], np.full_like(observed[sig], -0.035), marker="o",
+            ls="none", color="#c26d2b", ms=3.6, alpha=0.9,
+            markeredgecolor="none", clip_on=False,
+            label="Observed, q < 0.05")
+    ax.legend(frameon=False, loc="upper left", fontsize=8, handletextpad=0.4)
     ax.set_xlim(0, float(max(DELTA_GRID)))
     ax.set_ylim(-0.06, 1.02)
     ax.set_xlabel("True difference in CDS pair identity")
-    ax.set_ylabel("Power")
-    ax.legend(frameon=False, loc="lower right", fontsize=8)
-    ax.spines[["top", "right"]].set_visible(False)
+    ax.set_ylabel("Power at p \u2264 0.05")
+    for ax in axes:
+        ax.spines[["top", "right"]].set_visible(False)
     fig.tight_layout()
-    fig.savefig(OUT_POWER_CURVE)
-    fig.savefig(OUT_POWER_CURVE.replace(".pdf", ".png"), dpi=300)
+    fig.savefig(OUT_TEST_FIG)
+    fig.savefig(OUT_TEST_FIG.replace(".pdf", ".png"), dpi=300)
     plt.close(fig)
-    print(f"Wrote {OUT_POWER_CURVE}")
+    print(f"Wrote {OUT_TEST_FIG}")
     print(f"\nWrote {OUT_JOINT}\nWrote {OUT_CALIB}\nWrote {OUT_POWER}\n"
           f"Wrote {OUT_POWER_DELTA}\nWrote {OUT_POWER_OBS}")
     make_figure()
