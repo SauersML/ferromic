@@ -13,6 +13,7 @@ from pathlib import Path
 from zipfile import ZipFile
 from xml.etree import ElementTree as ET
 
+import numpy as np
 from PIL import Image
 from pypdf import PdfReader
 from reportlab.lib.utils import ImageReader
@@ -89,6 +90,31 @@ def numbered_sources(
     return sources
 
 
+def fix_main_figure_3a_label(payload: bytes) -> bytes:
+    """Correct panel A's fourth x-axis label in the pinned Figure 3 art.
+
+    The source art labels the fourth group "Recurrent direct haplotype"; the
+    group plots the recurrent inverted class. The second group's label carries
+    the same "inverted haplotype" line in the same font, so that line is copied
+    over the fourth group's second line, centered on the fourth column. Pixel
+    coordinates are fixed to the sha256-pinned art, which the caller verifies
+    before invoking this function.
+    """
+    with Image.open(io.BytesIO(payload)) as image:
+        art = np.array(image.convert("RGB"))
+    line_band = np.array(Image.fromarray(art).convert("L"))[459:476, :] < 128
+    ink = line_band.sum(axis=0)
+    if not (ink[539:667].sum() > 0 and ink[516:538].sum() == 0):
+        raise ValueError("Figure 3A label text is not at the pinned coordinates")
+    donor = art[456:480, 221:373].copy()
+    art[456:480, 520:686] = 255
+    x_start = round((539 + 666) / 2 - donor.shape[1] / 2)
+    art[456:480, x_start : x_start + donor.shape[1]] = donor
+    corrected = io.BytesIO()
+    Image.fromarray(art).save(corrected, format="PNG")
+    return corrected.getvalue()
+
+
 def write_pdf(source: FigureSource, destination: Path) -> tuple[int, int]:
     suffix = Path(source.media_target).suffix.lower()
     if suffix not in SUPPORTED_IMAGE_SUFFIXES:
@@ -142,6 +168,12 @@ def export(
             f"expected {expected_base_main_figure_3_sha256}, "
             f"observed {observed_figure_3_sha256}"
         )
+    sources[2] = FigureSource(
+        sources[2].label,
+        sources[2].document,
+        sources[2].media_target,
+        fix_main_figure_3a_label(sources[2].payload),
+    )
     sources.extend(
         numbered_sources(
             supplementary_document,
