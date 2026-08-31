@@ -19,25 +19,13 @@ name: Reference Recurrence Simulations
 # actually regenerating the grids, a cluster is far cheaper -- see
 # simulations/refsim/refsim.sbatch. Use the `reps` input for a cheap smoke test.
 #
-# Not run on push except when the simulation code itself changes.
+# Manual-only (workflow_dispatch). It used to run on pushes touching the
+# simulation code, but a multi-hour sharded grid queued on every such push
+# raced later pushes and left zombie queued runs; the committed grid tables
+# are already validated on every push by the Revision Analyses and
+# supplementary-table workflows, so CI regeneration is opt-in.
 
 on:
-  push:
-    paths:
-      - '.github/workflows/refsim_simulations.yml'
-      - 'reproducibility/manuscript_sources.json'
-      - 'scripts/fetch_manuscript_sources.py'
-      - 'simulations/refsim/inputFiles/temp.fa'
-      - 'simulations/refsim/make_demography_fig.py'
-      - 'simulations/refsim/make_report.py'
-      - 'simulations/refsim/refsim.py'
-      - 'simulations/refsim/requirements.txt'
-      - 'simulations/refsim/run_grid.py'
-      - 'simulations/refsim/source_model_manifest.json'
-      - 'simulations/refsim/upstream_archive/singleINV_m1.py'
-      - 'simulations/refsim/validate_grid.py'
-      - 'simulations/refsim/verify_model_port.py'
-      - 'simulations/refsim/verify_reported_flux.py'
   workflow_dispatch:
     inputs:
       commit:
