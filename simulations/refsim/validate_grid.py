@@ -8,6 +8,7 @@ import glob
 import hashlib
 import json
 import os
+import re
 
 import run_grid
 
@@ -42,7 +43,13 @@ def main() -> None:
     parser.add_argument("--task", required=True)
     parser.add_argument("--inputs", nargs="+", required=True)
     parser.add_argument("--provenance", required=True)
+    parser.add_argument("--upstream-repository", required=True)
+    parser.add_argument("--upstream-ref", required=True)
+    parser.add_argument("--upstream-commit", required=True)
     args = parser.parse_args()
+
+    if not re.fullmatch(r"[0-9a-f]{40}", args.upstream_commit):
+        raise SystemExit("--upstream-commit must be a full lowercase Git SHA")
 
     paths = sorted({path for pattern in args.inputs for path in glob.glob(pattern)})
     if not paths:
@@ -90,6 +97,11 @@ def main() -> None:
         "gene_flux_rates": sorted({row[3] for row in observed}),
         "inversion_frequencies": sorted({row[4] for row in observed}),
         "sample_sizes": sorted({row[5] for row in observed}),
+        "upstream": {
+            "repository": args.upstream_repository,
+            "ref": args.upstream_ref,
+            "resolved_commit": args.upstream_commit,
+        },
         "input_shards": [
             {
                 "path": os.path.basename(path),

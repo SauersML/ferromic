@@ -60,8 +60,9 @@ direct demes as ``random.randint(0, 10) / 10``. Those draws are preserved
 exactly: the production analysis does not condition either mixture or force a
 sample to come from a particular descendant population.
 
-The pinned public GitHub commit contains both generators. The single-event
-model uses its one-split topology and inverted-deme size exactly: ``N_a/100``.
+The public GitHub repository contains both generators. CI resolves its latest
+``main`` commit for every run. The single-event model uses its one-split
+topology and inverted-deme size exactly: ``N_a/100``.
 """
 from __future__ import annotations
 

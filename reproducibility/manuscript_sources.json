@@ -51,14 +51,6 @@
       "role": "Pinned IQ-TREE release matching the 2.1.2 version used for the reported recurrence simulations"
     },
     {
-      "id": "inversion_simulation_upstream",
-      "kind": "url",
-      "filename": "inversionSimulation-6ff2ce3c77f056bec013f64dce1efec963468bfc.tar.gz",
-      "url": "https://github.com/hsiehphLab/inversionSimulation/archive/6ff2ce3c77f056bec013f64dce1efec963468bfc.tar.gz",
-      "sha256": "ab51bb83d3446eb36eab7ad641e2eeed35da3b595520d25b446ba72fc896afc8",
-      "role": "Immutable public source for the recurrent- and single-event demographies and IQ-TREE plus Fitch-parsimony classifier ported by simulations/refsim"
-    },
-    {
       "id": "inversion_properties",
       "kind": "repository",
       "path": "data/inv_properties.tsv",
