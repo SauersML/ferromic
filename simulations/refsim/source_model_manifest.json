@@ -1,6 +1,6 @@
 {
   "public_recurrent": {
-    "commit": "3f845a2b4e017842d1d6648210f148faab616e17",
+    "commit": "6ff2ce3c77f056bec013f64dce1efec963468bfc",
     "generator": "scripts/recurrentINV_m1.2pop.py",
     "manifest": "inputFiles/model_manifest.young.tbl",
     "sample_haplotypes": 240,
@@ -19,17 +19,12 @@
     ],
     "within_orientation_migration": 1e-08
   },
-  "archived_single_event": {
-    "msi_path": "/projects/standard/hsiehph/hsiehph/projects/inversionSimulation/forINV_sim_ms/msprime_singleINV_old/scripts/singleINV_m1.py",
-    "vendored_path": "upstream_archive/singleINV_m1.py",
-    "sha256": "0c503d899b64c38318546a16799703eb36dbdcb7edb540639057ac738242cfa2",
+  "public_single_event": {
+    "generator": "scripts/singleINV_m1.py",
     "ancestral_effective_size": 6000,
     "direct_effective_size": 6000,
-    "archived_inverted_effective_size": 60,
-    "response_inverted_effective_size": 60,
-    "response_child_fraction_of_parent": 0.01,
-    "migration_rate": 0.0,
-    "note": "The reported grid uses upstream's own published inverted-deme size, N_a/100, confirmed against hsiehphLab/inversionSimulation commit 6ff2ce3c (scripts/singleINV_m1.py, published 2026-08-28). The Methods' 90%-reduction figure describes the orientation-changing children of the recurrent model; running the single-event arm at N_a/10 instead is reported as a sensitivity (gene_flux_10pct_*)."
+    "inverted_effective_size": 60,
+    "child_fraction_of_parent": 0.01
   },
   "response_grid": {
     "single_event_ages_years": [

@@ -15,7 +15,7 @@ the reader. The three claims, quoted from the Results:
 3. "it tends to overestimate the number of inversion events ... especially for
    younger events."
 
-The single-origin arm uses the archived two-population ``singleINV_m1.py``
+The single-origin arm uses the public two-population ``singleINV_m1.py``
 topology with upstream's N_a/100 inverted deme. The recurrent arm uses the public nine-population
 ``recurrentINV_m1.2pop.py`` model and its two independent random sampling
 mixtures.

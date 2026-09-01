@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import hashlib
 import json
 import re
 from itertools import combinations
@@ -54,29 +53,21 @@ def public_source_checks(root: Path, ledger: dict) -> None:
         raise SystemExit("unexpected test manifest in the pinned public repository")
 
 
-def archived_single_checks(ledger: dict) -> None:
-    path = HERE / ledger["vendored_path"]
-    payload = path.read_bytes()
-    observed_hash = hashlib.sha256(payload).hexdigest()
-    if observed_hash != ledger["sha256"]:
-        raise SystemExit(
-            "vendored single-event source changed: "
-            f"{observed_hash} != {ledger['sha256']}"
-        )
-    compact = re.sub(r"\s+", "", payload.decode("utf-8"))
+def public_single_checks(root: Path, ledger: dict) -> None:
+    source = (root / ledger["generator"]).read_text(encoding="utf-8")
+    compact = re.sub(r"\s+", "", source)
     required = (
         "N_a=6000",
-        "initial_size=N_a)",
-        "initial_size=N_a/100)",
-        "mig_mat=[[0,0],[0,0]]",
-        "MassMigration(time=Tsp_p0_p1,source=1,destination=0,proportion=1.0)",
+        'add_population(name="pop0",initial_size=N_a)',
+        'add_population(name="pop1",initial_size=N_a/100)',
+        'add_population_split(time=Tsp_p0_p1,derived=["pop1"],ancestral="pop0")',
     )
     missing = [token for token in required if token not in compact]
     if missing:
-        raise SystemExit(f"archived single-event source changed; missing {missing}")
+        raise SystemExit(f"public single-event source changed; missing {missing}")
 
 
-def structural_checks() -> None:
+def structural_checks(single_ledger: dict) -> None:
     depth = refsim.TIME_DEPTHS["young"]
     no_flux = refsim.demography(
         depth["t01_23"], depth["t0_1"], depth["t2_3"], 1e-8, 0.3, 0.7, 0.0
@@ -95,18 +86,18 @@ def structural_checks() -> None:
     single_sizes = {population.name: population.initial_size
                     for population in single.populations}
     expected_single = {
-        "P_I": refsim.N_A * refsim.SINGLE_INV_FRACTION,
-        "P_D": refsim.N_A,
-        "P00": refsim.N_A,
+        "P_I": single_ledger["inverted_effective_size"],
+        "P_D": single_ledger["direct_effective_size"],
+        "P00": single_ledger["ancestral_effective_size"],
     }
     if single_sizes != expected_single:
         raise SystemExit(f"single-event effective sizes differ: {single_sizes}")
-    if refsim.SINGLE_INV_FRACTION != refsim.SINGLE_INV_FRACTION_UPSTREAM:
+    expected_fraction = single_ledger["child_fraction_of_parent"]
+    if (refsim.SINGLE_INV_FRACTION != expected_fraction or
+            expected_single["P_I"] != expected_single["P00"] * expected_fraction):
         raise SystemExit(
             "the single-event grid no longer uses upstream's published inverted "
-            f"deme size (N_a/100); it uses {refsim.SINGLE_INV_FRACTION!r}. "
-            "Regenerate the reported grid or update the manuscript's "
-            "false-positive-rate claim before pinning this."
+            f"deme size (N_a/100); it uses {refsim.SINGLE_INV_FRACTION!r}."
         )
 
 
@@ -166,12 +157,12 @@ def main() -> None:
     args = parser.parse_args()
     ledger = json.loads(LEDGER.read_text(encoding="utf-8"))
     public_source_checks(args.upstream_root, ledger["public_recurrent"])
-    archived_single_checks(ledger["archived_single_event"])
-    structural_checks()
+    public_single_checks(args.upstream_root, ledger["public_single_event"])
+    structural_checks(ledger["public_single_event"])
     continuous_flux_checks()
     grid_checks(ledger["response_grid"])
-    print("Verified public recurrent source, archived single-event topology, "
-          "upstream N_a/100 single-event deme, unconstrained sampling grid, "
+    print("Verified public recurrent source, public N_a/100 single-event model, "
+          "unconstrained sampling grid, "
           "and continuous all-interval gene flux.")
 
 

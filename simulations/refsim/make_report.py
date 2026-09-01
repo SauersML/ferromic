@@ -8,8 +8,8 @@ Output: ``flux_results.csv`` (one row per grid cell), ``flux_results.md``,
 Every rate here is the upstream classifier's: ``call_recurrent`` is
 ``minMutHomoplasy >= 2`` on the IQ-TREE ML tree. For ``scenario = single`` the
 recurrent-call rate is the false-positive rate; for ``scenario = recurrent`` it
-is the detection rate. At ``m_flux = 0``, the single arm uses the archived
-``singleINV_m1.py`` topology with its own N_a/100 inverted deme, and the
+is the detection rate. At ``m_flux = 0``, the single arm uses the public
+``singleINV_m1.py`` topology with its N_a/100 inverted deme, and the
 recurrent arm is the public ``recurrentINV_m1.2pop.py`` model. The remaining columns add continuous,
 symmetric exchange between every pair of opposite-orientation populations for
 every interval in which the pair coexists.

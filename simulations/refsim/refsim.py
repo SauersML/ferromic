@@ -57,12 +57,8 @@ direct demes as ``random.randint(0, 10) / 10``. Those draws are preserved
 exactly: the production analysis does not condition either mixture or force a
 sample to come from a particular descendant population.
 
-The public GitHub commit contains the recurrent generator but omits the
-historical ``singleINV_m1.py`` source. The exact archived file from the original
-MSI analysis tree is vendored at ``upstream_archive/singleINV_m1.py`` and its
-SHA-256 is checked before every workflow run. The response model uses its
-one-split topology with its own inverted-deme size, ``N_a/100`` (see
-``SINGLE_INV_FRACTION``; the Methods' 90% figure describes the recurrent model).
+The pinned public GitHub commit contains both generators. The single-event
+model uses its one-split topology and inverted-deme size exactly: ``N_a/100``.
 """
 from __future__ import annotations
 
@@ -316,19 +312,12 @@ def draw_admixture(rng):
     return frac_i, frac_d
 
 
-# Inverted-deme size in the single-event model, as a fraction of the ancestral
-# size. ``UPSTREAM`` is the value in hsiehphLab/inversionSimulation's own
-# single-event generator (``singleINV_m1.py``: ``initial_size=N_a/100``), which
-# the lab published publicly on 2026-08-28 (commit 6ff2ce3c) with that value
-# unchanged. ``METHODS_BOTTLENECK`` is the 90%-reduction figure the Methods give
-# for orientation-changing children of the *recurrent* model. The two give very
-# different single-event false-positive rates, so the choice is explicit.
-SINGLE_INV_FRACTION_UPSTREAM = 1 / 100
-SINGLE_INV_FRACTION_METHODS_BOTTLENECK = 1 / 10
-SINGLE_INV_FRACTION = SINGLE_INV_FRACTION_UPSTREAM
+# Inverted-deme size in hsiehphLab/inversionSimulation's public single-event
+# generator (``singleINV_m1.py``: ``initial_size=N_a/100``).
+SINGLE_INV_FRACTION = 1 / 100
 
 
-def demography_single(t_inv_years, m_flux=0.0, inv_size_fraction=None):
+def demography_single(t_inv_years, m_flux=0.0):
     """The manuscript's single-event model: one divergence, nothing else.
 
     Methods: "an inversion event creates a subpopulation (e.g., inverted
@@ -337,20 +326,16 @@ def demography_single(t_inv_years, m_flux=0.0, inv_size_fraction=None):
     models are run at t_inv in {500, 250, 100, 50} kya. There is no second inverted
     deme and no sister direct deme -- those exist only in the recurrent model.
 
-    The inverted deme is ``inv_size_fraction * N_a`` and the deme retaining the
-    ancestral orientation is ``N_a``. The default is upstream's own published
-    value (``N_a / 100``); pass
-    ``SINGLE_INV_FRACTION_METHODS_BOTTLENECK`` to run the 90%-reduction
-    sensitivity instead. Direct lineages never enter the inverted deme, so the
-    tree carries exactly one orientation change.
+    The inverted deme is ``N_a / 100`` and the deme retaining the ancestral
+    orientation is ``N_a``, exactly as in the public upstream generator. Direct
+    lineages never enter the inverted deme, so the tree carries exactly one
+    orientation change.
     """
     import msprime
 
-    fraction = (SINGLE_INV_FRACTION if inv_size_fraction is None
-                else inv_size_fraction)
     de = msprime.Demography()
     de.add_population(name="P_I", description="INV group",
-                      initial_size=N_A * fraction)
+                      initial_size=N_A * SINGLE_INV_FRACTION)
     de.add_population(name="P_D", description="DIR group", initial_size=N_A)
     de.add_population(name="P00", description="Ancestral group", initial_size=N_A)
     if m_flux > 0:
