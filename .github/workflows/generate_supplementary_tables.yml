@@ -88,21 +88,24 @@ jobs:
           n_ferromic=$(find supplemental_code/ferromic -type f | wc -l)
           echo "ferromic: $n_ferromic files"
 
-          # --- upstream simulation code ---------------------------------------
-          # Fetch the immutable, SHA-256-verified archive recorded in
-          # reproducibility/manuscript_sources.json. Never archive a moving HEAD.
-          mkdir -p "$RUNNER_TEMP/manuscript-sources" supplemental_code/inversionSimulation
-          python scripts/fetch_manuscript_sources.py \
-            --source inversion_simulation_upstream \
-            --output-dir "$RUNNER_TEMP/manuscript-sources"
-          tar -xzf \
-            "$RUNNER_TEMP/manuscript-sources/inversionSimulation-6ff2ce3c77f056bec013f64dce1efec963468bfc.tar.gz" \
+          # --- latest upstream simulation code -------------------------------
+          # Resolve main once, then fetch that exact commit so the archive records
+          # what "latest" meant for this workflow run.
+          mkdir -p supplemental_code/inversionSimulation
+          up_sha="$(git ls-remote https://github.com/hsiehphLab/inversionSimulation.git refs/heads/main | awk '{print $1}')"
+          [[ "$up_sha" =~ ^[0-9a-f]{40}$ ]]
+          up_archive="$RUNNER_TEMP/inversionSimulation-${up_sha}.tar.gz"
+          curl --fail --location --retry 3 --retry-all-errors \
+            "https://github.com/hsiehphLab/inversionSimulation/archive/${up_sha}.tar.gz" \
+            --output "$up_archive"
+          up_archive_sha256="$(sha256sum "$up_archive" | awk '{print $1}')"
+          tar -xzf "$up_archive" \
             --strip-components=1 \
             -C supplemental_code/inversionSimulation
-          up_sha="6ff2ce3c77f056bec013f64dce1efec963468bfc"
           n_up=$(find supplemental_code/inversionSimulation -type f | wc -l)
           test "$n_up" -gt 0
-          echo "inversionSimulation: $n_up files at $up_sha"
+          echo "inversionSimulation: $n_up files from main at $up_sha"
+          echo "archive SHA-256: $up_archive_sha256"
 
           # --- manifest --------------------------------------------------------
           {
@@ -125,7 +128,10 @@ jobs:
             echo "      cds/            coding-sequence pipeline"
             echo "      .github/workflows/  the pipelines that reproduce the committed outputs"
             echo
-            echo "inversionSimulation/  ($n_up files, upstream commit $up_sha)"
+            echo "inversionSimulation/  ($n_up files)"
+            echo "    Source ref: main"
+            echo "    Resolved upstream commit: $up_sha"
+            echo "    Downloaded archive SHA-256: $up_archive_sha256"
             echo "    The structured-coalescent simulation and recurrence-inference code of"
             echo "    Porubsky et al. (2022), cited in Methods. simulations/refsim in this"
             echo "    repository ports it so that its power and false-positive rate could be"

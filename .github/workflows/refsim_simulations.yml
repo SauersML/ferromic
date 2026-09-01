@@ -19,11 +19,9 @@ name: Reference Recurrence Simulations
 # actually regenerating the grids, a cluster is far cheaper -- see
 # simulations/refsim/refsim.sbatch. Use the `reps` input for a cheap smoke test.
 #
-# Manual-only (workflow_dispatch). It used to run on pushes touching the
-# simulation code, but a multi-hour sharded grid queued on every such push
-# raced later pushes and left zombie queued runs; the committed grid tables
-# are already validated on every push by the Revision Analyses and
-# supplementary-table workflows, so CI regeneration is opt-in.
+# Manual-only (workflow_dispatch). The complete grid is deliberately not
+# started on every push; when dispatched it resolves the latest upstream main
+# once and uses that same revision across every shard.
 
 on:
   workflow_dispatch:
@@ -62,7 +60,17 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.build.outputs.matrix }}
+      upstream_sha: ${{ steps.upstream.outputs.sha }}
     steps:
+      - id: upstream
+        name: Resolve latest upstream main
+        run: |
+          set -euo pipefail
+          sha="$(git ls-remote https://github.com/hsiehphLab/inversionSimulation.git refs/heads/main | awk '{print $1}')"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Using hsiehphLab/inversionSimulation main at $sha"
+
       - id: build
         run: |
           set -euo pipefail
@@ -93,17 +101,24 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Verify immutable upstream simulation source
+      - name: Fetch latest upstream simulation source
+        env:
+          UPSTREAM_SHA: ${{ needs.plan.outputs.upstream_sha }}
         run: |
           set -euo pipefail
-          python scripts/fetch_manuscript_sources.py \
-            --source inversion_simulation_upstream \
-            --output-dir /tmp/manuscript-sources
-          mkdir -p /tmp/inversion-simulation-upstream
-          tar -xzf /tmp/manuscript-sources/inversionSimulation-6ff2ce3c77f056bec013f64dce1efec963468bfc.tar.gz \
-            -C /tmp/inversion-simulation-upstream
+          archive="$RUNNER_TEMP/inversionSimulation-${UPSTREAM_SHA}.tar.gz"
+          root="$RUNNER_TEMP/inversion-simulation-upstream/inversionSimulation-${UPSTREAM_SHA}"
+          mkdir -p "$(dirname "$root")"
+          curl --fail --location --retry 3 --retry-all-errors \
+            "https://github.com/hsiehphLab/inversionSimulation/archive/${UPSTREAM_SHA}.tar.gz" \
+            --output "$archive"
+          archive_sha256="$(sha256sum "$archive" | awk '{print $1}')"
+          tar -xzf "$archive" -C "$(dirname "$root")"
           cmp simulations/refsim/inputFiles/temp.fa \
-            /tmp/inversion-simulation-upstream/inversionSimulation-6ff2ce3c77f056bec013f64dce1efec963468bfc/inputFiles/temp.fa
+            "$root/inputFiles/temp.fa"
+          echo "UPSTREAM_ROOT=$root" >> "$GITHUB_ENV"
+          echo "Upstream main resolved to $UPSTREAM_SHA"
+          echo "Downloaded archive SHA-256: $archive_sha256"
 
       - name: Install dependencies
         run: |
@@ -113,7 +128,7 @@ jobs:
       - name: Audit model ports and all-interval gene flux
         run: |
           python simulations/refsim/verify_model_port.py \
-            --upstream-root /tmp/inversion-simulation-upstream/inversionSimulation-6ff2ce3c77f056bec013f64dce1efec963468bfc
+            --upstream-root "$UPSTREAM_ROOT"
 
       - name: Install IQ-TREE 2
         run: |
@@ -151,7 +166,7 @@ jobs:
           retention-days: 5
 
   aggregate:
-    needs: simulate
+    needs: [plan, simulate]
     if: needs.simulate.result == 'success'
     runs-on: ubuntu-latest
     steps:
@@ -193,7 +208,10 @@ jobs:
           }
           python validate_grid.py --task "${TASK}" \
             --inputs "out/${TASK}_shard*.csv" \
-            --provenance gene_flux_provenance.json
+            --provenance gene_flux_provenance.json \
+            --upstream-repository https://github.com/hsiehphLab/inversionSimulation \
+            --upstream-ref main \
+            --upstream-commit "${{ needs.plan.outputs.upstream_sha }}"
 
       - name: Rebuild and assert the reported gene-flux results
         if: github.event.inputs.reps == ''

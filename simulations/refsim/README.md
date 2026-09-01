@@ -1,10 +1,9 @@
 # Reference recurrence simulations and gene-flux analysis
 
 This directory contains the structured-coalescent simulation and recurrence
-classifier used for the manuscript response. The implementation is a port of
-the immutable upstream source at commit
-`6ff2ce3c77f056bec013f64dce1efec963468bfc`, verified through
-`reproducibility/manuscript_sources.json`.
+classifier used for the manuscript response. GitHub Actions resolves the latest
+`hsiehphLab/inversionSimulation` `main` commit at the start of each run, audits
+the port against that source, and records the resolved commit in provenance.
 
 ## Recurrence classifier
 
@@ -68,7 +67,10 @@ sbatch --array=0-7 --export=ALL,TASK=gene_flux,TAG=gene_flux \
   refsim.sbatch
 python validate_grid.py --task gene_flux \
   --inputs 'out/gene_flux_shard*.csv' \
-  --provenance gene_flux_provenance.json
+  --provenance gene_flux_provenance.json \
+  --upstream-repository https://github.com/hsiehphLab/inversionSimulation \
+  --upstream-ref main \
+  --upstream-commit "$(git ls-remote https://github.com/hsiehphLab/inversionSimulation.git refs/heads/main | awk '{print $1}')"
 python make_report.py 'out/gene_flux_shard*.csv' --prefix gene_flux
 python verify_reported_flux.py --rows 'out/gene_flux_shard*.csv'
 ```

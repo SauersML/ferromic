@@ -1,6 +1,5 @@
 {
   "public_recurrent": {
-    "commit": "6ff2ce3c77f056bec013f64dce1efec963468bfc",
     "generator": "scripts/recurrentINV_m1.2pop.py",
     "manifest": "inputFiles/model_manifest.young.tbl",
     "sample_haplotypes": 240,

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Audit the port against the pinned public source and continuous-flux contract."""
+"""Audit the port against the latest resolved public source and flux contract."""
 
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ def public_source_checks(root: Path, ledger: dict) -> None:
     if len(rows) != 18 or observed != expected:
         raise SystemExit("public model_manifest.young.tbl differs from the 18-row grid")
     if (root / "inputFiles" / "model_manifest.young.test.tbl").exists():
-        raise SystemExit("unexpected test manifest in the pinned public repository")
+        raise SystemExit("unexpected test manifest in the public repository")
 
 
 def public_single_checks(root: Path, ledger: dict) -> None:
