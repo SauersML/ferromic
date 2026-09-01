@@ -30,7 +30,7 @@ The classification is therefore, exactly as upstream:
    (``inputFiles/temp.fa``, vendored here byte-for-byte), one sequence per
    haplotype plus the ancestral/outgroup sequence ``CMP_CMP_0``;
 4. an IQ-TREE maximum-likelihood tree over that alignment, rooted on the
-   outgroup (``-m MFPMERGE -keep-ident -bb 1000 -o CMP_CMP_0``);
+   outgroup (``-m MFPMERGE -keep-ident -o CMP_CMP_0``);
 5. the outgroup collapsed, orientation mapped onto the tips as a binary trait
    (``A`` = direct, ``T`` = inverted), and the minimum number of orientation
    state changes scored with Biopython's ``ParsimonyScorer`` (Fitch).
@@ -44,6 +44,9 @@ parsimony score unchanged:
 * ``--date/--date-options/--clock-sd/--date-tip/--date-ci`` are dropped. Upstream
   those flags produce ``{locus}.timetree.nex``, which is consumed only by the
   plotting rules; ``computeMinMutations.py`` reads ``{locus}.treefile``.
+* ``-bb 1000`` is dropped. It generates bootstrap-support outputs after the
+  maximum-likelihood search, while recurrence is scored only from
+  ``{locus}.treefile``.
 * ``-nt 1`` and an explicit ``-seed``: replicates are parallelised one per core,
   and a fixed seed makes each replicate's tree search reproducible.
 
@@ -579,8 +582,8 @@ def run_iqtree(aln_path, prefix, outgroup=OUTGROUP, seed=1, threads=1,
     last = None
     for attempt in range(max_attempts):
         this_seed = seed if attempt == 0 else (int(seed) % 90_000) + attempt
-        cmd = [binary, "-safe", "-s", aln_path, "-keep-ident", "-bb", "1000",
-               "-redo", "-m", "MFPMERGE", "-pre", prefix, "-o", outgroup,
+        cmd = [binary, "-safe", "-s", aln_path, "-keep-ident", "-redo",
+               "-m", "MFPMERGE", "-pre", prefix, "-o", outgroup,
                "-nt", str(threads), "-seed", str(this_seed), "-quiet"]
         try:
             subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL,

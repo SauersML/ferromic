@@ -149,6 +149,9 @@ def grid_checks(ledger: dict) -> None:
         raise SystemExit("production scenarios changed")
     if sorted({row["m_flux"] for row in rows}) != ledger["gene_flux_rates"]:
         raise SystemExit("production flux ladder changed")
+    validation_rows = run_grid.build_grid("gene_flux", reps=1)
+    if validation_rows != rows[:len(validation_rows)]:
+        raise SystemExit("validation grid is not a prefix of production seeds")
 
 
 def main() -> None:

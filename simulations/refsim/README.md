@@ -16,13 +16,14 @@ Each simulated locus is processed as follows:
 2. retain biallelic sites and construct a full-length haplotype alignment on
    the upstream `inputFiles/temp.fa` reference backbone;
 3. infer the maximum-likelihood tree with IQ-TREE 2.1.2 using the upstream
-   `-safe -keep-ident -bb 1000 -m MFPMERGE -o CMP_CMP_0` options;
+   `-safe -keep-ident -m MFPMERGE -o CMP_CMP_0` search options;
 4. collapse the outgroup and score direct/inverted tip labels with Fitch
    parsimony; and
 5. classify a locus as recurrent when `minMutHomoplasy >= 2`.
 
-The classifier uses the best IQ-TREE `.treefile`. Bootstrap trees are generated
-by IQ-TREE but are not used to make the recurrence call.
+The classifier uses the best IQ-TREE `.treefile`. The upstream `-bb 1000` step
+is omitted because it generates bootstrap-support outputs that never enter the
+recurrence call.
 
 ## Reported gene-flux analysis
 

@@ -132,9 +132,15 @@ def build_grid(task, reps=None):
                                  seed=REPL_SEED0 + cell * reps + r))
     elif task == "gene_flux":
         reps = reps or GENE_FLUX_REPS
+        if not 1 <= reps <= GENE_FLUX_REPS:
+            raise ValueError(
+                f"gene_flux reps must be between 1 and {GENE_FLUX_REPS}"
+            )
         # Replicate is the OUTER loop so the grid is swept a full replicate at a
         # time. A run cut short by the wall clock then loses whole replicates
         # spread evenly over every cell, rather than whole cells off the end.
+        # The seed stride stays fixed at the production replicate count so a
+        # validation run is an exact prefix of the production seeds.
         cells = list(itertools.product(REPL_SCENARIOS, TIME_DEPTHS, RHOS,
                                        GENE_FLUX_RATES, REPL_FREQS))
         for r in range(reps):
@@ -142,7 +148,7 @@ def build_grid(task, reps=None):
                 rows.append(dict(scenario=sc, depth=depth, rho=rho,
                                  m_flux=m, inv_freq=freq,
                                  sample_size=FLUX_SAMPLE_HAP,
-                                 seed=GENE_FLUX_SEED0 + cell * reps + r))
+                                 seed=GENE_FLUX_SEED0 + cell * GENE_FLUX_REPS + r))
     elif task == "growth":
         reps = reps or GROWTH_REPS
         cells = list(itertools.product(GROWTH_SCENARIOS, TIME_DEPTHS, RHOS,
@@ -341,9 +347,9 @@ def main(argv=None):
             rows.append(row)
             if w is not None:
                 w.writerow(row)
+                fh.flush()
             el = time.time() - t0
             if (i + 1) % 50 == 0 or (i + 1) == len(mine):
-                fh.flush()
                 print(f"  {i + 1}/{len(mine)}  {el:.0f}s  "
                       f"({el / (i + 1):.1f}s/job)", flush=True)
             if args.max_seconds and el > args.max_seconds:
