@@ -3,15 +3,15 @@
 This directory contains the structured-coalescent simulation and recurrence
 classifier used for the manuscript response. The implementation is a port of
 the immutable upstream source at commit
-`3f845a2b4e017842d1d6648210f148faab616e17`, verified through
+`6ff2ce3c77f056bec013f64dce1efec963468bfc`, verified through
 `reproducibility/manuscript_sources.json`.
 
 ## Recurrence classifier
 
 Each simulated locus is processed as follows:
 
-1. simulate the archived one-split single-event topology with the Methods'
-   upstream `N_a/100` inverted deme, or the public nine-population
+1. simulate the public one-split single-event topology with its `N_a/100`
+   inverted deme, or the public nine-population
    recurrent model, with `msprime`;
 2. retain biallelic sites and construct a full-length haplotype alignment on
    the upstream `inputFiles/temp.fa` reference backbone;
@@ -28,9 +28,8 @@ by IQ-TREE but are not used to make the recurrence call.
 
 The response's gene-flux analysis comes from the `gene_flux` grid:
 
-- `single`: the archived `upstream_archive/singleINV_m1.py` two-population,
-  one-divergence topology with its own `N_a/100` inverted deme (the value in
-  the lab's published generator; see the section on deme size below);
+- `single`: the public `scripts/singleINV_m1.py` two-population,
+  one-divergence topology with its `N_a/100` inverted deme;
 - `recurrent`: the public `recurrentINV_m1.2pop.py` nine-population model.
 
 The recurrent arm preserves the public generator's sampling without any
@@ -88,30 +87,10 @@ release archive with its independently pinned archive checksum.
 - `refsim.sbatch`: Sioux production wrapper
 - `setup_sioux.sbatch`: pinned Python environment setup
 
-## Single-event inverted-deme size: upstream vs the Methods' bottleneck
+## Single-event inverted-deme size
 
-The single-event arm's inverted deme has no unambiguous size in the sources.
-
-- `hsiehphLab/inversionSimulation` sets it to `N_a / 100`. That is the value in
-  the archived `singleINV_m1.py` vendored at `upstream_archive/`, and the lab
-  published the same file publicly on 2026-08-28 (commit `6ff2ce3c`,
-  `scripts/singleINV_m1.py` and `scripts/singleINV_m1.new.py`) with
-  `initial_size=N_a/100` unchanged.
-- The Methods describe a "90% reduction" for the orientation-changing child.
-  That sentence describes the *recurrent* model, whose inverted demes are
-  `0.1 * N_a`; the single-event sensitivity model is not described separately.
-
-The choice changes the single-event false-positive rate by an order of
-magnitude, so both grids are kept:
-
-| grid | inverted deme | FPR at m = 0 | FPR at m = 1e-6 | trend p |
-|---|---|---|---|---|
-| `gene_flux_*` (reported) | `N_a / 100` (upstream) | 0.0% | 1.7% (1.2-2.6%) | 3.9e-11 |
-| `gene_flux_10pct_*` (sensitivity) | `N_a / 10` (Methods bottleneck) | 7.8% | 10.4% (8.9-12.1%) | 7.6e-3 |
-
-The recurrent arm is identical in both (power 67.5% -> 69.0%, p = 0.446): the
-single-event demography does not enter it. Both grids agree that gene flux
-raises the false-positive rate and leaves power unchanged; they differ only in
-the baseline. `refsim.SINGLE_INV_FRACTION` selects the model and defaults to
-upstream's value; `verify_model_port.py` fails if the reported grid is
-regenerated with anything else.
+`hsiehphLab/inversionSimulation` sets the single-event inverted deme to
+`N_a / 100`. The production model has no alternate size: the code, model audit,
+GitHub Actions workflow, and MSI wrapper all use the public 1% value. The
+recurrent generator's 10% child demes are unchanged because they belong to the
+distinct recurrent model.

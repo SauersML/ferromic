@@ -96,10 +96,10 @@ jobs:
             --source inversion_simulation_upstream \
             --output-dir "$RUNNER_TEMP/manuscript-sources"
           tar -xzf \
-            "$RUNNER_TEMP/manuscript-sources/inversionSimulation-3f845a2b4e017842d1d6648210f148faab616e17.tar.gz" \
+            "$RUNNER_TEMP/manuscript-sources/inversionSimulation-6ff2ce3c77f056bec013f64dce1efec963468bfc.tar.gz" \
             --strip-components=1 \
             -C supplemental_code/inversionSimulation
-          up_sha="3f845a2b4e017842d1d6648210f148faab616e17"
+          up_sha="6ff2ce3c77f056bec013f64dce1efec963468bfc"
           n_up=$(find supplemental_code/inversionSimulation -type f | wc -l)
           test "$n_up" -gt 0
           echo "inversionSimulation: $n_up files at $up_sha"

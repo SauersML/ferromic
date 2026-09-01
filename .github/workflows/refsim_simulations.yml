@@ -100,10 +100,10 @@ jobs:
             --source inversion_simulation_upstream \
             --output-dir /tmp/manuscript-sources
           mkdir -p /tmp/inversion-simulation-upstream
-          tar -xzf /tmp/manuscript-sources/inversionSimulation-3f845a2b4e017842d1d6648210f148faab616e17.tar.gz \
+          tar -xzf /tmp/manuscript-sources/inversionSimulation-6ff2ce3c77f056bec013f64dce1efec963468bfc.tar.gz \
             -C /tmp/inversion-simulation-upstream
           cmp simulations/refsim/inputFiles/temp.fa \
-            /tmp/inversion-simulation-upstream/inversionSimulation-3f845a2b4e017842d1d6648210f148faab616e17/inputFiles/temp.fa
+            /tmp/inversion-simulation-upstream/inversionSimulation-6ff2ce3c77f056bec013f64dce1efec963468bfc/inputFiles/temp.fa
 
       - name: Install dependencies
         run: |
@@ -113,7 +113,7 @@ jobs:
       - name: Audit model ports and all-interval gene flux
         run: |
           python simulations/refsim/verify_model_port.py \
-            --upstream-root /tmp/inversion-simulation-upstream/inversionSimulation-3f845a2b4e017842d1d6648210f148faab616e17
+            --upstream-root /tmp/inversion-simulation-upstream/inversionSimulation-6ff2ce3c77f056bec013f64dce1efec963468bfc
 
       - name: Install IQ-TREE 2
         run: |

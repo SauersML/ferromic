@@ -53,10 +53,10 @@
     {
       "id": "inversion_simulation_upstream",
       "kind": "url",
-      "filename": "inversionSimulation-3f845a2b4e017842d1d6648210f148faab616e17.tar.gz",
-      "url": "https://github.com/hsiehphLab/inversionSimulation/archive/3f845a2b4e017842d1d6648210f148faab616e17.tar.gz",
-      "sha256": "5cd9fe72d0c513e01f5ec2447671973068d12d0867fce5d316fab1b49ee5e64d",
-      "role": "Immutable public source for the recurrent-inversion demography and IQ-TREE plus Fitch-parsimony classifier ported by simulations/refsim"
+      "filename": "inversionSimulation-6ff2ce3c77f056bec013f64dce1efec963468bfc.tar.gz",
+      "url": "https://github.com/hsiehphLab/inversionSimulation/archive/6ff2ce3c77f056bec013f64dce1efec963468bfc.tar.gz",
+      "sha256": "ab51bb83d3446eb36eab7ad641e2eeed35da3b595520d25b446ba72fc896afc8",
+      "role": "Immutable public source for the recurrent- and single-event demographies and IQ-TREE plus Fitch-parsimony classifier ported by simulations/refsim"
     },
     {
       "id": "inversion_properties",
