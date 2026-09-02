@@ -173,7 +173,7 @@ def _format_p(p):
         return f"{p:.3g}"
     exponent = math.floor(math.log10(p)) if p > 0 else 0
     mantissa = p / (10 ** exponent) if p > 0 else 0
-    return f"{mantissa:.2g} × 10^{exponent}"
+    return f"{mantissa:.2g} × 10^{{{exponent}}}"
 
 
 def write_caption(cs, rows, path):
