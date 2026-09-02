@@ -56,7 +56,7 @@ def verify_inventory() -> None:
         9: 16,
         10: 18,
         12: 19,
-        13: 20,
+        13: 21,
     }
     if ORIGINAL_FIGURE_TO_FINAL != expected_old_map:
         raise RuntimeError(
