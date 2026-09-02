@@ -2229,8 +2229,11 @@ def build_workbook(output_path: Path) -> None:
         SheetInfo(
             name="17q21 tagging PheWAS",
             description=(
-                "PheWAS of the 17q21 inversion using the tagging SNP rs1052553 in place of imputed dosage, to check that the "
-                "associations at this locus do not depend on how the genotype was determined. NA marks models that did not "
+                "PheWAS of the 17q21 inversion using a tag-SNP hard call in place of imputed dosage, to check that the "
+                "associations at this locus do not depend on how the genotype was determined. A sample is called only when "
+                "all three tag SNPs at chr17:45,974,480, chr17:45,996,523 and chr17:46,003,698 agree "
+                "(imputation/tagging_snp_inversion_dosages.py); mixed or missing genotypes are left uncalled. "
+                "NA marks models that did not "
                 "converge or gave unstable fits."
             ),
             column_defs=TAG_PHEWAS_COLUMN_DEFS,
