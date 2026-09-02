@@ -326,7 +326,8 @@ def demography_single(t_inv_years, m_flux=0.0):
 
     Methods: "an inversion event creates a subpopulation (e.g., inverted
     haplotypes) diverged from the ancestral population ... Each divergence
-    introduces a bottleneck (90% reduction) in the new subpopulation". Single-event
+    sets the effective population size of the new subpopulation ... to 1% of the ancestral
+    population in the single-event model". Single-event
     models are run at t_inv in {500, 250, 100, 50} kya. There is no second inverted
     deme and no sister direct deme -- those exist only in the recurrent model.
 

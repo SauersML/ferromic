@@ -674,14 +674,9 @@ REFSIM_DIR = REPO_ROOT / "simulations" / "refsim"
 
 
 def _load_coding_site_diversity() -> pd.DataFrame:
-    """4-fold pi and piN/piS per locus, from the two scripts that compute them."""
+    """4-fold pi per locus."""
     ff = _load_tsv(DATA_DIR / "four_fold_pi_by_inversion.tsv", "4-fold diversity")
-    pn = _load_tsv(DATA_DIR / "pin_pis_by_inversion.tsv", "piN/piS")
-    ff = ff[pd.to_numeric(ff["recurrence"], errors="coerce").isin([0, 1])].copy()
-    pn = pn[pd.to_numeric(pn["recurrence"], errors="coerce").isin([0, 1])].copy()
-    key = ["chr", "region_start", "region_end"]
-    dup = [c for c in pn.columns if c in ff.columns and c not in key]
-    return ff.merge(pn.drop(columns=dup), on=key, how="outer")
+    return ff[pd.to_numeric(ff["recurrence"], errors="coerce").isin([0, 1])].copy()
 
 
 def _load_divergence() -> pd.DataFrame:
@@ -847,14 +842,6 @@ CODING_DIVERSITY_COLUMN_DEFS = {
     "pi_wholeCDS_inverted": "Nucleotide diversity across coding sequence, inverted haplotypes.",
     "pi_wholeLocus_direct": "Nucleotide diversity across the whole locus, direct haplotypes.",
     "pi_wholeLocus_inverted": "Nucleotide diversity across the whole locus, inverted haplotypes.",
-    "zerofold_sites_direct": "0-fold degenerate sites compared, direct haplotypes.",
-    "zerofold_sites_inverted": "0-fold degenerate sites compared, inverted haplotypes.",
-    "piN_direct": "Nonsynonymous diversity (0-fold sites), direct haplotypes.",
-    "piN_inverted": "Nonsynonymous diversity (0-fold sites), inverted haplotypes.",
-    "piS_direct": "Synonymous diversity (4-fold sites), direct haplotypes.",
-    "piS_inverted": "Synonymous diversity (4-fold sites), inverted haplotypes.",
-    "piN_piS_direct": "Ratio of nonsynonymous to synonymous diversity, direct haplotypes.",
-    "piN_piS_inverted": "Ratio of nonsynonymous to synonymous diversity, inverted haplotypes.",
 }
 
 DIVERGENCE_COLUMN_DEFS = {
@@ -1255,7 +1242,7 @@ _EXPLICIT_LABELS.update({
     "inversion": "Inversion locus",
     "Inversion": "Original inversion ID",
     "region_start": "Start (GRCh38)", "region_end": "End (GRCh38)",
-    "n_cds": "Coding sequences", "n_cds_used": "Coding sequences used",
+    "n_cds": "Coding sequences",
     "n_cds_with_fourfold": "Coding sequences with 4-fold sites",
     "fourfold_sites_direct": "4-fold sites, direct",
     "fourfold_sites_inverted": "4-fold sites, inverted",
@@ -1267,9 +1254,6 @@ _EXPLICIT_LABELS.update({
     "pi_wholeCDS_inverted": "pi across coding sequence, inverted",
     "pi_wholeLocus_direct": "pi across locus, direct",
     "pi_wholeLocus_inverted": "pi across locus, inverted",
-    "piN_direct": "piN, direct", "piN_inverted": "piN, inverted",
-    "piS_direct": "piS, direct", "piS_inverted": "piS, inverted",
-    "piN_piS_direct": "piN/piS, direct", "piN_piS_inverted": "piN/piS, inverted",
     "category": "Recurrence category",
     "hudson_pi_hap_group_0": "pi within direct haplotypes",
     "hudson_pi_hap_group_1": "pi within inverted haplotypes",
@@ -2287,9 +2271,8 @@ def build_workbook(output_path: Path) -> None:
             name="Coding-site diversity",
             description=(
                 "Per-orientation nucleotide diversity across the whole locus, across coding sequence, and at 4-fold degenerate "
-                "sites, together with piN (0-fold sites), piS (4-fold sites), and piN/piS, for inversion loci that overlap coding "
-                "sequence. NA marks a quantity that is undefined for that locus because one orientation has no comparable sites "
-                "or no synonymous variation."
+                "sites, for inversion loci that overlap coding sequence. NA marks a quantity that is undefined for that locus "
+                "because one orientation has no comparable sites."
             ),
             column_defs=CODING_DIVERSITY_COLUMN_DEFS,
             loader=_load_coding_site_diversity,
