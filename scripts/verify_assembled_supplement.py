@@ -71,8 +71,8 @@ def verify(template: Path, assembled: Path) -> None:
 
     captions = [text for text in texts if FIGURE_RE.match(text)]
     numbers = [int(FIGURE_RE.match(text).group(1)) for text in captions]
-    if numbers != list(range(1, 23)):
-        raise RuntimeError(f"Expected exactly ordered captions S1-S22; found {numbers}")
+    if numbers != list(range(1, 22)):
+        raise RuntimeError(f"Expected exactly ordered captions S1-S21; found {numbers}")
     for caption, figure in zip(captions, FINAL_SUPPLEMENTARY_FIGURES):
         expected = caption_plain_text(f"Figure S{figure.number}. {figure.title}")
         if not caption.startswith(expected):
@@ -84,7 +84,7 @@ def verify(template: Path, assembled: Path) -> None:
     promoted = [title for title in RESPONSE_ONLY_FIGURE_TITLES if title in full_text]
     if promoted:
         raise RuntimeError(f"Response-only figures were promoted into the supplement: {promoted}")
-    if "Figs. S1 to S22" not in texts or "Tables S1 to S21" not in texts:
+    if "Figs. S1 to S21" not in texts or "Tables S1 to S21" not in texts:
         raise RuntimeError("Front-matter figure/table ranges were not updated")
     if "SVbyEye alignments for 93 consensus-classified inversions" not in texts:
         raise RuntimeError("Front matter does not list the SVbyEye appendix")
@@ -165,7 +165,7 @@ def verify(template: Path, assembled: Path) -> None:
         )
 
     print(
-        "Verified assembled supplement: S1-S22 ordered; response-only figures omitted; "
+        "Verified assembled supplement: S1-S21 ordered; response-only figures omitted; "
         "all 93 SVbyEye drawings use a full-width two-per-page frame; 93-caption "
         "portrait appendix present; template formatting parts and page geometry unchanged."
     )

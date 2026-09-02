@@ -3,9 +3,8 @@
 The response letter contains several figures shown only to reviewers.  They are
 not automatically supplementary figures.  The 17q21.31
 tagging-SNP-versus-imputed-dosage comparison was Figure S11 of the submitted
-supplement; the revision re-ran it against the single tagging SNP used in
-Table S21 (``stats/tag_vs_imputed_concordance.py``) and that regenerated
-panel is Figure S19.
+supplement and is response-only in the revision; the tagging-SNP association
+results are given in Table S21.
 """
 
 from __future__ import annotations
@@ -195,19 +194,10 @@ FINAL_SUPPLEMENTARY_FIGURES = (
         "(A) Comparison of inversion effect estimates obtained using global and within-ancestry principal components. (B) Comparison of inversion p-values obtained using global and within-ancestry principal components.",
     ),
     SupplementaryFigure(18, "phenotype_categories", "Category-level meta-analysis of disease associations", "original Figure S10", 10, None, None),
+    SupplementaryFigure(19, "family_history", "Concordance between family and personal history for 17q21.31 allele associations", "original Figure S12", 12, None, None),
+    SupplementaryFigure(20, "heritability", "Correlations between heritability and inversion effects", "original Figure S13", 13, None, None),
     SupplementaryFigure(
-        19,
-        "tag_snp_concordance",
-        "Comparison of 17q21.31 PheWAS results using imputed inversion dosage versus tagging-SNP dosage",
-        "revision figure",
-        None,
-        "data/tag_vs_imputed_concordance.png",
-        "(A) Association p-values from the imputed inversion dosage analysis and the tagging-SNP analysis, colored by significance. (B) Effect estimates for the two dosage measures. Gray points had BH q ≥ 0.05 in both analyses, blue points were significant using imputed dosage only, orange points were significant using tagging-SNP dosage only, and green points were significant in both analyses. This figure replaces Figure S11 of the original submission, which compared p-values against a three-SNP unanimity hard call; the tagging-SNP association results are given in Table S21.",
-    ),
-    SupplementaryFigure(20, "family_history", "Concordance between family and personal history for 17q21.31 allele associations", "original Figure S12", 12, None, None),
-    SupplementaryFigure(21, "heritability", "Correlations between heritability and inversion effects", "original Figure S13", 13, None, None),
-    SupplementaryFigure(
-        22,
+        21,
         "cds_test_calibration_power",
         "Calibration and power of the CDS permutation test",
         "revision figure",
@@ -262,6 +252,8 @@ FINAL_SUPPLEMENTARY_TABLE_ORDER = (
 
 RESPONSE_ONLY_FIGURE_TITLES = (
     "Examples of inversion alignments to chimpanzee used for polarization",
+    "Comparison of 17q21.31 PheWAS results using imputed inversion dosage "
+    "versus tagging-SNP dosage",
 )
 
 
