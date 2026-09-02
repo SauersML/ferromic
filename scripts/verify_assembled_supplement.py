@@ -99,14 +99,14 @@ def verify(template: Path, assembled: Path) -> None:
         raise RuntimeError("SVbyEye appendix locus identifiers are not unique")
 
     drawings = document._element.body.xpath(".//w:drawing")
-    if len(drawings) != 115:
-        raise RuntimeError(f"Expected 22 + 93 = 115 drawings; found {len(drawings)}")
+    if len(drawings) != 114:
+        raise RuntimeError(f"Expected 21 + 93 = 114 drawings; found {len(drawings)}")
     figure_page_starts = document._element.body.xpath(
         ".//w:p[w:pPr/w:pageBreakBefore][.//w:drawing]"
     )
-    if len(figure_page_starts) != 68:
+    if len(figure_page_starts) != 67:
         raise RuntimeError(
-            "Expected page-break-before on 22 numbered figures and 46 subsequent "
+            "Expected page-break-before on 21 numbered figures and 46 subsequent "
             f"appendix plots; found {len(figure_page_starts)}"
         )
     standalone_page_breaks = document._element.body.xpath(
@@ -148,17 +148,17 @@ def verify(template: Path, assembled: Path) -> None:
     figure_extents = [
         (int(extent.get("cx")), int(extent.get("cy"))) for extent in extents
     ]
-    main_figure_extents = figure_extents[:22]
-    appendix_extents = figure_extents[22:]
+    main_figure_extents = figure_extents[:21]
+    appendix_extents = figure_extents[21:]
     if (
-        len(figure_extents) != 115
+        len(figure_extents) != 114
         or len(set(main_figure_extents)) != 1
         or len(set(appendix_extents)) != 1
         or main_figure_extents[0][0] != appendix_extents[0][0]
         or main_figure_extents[0][1] <= appendix_extents[0][1]
     ):
         raise RuntimeError(
-            "Expected one fixed frame for the 22 numbered figures and one shorter, "
+            "Expected one fixed frame for the 21 numbered figures and one shorter, "
             "full-width frame for the 93 SVbyEye plots; found "
             f"main={sorted(set(main_figure_extents))}, "
             f"appendix={sorted(set(appendix_extents))}"
