@@ -53,6 +53,49 @@ jobs:
             web/figures-site/public/downloads/supplementary_tables.xlsx
           python stats/verify_supplementary_inventory.py
 
+      - name: Commit the regenerated workbook to the repository
+        if: github.event_name != 'pull_request'
+        env:
+          PUSH_TOKEN: ${{ secrets.WRITE_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # The workbook is a build output and is listed in .gitignore, so it is
+          # force-added.  Committing it means a checkout always carries the
+          # workbook that matches its own commit, instead of the authors having
+          # to find the right expiring Actions artifact.
+          files=(
+            web/figures-site/public/downloads/supplementary_tables.xlsx
+            web/figures-site/public/downloads/supplementary_inventory.tsv
+          )
+          for f in "${files[@]}"; do
+            test -f "$f"
+            git add -f -- "$f"
+          done
+
+          if git diff --staged --quiet; then
+            echo "Workbook unchanged; nothing to commit."
+            exit 0
+          fi
+
+          git commit -m "Regenerate supplementary tables workbook [skip ci]"
+          git pull https://${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git main \
+            --rebase --autostash --strategy=recursive -X ours
+
+          for attempt in 1 2 3; do
+            if git push https://${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git HEAD:main; then
+              echo "Push succeeded on attempt $attempt"
+              exit 0
+            fi
+            echo "Push failed (attempt $attempt); refreshing and retrying"
+            git pull https://${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git main \
+              --rebase --autostash --strategy=recursive -X ours
+          done
+          echo "Push failed after 3 attempts"
+          exit 1
+
       - name: Upload supplementary tables artifact
         uses: actions/upload-artifact@v4
         with:
