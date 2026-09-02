@@ -2157,7 +2157,9 @@ def build_workbook(output_path: Path) -> None:
             description=(
                 "Performance of the partial least squares regression models that impute inversion dosage from flanking SNP "
                 "genotypes. Models were trained on the 82 phased haplotypes of the reference panel. Allele frequencies are "
-                "reported only for inversions imputed with r² above 0.5; NA marks the rest."
+                "reported only for inversions imputed with r² above 0.5; NA marks the rest. Each frequency is the mean "
+                "predicted dosage divided by two. The regression is not bounded to the interval from zero to two, so a "
+                "locus that is close to fixed for one orientation in a population can give a frequency slightly below zero."
             ),
             column_defs=IMPUTATION_COLUMN_DEFS,
             loader=_load_imputation_results,
