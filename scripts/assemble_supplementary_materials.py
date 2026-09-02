@@ -439,7 +439,7 @@ def assemble(template: Path, output: Path, svbyeye_pdf: Path) -> None:
 
     figure_range = next(p for p in document.paragraphs if p.text.strip() == "Figs. S1 to S13")
     table_range = next(p for p in document.paragraphs if p.text.strip() == "Tables S1 to S20")
-    replace_paragraph_text(figure_range, "Figs. S1 to S13", "Figs. S1 to S22")
+    replace_paragraph_text(figure_range, "Figs. S1 to S13", "Figs. S1 to S21")
     replace_paragraph_text(table_range, "Tables S1 to S20", "Tables S1 to S21")
     insert_front_matter_appendix_line(document, figure_range, figure_range)
 
