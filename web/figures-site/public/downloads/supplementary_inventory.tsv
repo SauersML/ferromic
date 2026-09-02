@@ -17,10 +17,9 @@ Figure	S15	Validation of imputed inversion dosage against experimental genotypes
 Figure	S16	Imputed allele frequency by population in the NIH All of Us cohort	original Figure S9
 Figure	S17	Sensitivity of ancestry-specific PheWAS associations to within-ancestry principal-component adjustment	revision figure
 Figure	S18	Category-level meta-analysis of disease associations	original Figure S10
-Figure	S19	Comparison of 17q21.31 PheWAS results using imputed inversion dosage versus tagging-SNP dosage	revision figure
-Figure	S20	Concordance between family and personal history for 17q21.31 allele associations	original Figure S12
-Figure	S21	Correlations between heritability and inversion effects	original Figure S13
-Figure	S22	Calibration and power of the CDS permutation test	revision figure
+Figure	S19	Concordance between family and personal history for 17q21.31 allele associations	original Figure S12
+Figure	S20	Correlations between heritability and inversion effects	original Figure S13
+Figure	S21	Calibration and power of the CDS permutation test	revision figure
 Table	S1	Old recurrent events	stats/generate_tables.py
 Table	S2	Young recurrent events	stats/generate_tables.py
 Table	S3	Recent recurrent events	stats/generate_tables.py
