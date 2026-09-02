@@ -1104,8 +1104,8 @@ EXPECTED_SUPPLEMENTARY_DATA_ROWS = (
     93,    # S9  Chimpanzee polarity per locus
     9,     # S10 Genomic-architecture controls
     93,    # S11 Divergence between orientations
-    66,   # S12 CDS conservation genes
-    206,   # S13 dN/dS results
+    206,   # S12 dN/dS results
+    66,    # S13 CDS conservation genes
     93,    # S14 Ancient DNA best tagging SNPs
     45,    # S15 Ancient DNA, all tagging SNPs
     75,    # S16 Imputation results
