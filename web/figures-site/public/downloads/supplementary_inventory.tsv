@@ -1,0 +1,44 @@
+type	number	title	source_or_key
+Figure	S1	Power analysis under scenarios of old recurrent inversion events	original Figure S1
+Figure	S2	Power analysis under scenarios of younger recurrent inversion events	original Figure S2
+Figure	S3	Power analysis under scenarios of recent recurrent inversion events	original Figure S3
+Figure	S4	Power analysis under scenarios of very recent recurrent inversion events	original Figure S4
+Figure	S5	Models for partial isolation between orientations with gene flux	revision figure
+Figure	S6	Simulation results with gene flux: performance of the evolutionary approach for detecting recurrent inversions	revision figure
+Figure	S7	Nucleotide diversity at whole inversion loci and at 4-fold-degenerate sites	revision figure
+Figure	S8	Comparison of nucleotide diversity between Porubsky et al. (2022) consensus- and SD-based recurrence classifications	revision figure
+Figure	S9	Comparison of nucleotide diversity by ancestral and derived orientation	revision figure
+Figure	S10	Differentiation between orientations considering within-orientation diversity	revision figure
+Figure	S11	FST differences between breakpoint-proximal and middle regions of inversion loci	original Figure S5
+Figure	S12	MAPT coding sequence polymorphisms across the 17q21.31 inversion locus’s inverted and direct haplotypes	original Figure S6
+Figure	S13	Allele frequency changes over time of the inversion tagging SNPs	original Figure S7
+Figure	S14	Cross-validated imputation accuracy	original Figure S8
+Figure	S15	Validation of imputed inversion dosage against experimental genotypes at 6q24.1 (HsInv0284)	revision figure
+Figure	S16	Imputed allele frequency by population in the NIH All of Us cohort	original Figure S9
+Figure	S17	Sensitivity of ancestry-specific PheWAS associations to within-ancestry principal-component adjustment	revision figure
+Figure	S18	Category-level meta-analysis of disease associations	original Figure S10
+Figure	S19	Comparison of 17q21.31 PheWAS results using imputed inversion dosage versus tagging-SNP dosage	revision figure
+Figure	S20	Concordance between family and personal history for 17q21.31 allele associations	original Figure S12
+Figure	S21	Correlations between heritability and inversion effects	original Figure S13
+Figure	S22	Calibration and power of the CDS permutation test	revision figure
+Table	S1	Old recurrent events	stats/generate_tables.py
+Table	S2	Young recurrent events	stats/generate_tables.py
+Table	S3	Recent recurrent events	stats/generate_tables.py
+Table	S4	Very recent recurrent events	stats/generate_tables.py
+Table	S5	Gene-flux simulation sweep	stats/generate_tables.py
+Table	S6	Inversion catalog	stats/generate_tables.py
+Table	S7	Coding-site diversity	stats/generate_tables.py
+Table	S8	4-fold diversity concordance	stats/generate_tables.py
+Table	S9	Chimpanzee polarity per locus	stats/generate_tables.py
+Table	S10	Genomic-architecture controls	stats/generate_tables.py
+Table	S11	Divergence between orientations	stats/generate_tables.py
+Table	S12	CDS conservation genes	stats/generate_tables.py
+Table	S13	dN/dS (ω) results	stats/generate_tables.py
+Table	S14	Ancient DNA best tagging SNPs	stats/generate_tables.py
+Table	S15	Ancient DNA, all tagging SNPs	stats/generate_tables.py
+Table	S16	Imputation results	stats/generate_tables.py
+Table	S17	Imputation external benchmarks	stats/generate_tables.py
+Table	S18	PheWAS results	stats/generate_tables.py
+Table	S19	Within-ancestry PC PheWAS	stats/generate_tables.py
+Table	S20	Phenotype categories	stats/generate_tables.py
+Table	S21	17q21 tagging PheWAS	stats/generate_tables.py
