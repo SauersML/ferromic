@@ -2229,7 +2229,7 @@ def build_workbook(output_path: Path) -> None:
         SheetInfo(
             name="17q21 tagging PheWAS",
             description=(
-                "PheWAS of the 17q21 inversion using the tagging SNP rs105255341 in place of imputed dosage, to check that the "
+                "PheWAS of the 17q21 inversion using the tagging SNP rs1052553 in place of imputed dosage, to check that the "
                 "associations at this locus do not depend on how the genotype was determined. NA marks models that did not "
                 "converge or gave unstable fits."
             ),
