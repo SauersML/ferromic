@@ -17,6 +17,7 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "stats"))
 
 from supplementary_inventory import (  # noqa: E402
+    caption_plain_text,
     FINAL_SUPPLEMENTARY_FIGURES,
     RESPONSE_ONLY_FIGURE_TITLES,
     SUPPLEMENT_TEMPLATE,
@@ -73,7 +74,7 @@ def verify(template: Path, assembled: Path) -> None:
     if numbers != list(range(1, 23)):
         raise RuntimeError(f"Expected exactly ordered captions S1-S22; found {numbers}")
     for caption, figure in zip(captions, FINAL_SUPPLEMENTARY_FIGURES):
-        expected = f"Figure S{figure.number}. {figure.title}"
+        expected = caption_plain_text(f"Figure S{figure.number}. {figure.title}")
         if not caption.startswith(expected):
             raise RuntimeError(
                 f"Figure S{figure.number} title mismatch:\n"

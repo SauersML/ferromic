@@ -40,6 +40,7 @@ from supplementary_inventory import (  # noqa: E402
     SUPPLEMENT_TEMPLATE_SHA256,
     SVBYEYE_APPENDIX_TITLE,
     SVBYEYE_CONSENSUS_PDF,
+    caption_segments,
 )
 
 
@@ -212,14 +213,25 @@ def add_picture_bytes(document, source, payload: bytes, width: float, height: fl
     return paragraph
 
 
+def add_marked_up_runs(paragraph, template_run, text: str) -> None:
+    """Add ``text`` as runs, honouring the caption super/subscript markup."""
+    for content, italic, vert_align in caption_segments(text):
+        run = paragraph.add_run(content)
+        copy_run_properties(template_run, run)
+        if italic:
+            run.font.italic = True
+        if vert_align == "superscript":
+            run.font.superscript = True
+        elif vert_align == "subscript":
+            run.font.subscript = True
+
+
 def add_caption(document, caption_template, heading_run, body_run, heading: str, body: str):
     paragraph = document.add_paragraph()
     copy_paragraph_properties(caption_template, paragraph)
-    head = paragraph.add_run(heading)
-    copy_run_properties(heading_run, head)
+    add_marked_up_runs(paragraph, heading_run, heading)
     if body:
-        normal = paragraph.add_run(" " + body)
-        copy_run_properties(body_run, normal)
+        add_marked_up_runs(paragraph, body_run, " " + body)
     return paragraph
 
 

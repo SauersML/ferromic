@@ -35,6 +35,72 @@ except FileNotFoundError:  # pragma: no cover - depends on checkout contents
     )
 
 
+def _matching_brace(text: str, start: int) -> int:
+    """Index of the ``}`` closing the ``{`` at ``start``, or -1."""
+    depth = 0
+    for index in range(start, len(text)):
+        if text[index] == "{":
+            depth += 1
+        elif text[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return index
+    return -1
+
+
+def _parse_caption(text: str, italic: bool, vert_align, out: list) -> None:
+    buffer = ""
+    index = 0
+    while index < len(text):
+        character = text[index]
+        if character == "*":
+            close = text.find("*", index + 1)
+            if close == -1:
+                buffer += character
+                index += 1
+                continue
+            if buffer:
+                out.append((buffer, italic, vert_align))
+                buffer = ""
+            _parse_caption(text[index + 1 : close], True, vert_align, out)
+            index = close + 1
+        elif character in "^_" and text[index + 1 : index + 2] == "{":
+            close = _matching_brace(text, index + 1)
+            if close == -1:
+                buffer += character
+                index += 1
+                continue
+            if buffer:
+                out.append((buffer, italic, vert_align))
+                buffer = ""
+            nested = "superscript" if character == "^" else "subscript"
+            _parse_caption(text[index + 2 : close], italic, nested, out)
+            index = close + 1
+        else:
+            buffer += character
+            index += 1
+    if buffer:
+        out.append((buffer, italic, vert_align))
+
+
+def caption_segments(text: str) -> list:
+    """Split caption markup into ``(text, italic, vertical alignment)`` runs.
+
+    ``^{...}`` marks a superscript, ``_{...}`` a subscript and ``*...*``
+    italics.  Markers nest, so ``*d_{xy}*`` is an italic d carrying an italic
+    subscript.  Captions without markup yield a single run, so the assembled
+    document is unchanged for them.
+    """
+    segments: list = []
+    _parse_caption(text, False, None, segments)
+    return segments
+
+
+def caption_plain_text(text: str) -> str:
+    """The caption with its markup removed."""
+    return "".join(content for content, _, _ in caption_segments(text))
+
+
 @dataclass(frozen=True)
 class SupplementaryFigure:
     number: int
@@ -58,7 +124,7 @@ FINAL_SUPPLEMENTARY_FIGURES = (
         "revision figure",
         None,
         "simulations/refsim/gene_flux_model.png",
-        "Orange and blue indicate inverted and direct orientation populations, respectively. Gray indicates the ancestral population. The vertical axis is time before present in thousands of years (25 years per generation). Gene flow within an orientation occurs at m = 10-8 per lineage per generation, and gene flux between orientations at m = 10-7 per lineage per generation is shown with arrows. Left: recurrent inversion simulation method. The inversion event happens three times. Right: single-event inversion simulation method. A single event leads to divergence between orientations.",
+        "Orange and blue indicate inverted and direct orientation populations, respectively. Gray indicates the ancestral population. The vertical axis is time before present in thousands of years (25 years per generation). Gene flow within an orientation occurs at m = 10^{-8} per lineage per generation, and gene flux between orientations at m = 10^{-7} per lineage per generation is shown with arrows. Left: recurrent inversion simulation method. The inversion event happens three times. Right: single-event inversion simulation method. A single event leads to divergence between orientations.",
     ),
     SupplementaryFigure(
         6,
@@ -76,7 +142,7 @@ FINAL_SUPPLEMENTARY_FIGURES = (
         "revision figure",
         None,
         "data/four_fold_pi.png",
-        "(A, B) Nucleotide diversity (π) of direct (blue) and inverted (purple) haplotypes, by recurrence class. Diversity is measured across the inversion locus (A) and at 4-fold-degenerate sites within coding sequences (B). Violins show the distribution and boxes indicate the median and interquartile range. Lines connect two orientations at the same locus. P-values are from two-sided paired Wilcoxon signed-rank tests. The 26 loci with 4-fold-degenerate sites in both orientations and a consensus recurrence classification (single-event n = 7, recurrent n = 19) are shown. Concordance of the per-locus orientation difference (Δπ = π_inverted − π_direct) is measured between 4-fold sites and the whole locus (C), and between 4-fold sites and the whole coding sequence (D). Spearman correlations are indicated for all loci and for the recurrence classification consensus set.",
+        "(A, B) Nucleotide diversity (π) of direct (blue) and inverted (purple) haplotypes, by recurrence class. Diversity is measured across the inversion locus (A) and at 4-fold-degenerate sites within coding sequences (B). Violins show the distribution and boxes indicate the median and interquartile range. Lines connect two orientations at the same locus. P-values are from two-sided paired Wilcoxon signed-rank tests. The 26 loci with 4-fold-degenerate sites in both orientations and a consensus recurrence classification (single-event n = 7, recurrent n = 19) are shown. Concordance of the per-locus orientation difference (Δπ = π_{inverted} − π_{direct}) is measured between 4-fold sites and the whole locus (C), and between 4-fold sites and the whole coding sequence (D). Spearman correlations are indicated for all loci and for the recurrence classification consensus set.",
     ),
     SupplementaryFigure(
         8,
@@ -94,7 +160,7 @@ FINAL_SUPPLEMENTARY_FIGURES = (
         "revision figure",
         None,
         "results/figure2a_repolarized/figure2a_repolarized.png",
-        "The ancestral and derived orientations are determined with respect to the chimpanzee (PanTro6) for 57 inversion loci (Table S9). The 33 loci with at least two haplotypes in each orientation are shown: single-event (left, n = 19) or recurrent (right, n = 14). The distribution of nucleotide diversity (π) across loci is shown for each of the groups. The boxplot shows the median and interquartile range. The lines connect the ancestral and derived orientations at the same locus, which are colored by the log2 of (π_ancestral / π_derived), a measure of fold change in diversity.",
+        "The ancestral and derived orientations are determined with respect to the chimpanzee (PanTro6) for 57 inversion loci (Table S9). The 33 loci with at least two haplotypes in each orientation are shown: single-event (left, n = 19) or recurrent (right, n = 14). The distribution of nucleotide diversity (π) across loci is shown for each of the groups. The boxplot shows the median and interquartile range. The lines connect the ancestral and derived orientations at the same locus, which are colored by the log_{2} of (π_{ancestral} / π_{derived}), a measure of fold change in diversity.",
     ),
     SupplementaryFigure(
         10,
@@ -103,7 +169,7 @@ FINAL_SUPPLEMENTARY_FIGURES = (
         "revision figure",
         None,
         "data/divergence_fst_dxy_da_by_type.png",
-        "Hudson's FST (left), absolute divergence dxy (center) and net divergence da (right) between direct and inverted haplotypes, for single-event (blue) and recurrent (purple) inversions. Points correspond to loci. Horizontal bars indicate medians. The p-values are from two-sided Mann–Whitney U tests between recurrence categories.",
+        "Hudson's *F_{ST}* (left), absolute divergence *d_{xy}* (center) and net divergence *d_{a}* (right) between direct and inverted haplotypes, for single-event (blue) and recurrent (purple) inversions. Points correspond to loci. Horizontal bars indicate medians. The p-values are from two-sided Mann–Whitney U tests between recurrence categories.",
     ),
     SupplementaryFigure(11, "breakpoint_fst", "FST differences between breakpoint-proximal and middle regions of inversion loci", "original Figure S5", 5, None, None),
     SupplementaryFigure(12, "mapt_polymorphisms", "MAPT coding sequence polymorphisms across the 17q21.31 inversion locus’s inverted and direct haplotypes", "original Figure S6", 6, None, None),
