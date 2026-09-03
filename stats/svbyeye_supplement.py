@@ -126,7 +126,9 @@ def write_consensus_pdf(
             width=source_width,
             height=source_height * PLOTS_PER_PAGE,
         )
-        for position, (_, path) in enumerate(pages[offset : offset + PLOTS_PER_PAGE]):
+        for position, (_, path) in enumerate(
+            pages[offset : offset + PLOTS_PER_PAGE]
+        ):
             plot = PdfReader(str(path)).pages[0]
             y = source_height if position == 0 else 0
             combined.merge_transformed_page(
@@ -174,7 +176,7 @@ def write_example_figure(by_id: dict[str, Path]) -> Path:
     writer.add_metadata(
         {
             "/Title": "Examples of inversion alignments to chimpanzee used for polarization",
-            "/Subject": "8p23.1 and 15q11.2 SVbyEye alignments",
+            "/Subject": "8p23.1 and 15q11.2-q13.1 SVbyEye alignments",
         }
     )
     with output.open("wb") as handle:
@@ -191,7 +193,7 @@ def write_legends() -> None:
     (OUTPUT_DIR / "Supplemental_Figure_SVbyEye_orientation_examples_legend.txt").write_text(
         "Figure S[X]. Examples of inversion alignments to chimpanzee used for polarization. "
         "SVbyEye shows alignments between GRCh38 (top) and panTro6 (bottom) across "
-        "(A) the recurrent 8p23.1 inversion and (B) the single-event 15q11.2 inversion. "
+        "(A) the recurrent 8p23.1 inversion and (B) the single-event 15q11.2-q13.1 inversion. "
         "Green and blue indicate forward and reverse alignments, respectively. Red dashed "
         "boxes indicate the inversion coordinates in GRCh38. The alignment in (A) indicates "
         "that the inversion is ancestral, whereas the alignment in (B) indicates that the "
