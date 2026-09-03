@@ -8,7 +8,7 @@ page	position_on_page	inversion_id	chromosome	start	end	cytoband	recurrence_clas
 4	top	chr1-248128774-INV-300084	chr1	248128773	248428856	q44	Single-event	direct	plots/chr1-248128774-INV-300084.pdf
 4	bottom	chr2-45062769-INV-12977	chr2	45065588	45081777	p21	Single-event	direct	plots/chr2-45062769-INV-12977.pdf
 5	top	chr2-87987172-INV-23268233	chr2	87987171	111255403	p11.2-q13	Single-event	na	plots/chr2-87987172-INV-23268233.pdf
-5	bottom	chr2-87995842-INV-184695	chr2	87995841	88180536	p11.2	Single-event	direct	plots/chr2-87995842-INV-184695.pdf
+5	bottom	chr2-87995842-INV-184695	chr2	87995841	88180536	p11.2	Single-event	na	plots/chr2-87995842-INV-184695.pdf
 6	top	chr2-91832041-INV-180624	chr2	91832040	92012663	p11.1	Recurrent	na	plots/chr2-91832041-INV-180624.pdf
 6	bottom	chr2-95800192-INV-224213	chr2	95800191	96024403	q11.1-q11.2	Recurrent	na	plots/chr2-95800192-INV-224213.pdf
 7	top	chr2-130138213-INV-1062391	chr2	130138212	131200602	q21.1	Single-event	na	plots/chr2-130138213-INV-1062391.pdf
@@ -37,7 +37,7 @@ page	position_on_page	inversion_id	chromosome	start	end	cytoband	recurrence_clas
 18	bottom	chr7-73113990-INV-1685041	chr7	73113989	74799029	q11.23	Recurrent	na	plots/chr7-73113990-INV-1685041.pdf
 19	top	chr7-74799031-INV-480422	chr7	74869950	75058098	q11.23	Recurrent	na	plots/chr7-74799031-INV-480422.pdf
 19	bottom	chr7-97445827-INV-13775	chr7	97445822	97459601	q21.3	Single-event	direct	plots/chr7-97445827-INV-13775.pdf
-20	top	chr8-2340295-INV-42058	chr8	2343351	2378385	p23.2	Recurrent	direct	plots/chr8-2340295-INV-42058.pdf
+20	top	chr8-2340295-INV-42058	chr8	2343351	2378385	p23.2	Recurrent	na	plots/chr8-2340295-INV-42058.pdf
 20	bottom	chr8-7301025-INV-5297356	chr8	7301024	12598379	p23.1	Recurrent	direct	plots/chr8-7301025-INV-5297356.pdf
 21	top	chr9-12016541-INV-55306	chr9	12004038	12074552	p23	Single-event	direct	plots/chr9-12016541-INV-55306.pdf
 21	bottom	chr9-85796067-INV-6026	chr9	85797070	85801040	q21.33	Single-event	direct	plots/chr9-85796067-INV-6026.pdf
