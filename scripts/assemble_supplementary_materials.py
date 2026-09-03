@@ -40,6 +40,7 @@ from supplementary_inventory import (  # noqa: E402
     SUPPLEMENT_TEMPLATE_SHA256,
     SVBYEYE_APPENDIX_TITLE,
     SVBYEYE_CONSENSUS_PDF,
+    SVBYEYE_LOCUS_INDEX,
     caption_segments,
 )
 
@@ -330,6 +331,24 @@ def chromosome_key(record: dict) -> tuple[int, int]:
     return rank, int(record["start"])
 
 
+def locus_labels() -> dict[str, str]:
+    """Cytoband label each plot draws above its own panel.
+
+    ``stats/svbyeye_supplement.py`` writes the index in the same run that
+    renders the plots, so reading the label back from it keeps a caption from
+    naming a locus differently than the figure it sits under.
+    """
+    labels = {}
+    with (REPO / SVBYEYE_LOCUS_INDEX).open(newline="") as handle:
+        for row in csv.DictReader(handle, delimiter="\t"):
+            chromosome = row["chromosome"]
+            labels[row["inversion_id"]] = (
+                f"{chromosome.removeprefix('chr')}{row['cytoband']} "
+                f"({chromosome}:{int(row['start']):,}-{int(row['end']):,})"
+            )
+    return labels
+
+
 def consensus_loci() -> list[dict[str, str]]:
     payload = json.loads((REPO / "data/chimp_alignment_responses.json").read_text())
     records = sorted(payload["responses"], key=chromosome_key)
@@ -341,11 +360,22 @@ def consensus_loci() -> list[dict[str, str]]:
                 properties[row["OrigID"]] = (
                     "Single-event" if consensus == "0" else "Recurrent"
                 )
+    labels = locus_labels()
     selected = []
     for record in records:
         recurrence = properties.get(record["inv_id"])
         if recurrence:
-            selected.append({**record, "recurrence": recurrence})
+            label = labels.get(record["inv_id"])
+            if label is None:
+                raise RuntimeError(
+                    f"{record['inv_id']} is missing from {SVBYEYE_LOCUS_INDEX}"
+                )
+            if not label.endswith(f"({record['region']})"):
+                raise RuntimeError(
+                    f"{record['inv_id']} spans {record['region']} but the plot "
+                    f"index labels it {label}"
+                )
+            selected.append({**record, "recurrence": recurrence, "label": label})
     if len(selected) != 93:
         raise RuntimeError(f"Expected 93 consensus loci, found {len(selected)}")
     return selected
@@ -435,10 +465,7 @@ def append_svbyeye(document, pdf_path: Path, image_template, caption_template, h
         if index > 1 and index % SVBYEYE_PLOTS_PER_PAGE == 1:
             set_page_break_before(image_paragraph._p)
         call = CALL_LABELS[locus["classification"]]
-        heading = (
-            f"SVbyEye alignment {index} of 93. "
-            f"{locus['inv_id']} ({locus['region']})."
-        )
+        heading = f"SVbyEye alignment {index} of 93. {locus['label']}."
         body = (
             "Chimpanzee (panTro6) versus human GRCh38 alignment used to polarize "
             f"orientation. Recurrence class: {locus['recurrence']}; GRCh38 "

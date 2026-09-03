@@ -42,6 +42,7 @@ on:
       - 'simulations/refsim/gene_flux_fpr_power.pdf'
       - 'output/pdf/svbyeye/Supplemental_Figure_SVbyEye_orientation_examples.png'
       - 'output/pdf/svbyeye/Supplemental_File_SVbyEye_consensus_93_loci.pdf'
+      - 'output/pdf/svbyeye/svbyeye_locus_index.tsv'
   pull_request:
     paths:
       - '.github/workflows/assemble_supplementary_materials.yml'

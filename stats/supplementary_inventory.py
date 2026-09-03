@@ -216,6 +216,10 @@ SVBYEYE_CONSENSUS_PDF = (
     "output/pdf/svbyeye/Supplemental_File_SVbyEye_consensus_93_loci.pdf"
 )
 
+# Written by ``stats/svbyeye_supplement.py`` alongside the plots, and the only
+# place the cytoband label each plot draws is recorded.
+SVBYEYE_LOCUS_INDEX = "output/pdf/svbyeye/svbyeye_locus_index.tsv"
+
 SUPPLEMENT_TEMPLATE = (
     "reproducibility/templates/INV_MS_SupplementaryMaterials_v3.8.final.docx"
 )
