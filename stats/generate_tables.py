@@ -367,7 +367,7 @@ WITHIN_ANCESTRY_PHEWAS_COLUMN_DEFS: Dict[str, str] = OrderedDict(
         ("within_p", "Nominal p-value from the within-ancestry principal component model."),
         (
             "within_q_selected_set",
-            "Benjamini–Hochberg adjusted p-value across the selected phenotype set.",
+            "Benjamini–Hochberg adjusted p-value across the 37 selected phenotypes.",
         ),
         ("within_n_total", "Number of participants in the within-ancestry model."),
         ("within_n_cases", "Number of cases in the within-ancestry model."),
@@ -2201,6 +2201,26 @@ def build_workbook(output_path: Path) -> None:
                 "computed within the selected phenotype set."
             ),
             column_defs=WITHIN_ANCESTRY_PHEWAS_COLUMN_DEFS,
+            column_labels={
+                "population": "Ancestry group",
+                "population_label": "Ancestry group name",
+                "locus": "Locus",
+                "pooled_or": "Pooled odds ratio",
+                "pooled_q": "Pooled q-value",
+                "existing_or": "Global PC odds ratio",
+                "existing_p": "Global PC p-value",
+                "within_or": "Within-ancestry odds ratio",
+                "within_p": "Within-ancestry p-value",
+                "within_q_selected_set": "Within-ancestry q-value",
+                "within_n_total": "Participants",
+                "within_n_cases": "Cases",
+                "within_n_controls": "Controls",
+                "within_ci_lo_or": "Odds ratio lower 95% CI",
+                "within_ci_hi_or": "Odds ratio upper 95% CI",
+                "beta_shift_within_minus_existing": "Log odds ratio shift",
+                "abs_beta_shift": "Absolute shift",
+                "not_evaluable_reason": "Reason not evaluable",
+            },
             loader=_load_within_ancestry_phewas,
         )
     )
