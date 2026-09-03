@@ -33,10 +33,19 @@ if (!is.finite(inv_length) || inv_length <= 0) {
   stop("INV_END must be greater than INV_START")
 }
 
-# The displayed region is exactly three inversion lengths, centered on the
-# inversion: one inversion length of flank on either side.
-window_start <- max(0, inv_start - inv_length)
-window_end <- inv_end + inv_length
+# The extracted target is exactly three inversion lengths, so this is the widest
+# view available. The displayed window is derived from the alignments below and
+# never exceeds it.
+region_start <- max(0, inv_start - inv_length)
+region_end <- inv_end + inv_length
+
+# Alignments shorter than this are segmental-duplication debris at this scale:
+# they add wisps without adding structure. Scaled to the locus, since 2 kb is
+# substantial for a 20 kb inversion and noise for a 700 kb one.
+min_span <- min(max(0.03 * inv_length, 2000), 25000)
+# Flank actually shown on each side: enough aligned sequence to read the
+# orientation, and no more.
+min_flank_shown <- min(max(0.25 * inv_length, 5000), 50000)
 
 overlap_length <- function(start, end, left, right) {
   pmax(0, pmin(end, right) - pmax(start, left))
@@ -57,7 +66,11 @@ dominant_strand <- function(support) {
   if (support[["forward"]] >= support[["reverse"]]) "+" else "-"
 }
 
-paf <- readPaf(paf_file, include.paf.tags = TRUE, restrict.paf.tags = "cg")
+paf <- readPaf(
+  paf_file,
+  include.paf.tags = TRUE,
+  restrict.paf.tags = c("cg", "de", "tp")
+)
 if (nrow(paf) == 0) {
   stop("PAF contains no alignments: ", paf_file)
 }
@@ -66,16 +79,52 @@ if (nrow(paf) == 0) {
 paf$t.start <- paf$t.start + region_offset
 paf$t.end <- paf$t.end + region_offset
 
+# Divergence, not secondary status, is what separates orthology from the 5-15%
+# duplication copies that turn these plots into a haze. Secondary alignments are
+# kept: a recurrent inversion is flanked by inverted repeats, so one chimpanzee
+# segment matches both flanks and minimap2 demotes one of them: filtering on
+# tp:A:P deletes a whole flank at exactly the loci this figure is about.
+# A handful of loci sit in sequence where panTro6 has nothing close, so take the
+# tightest cut that leaves anything rather than dropping the page, and record it.
+raw_alignments <- nrow(paf)
+secondary_kept <- sum(paf$tp != "P", na.rm = TRUE)
+de_limit <- NA_real_
+for (limit in c(0.03, 0.05, 0.08, 0.12)) {
+  if (any(paf$de <= limit)) {
+    de_limit <- limit
+    break
+  }
+}
+if (is.na(de_limit)) {
+  stop("No alignment below 12% divergence: ", paf_file)
+}
+paf <- paf[paf$de <= de_limit, , drop = FALSE]
+# Drop short alignments, relaxing the threshold rather than emptying the plot at
+# loci whose orthologous blocks are all small.
+span_filter <- function(frame, limit) {
+  frame[
+    (frame$q.end - frame$q.start) >= limit & (frame$t.end - frame$t.start) >= limit,
+    ,
+    drop = FALSE
+  ]
+}
+while (min_span > 1000 && nrow(span_filter(paf, min_span)) < 2) {
+  min_span <- min_span / 2
+}
+if (nrow(span_filter(paf, min_span)) > 0) {
+  paf <- span_filter(paf, min_span)
+}
+
 # Choose the chimpanzee sequence with the strongest support across both flanks.
 # Prioritizing the weaker flank favors a sequence that spans the complete locus
 # rather than a paralog with a strong match on only one side.
 contig_scores <- lapply(unique(paf$q.name), function(contig) {
   frame <- paf[paf$q.name == contig, , drop = FALSE]
   left <- sum(overlap_length(
-    frame$t.start, frame$t.end, window_start, inv_start
+    frame$t.start, frame$t.end, region_start, inv_start
   ))
   right <- sum(overlap_length(
-    frame$t.start, frame$t.end, inv_end, window_end
+    frame$t.start, frame$t.end, inv_end, region_end
   ))
   interior <- sum(overlap_length(
     frame$t.start, frame$t.end, inv_start, inv_end
@@ -103,7 +152,7 @@ chimp_contig <- contig_scores$contig[[1]]
 
 plot_paf <- paf[paf$q.name == chimp_contig, , drop = FALSE]
 plot_paf <- plot_paf[
-  plot_paf$t.end > window_start & plot_paf$t.start < window_end,
+  plot_paf$t.end > region_start & plot_paf$t.start < region_end,
   ,
   drop = FALSE
 ]
@@ -111,8 +160,8 @@ if (nrow(plot_paf) == 0) {
   stop("Selected chimpanzee contig has no alignment in the plotting window")
 }
 
-left_support <- strand_support(plot_paf, window_start, inv_start)
-right_support <- strand_support(plot_paf, inv_end, window_end)
+left_support <- strand_support(plot_paf, region_start, inv_start)
+right_support <- strand_support(plot_paf, inv_end, region_end)
 combined_support <- left_support + right_support
 left_vote <- dominant_strand(left_support)
 right_vote <- dominant_strand(right_support)
@@ -121,12 +170,12 @@ interior_support <- strand_support(plot_paf, inv_start, inv_end)
 interior_vote <- dominant_strand(interior_support)
 
 left_rows <- plot_paf[
-  overlap_length(plot_paf$t.start, plot_paf$t.end, window_start, inv_start) > 0,
+  overlap_length(plot_paf$t.start, plot_paf$t.end, region_start, inv_start) > 0,
   ,
   drop = FALSE
 ]
 right_rows <- plot_paf[
-  overlap_length(plot_paf$t.start, plot_paf$t.end, inv_end, window_end) > 0,
+  overlap_length(plot_paf$t.start, plot_paf$t.end, inv_end, region_end) > 0,
   ,
   drop = FALSE
 ]
@@ -176,8 +225,43 @@ if (is.na(combined_vote)) {
 # orientation switch inside the inversion.
 axis_reversed <- identical(axis_vote, "-")
 
-# Cut alignments exactly to the three-inversion-width human window using their
-# CIGAR strings. This keeps both axes and arrows confined to the displayed region.
+# Even inside one contig, duplication copies can sit megabases from the locus.
+# Left in, the furthest one sets the chimpanzee axis and squashes the locus to a
+# sliver. Anchor on the block covering most of the inversion and keep only what
+# lies within one region width of it.
+inv_covered <- overlap_length(plot_paf$t.start, plot_paf$t.end, inv_start, inv_end)
+anchor <- which.max(inv_covered)
+query_gap <- pmax(
+  plot_paf$q.start - plot_paf$q.end[anchor],
+  plot_paf$q.start[anchor] - plot_paf$q.end,
+  0
+)
+clustered <- query_gap <= (region_end - region_start)
+dropped_distant <- sum(!clustered)
+plot_paf <- plot_paf[clustered, , drop = FALSE]
+
+# Widen from each breakpoint only until min_flank_shown of aligned flank is in
+# view, so tight loci are not shown at three times their size and loci whose
+# flanking alignment starts far out still show it. The extracted region is the
+# ceiling.
+extend_side <- function(edge, outward) {
+  covered <- 0
+  distance <- 0
+  limit <- if (outward < 0) edge - region_start else region_end - edge
+  step <- max(limit / 200, 1)
+  while (covered < min_flank_shown && distance < limit) {
+    distance <- min(distance + step, limit)
+    lo <- if (outward < 0) edge - distance else edge
+    hi <- if (outward < 0) edge else edge + distance
+    covered <- sum(overlap_length(plot_paf$t.start, plot_paf$t.end, lo, hi))
+  }
+  distance
+}
+window_start <- inv_start - extend_side(inv_start, -1)
+window_end <- inv_end + extend_side(inv_end, 1)
+
+# Cut alignments exactly to the displayed human window using their CIGAR
+# strings. This keeps both axes and arrows confined to the displayed region.
 plot_paf$t.name <- chrom
 plot_paf <- subsetPafAlignments(
   paf.table = plot_paf,
@@ -236,18 +320,26 @@ plot <- ggplot(coords) +
     linewidth = 0.25
   )
 
-# Arrow coordinates follow the four-row ordering emitted by paf2coords:
-# query start, target start, query end, target end for each alignment.
-arrow_start <- coords$x[c(TRUE, TRUE, FALSE, FALSE)]
-arrow_end <- coords$x[c(FALSE, FALSE, TRUE, TRUE)]
-arrow_y <- coords$y[c(TRUE, TRUE, FALSE, FALSE)]
-arrow_group <- coords$group[c(TRUE, TRUE, FALSE, FALSE)]
-arrow_frame <- data.frame(
-  start = arrow_start,
-  end = arrow_end,
-  y = arrow_y,
-  group = arrow_group,
-  direction = ifelse(arrow_start < arrow_end, "+", "-")
+# paf2coords emits a reverse alignment as query start, target end, query end,
+# target start. Reading arrow direction back out of that ordering assigns the
+# descending pair to the human row, so the reference is drawn reverse and a
+# ribbon meets arrows of the opposite colour. Build the arrows from the PAF, so
+# each bar carries the alignment's own strand.
+arrow_frame <- rbind(
+  data.frame(
+    start = plot_paf$t.start,
+    end = plot_paf$t.end,
+    y = 2,
+    group = paste0("t", seq_len(nrow(plot_paf))),
+    direction = plot_paf$strand
+  ),
+  data.frame(
+    start = map_query_to_panel(plot_paf$q.start),
+    end = map_query_to_panel(plot_paf$q.end),
+    y = 1,
+    group = paste0("q", seq_len(nrow(plot_paf))),
+    direction = plot_paf$strand
+  )
 )
 
 plot <- plot +
@@ -285,7 +377,7 @@ target_labels <- target_labels[
 
 plot <- plot +
   scale_x_continuous(
-    name = "Chimpanzee (panTro6) genomic position (bp; axis normalized by flanks)",
+    name = "Chimpanzee (panTro6) genomic position (bp)",
     breaks = query_breaks,
     labels = scales::comma(abs(query_labels)),
     sec.axis = sec_axis(
@@ -318,8 +410,13 @@ plot <- plot +
     ylim = c(0.82, 2.18),
     clip = "on"
   ) +
+  # Cytoband plus plain coordinates: the internal locus id is not a reader's
+  # handle on the region.
   labs(
-    title = paste0(label, " (", inv_id, ")")
+    title = paste0(
+      sub("^chr", "", chrom), label, "  ",
+      chrom, ":", scales::comma(inv_start), "-", scales::comma(inv_end)
+    )
   ) +
   theme(
     panel.grid.major = element_blank(),
@@ -375,6 +472,11 @@ orientation <- data.frame(
   left_boundary_gap_bp = left_gap,
   right_boundary_gap_bp = right_gap,
   chimp_axis_reversed = axis_reversed,
+  raw_alignments = raw_alignments,
+  min_span_bp = min_span,
+  divergence_limit = de_limit,
+  secondary_kept = secondary_kept,
+  dropped_distant = dropped_distant,
   alignments_plotted = nrow(plot_paf),
   stringsAsFactors = FALSE
 )
@@ -393,6 +495,7 @@ cat(
   paste(names(left_support), left_support, collapse = ", "), "\n",
   "right flank vote:", right_vote, " ",
   paste(names(right_support), right_support, collapse = ", "), "\n",
+  "divergence limit:", de_limit, "\n",
   "axis rule:", axis_rule, "\n",
   "chimp axis reversed:", axis_reversed, "\n"
 )
