@@ -1049,17 +1049,15 @@
     "rho": 0.0,
     "m_flux": 0.0,
     "reps": 120,
-    "n_called": 64,
-    "recurrent_call_rate": 0.5333333333333333,
-    "ci_low": 0.4444262910579696,
-    "ci_high": 0.6201723575383017,
-    "mean_events": 1.6083333333333334,
-    "median_events": 2.0,
-    "mean_n_sites": 389.34166666666664,
+    "n_called": 0,
+    "recurrent_call_rate": 0.0,
+    "ci_low": 0.0,
+    "ci_high": 0.031020271055929513,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "mean_n_sites": 368.15,
     "events_hist": {
-      "1": 56,
-      "2": 55,
-      "3": 9
+      "1": 120
     }
   },
   {
@@ -1068,17 +1066,15 @@
     "rho": 0.0,
     "m_flux": 1e-08,
     "reps": 120,
-    "n_called": 56,
-    "recurrent_call_rate": 0.4666666666666667,
-    "ci_low": 0.3798276424616983,
-    "ci_high": 0.5555737089420304,
-    "mean_events": 1.525,
+    "n_called": 0,
+    "recurrent_call_rate": 0.0,
+    "ci_low": 0.0,
+    "ci_high": 0.031020271055929513,
+    "mean_events": 1.0,
     "median_events": 1.0,
-    "mean_n_sites": 375.9,
+    "mean_n_sites": 365.05833333333334,
     "events_hist": {
-      "1": 64,
-      "2": 49,
-      "3": 7
+      "1": 120
     }
   },
   {
@@ -1087,17 +1083,15 @@
     "rho": 0.0,
     "m_flux": 1e-07,
     "reps": 120,
-    "n_called": 62,
-    "recurrent_call_rate": 0.5166666666666667,
-    "ci_low": 0.42813421852868033,
-    "ci_high": 0.6041651057694554,
-    "mean_events": 1.5666666666666667,
-    "median_events": 2.0,
-    "mean_n_sites": 374.59166666666664,
+    "n_called": 0,
+    "recurrent_call_rate": 0.0,
+    "ci_low": 0.0,
+    "ci_high": 0.031020271055929513,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "mean_n_sites": 365.73333333333335,
     "events_hist": {
-      "1": 58,
-      "2": 56,
-      "3": 6
+      "1": 120
     }
   },
   {
@@ -1106,18 +1100,17 @@
     "rho": 0.0,
     "m_flux": 1e-06,
     "reps": 120,
-    "n_called": 64,
-    "recurrent_call_rate": 0.5333333333333333,
-    "ci_low": 0.4444262910579696,
-    "ci_high": 0.6201723575383017,
-    "mean_events": 1.65,
-    "median_events": 2.0,
-    "mean_n_sites": 381.0833333333333,
+    "n_called": 10,
+    "recurrent_call_rate": 0.08333333333333333,
+    "ci_low": 0.045893154816730314,
+    "ci_high": 0.14662373772987763,
+    "mean_events": 1.1333333333333333,
+    "median_events": 1.0,
+    "mean_n_sites": 366.03333333333336,
     "events_hist": {
-      "1": 56,
-      "2": 55,
-      "3": 5,
-      "4": 3,
+      "1": 110,
+      "2": 6,
+      "3": 3,
       "5": 1
     }
   },
@@ -1127,18 +1120,15 @@
     "rho": 1e-08,
     "m_flux": 0.0,
     "reps": 120,
-    "n_called": 39,
-    "recurrent_call_rate": 0.325,
-    "ci_low": 0.24775726408835433,
-    "ci_high": 0.41309983078122114,
-    "mean_events": 1.4416666666666667,
+    "n_called": 0,
+    "recurrent_call_rate": 0.0,
+    "ci_low": 0.0,
+    "ci_high": 0.031020271055929513,
+    "mean_events": 1.0,
     "median_events": 1.0,
-    "mean_n_sites": 373.40833333333336,
+    "mean_n_sites": 360.3,
     "events_hist": {
-      "1": 81,
-      "2": 28,
-      "3": 8,
-      "4": 3
+      "1": 120
     }
   },
   {
@@ -1147,17 +1137,15 @@
     "rho": 1e-08,
     "m_flux": 1e-08,
     "reps": 120,
-    "n_called": 37,
-    "recurrent_call_rate": 0.30833333333333335,
-    "ci_low": 0.23272612182675728,
-    "ci_high": 0.3958316487446824,
-    "mean_events": 1.3583333333333334,
+    "n_called": 0,
+    "recurrent_call_rate": 0.0,
+    "ci_low": 0.0,
+    "ci_high": 0.031020271055929513,
+    "mean_events": 1.0,
     "median_events": 1.0,
-    "mean_n_sites": 375.0,
+    "mean_n_sites": 362.48333333333335,
     "events_hist": {
-      "1": 83,
-      "2": 31,
-      "3": 6
+      "1": 120
     }
   },
   {
@@ -1166,94 +1154,21 @@
     "rho": 1e-08,
     "m_flux": 1e-07,
     "reps": 120,
-    "n_called": 36,
-    "recurrent_call_rate": 0.3,
-    "ci_low": 0.22525501338672319,
-    "ci_high": 0.38715309503564865,
-    "mean_events": 1.3416666666666666,
+    "n_called": 0,
+    "recurrent_call_rate": 0.0,
+    "ci_low": 0.0,
+    "ci_high": 0.031020271055929513,
+    "mean_events": 1.0,
     "median_events": 1.0,
-    "mean_n_sites": 378.48333333333335,
+    "mean_n_sites": 363.9916666666667,
     "events_hist": {
-      "1": 84,
-      "2": 31,
-      "3": 5
+      "1": 120
     }
   },
   {
     "scenario": "single",
     "depth": "very_recent",
     "rho": 1e-08,
-    "m_flux": 1e-06,
-    "reps": 120,
-    "n_called": 43,
-    "recurrent_call_rate": 0.35833333333333334,
-    "ci_low": 0.2781594371658861,
-    "ci_high": 0.44729630629996064,
-    "mean_events": 1.4166666666666667,
-    "median_events": 1.0,
-    "mean_n_sites": 379.875,
-    "events_hist": {
-      "1": 77,
-      "2": 37,
-      "3": 5,
-      "4": 1
-    }
-  },
-  {
-    "scenario": "single",
-    "depth": "very_recent",
-    "rho": 1e-06,
-    "m_flux": 0.0,
-    "reps": 120,
-    "n_called": 0,
-    "recurrent_call_rate": 0.0,
-    "ci_low": 0.0,
-    "ci_high": 0.031020271055929513,
-    "mean_events": 1.0,
-    "median_events": 1.0,
-    "mean_n_sites": 376.81666666666666,
-    "events_hist": {
-      "1": 120
-    }
-  },
-  {
-    "scenario": "single",
-    "depth": "very_recent",
-    "rho": 1e-06,
-    "m_flux": 1e-08,
-    "reps": 120,
-    "n_called": 0,
-    "recurrent_call_rate": 0.0,
-    "ci_low": 0.0,
-    "ci_high": 0.031020271055929513,
-    "mean_events": 1.0,
-    "median_events": 1.0,
-    "mean_n_sites": 377.8,
-    "events_hist": {
-      "1": 120
-    }
-  },
-  {
-    "scenario": "single",
-    "depth": "very_recent",
-    "rho": 1e-06,
-    "m_flux": 1e-07,
-    "reps": 120,
-    "n_called": 0,
-    "recurrent_call_rate": 0.0,
-    "ci_low": 0.0,
-    "ci_high": 0.031020271055929513,
-    "mean_events": 1.0,
-    "median_events": 1.0,
-    "mean_n_sites": 377.2416666666667,
-    "events_hist": {
-      "1": 120
-    }
-  },
-  {
-    "scenario": "single",
-    "depth": "very_recent",
-    "rho": 1e-06,
     "m_flux": 1e-06,
     "reps": 120,
     "n_called": 1,
@@ -1262,10 +1177,78 @@
     "ci_high": 0.045697415374322405,
     "mean_events": 1.0083333333333333,
     "median_events": 1.0,
-    "mean_n_sites": 375.75,
+    "mean_n_sites": 360.43333333333334,
     "events_hist": {
       "1": 119,
       "2": 1
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "very_recent",
+    "rho": 1e-06,
+    "m_flux": 0.0,
+    "reps": 120,
+    "n_called": 0,
+    "recurrent_call_rate": 0.0,
+    "ci_low": 0.0,
+    "ci_high": 0.031020271055929513,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "mean_n_sites": 362.9,
+    "events_hist": {
+      "1": 120
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "very_recent",
+    "rho": 1e-06,
+    "m_flux": 1e-08,
+    "reps": 120,
+    "n_called": 0,
+    "recurrent_call_rate": 0.0,
+    "ci_low": 0.0,
+    "ci_high": 0.031020271055929513,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "mean_n_sites": 361.7083333333333,
+    "events_hist": {
+      "1": 120
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "very_recent",
+    "rho": 1e-06,
+    "m_flux": 1e-07,
+    "reps": 120,
+    "n_called": 0,
+    "recurrent_call_rate": 0.0,
+    "ci_low": 0.0,
+    "ci_high": 0.031020271055929513,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "mean_n_sites": 363.5,
+    "events_hist": {
+      "1": 120
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "very_recent",
+    "rho": 1e-06,
+    "m_flux": 1e-06,
+    "reps": 120,
+    "n_called": 0,
+    "recurrent_call_rate": 0.0,
+    "ci_low": 0.0,
+    "ci_high": 0.031020271055929513,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "mean_n_sites": 362.3333333333333,
+    "events_hist": {
+      "1": 120
     }
   },
   {
@@ -1274,16 +1257,15 @@
     "rho": 0.0,
     "m_flux": 0.0,
     "reps": 120,
-    "n_called": 5,
-    "recurrent_call_rate": 0.041666666666666664,
-    "ci_low": 0.017926452505837805,
-    "ci_high": 0.0938421292954309,
-    "mean_events": 1.0416666666666667,
+    "n_called": 0,
+    "recurrent_call_rate": 0.0,
+    "ci_low": 0.0,
+    "ci_high": 0.031020271055929513,
+    "mean_events": 1.0,
     "median_events": 1.0,
-    "mean_n_sites": 383.6333333333333,
+    "mean_n_sites": 363.85833333333335,
     "events_hist": {
-      "1": 115,
-      "2": 5
+      "1": 120
     }
   },
   {
@@ -1292,16 +1274,15 @@
     "rho": 0.0,
     "m_flux": 1e-08,
     "reps": 120,
-    "n_called": 7,
-    "recurrent_call_rate": 0.058333333333333334,
-    "ci_low": 0.02854064663137293,
-    "ci_high": 0.1155272594680315,
-    "mean_events": 1.0583333333333333,
+    "n_called": 0,
+    "recurrent_call_rate": 0.0,
+    "ci_low": 0.0,
+    "ci_high": 0.031020271055929513,
+    "mean_events": 1.0,
     "median_events": 1.0,
-    "mean_n_sites": 394.5416666666667,
+    "mean_n_sites": 385.825,
     "events_hist": {
-      "1": 113,
-      "2": 7
+      "1": 120
     }
   },
   {
@@ -1310,16 +1291,17 @@
     "rho": 0.0,
     "m_flux": 1e-07,
     "reps": 120,
-    "n_called": 13,
-    "recurrent_call_rate": 0.10833333333333334,
-    "ci_low": 0.0644107989410726,
-    "ci_high": 0.1765550800527389,
-    "mean_events": 1.1083333333333334,
+    "n_called": 2,
+    "recurrent_call_rate": 0.016666666666666666,
+    "ci_low": 0.004582468541151394,
+    "ci_high": 0.058737126812913806,
+    "mean_events": 1.0333333333333334,
     "median_events": 1.0,
-    "mean_n_sites": 388.6666666666667,
+    "mean_n_sites": 376.8666666666667,
     "events_hist": {
-      "1": 107,
-      "2": 13
+      "1": 118,
+      "2": 1,
+      "4": 1
     }
   },
   {
@@ -1328,16 +1310,17 @@
     "rho": 0.0,
     "m_flux": 1e-06,
     "reps": 120,
-    "n_called": 14,
-    "recurrent_call_rate": 0.11666666666666667,
-    "ci_low": 0.07078052921096241,
-    "ci_high": 0.18633501193191693,
-    "mean_events": 1.1166666666666667,
+    "n_called": 3,
+    "recurrent_call_rate": 0.025,
+    "ci_low": 0.00853802009878548,
+    "ci_high": 0.07093123740434756,
+    "mean_events": 1.0333333333333334,
     "median_events": 1.0,
-    "mean_n_sites": 382.90833333333336,
+    "mean_n_sites": 370.03333333333336,
     "events_hist": {
-      "1": 106,
-      "2": 14
+      "1": 117,
+      "2": 2,
+      "3": 1
     }
   },
   {
@@ -1346,13 +1329,64 @@
     "rho": 1e-08,
     "m_flux": 0.0,
     "reps": 120,
+    "n_called": 0,
+    "recurrent_call_rate": 0.0,
+    "ci_low": 0.0,
+    "ci_high": 0.031020271055929513,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "mean_n_sites": 369.65833333333336,
+    "events_hist": {
+      "1": 120
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "recent",
+    "rho": 1e-08,
+    "m_flux": 1e-08,
+    "reps": 120,
+    "n_called": 0,
+    "recurrent_call_rate": 0.0,
+    "ci_low": 0.0,
+    "ci_high": 0.031020271055929513,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "mean_n_sites": 374.2916666666667,
+    "events_hist": {
+      "1": 120
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "recent",
+    "rho": 1e-08,
+    "m_flux": 1e-07,
+    "reps": 120,
+    "n_called": 0,
+    "recurrent_call_rate": 0.0,
+    "ci_low": 0.0,
+    "ci_high": 0.031020271055929513,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "mean_n_sites": 369.6,
+    "events_hist": {
+      "1": 120
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "recent",
+    "rho": 1e-08,
+    "m_flux": 1e-06,
+    "reps": 120,
     "n_called": 4,
     "recurrent_call_rate": 0.03333333333333333,
     "ci_low": 0.013037340166920576,
     "ci_high": 0.0825815794852803,
     "mean_events": 1.0333333333333334,
     "median_events": 1.0,
-    "mean_n_sites": 391.81666666666666,
+    "mean_n_sites": 370.06666666666666,
     "events_hist": {
       "1": 116,
       "2": 4
@@ -1361,25 +1395,110 @@
   {
     "scenario": "single",
     "depth": "recent",
-    "rho": 1e-08,
-    "m_flux": 1e-08,
+    "rho": 1e-06,
+    "m_flux": 0.0,
     "reps": 120,
-    "n_called": 3,
-    "recurrent_call_rate": 0.025,
-    "ci_low": 0.00853802009878548,
-    "ci_high": 0.07093123740434756,
-    "mean_events": 1.025,
+    "n_called": 0,
+    "recurrent_call_rate": 0.0,
+    "ci_low": 0.0,
+    "ci_high": 0.031020271055929513,
+    "mean_events": 1.0,
     "median_events": 1.0,
-    "mean_n_sites": 383.8,
+    "mean_n_sites": 371.225,
     "events_hist": {
-      "1": 117,
-      "2": 3
+      "1": 120
     }
   },
   {
     "scenario": "single",
     "depth": "recent",
-    "rho": 1e-08,
+    "rho": 1e-06,
+    "m_flux": 1e-08,
+    "reps": 120,
+    "n_called": 0,
+    "recurrent_call_rate": 0.0,
+    "ci_low": 0.0,
+    "ci_high": 0.031020271055929513,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "mean_n_sites": 369.03333333333336,
+    "events_hist": {
+      "1": 120
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "recent",
+    "rho": 1e-06,
+    "m_flux": 1e-07,
+    "reps": 120,
+    "n_called": 0,
+    "recurrent_call_rate": 0.0,
+    "ci_low": 0.0,
+    "ci_high": 0.031020271055929513,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "mean_n_sites": 373.21666666666664,
+    "events_hist": {
+      "1": 120
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "recent",
+    "rho": 1e-06,
+    "m_flux": 1e-06,
+    "reps": 120,
+    "n_called": 1,
+    "recurrent_call_rate": 0.008333333333333333,
+    "ci_low": 0.001472517830674952,
+    "ci_high": 0.045697415374322405,
+    "mean_events": 1.0083333333333333,
+    "median_events": 1.0,
+    "mean_n_sites": 371.0083333333333,
+    "events_hist": {
+      "1": 119,
+      "2": 1
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "young",
+    "rho": 0.0,
+    "m_flux": 0.0,
+    "reps": 120,
+    "n_called": 0,
+    "recurrent_call_rate": 0.0,
+    "ci_low": 0.0,
+    "ci_high": 0.031020271055929513,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "mean_n_sites": 397.35833333333335,
+    "events_hist": {
+      "1": 120
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "young",
+    "rho": 0.0,
+    "m_flux": 1e-08,
+    "reps": 120,
+    "n_called": 0,
+    "recurrent_call_rate": 0.0,
+    "ci_low": 0.0,
+    "ci_high": 0.031020271055929513,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "mean_n_sites": 413.01666666666665,
+    "events_hist": {
+      "1": 120
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "young",
+    "rho": 0.0,
     "m_flux": 1e-07,
     "reps": 120,
     "n_called": 1,
@@ -1388,7 +1507,7 @@
     "ci_high": 0.045697415374322405,
     "mean_events": 1.0083333333333333,
     "median_events": 1.0,
-    "mean_n_sites": 380.4583333333333,
+    "mean_n_sites": 398.14166666666665,
     "events_hist": {
       "1": 119,
       "2": 1
@@ -1396,233 +1515,94 @@
   },
   {
     "scenario": "single",
-    "depth": "recent",
-    "rho": 1e-08,
+    "depth": "young",
+    "rho": 0.0,
     "m_flux": 1e-06,
-    "reps": 120,
-    "n_called": 6,
-    "recurrent_call_rate": 0.05,
-    "ci_low": 0.023114049304474235,
-    "ci_high": 0.10480419464586234,
-    "mean_events": 1.05,
-    "median_events": 1.0,
-    "mean_n_sites": 389.55,
-    "events_hist": {
-      "1": 114,
-      "2": 6
-    }
-  },
-  {
-    "scenario": "single",
-    "depth": "recent",
-    "rho": 1e-06,
-    "m_flux": 0.0,
-    "reps": 120,
-    "n_called": 0,
-    "recurrent_call_rate": 0.0,
-    "ci_low": 0.0,
-    "ci_high": 0.031020271055929513,
-    "mean_events": 1.0,
-    "median_events": 1.0,
-    "mean_n_sites": 386.40833333333336,
-    "events_hist": {
-      "1": 120
-    }
-  },
-  {
-    "scenario": "single",
-    "depth": "recent",
-    "rho": 1e-06,
-    "m_flux": 1e-08,
-    "reps": 120,
-    "n_called": 0,
-    "recurrent_call_rate": 0.0,
-    "ci_low": 0.0,
-    "ci_high": 0.031020271055929513,
-    "mean_events": 1.0,
-    "median_events": 1.0,
-    "mean_n_sites": 383.14166666666665,
-    "events_hist": {
-      "1": 120
-    }
-  },
-  {
-    "scenario": "single",
-    "depth": "recent",
-    "rho": 1e-06,
-    "m_flux": 1e-07,
-    "reps": 120,
-    "n_called": 0,
-    "recurrent_call_rate": 0.0,
-    "ci_low": 0.0,
-    "ci_high": 0.031020271055929513,
-    "mean_events": 1.0,
-    "median_events": 1.0,
-    "mean_n_sites": 388.7083333333333,
-    "events_hist": {
-      "1": 120
-    }
-  },
-  {
-    "scenario": "single",
-    "depth": "recent",
-    "rho": 1e-06,
-    "m_flux": 1e-06,
-    "reps": 120,
-    "n_called": 0,
-    "recurrent_call_rate": 0.0,
-    "ci_low": 0.0,
-    "ci_high": 0.031020271055929513,
-    "mean_events": 1.0,
-    "median_events": 1.0,
-    "mean_n_sites": 384.3,
-    "events_hist": {
-      "1": 120
-    }
-  },
-  {
-    "scenario": "single",
-    "depth": "young",
-    "rho": 0.0,
-    "m_flux": 0.0,
-    "reps": 120,
-    "n_called": 0,
-    "recurrent_call_rate": 0.0,
-    "ci_low": 0.0,
-    "ci_high": 0.031020271055929513,
-    "mean_events": 1.0,
-    "median_events": 1.0,
-    "mean_n_sites": 416.59166666666664,
-    "events_hist": {
-      "1": 120
-    }
-  },
-  {
-    "scenario": "single",
-    "depth": "young",
-    "rho": 0.0,
-    "m_flux": 1e-08,
-    "reps": 120,
-    "n_called": 0,
-    "recurrent_call_rate": 0.0,
-    "ci_low": 0.0,
-    "ci_high": 0.031020271055929513,
-    "mean_events": 1.0,
-    "median_events": 1.0,
-    "mean_n_sites": 400.0,
-    "events_hist": {
-      "1": 120
-    }
-  },
-  {
-    "scenario": "single",
-    "depth": "young",
-    "rho": 0.0,
-    "m_flux": 1e-07,
     "reps": 120,
     "n_called": 2,
     "recurrent_call_rate": 0.016666666666666666,
     "ci_low": 0.004582468541151394,
     "ci_high": 0.058737126812913806,
-    "mean_events": 1.0166666666666666,
+    "mean_events": 1.0333333333333334,
     "median_events": 1.0,
-    "mean_n_sites": 412.4916666666667,
+    "mean_n_sites": 407.65833333333336,
     "events_hist": {
       "1": 118,
-      "2": 2
-    }
-  },
-  {
-    "scenario": "single",
-    "depth": "young",
-    "rho": 0.0,
-    "m_flux": 1e-06,
-    "reps": 120,
-    "n_called": 7,
-    "recurrent_call_rate": 0.058333333333333334,
-    "ci_low": 0.02854064663137293,
-    "ci_high": 0.1155272594680315,
-    "mean_events": 1.0583333333333333,
-    "median_events": 1.0,
-    "mean_n_sites": 415.89166666666665,
-    "events_hist": {
-      "1": 113,
-      "2": 7
-    }
-  },
-  {
-    "scenario": "single",
-    "depth": "young",
-    "rho": 1e-08,
-    "m_flux": 0.0,
-    "reps": 120,
-    "n_called": 0,
-    "recurrent_call_rate": 0.0,
-    "ci_low": 0.0,
-    "ci_high": 0.031020271055929513,
-    "mean_events": 1.0,
-    "median_events": 1.0,
-    "mean_n_sites": 410.5416666666667,
-    "events_hist": {
-      "1": 120
-    }
-  },
-  {
-    "scenario": "single",
-    "depth": "young",
-    "rho": 1e-08,
-    "m_flux": 1e-08,
-    "reps": 120,
-    "n_called": 0,
-    "recurrent_call_rate": 0.0,
-    "ci_low": 0.0,
-    "ci_high": 0.031020271055929513,
-    "mean_events": 1.0,
-    "median_events": 1.0,
-    "mean_n_sites": 410.6,
-    "events_hist": {
-      "1": 120
-    }
-  },
-  {
-    "scenario": "single",
-    "depth": "young",
-    "rho": 1e-08,
-    "m_flux": 1e-07,
-    "reps": 120,
-    "n_called": 0,
-    "recurrent_call_rate": 0.0,
-    "ci_low": 0.0,
-    "ci_high": 0.031020271055929513,
-    "mean_events": 1.0,
-    "median_events": 1.0,
-    "mean_n_sites": 417.225,
-    "events_hist": {
-      "1": 120
-    }
-  },
-  {
-    "scenario": "single",
-    "depth": "young",
-    "rho": 1e-08,
-    "m_flux": 1e-06,
-    "reps": 120,
-    "n_called": 4,
-    "recurrent_call_rate": 0.03333333333333333,
-    "ci_low": 0.013037340166920576,
-    "ci_high": 0.0825815794852803,
-    "mean_events": 1.05,
-    "median_events": 1.0,
-    "mean_n_sites": 418.65833333333336,
-    "events_hist": {
-      "1": 116,
-      "2": 3,
+      "2": 1,
       "4": 1
     }
   },
   {
     "scenario": "single",
     "depth": "young",
+    "rho": 1e-08,
+    "m_flux": 0.0,
+    "reps": 120,
+    "n_called": 0,
+    "recurrent_call_rate": 0.0,
+    "ci_low": 0.0,
+    "ci_high": 0.031020271055929513,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "mean_n_sites": 406.2916666666667,
+    "events_hist": {
+      "1": 120
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "young",
+    "rho": 1e-08,
+    "m_flux": 1e-08,
+    "reps": 120,
+    "n_called": 0,
+    "recurrent_call_rate": 0.0,
+    "ci_low": 0.0,
+    "ci_high": 0.031020271055929513,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "mean_n_sites": 403.425,
+    "events_hist": {
+      "1": 120
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "young",
+    "rho": 1e-08,
+    "m_flux": 1e-07,
+    "reps": 120,
+    "n_called": 0,
+    "recurrent_call_rate": 0.0,
+    "ci_low": 0.0,
+    "ci_high": 0.031020271055929513,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "mean_n_sites": 404.68333333333334,
+    "events_hist": {
+      "1": 120
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "young",
+    "rho": 1e-08,
+    "m_flux": 1e-06,
+    "reps": 120,
+    "n_called": 0,
+    "recurrent_call_rate": 0.0,
+    "ci_low": 0.0,
+    "ci_high": 0.031020271055929513,
+    "mean_events": 1.0,
+    "median_events": 1.0,
+    "mean_n_sites": 405.8833333333333,
+    "events_hist": {
+      "1": 120
+    }
+  },
+  {
+    "scenario": "single",
+    "depth": "young",
     "rho": 1e-06,
     "m_flux": 0.0,
     "reps": 120,
@@ -1632,7 +1612,7 @@
     "ci_high": 0.031020271055929513,
     "mean_events": 1.0,
     "median_events": 1.0,
-    "mean_n_sites": 414.2,
+    "mean_n_sites": 404.3833333333333,
     "events_hist": {
       "1": 120
     }
@@ -1649,7 +1629,7 @@
     "ci_high": 0.031020271055929513,
     "mean_events": 1.0,
     "median_events": 1.0,
-    "mean_n_sites": 414.5833333333333,
+    "mean_n_sites": 404.375,
     "events_hist": {
       "1": 120
     }
@@ -1666,7 +1646,7 @@
     "ci_high": 0.031020271055929513,
     "mean_events": 1.0,
     "median_events": 1.0,
-    "mean_n_sites": 414.75,
+    "mean_n_sites": 399.7916666666667,
     "events_hist": {
       "1": 120
     }
@@ -1683,7 +1663,7 @@
     "ci_high": 0.031020271055929513,
     "mean_events": 1.0,
     "median_events": 1.0,
-    "mean_n_sites": 415.6333333333333,
+    "mean_n_sites": 402.76666666666665,
     "events_hist": {
       "1": 120
     }
@@ -1700,7 +1680,7 @@
     "ci_high": 0.031020271055929513,
     "mean_events": 1.0,
     "median_events": 1.0,
-    "mean_n_sites": 456.3333333333333,
+    "mean_n_sites": 455.5083333333333,
     "events_hist": {
       "1": 120
     }
@@ -1717,7 +1697,7 @@
     "ci_high": 0.031020271055929513,
     "mean_events": 1.0,
     "median_events": 1.0,
-    "mean_n_sites": 478.0,
+    "mean_n_sites": 453.60833333333335,
     "events_hist": {
       "1": 120
     }
@@ -1734,7 +1714,7 @@
     "ci_high": 0.031020271055929513,
     "mean_events": 1.0,
     "median_events": 1.0,
-    "mean_n_sites": 470.89166666666665,
+    "mean_n_sites": 459.59166666666664,
     "events_hist": {
       "1": 120
     }
@@ -1745,18 +1725,16 @@
     "rho": 0.0,
     "m_flux": 1e-06,
     "reps": 120,
-    "n_called": 9,
-    "recurrent_call_rate": 0.075,
-    "ci_low": 0.039956662006448734,
-    "ci_high": 0.13641056839109136,
-    "mean_events": 1.1166666666666667,
+    "n_called": 3,
+    "recurrent_call_rate": 0.025,
+    "ci_low": 0.00853802009878548,
+    "ci_high": 0.07093123740434756,
+    "mean_events": 1.025,
     "median_events": 1.0,
-    "mean_n_sites": 468.975,
+    "mean_n_sites": 463.26666666666665,
     "events_hist": {
-      "1": 111,
-      "2": 6,
-      "3": 1,
-      "4": 2
+      "1": 117,
+      "2": 3
     }
   },
   {
@@ -1771,7 +1749,7 @@
     "ci_high": 0.031020271055929513,
     "mean_events": 1.0,
     "median_events": 1.0,
-    "mean_n_sites": 466.5,
+    "mean_n_sites": 448.80833333333334,
     "events_hist": {
       "1": 120
     }
@@ -1788,7 +1766,7 @@
     "ci_high": 0.031020271055929513,
     "mean_events": 1.0,
     "median_events": 1.0,
-    "mean_n_sites": 459.10833333333335,
+    "mean_n_sites": 455.35833333333335,
     "events_hist": {
       "1": 120
     }
@@ -1805,7 +1783,7 @@
     "ci_high": 0.031020271055929513,
     "mean_events": 1.0,
     "median_events": 1.0,
-    "mean_n_sites": 466.3833333333333,
+    "mean_n_sites": 457.2,
     "events_hist": {
       "1": 120
     }
@@ -1816,16 +1794,16 @@
     "rho": 1e-08,
     "m_flux": 1e-06,
     "reps": 120,
-    "n_called": 2,
-    "recurrent_call_rate": 0.016666666666666666,
-    "ci_low": 0.004582468541151394,
-    "ci_high": 0.058737126812913806,
+    "n_called": 1,
+    "recurrent_call_rate": 0.008333333333333333,
+    "ci_low": 0.001472517830674952,
+    "ci_high": 0.045697415374322405,
     "mean_events": 1.0166666666666666,
     "median_events": 1.0,
-    "mean_n_sites": 461.81666666666666,
+    "mean_n_sites": 447.6,
     "events_hist": {
-      "1": 118,
-      "2": 2
+      "1": 119,
+      "3": 1
     }
   },
   {
@@ -1840,7 +1818,7 @@
     "ci_high": 0.031020271055929513,
     "mean_events": 1.0,
     "median_events": 1.0,
-    "mean_n_sites": 467.3833333333333,
+    "mean_n_sites": 452.6333333333333,
     "events_hist": {
       "1": 120
     }
@@ -1857,7 +1835,7 @@
     "ci_high": 0.031020271055929513,
     "mean_events": 1.0,
     "median_events": 1.0,
-    "mean_n_sites": 462.05,
+    "mean_n_sites": 450.7416666666667,
     "events_hist": {
       "1": 120
     }
@@ -1874,7 +1852,7 @@
     "ci_high": 0.031020271055929513,
     "mean_events": 1.0,
     "median_events": 1.0,
-    "mean_n_sites": 466.05,
+    "mean_n_sites": 450.3333333333333,
     "events_hist": {
       "1": 120
     }
@@ -1891,7 +1869,7 @@
     "ci_high": 0.031020271055929513,
     "mean_events": 1.0,
     "median_events": 1.0,
-    "mean_n_sites": 468.8833333333333,
+    "mean_n_sites": 450.7916666666667,
     "events_hist": {
       "1": 120
     }

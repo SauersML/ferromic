@@ -222,6 +222,10 @@ jobs:
             --prefix gene_flux
           python verify_reported_flux.py \
             --rows 'out/gene_flux_shard*.csv'
+          # every derived artifact must come from the make_report run above:
+          # a partial regeneration once left sweep_gene_flux.json holding the
+          # superseded N_a/10 single-event counts and nothing caught it.
+          python check_report_consistency.py --prefix gene_flux
           python make_demography_fig.py --out gene_flux_model.png
 
       - name: Verify every tracked gzip still decompresses
