@@ -1117,6 +1117,20 @@ EXPECTED_SUPPLEMENTARY_DATA_ROWS = (
 )
 
 
+_ANCESTRY_LABEL_PREFIXES = (
+    "African ", "Admixed American ", "East Asian ",
+    "European ", "Middle Eastern ", "South Asian ",
+)
+
+_ANCESTRY_COLUMN_NOTE = (
+    "Each ancestry group (African, Admixed American, East Asian, European, Middle "
+    "Eastern, South Asian) has the same columns: participants, cases, controls, odds "
+    "ratio, nominal p-value, the test that produced it, inference method, confidence "
+    "interval method, and the lower and upper bounds of the 95% confidence interval. "
+    "Each value is for that stratum alone."
+)
+
+
 class SupplementaryTablesError(RuntimeError):
     """Raised for unrecoverable supplementary table failures."""
 
@@ -2419,12 +2433,21 @@ def build_workbook(output_path: Path) -> None:
             readme_ws.write(row, 1, "Definition", col_name_fmt)
             row += 1
 
+            ancestry_note_written = False
             for col_name, definition in sheet_info.column_defs.items():
-                readme_ws.write(
-                    row, 0,
-                    sheet_info.column_labels.get(col_name, _pretty_label(col_name)),
-                    col_name_fmt,
+                label = sheet_info.column_labels.get(
+                    col_name, _pretty_label(col_name)
                 )
+                # The six ancestry strata repeat the same columns. Listing all of
+                # them defines nothing the pattern does not, so state it once.
+                if label.startswith(_ANCESTRY_LABEL_PREFIXES):
+                    if not ancestry_note_written:
+                        readme_ws.write(row, 0, "Per-ancestry columns", col_name_fmt)
+                        readme_ws.write(row, 1, _ANCESTRY_COLUMN_NOTE, col_def_fmt)
+                        row += 1
+                        ancestry_note_written = True
+                    continue
+                readme_ws.write(row, 0, label, col_name_fmt)
                 readme_ws.write(row, 1, definition, col_def_fmt)
                 row += 1
 
