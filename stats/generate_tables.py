@@ -100,18 +100,18 @@ GENE_CONSERVATION_COLUMN_DEFS: Dict[str, str] = OrderedDict(
     [
         ("Gene", "HGNC gene symbol."),
         ("Transcript", "Ensembl transcript ID used for the CDS analysis."),
-        ("Inversion ID", "Identifier of the inversion overlapping the gene."),
-        ("Recurrence class", "Consensus recurrence class of the inversion locus."),
-        ("Direct haplotypes", "Direct haplotypes with a coding sequence."),
-        ("Inverted haplotypes", "Inverted haplotypes with a coding sequence."),
-        ("Sequence classes", "Distinct coding sequences across both orientations."),
+        ("Inversion ID", "Inversion locus overlapping the gene (chr:start-end, GRCh38)."),
+        ("Recurrence class", "Single-event or recurrent, from Porubsky et al. (2022)."),
+        ("Direct haplotypes", "Number of direct haplotypes with a coding sequence."),
+        ("Inverted haplotypes", "Number of inverted haplotypes with a coding sequence."),
+        ("Sequence classes", "Number of distinct coding sequences across both orientations."),
         (
             "Orientation more conserved",
             "Orientation with the higher proportion of identical coding-sequence pairs.",
         ),
         (
             "Fixed CDS differences",
-            "Coding sites fixed for different alleles in the two orientations.",
+            "Number of coding sites fixed for different alleles between orientations.",
         ),
         (
             "Direct identical pair proportion",
@@ -123,15 +123,15 @@ GENE_CONSERVATION_COLUMN_DEFS: Dict[str, str] = OrderedDict(
         ),
         (
             "Δ (inverted − direct)",
-            "Inverted minus direct identical pair proportion.",
+            "Difference between orientations in the proportion of identical coding-sequence pairs.",
         ),
         (
             "Permutation p-value",
-            "Two-sided p-value from the permutation null.",
+            "Two-sided p-value from 100,000 orientation-label shuffles.",
         ),
         (
             "Westfall-Young FWER p-value",
-            "Westfall–Young adjusted p-value (family-wise error rate) under the same permutation null.",
+            "Adjusted p-value controlling the family-wise error rate under the same null.",
         ),
         (
             "Direct FDR q-value",
@@ -146,7 +146,7 @@ PHEWAS_COLUMN_DEFS: Dict[str, str] = OrderedDict(
             "Phenotype",
             "Phecode phenotype, derived from ICD billing codes.",
         ),
-        ("Inversion", "Inversion identifier."),
+        ("Inversion", "Inversion identifier from Porubsky et al. (2022)."),
         (
             "BH_P_GLOBAL",
             "Benjamini–Hochberg adjusted p-value across all phenotypes and inversions tested.",
@@ -207,7 +207,7 @@ PHEWAS_COLUMN_DEFS: Dict[str, str] = OrderedDict(
         ),
         (
             "Stage2_P_Source",
-            "Test used for the interaction p-value.",
+            "Test producing the interaction p-value (Rao score across ancestry groups).",
         ),
         (
             "Stage2_Inference_Type",
@@ -352,10 +352,10 @@ PHEWAS_COLUMN_DEFS: Dict[str, str] = OrderedDict(
 WITHIN_ANCESTRY_PHEWAS_COLUMN_DEFS: Dict[str, str] = OrderedDict(
     [
         ("population", "All of Us genetic ancestry group."),
-        ("population_label", "Full name of the genetic ancestry group."),
-        ("Inversion", "Inversion identifier."),
+        ("population_label", "All of Us ancestry group name."),
+        ("Inversion", "Inversion identifier from Porubsky et al. (2022)."),
         ("locus", "Cytogenetic locus label."),
-        ("Phenotype", "Phecode-derived phenotype label."),
+        ("Phenotype", "Phecode name in All of Us."),
         ("pooled_or", "Odds ratio from the pooled PheWAS."),
         ("pooled_q", "Global Benjamini–Hochberg adjusted p-value from the pooled PheWAS."),
         (
@@ -369,9 +369,9 @@ WITHIN_ANCESTRY_PHEWAS_COLUMN_DEFS: Dict[str, str] = OrderedDict(
             "within_q_selected_set",
             "Benjamini–Hochberg adjusted p-value across the selected phenotype set.",
         ),
-        ("within_n_total", "Participants in the within-ancestry principal component model."),
-        ("within_n_cases", "Cases in the within-ancestry principal component model."),
-        ("within_n_controls", "Controls in the within-ancestry principal component model."),
+        ("within_n_total", "Number of participants in the within-ancestry model."),
+        ("within_n_cases", "Number of cases in the within-ancestry model."),
+        ("within_n_controls", "Number of controls in the within-ancestry model."),
         ("within_ci_lo_or", "Lower confidence bound for the within-ancestry odds ratio."),
         ("within_ci_hi_or", "Upper confidence bound for the within-ancestry odds ratio."),
         ("evaluable", "TRUE when both models gave valid estimates."),
@@ -420,7 +420,7 @@ TAG_PHEWAS_COLUMN_DEFS: Dict[str, str] = OrderedDict(
         ("N_Cases_Used", _phewas_desc("N_Cases_Used", "Case count contributing to final model.")),
         ("N_Controls_Used", _phewas_desc("N_Controls_Used", "Control count contributing to final model.")),
         ("Model_Notes", _phewas_desc("Model_Notes", "Diagnostic notes for this association.")),
-        ("Inversion", _phewas_desc("Inversion", "Inversion identifier.")),
+        ("Inversion", _phewas_desc("Inversion", "Inversion identifier from Porubsky et al. (2022).")),
         ("P_LRT_Overall", _phewas_desc("P_LRT_Overall", "Overall LRT p-value.")),
         ("P_Overall_Valid", _phewas_desc("P_Overall_Valid", "Validity flag for overall LRT.")),
         ("P_Source_y", _phewas_desc("P_Source", "Statistic used for overall p-value.")),
@@ -436,7 +436,7 @@ TAG_PHEWAS_COLUMN_DEFS: Dict[str, str] = OrderedDict(
 
 CATEGORY_COLUMN_DEFS: Dict[str, str] = OrderedDict(
     [
-        ("Inversion", "Inversion identifier."),
+        ("Inversion", "Inversion identifier from Porubsky et al. (2022)."),
         ("Category", "Phecode category."),
         ("Phenotypes in category", "Number of phenotypes in the category."),
         ("Phenotypes included in GBJ", "Number of phenotypes passing quality control and included in the GBJ test."),
