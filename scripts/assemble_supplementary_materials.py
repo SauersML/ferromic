@@ -24,7 +24,7 @@ from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import pymupdf
-from PIL import Image
+from PIL import Image, ImageChops
 from docx import Document
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
@@ -52,11 +52,15 @@ CALL_LABELS = {
     "na": "not callable",
 }
 FIGURE_FRAME_WIDTH_IN = 6.5
-FIGURE_FRAME_HEIGHT_IN = 5.75
-FIGURE_FRAME_WIDTH_PX = 2400
-FIGURE_FRAME_HEIGHT_PX = round(
-    FIGURE_FRAME_WIDTH_PX * FIGURE_FRAME_HEIGHT_IN / FIGURE_FRAME_WIDTH_IN
-)
+# Tallest a figure may be drawn, leaving a page for its caption.
+FIGURE_MAX_HEIGHT_IN = 7.5
+# Print resolution floor. Ten figures survive only as rasters inside the
+# immutable template, the smallest 960 px across; drawn at the full text width
+# they would sit near 150 dpi and visibly pixelate. Size those to the largest
+# they stay sharp at instead, which is still wider than the old fixed frame.
+FIGURE_MIN_DPI = 300
+# 6.5 in of text width at ~400 dpi, so a vector figure stays sharp in print.
+FIGURE_TARGET_WIDTH_PX = 2600
 SVBYEYE_PLOTS_PER_PAGE = 2
 SVBYEYE_FRAME_WIDTH_IN = FIGURE_FRAME_WIDTH_IN
 
@@ -110,6 +114,18 @@ def contains_drawing(element) -> bool:
     return bool(element.xpath(".//w:drawing"))
 
 
+def set_text(node, text: str) -> None:
+    """Write run text, keeping whitespace Word would otherwise drop.
+
+    Rewriting a caption prefix leaves the title in a run that now begins with a
+    space. Without xml:space the renderer strips it and the caption reads
+    "Figure S14.Cross-validated".
+    """
+    node.text = text
+    if text != text.strip():
+        node.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+
+
 def replace_prefix(element, old: str, new: str) -> None:
     nodes = element.xpath(".//w:t")
     full = "".join(node.text or "" for node in nodes)
@@ -125,10 +141,10 @@ def replace_prefix(element, old: str, new: str) -> None:
         take = min(len(text), remaining)
         tail = text[take:]
         if not inserted:
-            node.text = new + tail
+            set_text(node, new + tail)
             inserted = True
         else:
-            node.text = tail
+            set_text(node, tail)
         remaining -= take
     if remaining:
         raise RuntimeError(f"Could not replace complete prefix {old!r}")
@@ -175,32 +191,56 @@ def set_page_break_before(paragraph_element) -> None:
     properties.append(OxmlElement("w:pageBreakBefore"))
 
 
-def fixed_canvas(payload: bytes) -> bytes:
+def fit_figure(payload: bytes) -> tuple[bytes, float, float]:
+    """Trim the white border and scale as large as the pixels allow.
+
+    Padding every figure into one fixed frame shrank wide and tall figures
+    alike: with their own white margins on top, several were drawn at barely a
+    third of the text width. Crop to the ink, then take the full text width
+    unless that would fall below the resolution floor.
+    """
     with Image.open(io.BytesIO(payload)) as source:
-        image = source.convert("RGBA")
-        image.thumbnail(
-            (FIGURE_FRAME_WIDTH_PX, FIGURE_FRAME_HEIGHT_PX),
-            Image.Resampling.LANCZOS,
-        )
-        canvas = Image.new(
-            "RGBA", (FIGURE_FRAME_WIDTH_PX, FIGURE_FRAME_HEIGHT_PX), "white"
-        )
-        x = (canvas.width - image.width) // 2
-        y = (canvas.height - image.height) // 2
-        canvas.alpha_composite(image, (x, y))
+        image = source.convert("RGB")
+        background = Image.new("RGB", image.size, "white")
+        box = ImageChops.difference(image, background).getbbox()
+        if box:
+            pad = max(2, round(0.004 * max(image.size)))
+            image = image.crop((
+                max(0, box[0] - pad),
+                max(0, box[1] - pad),
+                min(image.width, box[2] + pad),
+                min(image.height, box[3] + pad),
+            ))
+        width_in = min(FIGURE_FRAME_WIDTH_IN, image.width / FIGURE_MIN_DPI)
+        height_in = width_in * image.height / image.width
+        if height_in > FIGURE_MAX_HEIGHT_IN:
+            height_in = FIGURE_MAX_HEIGHT_IN
+            width_in = height_in * image.width / image.height
         output = io.BytesIO()
-        canvas.convert("RGB").save(output, format="PNG", optimize=True)
+        image.save(output, format="PNG", optimize=True)
+        return output.getvalue(), width_in, height_in
+
+
+def rasterize_vector(pdf_path: Path) -> bytes:
+    """Render a one-page figure PDF at print resolution."""
+    with pymupdf.open(pdf_path) as source:
+        page = source[0]
+        scale = FIGURE_TARGET_WIDTH_PX / page.rect.width
+        pixmap = page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), alpha=False)
+        image = Image.frombytes("RGB", (pixmap.width, pixmap.height), pixmap.samples)
+        output = io.BytesIO()
+        image.save(output, format="PNG", optimize=True)
         return output.getvalue()
 
 
 def add_picture_paragraph(document, source, image_path: Path):
-    return add_picture_bytes(
-        document,
-        source,
-        fixed_canvas(image_path.read_bytes()),
-        FIGURE_FRAME_WIDTH_IN,
-        FIGURE_FRAME_HEIGHT_IN,
-    )
+    # Several figures ship a vector twin beside the raster. Rendering that keeps
+    # the small ones sharp: the gene-flux PNGs are barely 1000 px wide and blur
+    # badly once drawn at the full text width.
+    vector = image_path.with_suffix(".pdf")
+    payload = rasterize_vector(vector) if vector.is_file() else image_path.read_bytes()
+    payload, width_in, height_in = fit_figure(payload)
+    return add_picture_bytes(document, source, payload, width_in, height_in)
 
 
 def add_picture_bytes(document, source, payload: bytes, width: float, height: float):
@@ -276,13 +316,8 @@ def add_cloned_block(
     old_number: int,
     new_number: int,
 ):
-    image = add_picture_bytes(
-        document,
-        image_template,
-        fixed_canvas(image_payload),
-        FIGURE_FRAME_WIDTH_IN,
-        FIGURE_FRAME_HEIGHT_IN,
-    )
+    payload, width_in, height_in = fit_figure(image_payload)
+    image = add_picture_bytes(document, image_template, payload, width_in, height_in)
     set_page_break_before(image._p)
     caption = copy.deepcopy(caption_element)
     replace_prefix(caption, f"Figure S{old_number}.", f"Figure S{new_number}.")
