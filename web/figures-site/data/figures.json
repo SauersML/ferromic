@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-03T02:24:34.368829+00:00",
+  "generatedAt": "2026-09-03T02:51:07.509273+00:00",
   "groups": [
     {
       "title": "Top-level figures",
@@ -1564,6 +1564,60 @@
           "href": "figures/final_plots/phewas_plots/phewas_chr8_7_301_024-12_598_379.pdf",
           "preview": "figures/final_plots/phewas_plots/phewas_chr8_7_301_024-12_598_379.pdf",
           "type": "pdf"
+        },
+        {
+          "name": "qq_plot_chr10-79542902-INV-674513.pdf",
+          "href": "figures/final_plots/phewas_plots/qq_plot_chr10-79542902-INV-674513.pdf",
+          "preview": "figures/final_plots/phewas_plots/qq_plot_chr10-79542902-INV-674513.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "qq_plot_chr12-46897663-INV-16289.pdf",
+          "href": "figures/final_plots/phewas_plots/qq_plot_chr12-46897663-INV-16289.pdf",
+          "preview": "figures/final_plots/phewas_plots/qq_plot_chr12-46897663-INV-16289.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "qq_plot_chr17-45585160-INV-706887.pdf",
+          "href": "figures/final_plots/phewas_plots/qq_plot_chr17-45585160-INV-706887.pdf",
+          "preview": "figures/final_plots/phewas_plots/qq_plot_chr17-45585160-INV-706887.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "qq_plot_chr4-33098029-INV-7075.pdf",
+          "href": "figures/final_plots/phewas_plots/qq_plot_chr4-33098029-INV-7075.pdf",
+          "preview": "figures/final_plots/phewas_plots/qq_plot_chr4-33098029-INV-7075.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "qq_plot_chr6-141867315-INV-29159.pdf",
+          "href": "figures/final_plots/phewas_plots/qq_plot_chr6-141867315-INV-29159.pdf",
+          "preview": "figures/final_plots/phewas_plots/qq_plot_chr6-141867315-INV-29159.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "qq_plot_chr6-167181003-INV-209976.pdf",
+          "href": "figures/final_plots/phewas_plots/qq_plot_chr6-167181003-INV-209976.pdf",
+          "preview": "figures/final_plots/phewas_plots/qq_plot_chr6-167181003-INV-209976.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "qq_plot_chr8-7301025-INV-5297356.pdf",
+          "href": "figures/final_plots/phewas_plots/qq_plot_chr8-7301025-INV-5297356.pdf",
+          "preview": "figures/final_plots/phewas_plots/qq_plot_chr8-7301025-INV-5297356.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "qq_plot_overall.pdf",
+          "href": "figures/final_plots/phewas_plots/qq_plot_overall.pdf",
+          "preview": "figures/final_plots/phewas_plots/qq_plot_overall.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "qq_plot_overall.png",
+          "href": "figures/final_plots/phewas_plots/qq_plot_overall.png",
+          "preview": "figures/final_plots/phewas_plots/qq_plot_overall.png",
+          "type": "image"
         }
       ]
     },
@@ -2931,6 +2985,102 @@
           "name": "phewas_chr8_7_301_024-12_598_379.png",
           "href": "figures/phewas_plots/phewas_chr8_7_301_024-12_598_379.png",
           "preview": "figures/phewas_plots/phewas_chr8_7_301_024-12_598_379.png",
+          "type": "image"
+        },
+        {
+          "name": "qq_plot_chr10-79542902-INV-674513.pdf",
+          "href": "figures/phewas_plots/qq_plot_chr10-79542902-INV-674513.pdf",
+          "preview": "figures/phewas_plots/qq_plot_chr10-79542902-INV-674513.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "qq_plot_chr10-79542902-INV-674513.png",
+          "href": "figures/phewas_plots/qq_plot_chr10-79542902-INV-674513.png",
+          "preview": "figures/phewas_plots/qq_plot_chr10-79542902-INV-674513.png",
+          "type": "image"
+        },
+        {
+          "name": "qq_plot_chr12-46897663-INV-16289.pdf",
+          "href": "figures/phewas_plots/qq_plot_chr12-46897663-INV-16289.pdf",
+          "preview": "figures/phewas_plots/qq_plot_chr12-46897663-INV-16289.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "qq_plot_chr12-46897663-INV-16289.png",
+          "href": "figures/phewas_plots/qq_plot_chr12-46897663-INV-16289.png",
+          "preview": "figures/phewas_plots/qq_plot_chr12-46897663-INV-16289.png",
+          "type": "image"
+        },
+        {
+          "name": "qq_plot_chr17-45585160-INV-706887.pdf",
+          "href": "figures/phewas_plots/qq_plot_chr17-45585160-INV-706887.pdf",
+          "preview": "figures/phewas_plots/qq_plot_chr17-45585160-INV-706887.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "qq_plot_chr17-45585160-INV-706887.png",
+          "href": "figures/phewas_plots/qq_plot_chr17-45585160-INV-706887.png",
+          "preview": "figures/phewas_plots/qq_plot_chr17-45585160-INV-706887.png",
+          "type": "image"
+        },
+        {
+          "name": "qq_plot_chr4-33098029-INV-7075.pdf",
+          "href": "figures/phewas_plots/qq_plot_chr4-33098029-INV-7075.pdf",
+          "preview": "figures/phewas_plots/qq_plot_chr4-33098029-INV-7075.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "qq_plot_chr4-33098029-INV-7075.png",
+          "href": "figures/phewas_plots/qq_plot_chr4-33098029-INV-7075.png",
+          "preview": "figures/phewas_plots/qq_plot_chr4-33098029-INV-7075.png",
+          "type": "image"
+        },
+        {
+          "name": "qq_plot_chr6-141867315-INV-29159.pdf",
+          "href": "figures/phewas_plots/qq_plot_chr6-141867315-INV-29159.pdf",
+          "preview": "figures/phewas_plots/qq_plot_chr6-141867315-INV-29159.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "qq_plot_chr6-141867315-INV-29159.png",
+          "href": "figures/phewas_plots/qq_plot_chr6-141867315-INV-29159.png",
+          "preview": "figures/phewas_plots/qq_plot_chr6-141867315-INV-29159.png",
+          "type": "image"
+        },
+        {
+          "name": "qq_plot_chr6-167181003-INV-209976.pdf",
+          "href": "figures/phewas_plots/qq_plot_chr6-167181003-INV-209976.pdf",
+          "preview": "figures/phewas_plots/qq_plot_chr6-167181003-INV-209976.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "qq_plot_chr6-167181003-INV-209976.png",
+          "href": "figures/phewas_plots/qq_plot_chr6-167181003-INV-209976.png",
+          "preview": "figures/phewas_plots/qq_plot_chr6-167181003-INV-209976.png",
+          "type": "image"
+        },
+        {
+          "name": "qq_plot_chr8-7301025-INV-5297356.pdf",
+          "href": "figures/phewas_plots/qq_plot_chr8-7301025-INV-5297356.pdf",
+          "preview": "figures/phewas_plots/qq_plot_chr8-7301025-INV-5297356.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "qq_plot_chr8-7301025-INV-5297356.png",
+          "href": "figures/phewas_plots/qq_plot_chr8-7301025-INV-5297356.png",
+          "preview": "figures/phewas_plots/qq_plot_chr8-7301025-INV-5297356.png",
+          "type": "image"
+        },
+        {
+          "name": "qq_plot_overall.pdf",
+          "href": "figures/phewas_plots/qq_plot_overall.pdf",
+          "preview": "figures/phewas_plots/qq_plot_overall.pdf",
+          "type": "pdf"
+        },
+        {
+          "name": "qq_plot_overall.png",
+          "href": "figures/phewas_plots/qq_plot_overall.png",
+          "preview": "figures/phewas_plots/qq_plot_overall.png",
           "type": "image"
         }
       ]
