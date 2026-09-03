@@ -1,10 +1,7 @@
 """Canonical final ordering of supplementary figures and tables.
 
 The response letter contains several figures shown only to reviewers.  They are
-not automatically supplementary figures.  The 17q21.31
-tagging-SNP-versus-imputed-dosage comparison was Figure S11 of the submitted
-supplement and is response-only in the revision; the tagging-SNP association
-results are given in Table S21.
+not automatically supplementary figures.
 """
 
 from __future__ import annotations
@@ -256,8 +253,6 @@ FINAL_SUPPLEMENTARY_TABLE_ORDER = (
 
 RESPONSE_ONLY_FIGURE_TITLES = (
     "Examples of inversion alignments to chimpanzee used for polarization",
-    "Comparison of 17q21.31 PheWAS results using imputed inversion dosage "
-    "versus tagging-SNP dosage",
 )
 
 
