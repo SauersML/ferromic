@@ -171,7 +171,7 @@ PHEWAS_COLUMN_DEFS: Dict[str, str] = OrderedDict(
         ("N_Cases", "Number of cases (participants with the phenotype)."),
         (
             "P_Value_unadjusted",
-            "Nominal p-value: likelihood ratio test for stable fits; score test or Firth penalized likelihood when the standard model did not converge or showed separation.",
+            "Nominal p-value from a likelihood ratio test, or from a score test or Firth penalized likelihood when the model did not converge.",
         ),
         (
             "P_Source_x",
@@ -183,11 +183,11 @@ PHEWAS_COLUMN_DEFS: Dict[str, str] = OrderedDict(
         ),
         (
             "Inference_Type",
-            "Inference method ('mle', 'firth', or 'score'); 'firth' is penalized regression, used for rare phenotypes or separation.",
+            "Inference method. Firth is penalized regression, used for rare phenotypes.",
         ),
         (
             "Model_Notes",
-            "Diagnostic flags from model fitting, such as 'sex_restricted' (analysis limited to one sex) or 'ridge_seeded' (ridge regularization used to reach convergence).",
+            "Model fitting flags, such as sex_restricted or ridge_seeded.",
         ),
         (
             "Sig_Global",
@@ -199,7 +199,7 @@ PHEWAS_COLUMN_DEFS: Dict[str, str] = OrderedDict(
         ),
         (
             "P_LRT_AncestryxDosage",
-            "P-value of the ancestry by inversion interaction (likelihood ratio or Rao score test of the model with interaction terms against the base model), testing whether the inversion effect differs by genetic ancestry.",
+            "P-value for the ancestry by inversion interaction, testing whether the inversion effect differs by ancestry.",
         ),
         (
             "P_Stage2_Valid",
@@ -216,136 +216,136 @@ PHEWAS_COLUMN_DEFS: Dict[str, str] = OrderedDict(
         ("Stage2_Model_Notes", "Diagnostic flags from the interaction model fit."),
         (
             "EUR_N",
-            "Participants in the European ancestry stratum.",
+            "Participants, European stratum.",
         ),
-        ("EUR_N_Cases", "Number of cases in the European ancestry stratum."),
-        ("EUR_N_Controls", "Number of controls in the European ancestry stratum."),
+        ("EUR_N_Cases", "Cases, European stratum."),
+        ("EUR_N_Controls", "Controls, European stratum."),
         (
             "EUR_OR",
-            "Odds ratio within the European ancestry stratum.",
+            "Odds ratio, European stratum.",
         ),
-        ("EUR_P", "Nominal p-value for the association within the European ancestry stratum."),
+        ("EUR_P", "Nominal p-value, European stratum."),
         (
             "EUR_P_Source",
-            "Test that produced the p-value in the European ancestry stratum.",
+            "Test producing the p-value, European stratum.",
         ),
         (
             "EUR_Inference_Type",
-            "Inference method in the European ancestry stratum.",
+            "Inference method, European stratum.",
         ),
-        ("EUR_CI_Method", "Method used for confidence intervals in the European ancestry stratum."),
-        ("EUR_CI_LO_OR", "Lower bound of the 95% confidence interval, European ancestry stratum."),
-        ("EUR_CI_HI_OR", "Upper bound of the 95% confidence interval, European ancestry stratum."),
+        ("EUR_CI_Method", "Confidence interval method, European stratum."),
+        ("EUR_CI_LO_OR", "Lower 95% confidence bound, European stratum."),
+        ("EUR_CI_HI_OR", "Upper 95% confidence bound, European stratum."),
         (
             "AFR_N",
-            "Participants in the African ancestry stratum.",
+            "Participants, African stratum.",
         ),
-        ("AFR_N_Cases", "Number of cases in the African ancestry stratum."),
-        ("AFR_N_Controls", "Number of controls in the African ancestry stratum."),
+        ("AFR_N_Cases", "Cases, African stratum."),
+        ("AFR_N_Controls", "Controls, African stratum."),
         (
             "AFR_OR",
-            "Odds ratio within the African ancestry stratum.",
+            "Odds ratio, African stratum.",
         ),
-        ("AFR_P", "Nominal p-value for the association within the African ancestry stratum."),
+        ("AFR_P", "Nominal p-value, African stratum."),
         (
             "AFR_P_Source",
-            "Test that produced the p-value in the African ancestry stratum.",
+            "Test producing the p-value, African stratum.",
         ),
         (
             "AFR_Inference_Type",
-            "Inference method in the African ancestry stratum.",
+            "Inference method, African stratum.",
         ),
-        ("AFR_CI_Method", "Method used for confidence intervals in the African ancestry stratum."),
-        ("AFR_CI_LO_OR", "Lower bound of the 95% confidence interval, African ancestry stratum."),
-        ("AFR_CI_HI_OR", "Upper bound of the 95% confidence interval, African ancestry stratum."),
+        ("AFR_CI_Method", "Confidence interval method, African stratum."),
+        ("AFR_CI_LO_OR", "Lower 95% confidence bound, African stratum."),
+        ("AFR_CI_HI_OR", "Upper 95% confidence bound, African stratum."),
         (
             "AMR_N",
-            "Participants in the Admixed American ancestry stratum.",
+            "Participants, Admixed American stratum.",
         ),
-        ("AMR_N_Cases", "Number of cases in the Admixed American ancestry stratum."),
-        ("AMR_N_Controls", "Number of controls in the Admixed American ancestry stratum."),
+        ("AMR_N_Cases", "Cases, Admixed American stratum."),
+        ("AMR_N_Controls", "Controls, Admixed American stratum."),
         (
             "AMR_OR",
-            "Odds ratio within the Admixed American ancestry stratum.",
+            "Odds ratio, Admixed American stratum.",
         ),
-        ("AMR_P", "Nominal p-value for the association within the Admixed American ancestry stratum."),
+        ("AMR_P", "Nominal p-value, Admixed American stratum."),
         (
             "AMR_P_Source",
-            "Test that produced the p-value in the Admixed American ancestry stratum.",
+            "Test producing the p-value, Admixed American stratum.",
         ),
         (
             "AMR_Inference_Type",
-            "Inference method in the Admixed American ancestry stratum.",
+            "Inference method, Admixed American stratum.",
         ),
-        ("AMR_CI_Method", "Method used for confidence intervals in the Admixed American ancestry stratum."),
-        ("AMR_CI_LO_OR", "Lower bound of the 95% confidence interval, Admixed American ancestry stratum."),
-        ("AMR_CI_HI_OR", "Upper bound of the 95% confidence interval, Admixed American ancestry stratum."),
+        ("AMR_CI_Method", "Confidence interval method, Admixed American stratum."),
+        ("AMR_CI_LO_OR", "Lower 95% confidence bound, Admixed American stratum."),
+        ("AMR_CI_HI_OR", "Upper 95% confidence bound, Admixed American stratum."),
         (
             "SAS_N",
-            "Participants in the South Asian ancestry stratum.",
+            "Participants, South Asian stratum.",
         ),
-        ("SAS_N_Cases", "Number of cases in the South Asian ancestry stratum."),
-        ("SAS_N_Controls", "Number of controls in the South Asian ancestry stratum."),
+        ("SAS_N_Cases", "Cases, South Asian stratum."),
+        ("SAS_N_Controls", "Controls, South Asian stratum."),
         (
             "SAS_OR",
-            "Odds ratio within the South Asian ancestry stratum.",
+            "Odds ratio, South Asian stratum.",
         ),
-        ("SAS_P", "Nominal p-value for the association within the South Asian ancestry stratum."),
+        ("SAS_P", "Nominal p-value, South Asian stratum."),
         (
             "SAS_P_Source",
-            "Test that produced the p-value in the South Asian ancestry stratum.",
+            "Test producing the p-value, South Asian stratum.",
         ),
         (
             "SAS_Inference_Type",
-            "Inference method in the South Asian ancestry stratum.",
+            "Inference method, South Asian stratum.",
         ),
-        ("SAS_CI_Method", "Method used for confidence intervals in the South Asian ancestry stratum."),
-        ("SAS_CI_LO_OR", "Lower bound of the 95% confidence interval, South Asian ancestry stratum."),
-        ("SAS_CI_HI_OR", "Upper bound of the 95% confidence interval, South Asian ancestry stratum."),
+        ("SAS_CI_Method", "Confidence interval method, South Asian stratum."),
+        ("SAS_CI_LO_OR", "Lower 95% confidence bound, South Asian stratum."),
+        ("SAS_CI_HI_OR", "Upper 95% confidence bound, South Asian stratum."),
         (
             "EAS_N",
-            "Participants in the East Asian ancestry stratum.",
+            "Participants, East Asian stratum.",
         ),
-        ("EAS_N_Cases", "Number of cases in the East Asian ancestry stratum."),
-        ("EAS_N_Controls", "Number of controls in the East Asian ancestry stratum."),
+        ("EAS_N_Cases", "Cases, East Asian stratum."),
+        ("EAS_N_Controls", "Controls, East Asian stratum."),
         (
             "EAS_OR",
-            "Odds ratio within the East Asian ancestry stratum.",
+            "Odds ratio, East Asian stratum.",
         ),
-        ("EAS_P", "Nominal p-value for the association within the East Asian ancestry stratum."),
+        ("EAS_P", "Nominal p-value, East Asian stratum."),
         (
             "EAS_P_Source",
-            "Test that produced the p-value in the East Asian ancestry stratum.",
+            "Test producing the p-value, East Asian stratum.",
         ),
         (
             "EAS_Inference_Type",
-            "Inference method in the East Asian ancestry stratum.",
+            "Inference method, East Asian stratum.",
         ),
-        ("EAS_CI_Method", "Method used for confidence intervals in the East Asian ancestry stratum."),
-        ("EAS_CI_LO_OR", "Lower bound of the 95% confidence interval, East Asian ancestry stratum."),
-        ("EAS_CI_HI_OR", "Upper bound of the 95% confidence interval, East Asian ancestry stratum."),
+        ("EAS_CI_Method", "Confidence interval method, East Asian stratum."),
+        ("EAS_CI_LO_OR", "Lower 95% confidence bound, East Asian stratum."),
+        ("EAS_CI_HI_OR", "Upper 95% confidence bound, East Asian stratum."),
         (
             "MID_N",
-            "Participants in the Middle Eastern ancestry stratum.",
+            "Participants, Middle Eastern stratum.",
         ),
-        ("MID_N_Cases", "Number of cases in the Middle Eastern ancestry stratum."),
-        ("MID_N_Controls", "Number of controls in the Middle Eastern ancestry stratum."),
+        ("MID_N_Cases", "Cases, Middle Eastern stratum."),
+        ("MID_N_Controls", "Controls, Middle Eastern stratum."),
         (
             "MID_OR",
-            "Odds ratio within the Middle Eastern ancestry stratum.",
+            "Odds ratio, Middle Eastern stratum.",
         ),
-        ("MID_P", "Nominal p-value for the association within the Middle Eastern ancestry stratum."),
+        ("MID_P", "Nominal p-value, Middle Eastern stratum."),
         (
             "MID_P_Source",
-            "Test that produced the p-value in the Middle Eastern ancestry stratum.",
+            "Test producing the p-value, Middle Eastern stratum.",
         ),
         (
             "MID_Inference_Type",
-            "Inference method in the Middle Eastern ancestry stratum.",
+            "Inference method, Middle Eastern stratum.",
         ),
-        ("MID_CI_Method", "Method used for confidence intervals in the Middle Eastern ancestry stratum."),
-        ("MID_CI_LO_OR", "Lower bound of the 95% confidence interval, Middle Eastern ancestry stratum."),
-        ("MID_CI_HI_OR", "Upper bound of the 95% confidence interval, Middle Eastern ancestry stratum."),
+        ("MID_CI_Method", "Confidence interval method, Middle Eastern stratum."),
+        ("MID_CI_LO_OR", "Lower 95% confidence bound, Middle Eastern stratum."),
+        ("MID_CI_HI_OR", "Upper 95% confidence bound, Middle Eastern stratum."),
     ]
 )
 
@@ -367,7 +367,7 @@ WITHIN_ANCESTRY_PHEWAS_COLUMN_DEFS: Dict[str, str] = OrderedDict(
         ("within_p", "Nominal p-value from the within-ancestry principal component model."),
         (
             "within_q_selected_set",
-            "Benjamini–Hochberg adjusted p-value across the selected phenotype set; descriptive only, since the set was chosen from the pooled results.",
+            "Benjamini–Hochberg adjusted p-value across the selected phenotype set.",
         ),
         ("within_n_total", "Participants in the within-ancestry principal component model."),
         ("within_n_cases", "Cases in the within-ancestry principal component model."),
@@ -2127,11 +2127,9 @@ def build_workbook(output_path: Path) -> None:
         SheetInfo(
             name="CDS conservation genes",
             description=(
-                "Permutation test of protein-coding gene conservation for the 66 genes with at least four haplotypes in each "
-                "orientation and at least two distinct coding sequences among the haplotypes (genes whose coding sequence is "
-                "identical across all haplotypes cannot differ between orientations and were excluded). The statistic is the difference between inverted and direct haplotypes in the proportion of "
-                "identical coding-sequence pairs. Orientation labels were shuffled once per inversion and the same shuffled "
-                "labels were applied to every gene at that locus, preserving the dependence among genes at the same locus."
+                "Permutation test of protein-coding gene conservation for the 66 genes with at least four haplotypes in "
+                "each orientation and at least two distinct coding sequences. Orientation labels were shuffled once per "
+                "inversion and applied to every gene at that locus."
             ),
             column_defs=GENE_CONSERVATION_COLUMN_DEFS,
             loader=_load_gene_conservation,
@@ -2143,8 +2141,7 @@ def build_workbook(output_path: Path) -> None:
             name="dN/dS (ω) results",
             description=(
                 "dN/dS (ω) tests for genes whose selective regime differs between direct and inverted haplotypes. NA marks "
-                "inversion–CDS pairs excluded because of an uninformative tree topology, too few haplotypes, or a failed PAML "
-                "run."
+                "pairs excluded for an uninformative tree topology, too few haplotypes, or a failed PAML run."
             ),
             column_defs=PAML_COLUMN_DEFS,
             loader=_load_paml_results,
@@ -2157,9 +2154,9 @@ def build_workbook(output_path: Path) -> None:
             description=(
                 "Performance of the partial least squares regression models that impute inversion dosage from flanking SNP "
                 "genotypes. Models were trained on the 82 phased haplotypes of the reference panel. Allele frequencies are "
-                "reported only for inversions imputed with r² above 0.5; NA marks the rest. Each frequency is the mean "
-                "predicted dosage divided by two. The regression is not bounded to the interval from zero to two, so a "
-                "locus that is close to fixed for one orientation in a population can give a frequency slightly below zero."
+                "reported only for inversions with r² above 0.5. Each frequency is the mean predicted dosage divided by "
+                "two. Predicted dosages are unbounded, so a locus near fixation in a population can give a frequency "
+                "slightly below zero."
             ),
             column_defs=IMPUTATION_COLUMN_DEFS,
             loader=_load_imputation_results,
@@ -2170,12 +2167,11 @@ def build_workbook(output_path: Path) -> None:
         SheetInfo(
             name="PheWAS results",
             description=(
-                "Phenome-wide association study (PheWAS) of imputed inversion dosage against electronic health record phenotypes "
-                "in the NIH All of Us cohort (v8), using logistic regression adjusted for age, age squared, genetically inferred "
-                "sex, and 16 global genetic principal components. In the main-analysis columns, NA marks models that did not "
-                "converge or gave unstable fits. Interaction and ancestry-specific tests were run only for associations that "
-                "passed the main FDR threshold, so NA in those columns marks a test that was not run or an ancestry stratum with "
-                "too few cases."
+                "Phenome-wide association study (PheWAS) of imputed inversion dosage against electronic health record "
+                "phenotypes in the NIH All of Us cohort (v8), using logistic regression adjusted for age, age squared, "
+                "genetically inferred sex, and 16 global genetic principal components. NA marks a model that did not "
+                "converge. Interaction and ancestry-specific tests were run only for associations passing the FDR "
+                "threshold, so NA in those columns means the test was not run or the stratum had too few cases."
             ),
             column_defs=PHEWAS_COLUMN_DEFS,
             loader=_load_phewas_results,
@@ -2187,11 +2183,11 @@ def build_workbook(output_path: Path) -> None:
             name="Within-ancestry PC PheWAS",
             description=(
                 "Sensitivity analysis for residual fine-scale population structure. The 37 phenotypes associated with an "
-                "inversion in the pooled PheWAS were retested against all seven inversions within each All of Us genetic ancestry "
-                "group (AFR, AMR, EAS, EUR, MID, and SAS), adjusting for age, age squared, genetically inferred sex, and 16 "
-                "principal components computed within that group. Estimates from the ancestry-stratified models with the 16 "
-                "global principal components are given alongside for comparison. Because these phenotypes were selected from the "
-                "pooled results, the q-values within the selected set are descriptive and are not independent replication tests."
+                "inversion in the pooled PheWAS were retested against all seven inversions within each All of Us genetic "
+                "ancestry group (AFR, AMR, EAS, EUR, MID, and SAS), adjusting for age, age squared, genetically inferred "
+                "sex, and 16 principal components computed within that group. Estimates from the ancestry-stratified "
+                "models with the 16 global principal components are also reported. Because these phenotypes were selected "
+                "from the pooled results, the q-values within the selected set are descriptive."
             ),
             column_defs=WITHIN_ANCESTRY_PHEWAS_COLUMN_DEFS,
             loader=_load_within_ancestry_phewas,
@@ -2215,10 +2211,10 @@ def build_workbook(output_path: Path) -> None:
         SheetInfo(
             name="Ancient DNA best tagging SNPs",
             description=(
-                "Best tagging SNP for each inversion locus and its selection statistics (S and P_X) from the AGES ancient DNA "
-                "analysis of West Eurasian genomes. Allele frequencies are given separately for direct and inverted haplotypes. "
-                "Adjusted p-values are Benjamini–Hochberg corrected across the inversions that passed quality filters. NA marks "
-                "loci excluded for the reason given in the exclusion_reasons column."
+                "Best tagging SNP for each inversion locus and its selection statistics (S and P_X) from the AGES ancient "
+                "DNA analysis of West Eurasian genomes. Allele frequencies are reported for direct and inverted "
+                "haplotypes. P-values are Benjamini–Hochberg adjusted across the inversions that passed quality filters. "
+                "The exclusion_reasons column gives the reason for any excluded locus."
             ),
             column_defs=BEST_TAGGING_COLUMN_DEFS,
             loader=_load_best_tagging_snps,
@@ -2229,12 +2225,10 @@ def build_workbook(output_path: Path) -> None:
         SheetInfo(
             name="17q21 tagging PheWAS",
             description=(
-                "PheWAS of the 17q21 inversion using a tag-SNP hard call in place of imputed dosage, to check that the "
-                "associations at this locus do not depend on how the genotype was determined. A sample is called only when "
-                "all three tag SNPs at chr17:45,974,480, chr17:45,996,523 and chr17:46,003,698 agree "
-                "(imputation/tagging_snp_inversion_dosages.py); mixed or missing genotypes are left uncalled. "
-                "NA marks models that did not "
-                "converge or gave unstable fits."
+                "PheWAS of the 17q21 inversion using a tag-SNP hard call in place of imputed dosage. A sample is called "
+                "only when all three tag SNPs at chr17:45,974,480, chr17:45,996,523 and chr17:46,003,698 agree "
+                "(imputation/tagging_snp_inversion_dosages.py); mixed or missing genotypes are left uncalled. NA marks "
+                "models that did not converge or gave unstable fits."
             ),
             column_defs=TAG_PHEWAS_COLUMN_DEFS,
             loader=_load_phewas_tagging,
