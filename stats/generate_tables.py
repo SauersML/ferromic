@@ -2169,9 +2169,10 @@ def build_workbook(output_path: Path) -> None:
             description=(
                 "Phenome-wide association study (PheWAS) of imputed inversion dosage against electronic health record "
                 "phenotypes in the NIH All of Us cohort (v8), using logistic regression adjusted for age, age squared, "
-                "genetically inferred sex, and 16 global genetic principal components. NA marks a model that did not "
-                "converge. Interaction and ancestry-specific tests were run only for associations passing the FDR "
-                "threshold, so NA in those columns means the test was not run or the stratum had too few cases."
+                "genetically inferred sex, and 16 global genetic principal components. NA marks a model that returned no "
+                "valid estimate. Almost all are sex-restricted phenotypes, mostly obstetric, where the Firth refit still "
+                "failed. Interaction and ancestry-specific tests were run only for associations passing the FDR threshold, "
+                "so NA in those columns means the test was not run or the stratum had too few cases."
             ),
             column_defs=PHEWAS_COLUMN_DEFS,
             loader=_load_phewas_results,
@@ -2214,7 +2215,7 @@ def build_workbook(output_path: Path) -> None:
                 "Best tagging SNP for each inversion locus and its selection statistics (S and P_X) from the AGES ancient "
                 "DNA analysis of West Eurasian genomes. Allele frequencies are reported for direct and inverted "
                 "haplotypes. P-values are Benjamini–Hochberg adjusted across the inversions that passed quality filters. "
-                "The exclusion_reasons column gives the reason for any excluded locus."
+                "The Reasons for exclusion column gives the reason for any excluded locus."
             ),
             column_defs=BEST_TAGGING_COLUMN_DEFS,
             loader=_load_best_tagging_snps,
