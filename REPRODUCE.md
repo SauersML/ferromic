@@ -84,7 +84,7 @@ resolve inclusively, which is the conservative choice for an exact test.
   every one of them from a clean checkout:
   `PGS_control_plot.py`, `chr17_inversion_tag_correlation.py`, `family_forest.py`,
   `forest.py`, `manhattan_phe.py`, `overall_AF_scatterplot.py`,
-  `phewas_ext_replicate.py`, `pop_dosage_plot.py`, `qq_plot.py`.
+  `phewas_ext_replicate.py`, `pop_dosage_plot.py`.
   They are the complete list: an audit of all 94 scripts under `stats/` and `cds/`
   found exactly eleven that produce committed data without a workflow, and the
   other two (`divergence_da_dxy_by_type.py`, `divergence_edge_decay.py`) did run
