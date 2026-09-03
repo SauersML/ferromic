@@ -23,59 +23,259 @@
   "input_shards": [
     {
       "path": "gene_flux_shard0.csv",
-      "sha256": "b519b8190d631c4eb0184e2e3ca921e7abbcaa3ff5242eb8eab84ca66d33d2f5"
+      "sha256": "6144a8868de21d40d3ae525160c567a2424baffb6f3a44afdd27fd96dde36594"
     },
     {
       "path": "gene_flux_shard1.csv",
-      "sha256": "5e38328d5644c6cf6a14fb46e2e90620837254a03b78f501742393603c530794"
+      "sha256": "542fa357f17ec2da91fa15e64df644438e7fe9ce2653e0df1bf19332251d7447"
+    },
+    {
+      "path": "gene_flux_shard10.csv",
+      "sha256": "90214aeb6af353e76899f44881b0b8edce1760c5f748ed421bda78d3e1b6c9a0"
+    },
+    {
+      "path": "gene_flux_shard11.csv",
+      "sha256": "279a73b70dc48ba2030cdd3425dac357b6806aff279d617f3ca88e105fe34c5c"
+    },
+    {
+      "path": "gene_flux_shard12.csv",
+      "sha256": "57361b684f5f4899540f6ac189576bb0fafd2968b4bae3378573621faf07bdeb"
+    },
+    {
+      "path": "gene_flux_shard13.csv",
+      "sha256": "999322a4130d680105447f78979be5752fdf5fbc5197647bdb2acbd7e384ebac"
+    },
+    {
+      "path": "gene_flux_shard14.csv",
+      "sha256": "d580862dc3f588f57ef2960bbc09408624443a39b8b23b33960cfe218180ea9b"
     },
     {
       "path": "gene_flux_shard15.csv",
-      "sha256": "5d606a48094ef11c81b97aa22e642402823e05eeab0fb8412a42d8d318be06ff"
+      "sha256": "2555512e4430b1d6d62351c30b15e0f534ddf1bdb0908515a3439b282f077b32"
+    },
+    {
+      "path": "gene_flux_shard16.csv",
+      "sha256": "476aa928c62a954650e68f23d85f096aca132d1862e9fba614c668fa9b92f2a0"
     },
     {
       "path": "gene_flux_shard17.csv",
-      "sha256": "dedb4c19211f655d2872e6255122dad5cc36781f75f0b5c4bc96adfd49f29c06"
+      "sha256": "8c4d48e336670aa2910f3a0980eddfab05e4ac5b85f268e464a3510c14b2b1b2"
+    },
+    {
+      "path": "gene_flux_shard18.csv",
+      "sha256": "b33e7e7b2895d481ad735ecb054c3a9cc6a48f70d42733a54c95c4beb6fda5d4"
+    },
+    {
+      "path": "gene_flux_shard19.csv",
+      "sha256": "640b7401deed14259d0f0313c602c7a393358cce9017b8721fabc538e9e811b5"
     },
     {
       "path": "gene_flux_shard2.csv",
-      "sha256": "31bda6658dbb4b7f7f4ffa0c73e56c487ba1464dc3144aa398856ca059a6ffe8"
+      "sha256": "06d9b22b4ce9aceed4d817bbbd3a515804ed2ac16ff0f74738551abb6899d22a"
+    },
+    {
+      "path": "gene_flux_shard20.csv",
+      "sha256": "34fd6eaeb332e8e93082f100c00b335459cb3329acb35d16517f6144b6086075"
+    },
+    {
+      "path": "gene_flux_shard21.csv",
+      "sha256": "3bc1086588053950e8d90b09f4226c7cfbed04e0d3f1b70c459b5cb0be53f61d"
+    },
+    {
+      "path": "gene_flux_shard22.csv",
+      "sha256": "ad7b1aa0d4fab0d0f280b9e49ce4c164a5c57b39afadcc03eb3c72deee733ad9"
     },
     {
       "path": "gene_flux_shard23.csv",
-      "sha256": "3263c3c6cc26f5842859e8cd5db8f64b393fdb580c44ab1cf2de70226c36a9d1"
+      "sha256": "3c9610ddaceff07aaf8d0961640248f0149bdace55de36585a2c4498757ea604"
+    },
+    {
+      "path": "gene_flux_shard24.csv",
+      "sha256": "866ae9de6b9cb989a05033b27ede7e2edcb6942302e5ecf1af0df1815001974d"
     },
     {
       "path": "gene_flux_shard25.csv",
-      "sha256": "d5060d9172a15b60fb18234a62249d1b90b86ea92114380618c489695a52a269"
+      "sha256": "3f5c4988c16597054fa9b922a36627a2c9bf5b4569989828328347ac6243dce3"
+    },
+    {
+      "path": "gene_flux_shard26.csv",
+      "sha256": "31ca2e8063dcc65c1b5faf5d7cbfb4841cc1503ebc39147ef7cba563194963c8"
+    },
+    {
+      "path": "gene_flux_shard27.csv",
+      "sha256": "3996531d839823b12c3ffec33e8dbe2f8c969226eabb00064474da5616f812c0"
+    },
+    {
+      "path": "gene_flux_shard28.csv",
+      "sha256": "1c505a422b4ee50f41c47a707ad71751eeeaf544f8a4303289d3c3cddb4d50f6"
+    },
+    {
+      "path": "gene_flux_shard29.csv",
+      "sha256": "edb03df321042939a41c9e76353a232d596dcdf950a952b07e05002d42d38823"
     },
     {
       "path": "gene_flux_shard3.csv",
-      "sha256": "5b863afacd6f2419e97386106c062ec06c37c1a38e3f7e751fa25534d5922738"
+      "sha256": "bbba8f474f219f09e68de4ecaafe0ea04e45b5ba84d6b1c229668d303381a8bd"
+    },
+    {
+      "path": "gene_flux_shard30.csv",
+      "sha256": "5a07105d1ca31413e47b2969ef06d9f8477a2cbafb2dd7ac84aac7713abbcbfd"
     },
     {
       "path": "gene_flux_shard31.csv",
-      "sha256": "64a86b67ede299318149f4d07ca1b1aa7ed8c0422f96e187d54740cd7a9828b3"
+      "sha256": "afba41ea80626bd8ba9f8a16bc4b46907e36bdf59c434f720ee59a80d242a7ea"
+    },
+    {
+      "path": "gene_flux_shard32.csv",
+      "sha256": "6586754b4ad93bff20c08b1995bb149ec704732ec4e9b20d73bdf15dd4d283f3"
+    },
+    {
+      "path": "gene_flux_shard33.csv",
+      "sha256": "589730808e3e16f92298f5b276faaf89c362dab143a868ab945b5357e28766b6"
+    },
+    {
+      "path": "gene_flux_shard34.csv",
+      "sha256": "aa3b0588976615e4f8a5dfebfa57aa05bd6247e1788bbd9ec813149e2f649e93"
+    },
+    {
+      "path": "gene_flux_shard35.csv",
+      "sha256": "89c32844222105996cb9a19bc2f333d33f2df3bedaeae9729f7ca96907ef7a51"
+    },
+    {
+      "path": "gene_flux_shard36.csv",
+      "sha256": "1bcf71fa64cdfa056a770639bb872327b7153707e9b429916dbdea7baf50c583"
+    },
+    {
+      "path": "gene_flux_shard37.csv",
+      "sha256": "b8204a1c1420bab88600cae9eedba1fbc9947244a29f37a7c9118d3298ef7755"
+    },
+    {
+      "path": "gene_flux_shard38.csv",
+      "sha256": "2f2984d3e654b8d01ab83d10dd5b0fcccb52399bc0ad31b1a413b6ce7833bd6c"
+    },
+    {
+      "path": "gene_flux_shard39.csv",
+      "sha256": "4e6a76a282d919e291c615b425ab02b12cf6cb1141dfdc074e63341d44e6ab88"
     },
     {
       "path": "gene_flux_shard4.csv",
-      "sha256": "07f09d1f4576f326189a3dea738c8fcbd59a6c812a822045f2d16a86de9fab07"
+      "sha256": "ca7b95fbfb6f72c49a7e387d3fa3b6e645f30c7453576f2a529d7bd73e3913c0"
+    },
+    {
+      "path": "gene_flux_shard40.csv",
+      "sha256": "e8c53439027e66c9265e6e9cb5fdbef05e4079e63edc5c628ee907f1c937034e"
+    },
+    {
+      "path": "gene_flux_shard41.csv",
+      "sha256": "9755250c93c693ffa045dc5c3897695ea78f88390de2330658d260a34323a25e"
+    },
+    {
+      "path": "gene_flux_shard42.csv",
+      "sha256": "830309d5896f9ac8dce8891fd6adf89a2ab600c1b93d4b5bd49860152b046273"
+    },
+    {
+      "path": "gene_flux_shard43.csv",
+      "sha256": "60dc1a252acfaab6768fc9da584db81086876d1df446684c293d4fa727ef44c0"
+    },
+    {
+      "path": "gene_flux_shard44.csv",
+      "sha256": "16319c489b04647b84631242949b9196a43d169a74a93874c08008b992fd3f22"
+    },
+    {
+      "path": "gene_flux_shard45.csv",
+      "sha256": "3b45e5836ad72370bfe28e5b7244ff86d2e3439d214b3b3cdc134d76af6c9e95"
+    },
+    {
+      "path": "gene_flux_shard46.csv",
+      "sha256": "75a785579659030466a5fc0bfaa16c9c219876de27819cdd3ce2a3e8e2e1a603"
+    },
+    {
+      "path": "gene_flux_shard47.csv",
+      "sha256": "eda000244192249400e209bf279917a4252a235caddbe3df2028ebc27a379d43"
+    },
+    {
+      "path": "gene_flux_shard48.csv",
+      "sha256": "05ed3ecda2a41c3b8e11727e8f4d621e38eed81d7cbe0ebaebe83c70cacd2c91"
+    },
+    {
+      "path": "gene_flux_shard49.csv",
+      "sha256": "19a1ff00b8e3b4d55941ddd614030f830361f46260ba6ae7dccfa0df48336879"
     },
     {
       "path": "gene_flux_shard5.csv",
-      "sha256": "cbc7c8bce408dc6685efe6d1bed1244af4d6680480310ce0f1462648edf0c19d"
+      "sha256": "2ed7d146c9368f829765c2c771306ec3b0afa337d21c3d6191b5d7dcfaebe3cb"
+    },
+    {
+      "path": "gene_flux_shard50.csv",
+      "sha256": "dea2b7d243d2b40718334e02942357c7549ba420d1b363c94a334ad51e197b6e"
+    },
+    {
+      "path": "gene_flux_shard51.csv",
+      "sha256": "87f79828313194e259182bd8f492efb0d8086758413a082298ce75cc8489532c"
+    },
+    {
+      "path": "gene_flux_shard52.csv",
+      "sha256": "88b2514fb7883ebfcb983018099e53b2fc136efb69ca9d9ebd766100ee8ea02e"
+    },
+    {
+      "path": "gene_flux_shard53.csv",
+      "sha256": "ea70bc67f2af9fc88de3918f341ad5fe64e755e24c9274fc81eed894c6508c26"
+    },
+    {
+      "path": "gene_flux_shard54.csv",
+      "sha256": "17789ecc93ea34a675346f3fa4c7241f19aa550b547c91689254f86d2f717466"
+    },
+    {
+      "path": "gene_flux_shard55.csv",
+      "sha256": "96e907d235dc3fbe3af93ba771b67fda70843304a77fbebb901e580fe8b284c6"
+    },
+    {
+      "path": "gene_flux_shard56.csv",
+      "sha256": "209162d6a382359fae9def7568ede841dfe736c9891933f676828614b6f203ab"
+    },
+    {
+      "path": "gene_flux_shard57.csv",
+      "sha256": "7a2c2350c9cd95e4464d1d5812837002895336b535adbf7107cd841413c84e9f"
+    },
+    {
+      "path": "gene_flux_shard58.csv",
+      "sha256": "3d9d055e44c11e600a4e727b88f50e5b612044a78f95a0b3db01fc1bc86d4210"
+    },
+    {
+      "path": "gene_flux_shard59.csv",
+      "sha256": "16a5d184549e765c59fe72f844f322d02aa7fef9f82ed4ecda739a7659a9473b"
     },
     {
       "path": "gene_flux_shard6.csv",
-      "sha256": "6c2c120e0ac33e1481715359e10bcd8cbf7197ffc915d92fa68f98000ae8e95c"
+      "sha256": "4020beb55ce10e15d5aff43dcbc7b4b4b90249a6dbab92b52a863a57fa759c34"
+    },
+    {
+      "path": "gene_flux_shard60.csv",
+      "sha256": "5a5a1bde612cccd6b48316d76f8216aa721bf5df21211e6af1b0e75c843fab0d"
+    },
+    {
+      "path": "gene_flux_shard61.csv",
+      "sha256": "2e154ce557f4f3267a064cbb37091e4e30a26d0528bfa392dd4cb95b651c7b5b"
+    },
+    {
+      "path": "gene_flux_shard62.csv",
+      "sha256": "8d80290d46ad19a637350f1b587627c6eac8cc2525b2e68160e28e8332065267"
+    },
+    {
+      "path": "gene_flux_shard63.csv",
+      "sha256": "c831d6535c767f0f72c321d4d21303386edf3f4fa1a87d98db718b7da9739fa8"
     },
     {
       "path": "gene_flux_shard7.csv",
-      "sha256": "217eda1976c141586ed1c675dc652cd4f0092edbccc4922233326b3e35d98a63"
+      "sha256": "a887b8affc8464eaab7439cf1482c30a816f19a828a0aa03c7bc5071c4c541d9"
+    },
+    {
+      "path": "gene_flux_shard8.csv",
+      "sha256": "e52630f31df1f05f7740386fdcb7081a83bc9314cc3398c376dc1a4c1e5cbaa1"
     },
     {
       "path": "gene_flux_shard9.csv",
-      "sha256": "520a65a17820d001ae0bf017acf748eb744b825e745b0bb872fd4a164a395ed4"
+      "sha256": "84caa2703622877aea5d634d9bd8b566628f7a8b9d74c2fa9fb2464c9600b180"
     }
   ],
   "inversion_frequencies": [
@@ -99,5 +299,10 @@
     "recurrent",
     "single"
   ],
-  "task": "gene_flux"
+  "task": "gene_flux",
+  "upstream": {
+    "ref": "main",
+    "repository": "https://github.com/hsiehphLab/inversionSimulation",
+    "resolved_commit": "af0bece3f9470a34788e44ec985f2fd01684a2ca"
+  }
 }
