@@ -27,7 +27,9 @@ from supplementary_inventory import (  # noqa: E402
 
 
 FIGURE_RE = re.compile(r"^Figure S(\d+)\.")
-APPENDIX_RE = re.compile(r"^SVbyEye alignment (\d+) of 93\. (\S+) \(")
+# Nine cytoband labels cover more than one locus (Xq28 covers seven), so the
+# coordinates are what make an appendix caption identify a single plot.
+APPENDIX_RE = re.compile(r"^SVbyEye alignment (\d+) of 93\. (\S+ \([^)]+\))\.")
 IMMUTABLE_PARTS = (
     "word/styles.xml",
     "word/settings.xml",
