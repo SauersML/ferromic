@@ -150,22 +150,39 @@ def verify(template: Path, assembled: Path) -> None:
     ]
     main_figure_extents = figure_extents[:21]
     appendix_extents = figure_extents[21:]
+    # The numbered figures are no longer padded into one frame: each is sized
+    # from its own aspect ratio, capped at the text width and at the resolution
+    # floor. Check the invariants that survive that, not uniformity.
+    text_width_emu = round(6.5 * 914400)
+    max_height_emu = round(7.5 * 914400)
+    too_wide = [e for e in main_figure_extents if e[0] > text_width_emu + 1000]
+    too_tall = [e for e in main_figure_extents if e[1] > max_height_emu + 1000]
+    too_small = [e for e in main_figure_extents if e[0] < round(2.5 * 914400)]
     if (
         len(figure_extents) != 114
-        or len(set(main_figure_extents)) != 1
-        or len(set(appendix_extents)) != 1
-        or main_figure_extents[0][0] != appendix_extents[0][0]
-        or main_figure_extents[0][1] <= appendix_extents[0][1]
+        or len(main_figure_extents) != 21
+        or too_wide
+        or too_tall
+        or too_small
     ):
         raise RuntimeError(
-            "Expected one fixed frame for the 21 numbered figures and one shorter, "
-            "full-width frame for the 93 SVbyEye plots; found "
-            f"main={sorted(set(main_figure_extents))}, "
-            f"appendix={sorted(set(appendix_extents))}"
+            "Numbered figures must each fit the text width and the page without "
+            "shrinking below 2.5 in; found "
+            f"count={len(figure_extents)}, too_wide={too_wide}, "
+            f"too_tall={too_tall}, too_small={too_small}"
+        )
+    if (
+        len(set(appendix_extents)) != 1
+        or appendix_extents[0][0] != text_width_emu
+    ):
+        raise RuntimeError(
+            "Expected one full-width frame for the 93 SVbyEye plots; found "
+            f"{sorted(set(appendix_extents))}"
         )
 
     print(
-        "Verified assembled supplement: S1-S21 ordered; response-only figures omitted; "
+        "Verified assembled supplement: S1-S21 ordered and each within the text "
+        "width and page height; response-only figures omitted; "
         "all 93 SVbyEye drawings use a full-width two-per-page frame; 93-caption "
         "portrait appendix present; template formatting parts and page geometry unchanged."
     )
