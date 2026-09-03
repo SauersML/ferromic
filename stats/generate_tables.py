@@ -104,7 +104,7 @@ GENE_CONSERVATION_COLUMN_DEFS: Dict[str, str] = OrderedDict(
         ("Recurrence class", "Single-event or recurrent (Porubsky et al. 2022)."),
         ("Direct haplotypes", "Direct haplotypes with a coding sequence."),
         ("Inverted haplotypes", "Inverted haplotypes with a coding sequence."),
-        ("Sequence classes", "Distinct coding sequences."),
+        ("Sequence classes", "Number of distinct coding sequences at this gene."),
         (
             "Orientation more conserved",
             "Orientation with the higher proportion of identical coding-sequence pairs.",
@@ -115,11 +115,11 @@ GENE_CONSERVATION_COLUMN_DEFS: Dict[str, str] = OrderedDict(
         ),
         (
             "Direct identical pair proportion",
-            "Identical pairs among direct haplotypes.",
+            "Fraction of direct haplotype pairs at this gene with identical coding sequence.",
         ),
         (
             "Inverted identical pair proportion",
-            "Identical pairs among inverted haplotypes.",
+            "Fraction of inverted haplotype pairs at this gene with identical coding sequence.",
         ),
         (
             "Δ (inverted − direct)",
@@ -131,7 +131,7 @@ GENE_CONSERVATION_COLUMN_DEFS: Dict[str, str] = OrderedDict(
         ),
         (
             "Westfall-Young FWER p-value",
-            "Adjusted p-value controlling the family-wise error rate under the same null.",
+            "Westfall–Young adjusted p-value from the same 100,000 shuffles.",
         ),
         (
             "Direct FDR q-value",
@@ -2150,8 +2150,9 @@ def build_workbook(output_path: Path) -> None:
         SheetInfo(
             name="dN/dS (ω) results",
             description=(
-                "dN/dS (ω) tests for genes whose selective regime differs between direct and inverted haplotypes. NA marks "
-                "pairs excluded for an uninformative tree topology, too few haplotypes, or a failed PAML run."
+                "Clade model C tests in PAML (Yang 2007) for genes whose dN/dS differs between direct and inverted "
+                "haplotypes. NA marks pairs excluded for an uninformative tree topology, too few haplotypes, or a "
+                "failed PAML run."
             ),
             column_defs=PAML_COLUMN_DEFS,
             loader=_load_paml_results,
