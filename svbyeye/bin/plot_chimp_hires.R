@@ -138,9 +138,22 @@ contig_scores <- lapply(unique(paf$q.name), function(contig) {
   )
 })
 contig_scores <- do.call(rbind, contig_scores)
+# Reaching both flanks is the gate, but ranking on the weaker flank alone picks
+# a duplicate that straddles the locus over the sequence that actually covers
+# it: at 1q21.1 that preferred an unplaced scaffold covering 60 kb of the
+# inversion to chr1 covering 329 kb. Among contigs that reach both flanks, take
+# the one with the most aligned sequence across the window.
+# Where nothing spans the locus, orientation can only be read from whatever
+# flank is aligned, so flank coverage still decides there; total coverage would
+# otherwise pick sequence sitting entirely inside the inversion with no anchor.
+contig_scores$spans_locus <- contig_scores$both_flanks > 0
+contig_scores$spanning_total <- ifelse(
+  contig_scores$spans_locus, contig_scores$window_total, 0
+)
 contig_scores <- contig_scores[
   order(
-    -contig_scores$both_flanks,
+    -contig_scores$spans_locus,
+    -contig_scores$spanning_total,
     -contig_scores$flank_total,
     -contig_scores$window_total,
     contig_scores$contig
@@ -377,12 +390,12 @@ target_labels <- target_labels[
 
 plot <- plot +
   scale_x_continuous(
-    name = "Chimpanzee (panTro6) genomic position (bp)",
+    name = paste0("Chimpanzee (panTro6) ", chimp_contig, " position (bp)"),
     breaks = query_breaks,
     labels = scales::comma(abs(query_labels)),
     sec.axis = sec_axis(
       transform = ~ .,
-      name = "Human (GRCh38) genomic position (bp)",
+      name = paste0("Human (GRCh38) ", chrom, " position (bp)"),
       breaks = target_labels,
       labels = scales::comma(target_labels)
     ),
