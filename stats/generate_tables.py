@@ -98,28 +98,28 @@ INVERSION_COLUMN_DEFS: Dict[str, str] = OrderedDict(
 
 GENE_CONSERVATION_COLUMN_DEFS: Dict[str, str] = OrderedDict(
     [
-        ("Gene", "HGNC gene symbol."),
-        ("Transcript", "Ensembl transcript ID used for the CDS analysis."),
+        ("Gene", "HGNC symbol."),
+        ("Transcript", "Ensembl transcript ID."),
         ("Inversion ID", "Inversion locus overlapping the gene (chr:start-end, GRCh38)."),
-        ("Recurrence class", "Single-event or recurrent, from Porubsky et al. (2022)."),
-        ("Direct haplotypes", "Number of direct haplotypes with a coding sequence."),
-        ("Inverted haplotypes", "Number of inverted haplotypes with a coding sequence."),
-        ("Sequence classes", "Number of distinct coding sequences across both orientations."),
+        ("Recurrence class", "Single-event or recurrent (Porubsky et al. 2022)."),
+        ("Direct haplotypes", "Direct haplotypes with a coding sequence."),
+        ("Inverted haplotypes", "Inverted haplotypes with a coding sequence."),
+        ("Sequence classes", "Distinct coding sequences."),
         (
             "Orientation more conserved",
             "Orientation with the higher proportion of identical coding-sequence pairs.",
         ),
         (
             "Fixed CDS differences",
-            "Number of coding sites fixed for different alleles between orientations.",
+            "Coding sites fixed for different alleles between orientations.",
         ),
         (
             "Direct identical pair proportion",
-            "Fraction of pairs of direct haplotypes with identical coding sequences.",
+            "Identical pairs among direct haplotypes.",
         ),
         (
             "Inverted identical pair proportion",
-            "Fraction of pairs of inverted haplotypes with identical coding sequences.",
+            "Identical pairs among inverted haplotypes.",
         ),
         (
             "Δ (inverted − direct)",
@@ -127,7 +127,7 @@ GENE_CONSERVATION_COLUMN_DEFS: Dict[str, str] = OrderedDict(
         ),
         (
             "Permutation p-value",
-            "Two-sided p-value from 100,000 orientation-label shuffles.",
+            "Two-sided p-value from 100,000 shuffles of orientation labels, one shuffle per inversion shared by every gene at that locus.",
         ),
         (
             "Westfall-Young FWER p-value",
@@ -2179,10 +2179,10 @@ def build_workbook(output_path: Path) -> None:
             description=(
                 "Phenome-wide association study (PheWAS) of imputed inversion dosage against electronic health record "
                 "phenotypes in the NIH All of Us cohort (v8), using logistic regression adjusted for age, age "
-                "squared, genetically inferred sex, and 16 global genetic principal components. NA marks a model that "
-                "returned no valid estimate. These are sex-restricted phenotypes, mostly obstetric. Interaction and "
-                "ancestry-specific tests were run only for associations passing the FDR threshold, so NA in those "
-                "columns means the test was not run or the group had too few cases."
+                "squared, genetically inferred sex, and 16 global genetic principal components. NA marks a model with "
+                "no valid estimate, nearly all sex-restricted obstetric phenotypes. Interaction and ancestry-specific "
+                "tests were run only for associations passing the FDR threshold, and only in groups with enough "
+                "cases."
             ),
             column_defs=PHEWAS_COLUMN_DEFS,
             loader=_load_phewas_results,
