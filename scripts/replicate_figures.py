@@ -385,18 +385,6 @@ FIGURE_TASKS: Sequence[FigureTask] = (
         group="Associations",
     ),
     FigureTask(
-        name="PheWAS QQ plot",
-        script=Path("stats/qq_plot.py"),
-        outputs=(
-            Path("phewas_plots/qq_plot_overall.png"),
-            Path("phewas_plots/qq_plot_overall.pdf"),
-        ),
-        dependencies=("data/phewas_results.tsv",),
-        required=False,
-        note="Generates QQ plots for PheWAS results with genomic inflation factor.",
-        group="Associations",
-    ),
-    FigureTask(
         name="Chr17 inversion vs tag SNP correlation",
         script=Path("stats/chr17_inversion_tag_correlation.py"),
         outputs=(
