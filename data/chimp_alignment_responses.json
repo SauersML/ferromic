@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "dataset": "chimp_vs_hg38_inversion_alignments",
-  "updated_at": "2026-09-03T04:30:25.562680+00:00",
+  "updated_at": "2026-07-24T06:26:05.350509+00:00",
   "responses": [
     {
       "inv_id": "chr1-13084312-INV-62181",
@@ -253,9 +253,8 @@
       "region": "chr2:87,995,841-88,180,536",
       "size_bp": 184695,
       "image_file": "chr2-87995842-INV-184695.chimp.webp",
-      "classification": "na",
-      "updated_at": "2026-09-03T04:30:25.562680+00:00",
-      "classification_note": "No panTro6 alignment to chimpanzee chr2A/chr2B anywhere in the window, at any divergence; the only match is 141 kb on chimpanzee chrX at 1.5% divergence, a duplication family rather than the ortholog, so orientation here cannot polarize."
+      "classification": "direct",
+      "updated_at": "2026-07-24T00:30:53.121553+00:00"
     },
     {
       "inv_id": "chr2-88859192-INV-39467",
@@ -1178,9 +1177,8 @@
       "region": "chr8:2,343,351-2,378,385",
       "size_bp": 35034,
       "image_file": "chr8-2340295-INV-42058.chimp.webp",
-      "classification": "na",
-      "updated_at": "2026-09-03T04:30:25.562680+00:00",
-      "classification_note": "No panTro6 alignment to chimpanzee chr8 anywhere in the window, at any divergence; the best match is chimpanzee chr5 at 4.0%, and the plotted alignment lies entirely inside the inversion with no aligned flank to read orientation against."
+      "classification": "direct",
+      "updated_at": "2026-07-24T03:28:24.949968+00:00"
     },
     {
       "inv_id": "chr8-7301025-INV-5297356",
