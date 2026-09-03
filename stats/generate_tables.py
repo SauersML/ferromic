@@ -104,10 +104,10 @@ GENE_CONSERVATION_COLUMN_DEFS: Dict[str, str] = OrderedDict(
         ("Recurrence class", "Single-event or recurrent (Porubsky et al. 2022)."),
         ("Direct haplotypes", "Direct haplotypes with a coding sequence."),
         ("Inverted haplotypes", "Inverted haplotypes with a coding sequence."),
-        ("Sequence classes", "Number of distinct coding sequences at this gene."),
+        ("Sequence classes", "Unique coding sequences seen at this gene."),
         (
             "Orientation more conserved",
-            "Orientation with the higher proportion of identical coding-sequence pairs.",
+            "Whichever orientation has the higher fraction.",
         ),
         (
             "Fixed CDS differences",
@@ -115,15 +115,15 @@ GENE_CONSERVATION_COLUMN_DEFS: Dict[str, str] = OrderedDict(
         ),
         (
             "Direct identical pair proportion",
-            "Fraction of direct haplotype pairs at this gene with identical coding sequence.",
+            "Fraction of direct haplotype pairs with identical CDS.",
         ),
         (
             "Inverted identical pair proportion",
-            "Fraction of inverted haplotype pairs at this gene with identical coding sequence.",
+            "Fraction of inverted haplotype pairs with identical CDS.",
         ),
         (
             "Δ (inverted − direct)",
-            "Difference between orientations in the proportion of identical coding-sequence pairs.",
+            "Inverted minus direct, for the two fractions above.",
         ),
         (
             "Permutation p-value",
@@ -2142,6 +2142,13 @@ def build_workbook(output_path: Path) -> None:
                 "inversion and applied to every gene at that locus."
             ),
             column_defs=GENE_CONSERVATION_COLUMN_DEFS,
+            column_labels={
+                "Orientation more conserved": "More conserved orientation",
+                "Direct identical pair proportion": "Identical pair fraction, direct",
+                "Inverted identical pair proportion": "Identical pair fraction, inverted",
+                "Fixed CDS differences": "Fixed coding differences",
+                "Sequence classes": "Distinct coding sequences",
+            },
             loader=_load_gene_conservation,
         )
     )
