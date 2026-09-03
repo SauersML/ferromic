@@ -102,16 +102,16 @@ GENE_CONSERVATION_COLUMN_DEFS: Dict[str, str] = OrderedDict(
         ("Transcript", "Ensembl transcript ID used for the CDS analysis."),
         ("Inversion ID", "Identifier of the inversion overlapping the gene."),
         ("Recurrence class", "Consensus recurrence class of the inversion locus."),
-        ("Direct haplotypes", "Number of direct haplotypes contributing a coding sequence."),
-        ("Inverted haplotypes", "Number of inverted haplotypes contributing a coding sequence."),
-        ("Sequence classes", "Number of distinct coding sequences across both orientations."),
+        ("Direct haplotypes", "Direct haplotypes with a coding sequence."),
+        ("Inverted haplotypes", "Inverted haplotypes with a coding sequence."),
+        ("Sequence classes", "Distinct coding sequences across both orientations."),
         (
             "Orientation more conserved",
-            "Orientation (inverted or direct) with the higher proportion of identical coding-sequence pairs, from the sign of Δ.",
+            "Orientation with the higher proportion of identical coding-sequence pairs.",
         ),
         (
             "Fixed CDS differences",
-            "Number of coding sites at which direct and inverted haplotypes are fixed for different alleles.",
+            "Coding sites fixed for different alleles in the two orientations.",
         ),
         (
             "Direct identical pair proportion",
@@ -123,11 +123,11 @@ GENE_CONSERVATION_COLUMN_DEFS: Dict[str, str] = OrderedDict(
         ),
         (
             "Δ (inverted − direct)",
-            "Inverted minus direct identical pair proportion; positive values mean higher conservation in the inverted orientation.",
+            "Inverted minus direct identical pair proportion.",
         ),
         (
             "Permutation p-value",
-            "Two-sided p-value from the permutation null that shuffles orientation labels once per inversion and applies the same labels to every gene at that locus.",
+            "Two-sided p-value from the permutation null.",
         ),
         (
             "Westfall-Young FWER p-value",
@@ -166,12 +166,12 @@ PHEWAS_COLUMN_DEFS: Dict[str, str] = OrderedDict(
         ("CI_HI_OR", "Upper bound of the 95% confidence interval for the odds ratio."),
         (
             "N_Total",
-            "Number of participants (cases plus controls) in the model after quality control and removal of related individuals.",
+            "Number of participants in the model, cases plus controls.",
         ),
-        ("N_Cases", "Number of cases (participants with the phenotype)."),
+        ("N_Cases", "Participants with the phenotype."),
         (
             "P_Value_unadjusted",
-            "Nominal p-value from a likelihood ratio test, or from a score test or Firth penalized likelihood when the model did not converge.",
+            "Nominal p-value for inversion dosage.",
         ),
         (
             "P_Source_x",
@@ -199,15 +199,15 @@ PHEWAS_COLUMN_DEFS: Dict[str, str] = OrderedDict(
         ),
         (
             "P_LRT_AncestryxDosage",
-            "P-value for the ancestry by inversion interaction, testing whether the inversion effect differs by ancestry.",
+            "P-value for the ancestry by inversion interaction.",
         ),
         (
             "P_Stage2_Valid",
-            "TRUE if the ancestry interaction model converged and gave a valid p-value.",
+            "TRUE if the interaction model gave a valid p-value.",
         ),
         (
             "Stage2_P_Source",
-            "Test used for the interaction p-value ('rao_score' for multi-degree-of-freedom tests across several ancestry groups).",
+            "Test used for the interaction p-value.",
         ),
         (
             "Stage2_Inference_Type",
@@ -216,136 +216,136 @@ PHEWAS_COLUMN_DEFS: Dict[str, str] = OrderedDict(
         ("Stage2_Model_Notes", "Diagnostic flags from the interaction model fit."),
         (
             "EUR_N",
-            "Participants, European stratum.",
+            "European participants.",
         ),
-        ("EUR_N_Cases", "Cases, European stratum."),
-        ("EUR_N_Controls", "Controls, European stratum."),
+        ("EUR_N_Cases", "European cases."),
+        ("EUR_N_Controls", "European controls."),
         (
             "EUR_OR",
-            "Odds ratio, European stratum.",
+            "Odds ratio in European participants.",
         ),
-        ("EUR_P", "Nominal p-value, European stratum."),
+        ("EUR_P", "Nominal p-value in European participants."),
         (
             "EUR_P_Source",
-            "Test producing the p-value, European stratum.",
+            "Test producing the European p-value.",
         ),
         (
             "EUR_Inference_Type",
-            "Inference method, European stratum.",
+            "Inference method for European participants.",
         ),
-        ("EUR_CI_Method", "Confidence interval method, European stratum."),
-        ("EUR_CI_LO_OR", "Lower 95% confidence bound, European stratum."),
-        ("EUR_CI_HI_OR", "Upper 95% confidence bound, European stratum."),
+        ("EUR_CI_Method", "Confidence interval method for European participants."),
+        ("EUR_CI_LO_OR", "Lower 95% confidence bound in European participants."),
+        ("EUR_CI_HI_OR", "Upper 95% confidence bound in European participants."),
         (
             "AFR_N",
-            "Participants, African stratum.",
+            "African participants.",
         ),
-        ("AFR_N_Cases", "Cases, African stratum."),
-        ("AFR_N_Controls", "Controls, African stratum."),
+        ("AFR_N_Cases", "African cases."),
+        ("AFR_N_Controls", "African controls."),
         (
             "AFR_OR",
-            "Odds ratio, African stratum.",
+            "Odds ratio in African participants.",
         ),
-        ("AFR_P", "Nominal p-value, African stratum."),
+        ("AFR_P", "Nominal p-value in African participants."),
         (
             "AFR_P_Source",
-            "Test producing the p-value, African stratum.",
+            "Test producing the African p-value.",
         ),
         (
             "AFR_Inference_Type",
-            "Inference method, African stratum.",
+            "Inference method for African participants.",
         ),
-        ("AFR_CI_Method", "Confidence interval method, African stratum."),
-        ("AFR_CI_LO_OR", "Lower 95% confidence bound, African stratum."),
-        ("AFR_CI_HI_OR", "Upper 95% confidence bound, African stratum."),
+        ("AFR_CI_Method", "Confidence interval method for African participants."),
+        ("AFR_CI_LO_OR", "Lower 95% confidence bound in African participants."),
+        ("AFR_CI_HI_OR", "Upper 95% confidence bound in African participants."),
         (
             "AMR_N",
-            "Participants, Admixed American stratum.",
+            "Admixed American participants.",
         ),
-        ("AMR_N_Cases", "Cases, Admixed American stratum."),
-        ("AMR_N_Controls", "Controls, Admixed American stratum."),
+        ("AMR_N_Cases", "Admixed American cases."),
+        ("AMR_N_Controls", "Admixed American controls."),
         (
             "AMR_OR",
-            "Odds ratio, Admixed American stratum.",
+            "Odds ratio in Admixed American participants.",
         ),
-        ("AMR_P", "Nominal p-value, Admixed American stratum."),
+        ("AMR_P", "Nominal p-value in Admixed American participants."),
         (
             "AMR_P_Source",
-            "Test producing the p-value, Admixed American stratum.",
+            "Test producing the Admixed American p-value.",
         ),
         (
             "AMR_Inference_Type",
-            "Inference method, Admixed American stratum.",
+            "Inference method for Admixed American participants.",
         ),
-        ("AMR_CI_Method", "Confidence interval method, Admixed American stratum."),
-        ("AMR_CI_LO_OR", "Lower 95% confidence bound, Admixed American stratum."),
-        ("AMR_CI_HI_OR", "Upper 95% confidence bound, Admixed American stratum."),
+        ("AMR_CI_Method", "Confidence interval method for Admixed American participants."),
+        ("AMR_CI_LO_OR", "Lower 95% confidence bound in Admixed American participants."),
+        ("AMR_CI_HI_OR", "Upper 95% confidence bound in Admixed American participants."),
         (
             "SAS_N",
-            "Participants, South Asian stratum.",
+            "South Asian participants.",
         ),
-        ("SAS_N_Cases", "Cases, South Asian stratum."),
-        ("SAS_N_Controls", "Controls, South Asian stratum."),
+        ("SAS_N_Cases", "South Asian cases."),
+        ("SAS_N_Controls", "South Asian controls."),
         (
             "SAS_OR",
-            "Odds ratio, South Asian stratum.",
+            "Odds ratio in South Asian participants.",
         ),
-        ("SAS_P", "Nominal p-value, South Asian stratum."),
+        ("SAS_P", "Nominal p-value in South Asian participants."),
         (
             "SAS_P_Source",
-            "Test producing the p-value, South Asian stratum.",
+            "Test producing the South Asian p-value.",
         ),
         (
             "SAS_Inference_Type",
-            "Inference method, South Asian stratum.",
+            "Inference method for South Asian participants.",
         ),
-        ("SAS_CI_Method", "Confidence interval method, South Asian stratum."),
-        ("SAS_CI_LO_OR", "Lower 95% confidence bound, South Asian stratum."),
-        ("SAS_CI_HI_OR", "Upper 95% confidence bound, South Asian stratum."),
+        ("SAS_CI_Method", "Confidence interval method for South Asian participants."),
+        ("SAS_CI_LO_OR", "Lower 95% confidence bound in South Asian participants."),
+        ("SAS_CI_HI_OR", "Upper 95% confidence bound in South Asian participants."),
         (
             "EAS_N",
-            "Participants, East Asian stratum.",
+            "East Asian participants.",
         ),
-        ("EAS_N_Cases", "Cases, East Asian stratum."),
-        ("EAS_N_Controls", "Controls, East Asian stratum."),
+        ("EAS_N_Cases", "East Asian cases."),
+        ("EAS_N_Controls", "East Asian controls."),
         (
             "EAS_OR",
-            "Odds ratio, East Asian stratum.",
+            "Odds ratio in East Asian participants.",
         ),
-        ("EAS_P", "Nominal p-value, East Asian stratum."),
+        ("EAS_P", "Nominal p-value in East Asian participants."),
         (
             "EAS_P_Source",
-            "Test producing the p-value, East Asian stratum.",
+            "Test producing the East Asian p-value.",
         ),
         (
             "EAS_Inference_Type",
-            "Inference method, East Asian stratum.",
+            "Inference method for East Asian participants.",
         ),
-        ("EAS_CI_Method", "Confidence interval method, East Asian stratum."),
-        ("EAS_CI_LO_OR", "Lower 95% confidence bound, East Asian stratum."),
-        ("EAS_CI_HI_OR", "Upper 95% confidence bound, East Asian stratum."),
+        ("EAS_CI_Method", "Confidence interval method for East Asian participants."),
+        ("EAS_CI_LO_OR", "Lower 95% confidence bound in East Asian participants."),
+        ("EAS_CI_HI_OR", "Upper 95% confidence bound in East Asian participants."),
         (
             "MID_N",
-            "Participants, Middle Eastern stratum.",
+            "Middle Eastern participants.",
         ),
-        ("MID_N_Cases", "Cases, Middle Eastern stratum."),
-        ("MID_N_Controls", "Controls, Middle Eastern stratum."),
+        ("MID_N_Cases", "Middle Eastern cases."),
+        ("MID_N_Controls", "Middle Eastern controls."),
         (
             "MID_OR",
-            "Odds ratio, Middle Eastern stratum.",
+            "Odds ratio in Middle Eastern participants.",
         ),
-        ("MID_P", "Nominal p-value, Middle Eastern stratum."),
+        ("MID_P", "Nominal p-value in Middle Eastern participants."),
         (
             "MID_P_Source",
-            "Test producing the p-value, Middle Eastern stratum.",
+            "Test producing the Middle Eastern p-value.",
         ),
         (
             "MID_Inference_Type",
-            "Inference method, Middle Eastern stratum.",
+            "Inference method for Middle Eastern participants.",
         ),
-        ("MID_CI_Method", "Confidence interval method, Middle Eastern stratum."),
-        ("MID_CI_LO_OR", "Lower 95% confidence bound, Middle Eastern stratum."),
-        ("MID_CI_HI_OR", "Upper 95% confidence bound, Middle Eastern stratum."),
+        ("MID_CI_Method", "Confidence interval method for Middle Eastern participants."),
+        ("MID_CI_LO_OR", "Lower 95% confidence bound in Middle Eastern participants."),
+        ("MID_CI_HI_OR", "Upper 95% confidence bound in Middle Eastern participants."),
     ]
 )
 
@@ -354,7 +354,7 @@ WITHIN_ANCESTRY_PHEWAS_COLUMN_DEFS: Dict[str, str] = OrderedDict(
         ("population", "All of Us genetic ancestry group."),
         ("population_label", "Full name of the genetic ancestry group."),
         ("Inversion", "Inversion identifier."),
-        ("locus", "Cytogenetic locus label, where available."),
+        ("locus", "Cytogenetic locus label."),
         ("Phenotype", "Phecode-derived phenotype label."),
         ("pooled_or", "Odds ratio from the pooled PheWAS."),
         ("pooled_q", "Global Benjamini–Hochberg adjusted p-value from the pooled PheWAS."),
@@ -584,14 +584,14 @@ PAML_COLUMN_DEFS: Dict[str, str] = OrderedDict(
         ("cmc_omega0", "dN/dS (ω) in site class 0."),
         ("cmc_omega2_direct", "dN/dS (ω) at divergent sites in the direct clade."),
         ("cmc_omega2_inverted", "dN/dS (ω) at divergent sites in the inverted clade."),
-        ("cmc_kappa", "Estimated transition/transversion ratio (κ)."),
+        ("cmc_kappa", "Transition/transversion ratio (κ)."),
         (
             "n_leaves_pruned",
-            "Number of sequences present in both the region tree and the gene alignment.",
+            "Sequences shared by the region tree and the gene alignment.",
         ),
         (
             "taxa_used",
-            "Samples included in the PAML analysis, separated by semicolons.",
+            "Samples in the PAML analysis.",
         ),
     ]
 )
@@ -1123,11 +1123,7 @@ _ANCESTRY_LABEL_PREFIXES = (
 )
 
 _ANCESTRY_COLUMN_NOTE = (
-    "Each ancestry group (African, Admixed American, East Asian, European, Middle "
-    "Eastern, South Asian) has the same columns: participants, cases, controls, odds "
-    "ratio, nominal p-value, the test that produced it, inference method, confidence "
-    "interval method, and the lower and upper bounds of the 95% confidence interval. "
-    "Each value is for that stratum alone."
+    "The same ten columns repeat for each ancestry group."
 )
 
 
@@ -2182,11 +2178,11 @@ def build_workbook(output_path: Path) -> None:
             name="PheWAS results",
             description=(
                 "Phenome-wide association study (PheWAS) of imputed inversion dosage against electronic health record "
-                "phenotypes in the NIH All of Us cohort (v8), using logistic regression adjusted for age, age squared, "
-                "genetically inferred sex, and 16 global genetic principal components. NA marks a model that returned no "
-                "valid estimate. Almost all are sex-restricted phenotypes, mostly obstetric, where the Firth refit still "
-                "failed. Interaction and ancestry-specific tests were run only for associations passing the FDR threshold, "
-                "so NA in those columns means the test was not run or the stratum had too few cases."
+                "phenotypes in the NIH All of Us cohort (v8), using logistic regression adjusted for age, age "
+                "squared, genetically inferred sex, and 16 global genetic principal components. NA marks a model that "
+                "returned no valid estimate. These are sex-restricted phenotypes, mostly obstetric. Interaction and "
+                "ancestry-specific tests were run only for associations passing the FDR threshold, so NA in those "
+                "columns means the test was not run or the group had too few cases."
             ),
             column_defs=PHEWAS_COLUMN_DEFS,
             loader=_load_phewas_results,
@@ -2197,12 +2193,12 @@ def build_workbook(output_path: Path) -> None:
         SheetInfo(
             name="Within-ancestry PC PheWAS",
             description=(
-                "Sensitivity analysis for residual fine-scale population structure. The 37 phenotypes associated with an "
-                "inversion in the pooled PheWAS were retested against all seven inversions within each All of Us genetic "
-                "ancestry group (AFR, AMR, EAS, EUR, MID, and SAS), adjusting for age, age squared, genetically inferred "
-                "sex, and 16 principal components computed within that group. Estimates from the ancestry-stratified "
-                "models with the 16 global principal components are also reported. Because these phenotypes were selected "
-                "from the pooled results, the q-values within the selected set are descriptive."
+                "Sensitivity analysis for residual fine-scale population structure. The 37 phenotypes associated with "
+                "an inversion in the pooled PheWAS were retested against all seven inversions within each All of Us "
+                "genetic ancestry group (AFR, AMR, EAS, EUR, MID, and SAS), adjusting for age, age squared, "
+                "genetically inferred sex, and 16 principal components computed within that group. Estimates from the "
+                "ancestry-stratified models with the 16 global principal components are also reported. Q-values are "
+                "computed within the selected phenotype set."
             ),
             column_defs=WITHIN_ANCESTRY_PHEWAS_COLUMN_DEFS,
             loader=_load_within_ancestry_phewas,
@@ -2438,7 +2434,7 @@ def build_workbook(output_path: Path) -> None:
                 label = sheet_info.column_labels.get(
                     col_name, _pretty_label(col_name)
                 )
-                # The six ancestry strata repeat the same columns. Listing all of
+                # The six ancestry groups repeat the same columns. Listing all of
                 # them defines nothing the pattern does not, so state it once.
                 if label.startswith(_ANCESTRY_LABEL_PREFIXES):
                     if not ancestry_note_written:
