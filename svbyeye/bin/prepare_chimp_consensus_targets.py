@@ -56,18 +56,31 @@ def read_cytobands(path: Path) -> dict[str, list[tuple[int, int, str]]]:
     return bands
 
 
-def midpoint_band(
+def span_band(
     bands: dict[str, list[tuple[int, int, str]]], chromosome: str, start: int, end: int
 ) -> str:
-    midpoint = (start + end) // 2
-    matches = [
-        name for left, right, name in bands.get(chromosome, []) if left <= midpoint < right
-    ]
-    if len(matches) != 1:
-        raise RuntimeError(
-            f"Expected one cytoband for {chromosome}:{start}-{end}; found {matches}"
-        )
-    return matches[0]
+    """Cytoband label covering the locus.
+
+    A midpoint band mislabels anything that crosses a boundary: the 23 Mb chr2
+    inversion spans p11.2 through q13 and its midpoint names it q11.2, putting a
+    p-arm region on the q arm.
+    """
+
+    def band_at(position: int) -> str:
+        matches = [
+            name
+            for left, right, name in bands.get(chromosome, [])
+            if left <= position < right
+        ]
+        if len(matches) != 1:
+            raise RuntimeError(
+                f"Expected one cytoband for {chromosome}:{position}; found {matches}"
+            )
+        return matches[0]
+
+    first = band_at(start)
+    last = band_at(end - 1)
+    return first if first == last else f"{first}-{last}"
 
 
 def extract_region(reference: Path, region: str) -> bytes:
@@ -124,7 +137,7 @@ def main() -> None:
                         if row["0_single_1_recur_consensus"].strip() == "1"
                         else "Single-event"
                     ),
-                    "label": midpoint_band(cytobands, chromosome, start, end),
+                    "label": span_band(cytobands, chromosome, start, end),
                 }
             )
 

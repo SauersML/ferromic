@@ -109,9 +109,9 @@
     {
       "id": "svbyeye_consensus_93_boxed_bundle",
       "kind": "url",
-      "url": "https://github.com/SauersML/ferromic/releases/download/manuscript-analysis-sources-v5/svbyeye-consensus-93-boxed.tar.gz",
+      "url": "https://github.com/SauersML/ferromic/releases/download/manuscript-analysis-sources-v6/svbyeye-consensus-93-boxed.tar.gz",
       "filename": "svbyeye-consensus-93-boxed.tar.gz",
-      "sha256": "8b896029cbdc32023674769605edd559df6a3009450f9ba922dbf09285e71b3e",
+      "sha256": "956ad3a0beb9d99a00bfc62a1fd367c2a97372000579e836862a5fa8f149cefc",
       "role": "Pinned one-page, uniformly sized GRCh38-versus-panTro6 SVbyEye plots for the 93 consensus-classified inversions"
     },
     {
