@@ -93,10 +93,7 @@ def main() -> int:
     except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
-    print(
-        "Verified final supplementary inventory: 21 figures and 21 tables; "
-        "the 17q21.31 tagging-SNP comparison is response-only."
-    )
+    print("Verified final supplementary inventory: 21 figures and 21 tables.")
     return 0
 
 
