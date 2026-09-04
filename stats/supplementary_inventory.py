@@ -195,7 +195,15 @@ FINAL_SUPPLEMENTARY_FIGURES = (
         "(A) Comparison of inversion effect estimates obtained using global and within-ancestry principal components. (B) Comparison of inversion p-values obtained using global and within-ancestry principal components.",
     ),
     SupplementaryFigure(18, "phenotype_categories", "Category-level meta-analysis of disease associations", "original Figure S10", 10, None, None),
-    SupplementaryFigure(19, "tagging_snp_concordance", "Correlation of 17q21.31 inversion phecode association p-values between tagging SNP and imputed dosage approaches", "original Figure S11", 11, None, None),
+    SupplementaryFigure(
+        19,
+        "tagging_snp_concordance",
+        "Comparison of 17q21.31 PheWAS results using imputed inversion dosage and tagging SNP dosage",
+        "revision figure",
+        None,
+        "data/tag_vs_imputed_concordance.png",
+        "Each point is a phecode tested by both the imputed dosage scan and the tagging SNP scan. (A) Association p-values from the imputed inversion dosage analysis and the tagging SNP analysis, colored by Benjamini-Hochberg significance (q < 0.05). (B) Effect estimates from the two analyses. Gray points had BH q \u2265 0.05 in both analyses, blue points were significant using imputed dosage only, orange points were significant using tagging SNP dosage only, and green points were significant in both analyses. Tagging SNP dosage was determined by unanimity across three tagging SNPs at chr17:45,974,480, chr17:45,996,523, and chr17:46,003,698. Samples were assigned a dosage of 0, 1, or 2 only when all three SNPs agreed; samples with missing or discordant genotypes were excluded. The same controls were used in both analyses (Methods).",
+    ),
     SupplementaryFigure(20, "family_history", "Concordance between family and personal history for 17q21.31 allele associations", "original Figure S12", 12, None, None),
     SupplementaryFigure(
         21,

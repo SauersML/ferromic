@@ -55,7 +55,6 @@ def verify_inventory() -> None:
         8: 14,
         9: 16,
         10: 18,
-        11: 19,
         12: 20,
         13: 22,
     }
@@ -96,7 +95,7 @@ def main() -> int:
         return 1
     print(
         "Verified final supplementary inventory: 22 figures and 21 tables; "
-        "original Figure S11 is Figure S19."
+        "original Figure S11 is replaced by the regenerated Figure S19."
     )
     return 0
 
