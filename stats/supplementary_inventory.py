@@ -160,7 +160,7 @@ FINAL_SUPPLEMENTARY_FIGURES = (
         "revision figure",
         None,
         "results/figure2a_repolarized/figure2a_repolarized.png",
-        "The ancestral and derived orientations are determined with respect to the chimpanzee (PanTro6) for 57 inversion loci (Table S9). The 33 loci with at least two haplotypes in each orientation are shown: single-event (left, n = 19) or recurrent (right, n = 14). The distribution of nucleotide diversity (π) across loci is shown for each of the groups. The boxplot shows the median and interquartile range. The lines connect the ancestral and derived orientations at the same locus, which are colored by the log_{2} of (π_{ancestral} / π_{derived}), a measure of fold change in diversity.",
+        "The ancestral and derived orientations are determined with respect to the chimpanzee (panTro6) for 57 inversion loci (Table S9). The 33 loci with at least two haplotypes in each orientation are shown: single-event (left, n = 19) or recurrent (right, n = 14). The distribution of nucleotide diversity (π) across loci is shown for each of the groups. The boxplot shows the median and interquartile range. The lines connect the ancestral and derived orientations at the same locus, which are colored by the log_{2} of (π_{ancestral} / π_{derived}), a measure of fold change in diversity.",
     ),
     SupplementaryFigure(
         10,
