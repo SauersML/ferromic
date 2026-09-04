@@ -73,8 +73,8 @@ def verify(template: Path, assembled: Path) -> None:
 
     captions = [text for text in texts if FIGURE_RE.match(text)]
     numbers = [int(FIGURE_RE.match(text).group(1)) for text in captions]
-    if numbers != list(range(1, 23)):
-        raise RuntimeError(f"Expected exactly ordered captions S1-S22; found {numbers}")
+    if numbers != list(range(1, 24)):
+        raise RuntimeError(f"Expected exactly ordered captions S1-S23; found {numbers}")
     for caption, figure in zip(captions, FINAL_SUPPLEMENTARY_FIGURES):
         expected = caption_plain_text(f"Figure S{figure.number}. {figure.title}")
         if not caption.startswith(expected):
@@ -86,7 +86,7 @@ def verify(template: Path, assembled: Path) -> None:
     promoted = [title for title in RESPONSE_ONLY_FIGURE_TITLES if title in full_text]
     if promoted:
         raise RuntimeError(f"Response-only figures were promoted into the supplement: {promoted}")
-    if "Figs. S1 to S22" not in texts or "Tables S1 to S21" not in texts:
+    if "Figs. S1 to S23" not in texts or "Tables S1 to S21" not in texts:
         raise RuntimeError("Front-matter figure/table ranges were not updated")
     if "SVbyEye alignments for 93 consensus-classified inversions" not in texts:
         raise RuntimeError("Front matter does not list the SVbyEye appendix")
@@ -101,14 +101,14 @@ def verify(template: Path, assembled: Path) -> None:
         raise RuntimeError("SVbyEye appendix locus identifiers are not unique")
 
     drawings = document._element.body.xpath(".//w:drawing")
-    if len(drawings) != 115:
-        raise RuntimeError(f"Expected 22 + 93 = 115 drawings; found {len(drawings)}")
+    if len(drawings) != 116:
+        raise RuntimeError(f"Expected 23 + 93 = 116 drawings; found {len(drawings)}")
     figure_page_starts = document._element.body.xpath(
         ".//w:p[w:pPr/w:pageBreakBefore][.//w:drawing]"
     )
-    if len(figure_page_starts) != 68:
+    if len(figure_page_starts) != 69:
         raise RuntimeError(
-            "Expected page-break-before on 22 numbered figures and 46 subsequent "
+            "Expected page-break-before on 23 numbered figures and 46 subsequent "
             f"appendix plots; found {len(figure_page_starts)}"
         )
     standalone_page_breaks = document._element.body.xpath(
@@ -150,8 +150,8 @@ def verify(template: Path, assembled: Path) -> None:
     figure_extents = [
         (int(extent.get("cx")), int(extent.get("cy"))) for extent in extents
     ]
-    main_figure_extents = figure_extents[:22]
-    appendix_extents = figure_extents[22:]
+    main_figure_extents = figure_extents[:23]
+    appendix_extents = figure_extents[23:]
     # The numbered figures are no longer padded into one frame: each is sized
     # from its own aspect ratio, capped at the text width and at the resolution
     # floor. Check the invariants that survive that, not uniformity.
@@ -161,8 +161,8 @@ def verify(template: Path, assembled: Path) -> None:
     too_tall = [e for e in main_figure_extents if e[1] > max_height_emu + 1000]
     too_small = [e for e in main_figure_extents if e[0] < round(2.5 * 914400)]
     if (
-        len(figure_extents) != 115
-        or len(main_figure_extents) != 22
+        len(figure_extents) != 116
+        or len(main_figure_extents) != 23
         or too_wide
         or too_tall
         or too_small
@@ -183,7 +183,7 @@ def verify(template: Path, assembled: Path) -> None:
         )
 
     print(
-        "Verified assembled supplement: S1-S22 ordered and each within the text "
+        "Verified assembled supplement: S1-S23 ordered and each within the text "
         "width and page height; response-only figures omitted; "
         "all 93 SVbyEye drawings use a full-width two-per-page frame; 93-caption "
         "portrait appendix present; template formatting parts and page geometry unchanged."

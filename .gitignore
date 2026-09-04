@@ -82,3 +82,5 @@ data/selection_data/
 simulations/refsim/out/
 simulations/refsim/out_single/
 simulations/refsim/out_comb_train/
+!data/recurrence_controls.png
+!data/recurrence_controls.pdf
