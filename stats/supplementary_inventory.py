@@ -164,6 +164,15 @@ FINAL_SUPPLEMENTARY_FIGURES = (
     ),
     SupplementaryFigure(
         10,
+        "genomic_architecture_controls",
+        "Comparisons after adjustment for genomic architecture",
+        "revision figure",
+        None,
+        "data/recurrence_controls.png",
+        "Points and horizontal bars show effect estimates and 95% confidence intervals for the orientation by recurrence interaction effect on nucleotide diversity (top), the difference in Hudson\u2019s FST between recurrent and single-event inversions (middle), and the difference in net divergence (da) between recurrent and single-event inversions (bottom). Results are shown without conditioning, after conditioning on inversion length, inverted allele frequency, local SNV density, and CDS density, and finally after additionally conditioning on local recombination rate (HapMap Phase II recombination map, from the International HapMap Consortium, using the GRCh38 map supplied by Beagle) and chromosome arm position. Dashed vertical lines indicate no effect.",
+    ),
+    SupplementaryFigure(
+        11,
         "divergence",
         "Differentiation between orientations considering within-orientation diversity",
         "revision figure",
@@ -171,12 +180,12 @@ FINAL_SUPPLEMENTARY_FIGURES = (
         "data/divergence_fst_dxy_da_by_type.png",
         "Hudson's *F_{ST}* (left), absolute divergence *d_{xy}* (center) and net divergence *d_{a}* (right) between direct and inverted haplotypes, for single-event (blue) and recurrent (purple) inversions. Points correspond to loci. Horizontal bars indicate medians. The p-values are from two-sided Mann–Whitney U tests between recurrence categories.",
     ),
-    SupplementaryFigure(11, "breakpoint_fst", "FST differences between breakpoint-proximal and middle regions of inversion loci", "original Figure S5", 5, None, None),
-    SupplementaryFigure(12, "mapt_polymorphisms", "MAPT coding sequence polymorphisms across the 17q21.31 inversion locus’s inverted and direct haplotypes", "original Figure S6", 6, None, None),
-    SupplementaryFigure(13, "ages_trajectories", "Allele frequency changes over time of the inversion tagging SNPs", "original Figure S7", 7, None, None),
-    SupplementaryFigure(14, "imputation_accuracy", "Cross-validated imputation accuracy", "original Figure S8", 8, None, None),
+    SupplementaryFigure(12, "breakpoint_fst", "FST differences between breakpoint-proximal and middle regions of inversion loci", "original Figure S5", 5, None, None),
+    SupplementaryFigure(13, "mapt_polymorphisms", "MAPT coding sequence polymorphisms across the 17q21.31 inversion locus’s inverted and direct haplotypes", "original Figure S6", 6, None, None),
+    SupplementaryFigure(14, "ages_trajectories", "Allele frequency changes over time of the inversion tagging SNPs", "original Figure S7", 7, None, None),
+    SupplementaryFigure(15, "imputation_accuracy", "Cross-validated imputation accuracy", "original Figure S8", 8, None, None),
     SupplementaryFigure(
-        15,
+        16,
         "hsinv0284_validation",
         "Validation of imputed inversion dosage against experimental genotypes at 6q24.1 (HsInv0284)",
         "revision figure",
@@ -184,9 +193,9 @@ FINAL_SUPPLEMENTARY_FIGURES = (
         "data/imputation_benchmark_HsInv0284.png",
         "Left: Comparison of our imputed dosage (y-axis) against the experimentally genotyped dosage (x-axis) from Giner-Delgado et al. (2019) for 517 samples from the 1000 Genomes Project. The dotted line represents exact agreement. Right: Inverted allele frequencies stratified by superpopulation, comparing the external experimental dosages to our imputed dosage model.",
     ),
-    SupplementaryFigure(16, "population_frequencies", "Imputed allele frequency by population in the NIH All of Us cohort", "original Figure S9", 9, None, None),
+    SupplementaryFigure(17, "population_frequencies", "Imputed allele frequency by population in the NIH All of Us cohort", "original Figure S9", 9, None, None),
     SupplementaryFigure(
-        17,
+        18,
         "within_ancestry_pc",
         "Sensitivity of ancestry-specific PheWAS associations to within-ancestry principal-component adjustment",
         "revision figure",
@@ -194,9 +203,9 @@ FINAL_SUPPLEMENTARY_FIGURES = (
         "results/phewas_within_ancestry/effect_pvalue_correspondence.png",
         "(A) Comparison of inversion effect estimates obtained using global and within-ancestry principal components. (B) Comparison of inversion p-values obtained using global and within-ancestry principal components.",
     ),
-    SupplementaryFigure(18, "phenotype_categories", "Category-level meta-analysis of disease associations", "original Figure S10", 10, None, None),
+    SupplementaryFigure(19, "phenotype_categories", "Category-level meta-analysis of disease associations", "original Figure S10", 10, None, None),
     SupplementaryFigure(
-        19,
+        20,
         "tagging_snp_concordance",
         "Comparison of 17q21.31 PheWAS results using imputed inversion dosage and tagging SNP dosage",
         "revision figure",
@@ -204,9 +213,9 @@ FINAL_SUPPLEMENTARY_FIGURES = (
         "data/tag_vs_imputed_concordance.png",
         "Each point is a phecode tested by both the imputed dosage scan and the tagging SNP scan. (A) Association p-values from the imputed inversion dosage analysis and the tagging SNP analysis, colored by Benjamini-Hochberg significance (q < 0.05). (B) Effect estimates from the two analyses. Gray points had BH q \u2265 0.05 in both analyses, blue points were significant using imputed dosage only, orange points were significant using tagging SNP dosage only, and green points were significant in both analyses. Tagging SNP dosage was determined by unanimity across three tagging SNPs at chr17:45,974,480, chr17:45,996,523, and chr17:46,003,698. Samples were assigned a dosage of 0, 1, or 2 only when all three SNPs agreed; samples with missing or discordant genotypes were excluded. The same controls were used in both analyses (Methods).",
     ),
-    SupplementaryFigure(20, "family_history", "Concordance between family and personal history for 17q21.31 allele associations", "original Figure S12", 12, None, None),
+    SupplementaryFigure(21, "family_history", "Concordance between family and personal history for 17q21.31 allele associations", "original Figure S12", 12, None, None),
     SupplementaryFigure(
-        21,
+        22,
         "cds_test_calibration_power",
         "Calibration and power of the CDS permutation test",
         "revision figure",
@@ -214,7 +223,7 @@ FINAL_SUPPLEMENTARY_FIGURES = (
         "data/cds_permutation_calibration_power.png",
         "Left: realized per-test rejection rate (false positive rate) versus the nominal p-value threshold, computed from 100,000 null datasets generated by shuffling orientation labels once per inversion (Methods). The dashed line indicates equality between realized rate and nominal threshold. Below the line indicates conservative p-values. Right: power to detect a simulated difference in CDS pair identity between orientations at nominal p \u2264 0.05, averaged over the 66 tested genes. Power was calculated by creating a fake inverted group by sampling from the gene\u2019s observed sequences, with some samples replaced with copies of a randomly chosen sequence, or replaced by unique sequences, to reach the desired difference in identity. Power is defined as the fraction of these simulation runs with a permutation p-value \u2264 0.05. The dashed line indicates 80% power.",
     ),
-    SupplementaryFigure(22, "heritability", "Correlations between heritability and inversion effects", "original Figure S13", 13, None, None),
+    SupplementaryFigure(23, "heritability", "Correlations between heritability and inversion effects", "original Figure S13", 13, None, None),
 )
 
 

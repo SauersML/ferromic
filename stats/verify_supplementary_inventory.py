@@ -22,9 +22,9 @@ from supplementary_inventory import (
 
 def verify_inventory() -> None:
     figure_numbers = [figure.number for figure in FINAL_SUPPLEMENTARY_FIGURES]
-    if figure_numbers != list(range(1, 23)):
+    if figure_numbers != list(range(1, 24)):
         raise RuntimeError(
-            f"Figure inventory must be exactly S1-S22; observed {figure_numbers}."
+            f"Figure inventory must be exactly S1-S23; observed {figure_numbers}."
         )
     figure_keys = [figure.key for figure in FINAL_SUPPLEMENTARY_FIGURES]
     if len(figure_keys) != len(set(figure_keys)):
@@ -49,14 +49,14 @@ def verify_inventory() -> None:
         2: 2,
         3: 3,
         4: 4,
-        5: 11,
-        6: 12,
-        7: 13,
-        8: 14,
-        9: 16,
-        10: 18,
-        12: 20,
-        13: 22,
+        5: 12,
+        6: 13,
+        7: 14,
+        8: 15,
+        9: 17,
+        10: 19,
+        12: 21,
+        13: 23,
     }
     if ORIGINAL_FIGURE_TO_FINAL != expected_old_map:
         raise RuntimeError(
@@ -94,7 +94,7 @@ def main() -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
     print(
-        "Verified final supplementary inventory: 22 figures and 21 tables; "
+        "Verified final supplementary inventory: 23 figures and 21 tables; "
         "original Figure S11 is replaced by the regenerated Figure S19."
     )
     return 0
