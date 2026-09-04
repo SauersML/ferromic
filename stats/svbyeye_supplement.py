@@ -196,8 +196,8 @@ def write_legends() -> None:
         "(A) the recurrent 8p23.1 inversion and (B) the single-event 15q11.2-q13.1 inversion. "
         "Green and blue indicate forward and reverse alignments, respectively. Red dashed "
         "boxes indicate the inversion coordinates in GRCh38. The alignment in (A) indicates "
-        "that the inversion is ancestral, whereas the alignment in (B) indicates that the "
-        "inversion is derived.\n"
+        "that the GRCh38 orientation is ancestral, whereas the alignment in (B) indicates "
+        "that the GRCh38 orientation is derived.\n"
     )
     (OUTPUT_DIR / "Supplemental_File_SVbyEye_consensus_93_loci_legend.txt").write_text(
         "SVbyEye alignments between GRCh38 (top) and panTro6 (bottom) across the 93 "

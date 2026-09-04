@@ -12,6 +12,14 @@ suppressPackageStartupMessages({
 })
 
 args <- commandArgs(trailingOnly = TRUE)
+# An optional ninth argument scales the requested flank. A few loci hit an
+# edge case in subsetPafAlignments when the window is widened, so the caller
+# steps this down until the page renders rather than losing the locus.
+flank_scale <- 1
+if (length(args) == 9) {
+  flank_scale <- as.numeric(args[[9]])
+  args <- args[1:8]
+}
 if (length(args) != 8) {
   stop(
     "usage: plot_chimp_hires.R PAF OUT_PREFIX INV_ID CHROM INV_START ",
@@ -33,19 +41,26 @@ if (!is.finite(inv_length) || inv_length <= 0) {
   stop("INV_END must be greater than INV_START")
 }
 
-# The extracted target is exactly three inversion lengths, so this is the widest
-# view available. The displayed window is derived from the alignments below and
-# never exceeds it.
-region_start <- max(0, inv_start - inv_length)
-region_end <- inv_end + inv_length
+# The extracted target carries one inversion length of flank on each side, or
+# 300 kb where that is larger, so short inversions still show enough anchoring
+# sequence to read the orientation. The displayed window is derived from the
+# alignments below and never exceeds what was extracted.
+extracted_flank <- max(inv_length, 300000)
+region_start <- max(0, inv_start - extracted_flank)
+region_end <- inv_end + extracted_flank
 
 # Alignments shorter than this are segmental-duplication debris at this scale:
 # they add wisps without adding structure. Scaled to the locus, since 2 kb is
-# substantial for a 20 kb inversion and noise for a 700 kb one.
-min_span <- min(max(0.03 * inv_length, 2000), 25000)
-# Flank actually shown on each side: enough aligned sequence to read the
-# orientation, and no more.
-min_flank_shown <- min(max(0.25 * inv_length, 5000), 50000)
+# substantial for a 20 kb inversion and noise for a 700 kb one. The former
+# 25 kb ceiling undid that scaling at megabase loci, where duplication-rich
+# flanks contribute hundreds of short paralogous matches that bury the blocks
+# carrying the orientation; a step-down below keeps sparse loci plottable.
+min_span <- max(0.03 * inv_length, 2000)
+# Flank actually shown on each side. The earlier 50 kb ceiling hid the anchoring
+# alignment at large loci, where 50 kb is a sliver beside a multi-megabase
+# inversion, so ask for a flank that scales with the locus and let the extracted
+# region be the only ceiling.
+min_flank_shown <- flank_scale * max(0.6 * inv_length, 150000)
 
 overlap_length <- function(start, end, left, right) {
   pmax(0, pmin(end, right) - pmax(start, left))
@@ -108,7 +123,7 @@ span_filter <- function(frame, limit) {
     drop = FALSE
   ]
 }
-while (min_span > 1000 && nrow(span_filter(paf, min_span)) < 2) {
+while (min_span > 1000 && nrow(span_filter(paf, min_span)) < 4) {
   min_span <- min_span / 2
 }
 if (nrow(span_filter(paf, min_span)) > 0) {
@@ -338,6 +353,16 @@ plot <- ggplot(coords) +
 # descending pair to the human row, so the reference is drawn reverse and a
 # ribbon meets arrows of the opposite colour. Build the arrows from the PAF, so
 # each bar carries the alignment's own strand.
+#
+# A PAF holds both coordinate pairs ascending and keeps the alignment direction
+# in a separate strand column, so a bar drawn from start to end always points
+# right and the arrowheads carry nothing. Human is the fixed frame and its bars
+# always run left to right. A chimpanzee segment aligned in reverse runs against
+# that frame, so its bar is drawn from end to start and its head points left.
+# Arrowhead and fill then report the same strand.
+query_left <- map_query_to_panel(plot_paf$q.start)
+query_right <- map_query_to_panel(plot_paf$q.end)
+query_reverse <- plot_paf$strand == "-"
 arrow_frame <- rbind(
   data.frame(
     start = plot_paf$t.start,
@@ -347,8 +372,8 @@ arrow_frame <- rbind(
     direction = plot_paf$strand
   ),
   data.frame(
-    start = map_query_to_panel(plot_paf$q.start),
-    end = map_query_to_panel(plot_paf$q.end),
+    start = ifelse(query_reverse, query_right, query_left),
+    end = ifelse(query_reverse, query_left, query_right),
     y = 1,
     group = paste0("q", seq_len(nrow(plot_paf))),
     direction = plot_paf$strand
@@ -378,15 +403,39 @@ plot <- plot +
   ylab(NULL)
 
 # Independent species axes share panel positions but retain genomic coordinates.
+#
+# pretty() picks breaks from the coordinate range alone, so at a wide locus it
+# returns more nine- to eleven-digit labels than the panel can hold and they run
+# together. Drop a break whose label would not clear its neighbour, estimating
+# label width from its character count at the axis text size.
+PANEL_WIDTH_IN <- 8
+AXIS_TEXT_PT <- 16
+thin_labels <- function(values, span) {
+  if (length(values) < 2) {
+    return(values)
+  }
+  label_in <- max(nchar(scales::comma(abs(values)))) * AXIS_TEXT_PT * 0.6 / 72
+  min_gap <- label_in * 1.2 / PANEL_WIDTH_IN * span
+  kept <- values[[1]]
+  for (value in values[-1]) {
+    if (value - kept[[length(kept)]] >= min_gap) {
+      kept <- c(kept, value)
+    }
+  }
+  kept
+}
+
 query_labels <- pretty(query_range)
 query_labels <- query_labels[
   query_labels >= query_range[[1]] & query_labels <= query_range[[2]]
 ]
+query_labels <- thin_labels(query_labels, diff(query_range))
 query_breaks <- map_query_to_panel(query_labels)
 target_labels <- pretty(c(window_start, window_end))
 target_labels <- target_labels[
   target_labels >= window_start & target_labels <= window_end
 ]
+target_labels <- thin_labels(target_labels, window_end - window_start)
 
 plot <- plot +
   scale_x_continuous(
@@ -448,7 +497,10 @@ plot <- plot +
     legend.text = element_text(size = 16),
     legend.key.size = grid::unit(7, "mm"),
     legend.position = "bottom",
-    plot.margin = margin(34, 24, 30, 120)
+    # The outermost tick label is centred on the window edge, so half of it sits
+    # outside the panel. A right margin narrower than that half clips the last
+    # coordinate on both axes.
+    plot.margin = margin(34, 96, 30, 120)
   )
 
 dir.create(dirname(out_prefix), recursive = TRUE, showWarnings = FALSE)
