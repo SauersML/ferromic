@@ -661,14 +661,20 @@ def _logit_mle_refit_offset(X, y, offset=None, maxiter=200, tol=1e-8, start_beta
         eta = np.clip(offset + X_np @ beta, -35.0, 35.0)
         p_hat = expit(eta)
         W = p_hat * (1.0 - p_hat)
-        z = eta + (y_np - p_hat) / np.clip(W, 1e-12, None)
+        # Newton step on the log-likelihood with the offset held fixed:
+        # gradient X'(y - p), Hessian -X'WX. The earlier working-response form
+        # regressed z = eta + (y - p)/W on X without subtracting the offset, so
+        # its fixed point solved X'(y - p) = -X'W offset and every constrained
+        # fit with a nonzero offset stopped short of the constrained maximum;
+        # profile intervals built on it were far too narrow on the side away
+        # from zero.
         XTW = X_np.T * W
         XtWX = XTW @ X_np
-        XtWz = XTW @ z
+        score = X_np.T @ (y_np - p_hat)
         try:
-            delta = np.linalg.solve(XtWX, XtWz - XtWX @ beta)
+            delta = np.linalg.solve(XtWX, score)
         except np.linalg.LinAlgError:
-            delta = np.linalg.pinv(XtWX) @ (XtWz - XtWX @ beta)
+            delta = np.linalg.pinv(XtWX) @ score
         beta_new = beta + delta
         if not np.all(np.isfinite(beta_new)):
             break
