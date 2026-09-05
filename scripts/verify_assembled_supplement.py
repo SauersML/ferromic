@@ -83,6 +83,11 @@ def verify(template: Path, assembled: Path) -> None:
                 f"expected prefix={expected!r}\nobserved={caption[:180]!r}"
             )
 
+    retired = [text[:60] for text in captions if "enrichment" in text]
+    if retired:
+        raise RuntimeError(
+            f"'enrichment' survives in a caption (Reviewer 2 asked for 'increase'): {retired}"
+        )
     promoted = [title for title in RESPONSE_ONLY_FIGURE_TITLES if title in full_text]
     if promoted:
         raise RuntimeError(f"Response-only figures were promoted into the supplement: {promoted}")
