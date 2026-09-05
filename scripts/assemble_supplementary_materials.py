@@ -309,6 +309,26 @@ def remove_original_figure_section(document) -> None:
             body.remove(element)
 
 
+# Wording changes to captions carried over from the immutable template. Each
+# entry must match the text of exactly one run in the cloned caption; the
+# Reviewer 2 response says "enrichment" was replaced by "increase" throughout.
+TEMPLATE_CAPTION_EDITS = {
+    12: [(" enrichment effect was derived via permutation (",
+          " increase was derived via permutation (")],
+}
+
+
+def apply_caption_edits(caption, new_number: int) -> None:
+    for old, new in TEMPLATE_CAPTION_EDITS.get(new_number, []):
+        nodes = [node for node in caption.xpath(".//w:t") if (node.text or "") == old]
+        if len(nodes) != 1:
+            raise RuntimeError(
+                f"Figure S{new_number}: expected one caption run equal to {old!r}, "
+                f"found {len(nodes)}"
+            )
+        set_text(nodes[0], new)
+
+
 def add_cloned_block(
     document,
     image_template,
@@ -322,6 +342,7 @@ def add_cloned_block(
     set_page_break_before(image._p)
     caption = copy.deepcopy(caption_element)
     replace_prefix(caption, f"Figure S{old_number}.", f"Figure S{new_number}.")
+    apply_caption_edits(caption, new_number)
     document._element.body.insert(-1, caption)
 
 
