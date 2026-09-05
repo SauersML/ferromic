@@ -154,7 +154,7 @@ jobs:
           python simulations/refsim/make_demography_fig.py \
             --out simulations/refsim/gene_flux_model.png
 
-      - name: Verify all 20 figure inputs and the 47-page paired alignment source
+      - name: Verify every figure input and the 47-page paired alignment source
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -216,11 +216,19 @@ jobs:
       - name: Export every numbered main and supplementary figure as PDF
         run: |
           set -euo pipefail
+          supplementary_count="$(python - <<'PY'
+          import sys
+          sys.path.insert(0, 'stats')
+          from supplementary_inventory import FINAL_SUPPLEMENTARY_FIGURES
+          print(len(FINAL_SUPPLEMENTARY_FIGURES))
+          PY
+          )"
+          test "$supplementary_count" -eq 23
           python scripts/export_manuscript_figures.py \
             --main "$RUNNER_TEMP/manuscript-sources/INV.MS-MainText.v3.7.1.final.1.docx" \
             --supplement output/supplementary_materials/Supplementary_Materials_final.docx \
             --output-dir output/manuscript_figures/all_figures_pdf \
-            --supplementary-count 20 \
+            --supplementary-count "$supplementary_count" \
             --expected-base-main-figure-3-sha256 fe073af00fc0aaae5dd7b7d7ae6c2d20a2e9313b8e6025781f3bd46d6dcc89a5
           python scripts/annotate_main_figure_2a.py \
             --base output/manuscript_figures/all_figures_pdf/Figure_2.pdf \
@@ -238,10 +246,50 @@ jobs:
             --output "$RUNNER_TEMP/Figure_3.corrected.pdf"
           mv "$RUNNER_TEMP/Figure_3.corrected.pdf" \
             output/manuscript_figures/all_figures_pdf/Figure_3.pdf
-          cp results/phewas_within_ancestry/effect_pvalue_correspondence.pdf \
-            output/manuscript_figures/all_figures_pdf/Figure_S17.pdf
+          # Replace the raster exports of the revision figures with the vector
+          # PDFs their scripts wrote in the rebuild step above. Each override is
+          # keyed by the inventory entry, not by number, so renumbering the
+          # supplement cannot point an override at the wrong figure; the page
+          # shape must match the raster export it replaces.
+          python - <<'PY'
+          import shutil, sys
+          from pathlib import Path
+          from pypdf import PdfReader
+          sys.path.insert(0, 'stats')
+          from supplementary_inventory import FINAL_SUPPLEMENTARY_FIGURES
+
+          vector = {
+              'gene_flux_model': 'simulations/refsim/gene_flux_model.pdf',
+              'gene_flux_performance': 'simulations/refsim/gene_flux_fpr_power.pdf',
+              'four_fold_diversity': 'data/four_fold_pi.pdf',
+              'ancestral_derived_diversity':
+                  'results/figure2a_repolarized/figure2a_repolarized.pdf',
+              'genomic_architecture_controls': 'data/recurrence_controls.pdf',
+              'divergence': 'data/divergence_fst_dxy_da_by_type.pdf',
+              'within_ancestry_pc':
+                  'results/phewas_within_ancestry/effect_pvalue_correspondence.pdf',
+              'tagging_snp_concordance': 'data/tag_vs_imputed_concordance.pdf',
+              'cds_test_calibration_power': 'data/cds_permutation_calibration_power.pdf',
+          }
+          out = Path('output/manuscript_figures/all_figures_pdf')
+          numbers = {figure.key: figure.number for figure in FINAL_SUPPLEMENTARY_FIGURES}
+          missing = sorted(set(vector) - set(numbers))
+          assert not missing, f'vector overrides name unknown inventory keys: {missing}'
+          for key, source in vector.items():
+              source = Path(source)
+              assert source.is_file() and source.stat().st_size > 0, source
+              target = out / f'Figure_S{numbers[key]}.pdf'
+              assert target.is_file(), target
+              def shape(path):
+                  box = PdfReader(path).pages[0].mediabox
+                  return float(box.width) / float(box.height)
+              raster, vec = shape(target), shape(source)
+              assert abs(raster - vec) / raster < 0.10, (key, target, raster, vec)
+              shutil.copyfile(source, target)
+              print(f'S{numbers[key]:<3} {key:<32} <- {source}')
+          PY
           rm output/manuscript_figures/all_figures_pdf/manifest.tsv
-          test "$(find output/manuscript_figures/all_figures_pdf -maxdepth 1 -type f -name '*.pdf' | wc -l)" -eq 25
+          test "$(find output/manuscript_figures/all_figures_pdf -maxdepth 1 -type f -name '*.pdf' | wc -l)" -eq 28
 
       - name: Verify every rendered page and make contact sheets
         run: |

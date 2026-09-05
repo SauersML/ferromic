@@ -128,6 +128,29 @@ def main() -> None:
                     f"{100 * worst:.1f}%"
                 )
 
+    # 3b. the caption's two trend p-values are the summary's trend_p values.
+    # Commit 0cb3dd89 regenerated the grid (recurrent power trend p moved from
+    # 0.446 to 0.525) without the caption changing; check 3 only looks at the
+    # highest-flux rate, so the stale p-value reached the supplement.
+    if os.path.exists(caption_path) and os.path.exists(summary_path):
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from make_report import _format_p
+        caption = open(caption_path, encoding="utf-8").read()
+        with open(summary_path, newline="") as handle:
+            trend = {r["scenario"]: float(r["trend_p"])
+                     for r in csv.DictReader(handle, delimiter="\t")}
+        for scenario, phrase in (("single-event", "test for trend, p = "),
+                                 ("recurrent", "significantly with flux (p = ")):
+            if scenario not in trend:
+                problems.append(f"summary has no {scenario} row for the caption check")
+                continue
+            want = f"{phrase}{_format_p(trend[scenario])})"
+            if want not in caption:
+                problems.append(
+                    f"caption does not carry the summary's {scenario} trend p; "
+                    f"expected \"{want}\""
+                )
+
     # 4. the single-event deme size has not drifted back off N_a/100
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     try:
