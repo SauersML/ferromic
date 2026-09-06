@@ -6,8 +6,10 @@ Background
 The constrained logistic refit that ``phewas/models.py`` used to trace profile
 likelihoods ignored its offset in the Newton step (fixed in c364c189). Every
 interval labelled ``profile`` in the exported All of Us tables therefore stopped
-short of the true profile bound on the side away from OR = 1. The likelihood-
-ratio test never used that refit, so ``Beta`` and ``P_LRT_Overall`` are exact.
+short of the true profile bound on the side away from OR = 1, and in the harder
+cases the search failed altogether, leaving a one-sided interval or none at all.
+The likelihood-ratio test never used that refit, so ``Beta`` and
+``P_LRT_Overall`` are exact.
 
 Those two quantities pin the profile deviance at the estimate (zero) and at
 OR = 1 (the LRT statistic). Under a quadratic profile log-likelihood, which holds
@@ -19,15 +21,26 @@ profile bounds, identical coverage and significance calls in simulation), the
     CI = exp(ln OR -/+ 1.959964 * SE)
 
 This is the construction the pipeline already uses when an interval is missing
-(``_compute_overall_or_ci`` in ``phewas/run.py``). Rows whose interval came from
-another method (``wald_mle``, ``profile_penalized``, score bootstraps) are left
-untouched; their intervals never went through the defective refit.
+(``_compute_overall_or_ci`` in ``phewas/run.py``).
+
+Which rows are rewritten
+------------------------
+A row is rebuilt when its p-value comes from the likelihood-ratio test
+(``lrt_mle``), its estimate is finite, and its interval is one of
+
+* ``profile`` and two-sided (the collapsed intervals),
+* ``profile`` but flagged invalid or one-sided (the failed searches),
+* absent (no method recorded although the model converged).
+
+Rows whose interval came from another method (``wald_mle``,
+``profile_penalized``, score bootstraps) are left untouched; they never went
+through the defective refit.
 
 The tables are edited as text so every untouched cell stays byte-identical, and
 the operation is idempotent: rebuilt rows carry ``CI_Method = lrt_quadratic`` and
-are skipped on later runs. ``--check`` fails when an LRT-backed profile interval
-is still present, when a rebuilt interval no longer matches its Beta and p-value,
-or when the combined within-ancestry table disagrees with its six sources.
+are skipped on later runs. ``--check`` fails when an eligible row is still
+pending, when a rebuilt interval no longer matches its Beta and p-value, or when
+the combined within-ancestry table disagrees with its six sources.
 
 Usage
 -----
@@ -119,7 +132,8 @@ class Table:
     @classmethod
     def read(cls, path: Path) -> "Table":
         raw = path.read_bytes().decode("utf-8")
-        newline = "\r\n" if "\r\n" in raw.split("\n", 1)[0] + "\n" else "\n"
+        first_line = raw.split("\n", 1)[0]
+        newline = "\r\n" if first_line.endswith("\r") else "\n"
         trailing = raw.endswith(newline)
         body = raw[: -len(newline)] if trailing else raw
         lines = body.split(newline) if body else []
@@ -162,6 +176,7 @@ class Block:
     ci95_col: Optional[str]
     valid_col: Optional[str]
     sided_col: Optional[str]
+    label_col: Optional[str]
     beta_col: Optional[str]
     or_col: Optional[str]
     p_col: str
@@ -176,8 +191,10 @@ def overall_block(table: Table, p_col: str, source_cols: Sequence[str]) -> Block
         ("CI_LO_OR", "CI_LO_OR_DISPLAY"),
         ("CI_HI_OR", "CI_HI_OR_DISPLAY"),
         ("OR_CI95", "OR_CI95_DISPLAY"),
+        ("CI_Valid", "CI_Valid_DISPLAY"),
+        ("CI_Label", "CI_Label_DISPLAY"),
     ):
-        if table.has(dst):
+        if table.has(src) and table.has(dst):
             mirrors[src] = dst
     return Block(
         label="overall",
@@ -187,6 +204,7 @@ def overall_block(table: Table, p_col: str, source_cols: Sequence[str]) -> Block
         ci95_col="OR_CI95" if table.has("OR_CI95") else None,
         valid_col="CI_Valid" if table.has("CI_Valid") else None,
         sided_col="CI_Sided" if table.has("CI_Sided") else None,
+        label_col="CI_Label" if table.has("CI_Label") else None,
         beta_col="Beta" if table.has("Beta") else None,
         or_col="OR" if table.has("OR") else None,
         p_col=p_col,
@@ -204,6 +222,7 @@ def ancestry_block(table: Table, anc: str) -> Block:
         ci95_col=f"{anc}_CI95" if table.has(f"{anc}_CI95") else None,
         valid_col=f"{anc}_CI_Valid" if table.has(f"{anc}_CI_Valid") else None,
         sided_col=f"{anc}_CI_Sided" if table.has(f"{anc}_CI_Sided") else None,
+        label_col=f"{anc}_CI_Label" if table.has(f"{anc}_CI_Label") else None,
         beta_col=None,
         or_col=f"{anc}_OR",
         p_col=f"{anc}_P",
@@ -218,10 +237,14 @@ class BlockReport:
     rebuilt: int = 0
     already: int = 0
     drift: int = 0
+    categories: Dict[str, int] = field(default_factory=dict)  # what the rebuilt rows replaced
     skipped: Dict[str, int] = field(default_factory=dict)
 
     def skip(self, reason: str) -> None:
         self.skipped[reason] = self.skipped.get(reason, 0) + 1
+
+    def count(self, category: str) -> None:
+        self.categories[category] = self.categories.get(category, 0) + 1
 
 
 def _row_inputs(table: Table, block: Block, row: List[str]) -> Tuple[float, float]:
@@ -248,6 +271,7 @@ def process_block(table: Table, block: Block, *, write: bool, tol: float = 1e-9)
     ci95_ix = table.col(block.ci95_col) if block.ci95_col else None
     valid_ix = table.col(block.valid_col) if block.valid_col else None
     sided_ix = table.col(block.sided_col) if block.sided_col else None
+    label_ix = table.col(block.label_col) if block.label_col else None
     mirror_ix = {table.col(src): table.col(dst) for src, dst in block.mirror_cols.items()}
 
     for row in table.rows:
@@ -265,55 +289,72 @@ def process_block(table: Table, block: Block, *, write: bool, tol: float = 1e-9)
             else:
                 report.already += 1
             continue
-        if method != SOURCE_METHOD:
-            continue
+        if method not in (SOURCE_METHOD, ""):
+            continue  # wald_mle, profile_penalized, score bootstraps: never used the refit
         if not _lrt_backed(table, block, row):
-            report.skip("profile interval without an LRT p-value (left as is)")
-            continue
-        if valid_ix is not None and not _is_true(row[valid_ix]):
-            report.skip("profile interval flagged invalid (left as is)")
-            continue
-        if sided_ix is not None and row[sided_ix].strip() not in {"two", ""}:
-            report.skip("one-sided profile interval (left as is)")
+            if method == SOURCE_METHOD:
+                report.skip("profile interval without an LRT p-value (left as is)")
             continue
         beta, p_value = _row_inputs(table, block, row)
+        if method == "" and not math.isfinite(beta):
+            continue  # no converged model in this cell
         try:
             lo, hi = rebuilt_bounds(beta, p_value)
         except ValueError as exc:
             report.skip(f"cannot rebuild: {exc}")
             continue
+        valid = _is_true(row[valid_ix]) if valid_ix is not None else True
+        sided = row[sided_ix].strip() if sided_ix is not None else "two"
+        if method == "":
+            category = "no interval recorded"
+        elif not valid:
+            category = "profile search failed (flagged invalid)"
+        elif sided == "one":
+            category = "one-sided profile interval"
+        else:
+            category = "two-sided profile interval"
         if write:
             row[m] = REBUILT_METHOD
             row[lo_ix] = repr(lo)
             row[hi_ix] = repr(hi)
             if ci95_ix is not None:
                 row[ci95_ix] = fmt_ci(lo, hi)
+            if valid_ix is not None:
+                row[valid_ix] = "True"
+            if sided_ix is not None:
+                row[sided_ix] = "two"
+            if label_ix is not None:
+                row[label_ix] = ""
             for src_ix, dst_ix in mirror_ix.items():
                 row[dst_ix] = row[src_ix]
         report.rebuilt += 1
+        report.count(category)
     return report
 
 
 # ---------------------------------------------------------------------------
 # Combined within-ancestry table (derived from the six per-ancestry tables)
 # ---------------------------------------------------------------------------
+COMBINED_SYNC_COLUMNS = ("CI_Valid", "CI_Sided", "CI_LO_OR", "CI_HI_OR")
+
+
 def sync_combined(root: Path, *, write: bool) -> Tuple[BlockReport, List[str]]:
-    """Copy the (possibly rebuilt) bounds from the six per-ancestry tables into the
-    combined table, matching rows on (population, Phenotype, Inversion). Returns the
-    report and a list of inconsistencies (rows whose bounds match neither the source
-    nor the rebuilt values)."""
+    """Copy the (possibly rebuilt) interval columns from the six per-ancestry tables
+    into the combined table, matching rows on (population, Phenotype, Inversion).
+    Returns the report and a list of inconsistencies (rows whose values match
+    neither the source table as committed nor its rebuilt values)."""
     combined = Table.read(root / COMBINED_TABLE)
     report = BlockReport(str(COMBINED_TABLE), "combined")
     problems: List[str] = []
     key_ix = (combined.col("population"), combined.col("Phenotype"), combined.col("Inversion"))
-    lo_ix, hi_ix = combined.col("CI_LO_OR"), combined.col("CI_HI_OR")
+    sync_ix = [combined.col(c) for c in COMBINED_SYNC_COLUMNS]
 
-    sources: Dict[str, Dict[Tuple[str, str], Tuple[str, str, str]]] = {}
+    sources: Dict[str, Dict[Tuple[str, str], Tuple[List[str], str]]] = {}
     for anc, rel in POPULATION_FILES.items():
         src = Table.read(root / rel)
-        p_ix, i_ix = src.col("Phenotype"), src.col("Inversion")
-        s_lo, s_hi, s_m = src.col("CI_LO_OR"), src.col("CI_HI_OR"), src.col("CI_Method")
-        sources[anc] = {(r[p_ix], r[i_ix]): (r[s_lo], r[s_hi], r[s_m]) for r in src.rows}
+        p_ix, i_ix, m_ix = src.col("Phenotype"), src.col("Inversion"), src.col("CI_Method")
+        s_ix = [src.col(c) for c in COMBINED_SYNC_COLUMNS]
+        sources[anc] = {(r[p_ix], r[i_ix]): ([r[i] for i in s_ix], r[m_ix]) for r in src.rows}
 
     for row in combined.rows:
         anc = row[key_ix[0]].strip().upper()
@@ -322,17 +363,18 @@ def sync_combined(root: Path, *, write: bool) -> Tuple[BlockReport, List[str]]:
         if src is None:
             problems.append(f"{anc} {key[0]} {key[1]}: no matching per-ancestry row")
             continue
-        src_lo, src_hi, src_method = src
-        same = _same_number(row[lo_ix], src_lo) and _same_number(row[hi_ix], src_hi)
+        src_values, src_method = src
+        same = all(_same_cell(row[i], v) for i, v in zip(sync_ix, src_values))
         if same:
             if src_method == REBUILT_METHOD:
                 report.already += 1
             continue
         if src_method != REBUILT_METHOD:
-            problems.append(f"{anc} {key[0]} {key[1]}: bounds differ from the per-ancestry table")
+            problems.append(f"{anc} {key[0]} {key[1]}: interval columns differ from the per-ancestry table")
             continue
         if write:
-            row[lo_ix], row[hi_ix] = src_lo, src_hi
+            for i, v in zip(sync_ix, src_values):
+                row[i] = v
         report.rebuilt += 1
 
     if write and report.rebuilt:
@@ -340,7 +382,7 @@ def sync_combined(root: Path, *, write: bool) -> Tuple[BlockReport, List[str]]:
     return report, problems
 
 
-def _same_number(a: str, b: str) -> bool:
+def _same_cell(a: str, b: str) -> bool:
     if a.strip() == b.strip():
         return True
     try:
@@ -349,6 +391,8 @@ def _same_number(a: str, b: str) -> bool:
         return False
     if math.isnan(fa) and math.isnan(fb):
         return True
+    if math.isinf(fa) or math.isinf(fb):
+        return fa == fb
     return math.isfinite(fa) and math.isfinite(fb) and abs(fa - fb) <= 1e-12 * max(1.0, abs(fa))
 
 
@@ -356,7 +400,7 @@ def _same_number(a: str, b: str) -> bool:
 # Driver
 # ---------------------------------------------------------------------------
 def table_plan(root: Path) -> List[Tuple[Path, List[str], List[str], List[str]]]:
-    """(path, p column, source columns, ancestry blocks) for every affected table."""
+    """(path, p columns, source columns, ancestry blocks) for every affected table."""
     plan: List[Tuple[Path, List[str], List[str], List[str]]] = []
     plan.append((MAIN_TABLE, ["P_LRT_Overall"], ["P_Source_x", "P_Source"], list(ANCESTRIES)))
     plan.append((TAG_TABLE, ["P_LRT_Overall"], ["P_Source_x", "P_Source"], []))
@@ -414,10 +458,12 @@ def run(
         problems.extend(probs)
     if verbose:
         for rep in reports:
+            cats = "; ".join(f"{v} {k}" for k, v in rep.categories.items())
             skipped = "; ".join(f"{v} {k}" for k, v in rep.skipped.items()) or "none"
             print(
-                f"{rep.table} [{rep.block}]: rebuilt={rep.rebuilt} already={rep.already} "
-                f"drift={rep.drift} skipped={skipped}"
+                f"{rep.table} [{rep.block}]: rebuilt={rep.rebuilt}"
+                + (f" ({cats})" if cats else "")
+                + f" already={rep.already} drift={rep.drift} skipped={skipped}"
             )
         for prob in problems:
             print(f"PROBLEM: {prob}")
@@ -428,7 +474,7 @@ def pending(reports: Sequence[BlockReport], problems: Sequence[str]) -> List[str
     issues = list(problems)
     for rep in reports:
         if rep.rebuilt:
-            issues.append(f"{rep.table} [{rep.block}]: {rep.rebuilt} profile interval(s) still need rebuilding")
+            issues.append(f"{rep.table} [{rep.block}]: {rep.rebuilt} interval(s) still need rebuilding")
         if rep.drift:
             issues.append(f"{rep.table} [{rep.block}]: {rep.drift} rebuilt interval(s) no longer match Beta and p")
     return issues
