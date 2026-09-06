@@ -179,7 +179,9 @@ PHEWAS_COLUMN_DEFS: Dict[str, str] = OrderedDict(
         ),
         (
             "CI_Method",
-            "Method for the confidence interval ('profile' or 'wald_mle').",
+            "Method for the 95% confidence interval: 'lrt_quadratic' (derived from the likelihood-ratio statistic, "
+            "exp(beta ± 1.96·|beta|/z), which equals the profile-likelihood interval under a quadratic profile "
+            "log-likelihood; see the sheet description) or 'wald_mle' (Wald interval from the observed information).",
         ),
         (
             "Inference_Type",
@@ -233,7 +235,7 @@ PHEWAS_COLUMN_DEFS: Dict[str, str] = OrderedDict(
             "EUR_Inference_Type",
             "Inference method for European participants.",
         ),
-        ("EUR_CI_Method", "Confidence interval method for European participants."),
+        ("EUR_CI_Method", "Confidence interval method for European participants ('lrt_quadratic', 'profile_penalized', or 'wald_mle'; see CI_Method)."),
         ("EUR_CI_LO_OR", "Lower 95% confidence bound in European participants."),
         ("EUR_CI_HI_OR", "Upper 95% confidence bound in European participants."),
         (
@@ -255,7 +257,7 @@ PHEWAS_COLUMN_DEFS: Dict[str, str] = OrderedDict(
             "AFR_Inference_Type",
             "Inference method for African participants.",
         ),
-        ("AFR_CI_Method", "Confidence interval method for African participants."),
+        ("AFR_CI_Method", "Confidence interval method for African participants ('lrt_quadratic', 'profile_penalized', or 'wald_mle'; see CI_Method)."),
         ("AFR_CI_LO_OR", "Lower 95% confidence bound in African participants."),
         ("AFR_CI_HI_OR", "Upper 95% confidence bound in African participants."),
         (
@@ -277,7 +279,7 @@ PHEWAS_COLUMN_DEFS: Dict[str, str] = OrderedDict(
             "AMR_Inference_Type",
             "Inference method for Admixed American participants.",
         ),
-        ("AMR_CI_Method", "Confidence interval method for Admixed American participants."),
+        ("AMR_CI_Method", "Confidence interval method for Admixed American participants ('lrt_quadratic', 'profile_penalized', or 'wald_mle'; see CI_Method)."),
         ("AMR_CI_LO_OR", "Lower 95% confidence bound in Admixed American participants."),
         ("AMR_CI_HI_OR", "Upper 95% confidence bound in Admixed American participants."),
         (
@@ -299,7 +301,7 @@ PHEWAS_COLUMN_DEFS: Dict[str, str] = OrderedDict(
             "SAS_Inference_Type",
             "Inference method for South Asian participants.",
         ),
-        ("SAS_CI_Method", "Confidence interval method for South Asian participants."),
+        ("SAS_CI_Method", "Confidence interval method for South Asian participants ('lrt_quadratic', 'profile_penalized', or 'wald_mle'; see CI_Method)."),
         ("SAS_CI_LO_OR", "Lower 95% confidence bound in South Asian participants."),
         ("SAS_CI_HI_OR", "Upper 95% confidence bound in South Asian participants."),
         (
@@ -321,7 +323,7 @@ PHEWAS_COLUMN_DEFS: Dict[str, str] = OrderedDict(
             "EAS_Inference_Type",
             "Inference method for East Asian participants.",
         ),
-        ("EAS_CI_Method", "Confidence interval method for East Asian participants."),
+        ("EAS_CI_Method", "Confidence interval method for East Asian participants ('lrt_quadratic', 'profile_penalized', or 'wald_mle'; see CI_Method)."),
         ("EAS_CI_LO_OR", "Lower 95% confidence bound in East Asian participants."),
         ("EAS_CI_HI_OR", "Upper 95% confidence bound in East Asian participants."),
         (
@@ -343,7 +345,7 @@ PHEWAS_COLUMN_DEFS: Dict[str, str] = OrderedDict(
             "MID_Inference_Type",
             "Inference method for Middle Eastern participants.",
         ),
-        ("MID_CI_Method", "Confidence interval method for Middle Eastern participants."),
+        ("MID_CI_Method", "Confidence interval method for Middle Eastern participants ('lrt_quadratic', 'profile_penalized', or 'wald_mle'; see CI_Method)."),
         ("MID_CI_LO_OR", "Lower 95% confidence bound in Middle Eastern participants."),
         ("MID_CI_HI_OR", "Upper 95% confidence bound in Middle Eastern participants."),
     ]
@@ -407,7 +409,14 @@ TAG_PHEWAS_COLUMN_DEFS: Dict[str, str] = OrderedDict(
         ("P_Valid", _phewas_desc("P_Valid", "Whether the p-value is valid.")),
         ("P_Source_x", _phewas_desc("P_Source", "Statistic used for the p-value.")),
         ("OR_CI95", _phewas_desc("OR_CI95", "95% confidence interval for the odds ratio.")),
-        ("CI_Method", _phewas_desc("CI_Method", "Method used to compute the confidence interval.")),
+        (
+            "CI_Method",
+            _phewas_desc(
+                "CI_Method",
+                "Method for the 95% confidence interval: 'lrt_quadratic' (derived from the likelihood-ratio statistic; "
+                "see the PheWAS results sheet), 'profile_penalized' (Firth profile likelihood), or 'wald_mle'.",
+            ),
+        ),
         ("CI_Sided", _phewas_desc("CI_Sided", "Whether the confidence interval is one- or two-sided.")),
         ("CI_Valid", _phewas_desc("CI_Valid", "Whether the confidence interval is valid.")),
         ("CI_LO_OR", _phewas_desc("CI_LO_OR", "Lower CI bound for odds ratio.")),
@@ -2190,7 +2199,15 @@ def build_workbook(output_path: Path) -> None:
                 "squared, genetically inferred sex, and 16 global genetic principal components. NA marks a model with "
                 "no valid estimate, nearly all sex-restricted obstetric phenotypes. Interaction and ancestry-specific "
                 "tests were run only for associations passing the FDR threshold, and only in groups with enough "
-                "cases."
+                "cases. 95% confidence intervals labelled 'lrt_quadratic' are derived from the likelihood-ratio "
+                "statistic of the association, exp(beta ± 1.96·|beta|/z) with z the standard-normal quantile of the "
+                "likelihood-ratio p-value; this equals the profile-likelihood interval when the profile log-likelihood "
+                "is quadratic, which holds to within a few percent of the interval half-width at the case counts here "
+                "(stats/rebuild_phewas_profile_cis.py). They replace profile intervals from an earlier constrained "
+                "refit that did not reach the constrained maximum. Intervals labelled 'wald_mle' are Wald intervals "
+                "from the observed information; 'profile_penalized' intervals are Firth profile-likelihood intervals. "
+                "Ancestry strata with fewer than about 200 cases have wider genuine likelihood asymmetry than the "
+                "quadratic approximation allows for, so their 'lrt_quadratic' bounds are approximate."
             ),
             column_defs=PHEWAS_COLUMN_DEFS,
             loader=_load_phewas_results,
@@ -2206,7 +2223,9 @@ def build_workbook(output_path: Path) -> None:
                 "genetic ancestry group (AFR, AMR, EAS, EUR, MID, and SAS), adjusting for age, age squared, "
                 "genetically inferred sex, and 16 principal components computed within that group. Estimates from the "
                 "ancestry-stratified models with the 16 global principal components are also reported. Q-values are "
-                "computed within the selected phenotype set."
+                "computed within the selected phenotype set. Confidence bounds for likelihood-ratio-tested models "
+                "are derived from the likelihood-ratio statistic (see the PheWAS results sheet); they are approximate "
+                "in strata with fewer than about 200 cases."
             ),
             column_defs=WITHIN_ANCESTRY_PHEWAS_COLUMN_DEFS,
             column_labels={
@@ -2267,7 +2286,8 @@ def build_workbook(output_path: Path) -> None:
                 "PheWAS of the 17q21 inversion using a tag-SNP hard call in place of imputed dosage. A sample is called "
                 "only when all three tag SNPs at chr17:45,974,480, chr17:45,996,523 and chr17:46,003,698 agree "
                 "(imputation/tagging_snp_inversion_dosages.py); mixed or missing genotypes are left uncalled. NA marks "
-                "models that did not converge or gave unstable fits."
+                "models that did not converge or gave unstable fits. Confidence intervals follow the conventions of "
+                "the PheWAS results sheet ('lrt_quadratic', 'profile_penalized', or 'wald_mle')."
             ),
             column_defs=TAG_PHEWAS_COLUMN_DEFS,
             loader=_load_phewas_tagging,
