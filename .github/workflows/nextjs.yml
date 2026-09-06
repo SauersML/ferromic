@@ -280,7 +280,10 @@ jobs:
           fi
 
       - name: Commit and push updated figures manifest
-        if: steps.check-site.outputs.exists == 'true' && steps.check-manifest.outputs.generated == 'true'
+        # Never push from a pull_request run: its checkout is GitHub's synthetic
+        # merge commit, and rebasing that onto main pushed partial PR content
+        # (new files only) to main on 2026-09-06.
+        if: github.event_name != 'pull_request' && steps.check-site.outputs.exists == 'true' && steps.check-manifest.outputs.generated == 'true'
         env:
           PUSH_TOKEN: ${{ secrets.WRITE_TOKEN }}
         run: |
