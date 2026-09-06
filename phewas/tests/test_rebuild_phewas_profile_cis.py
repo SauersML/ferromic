@@ -11,6 +11,7 @@ from __future__ import annotations
 import importlib.util
 import math
 import pathlib
+import sys
 from statistics import NormalDist
 
 import numpy as np
@@ -21,6 +22,7 @@ SCRIPT = REPO / "stats" / "rebuild_phewas_profile_cis.py"
 
 _spec = importlib.util.spec_from_file_location("rebuild_phewas_profile_cis", SCRIPT)
 rb = importlib.util.module_from_spec(_spec)
+sys.modules[_spec.name] = rb  # dataclasses resolve annotations through sys.modules
 _spec.loader.exec_module(rb)
 
 
