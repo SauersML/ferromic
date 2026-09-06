@@ -28,3 +28,15 @@ This writes the comparison table to
 `data/phewas_within_ancestry_correspondence.tsv` and the figures and summary to
 `results/phewas_within_ancestry/`.
 
+
+## Confidence intervals
+
+Rows whose `CI_Method` is `lrt_quadratic` carry 95% intervals derived from the
+likelihood-ratio statistic of the model, `exp(beta ± 1.96·|beta|/z)` with `z`
+the standard-normal quantile of the likelihood-ratio p-value. These replace the
+`profile` intervals originally exported by the pipeline, whose constrained refit
+did not reach the constrained maximum (fixed in phewas/models.py, c364c189).
+The rebuild is performed and verified by `stats/rebuild_phewas_profile_cis.py`,
+which also keeps `data/within_ancestry_pc_phewas_results.tsv` in step with the
+six per-ancestry tables. `wald_mle` and `profile_penalized` (Firth) intervals
+never used the defective refit and are unchanged.

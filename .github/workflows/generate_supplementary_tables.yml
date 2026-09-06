@@ -44,6 +44,11 @@ jobs:
           python stats/verify_supplementary_inventory.py \
             --write-tsv web/figures-site/public/downloads/supplementary_inventory.tsv
 
+      - name: Verify the PheWAS confidence intervals are rebuilt
+        # Refuse to publish tables that still carry profile intervals from the
+        # defective constrained refit (see stats/rebuild_phewas_profile_cis.py).
+        run: python stats/rebuild_phewas_profile_cis.py --check
+
       - name: Generate supplementary tables workbook
         run: python stats/generate_tables.py --output web/figures-site/public/downloads/supplementary_tables.xlsx
 

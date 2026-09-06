@@ -1049,6 +1049,47 @@ def _profile_ci_beta(X_full, y, target_ix, fit_full, kind="mle", alpha=0.05, max
     }
 
 
+PROFILE_CI_MIN_HALFWIDTH_RATIO = 0.5
+
+
+def _profile_ci_plausible(ci_info, beta_hat, lrt_stat, min_ratio=PROFILE_CI_MIN_HALFWIDTH_RATIO):
+    """Sanity-check a profile interval against the half-width implied by the LRT.
+
+    The LRT statistic fixes the profile deviance at OR = 1, so under a quadratic
+    profile log-likelihood the 95% half-width is 1.96 * |beta_hat| / sqrt(stat).
+    At the case counts analysed here the true profile bounds sit within a few
+    percent of that value, so a finite bound closer to the estimate than
+    ``min_ratio`` times the implied half-width cannot come from a correctly
+    maximised constrained fit. That pattern is the signature of the offset-refit
+    defect fixed in c364c189 (bounds collapsed onto the estimate on the side
+    away from the null); rejecting it here makes the caller fall back to a Wald
+    interval instead of reporting an impossible one.
+
+    Returns (ok, note). The check is skipped when the statistic is too small for
+    the implied half-width to be meaningful (stat < 1) or when beta_hat is zero.
+    """
+    try:
+        lo = float(ci_info.get("lo", np.nan))
+        hi = float(ci_info.get("hi", np.nan))
+        b = float(beta_hat)
+        stat = float(lrt_stat)
+    except (TypeError, ValueError, AttributeError):
+        return True, ""
+    if not (np.isfinite(b) and np.isfinite(stat)) or stat < 1.0 or b == 0.0:
+        return True, ""
+    implied = float(sp_stats.norm.ppf(0.975)) * abs(b) / np.sqrt(stat)
+    if not (np.isfinite(implied) and implied > 0.0):
+        return True, ""
+    bad = []
+    if np.isfinite(lo) and (b - lo) < min_ratio * implied:
+        bad.append(f"lower half-width {b - lo:.4g} < {min_ratio:g} x LRT-implied {implied:.4g}")
+    if np.isfinite(hi) and (hi - b) < min_ratio * implied:
+        bad.append(f"upper half-width {hi - b:.4g} < {min_ratio:g} x LRT-implied {implied:.4g}")
+    if bad:
+        return False, "profile_ci_implausible: " + "; ".join(bad)
+    return True, ""
+
+
 def _score_stat_at_beta(X_red, y, x_target, beta0, kind="mle"):
     Xr = X_red.to_numpy(dtype=np.float64, copy=False) if hasattr(X_red, "to_numpy") else np.asarray(X_red, dtype=np.float64)
     yv = np.asarray(y, dtype=np.float64)
@@ -3488,10 +3529,23 @@ def _lrt_overall_worker_impl(task):
         if inference_family is not None:
             if target_ix is not None and fit_full_use is not None:
                 ci_info = _profile_ci_beta(X_full_zv, yb, target_ix, fit_full_use, kind=inference_family)
+                if inference_family == "mle" and ci_info.get("valid", False):
+                    _guard_stat = 2.0 * (
+                        float(getattr(fit_full_use, "llf", np.nan)) - float(getattr(fit_red_use, "llf", np.nan))
+                    )
+                    _guard_beta = float(np.asarray(getattr(fit_full_use, "params"), dtype=np.float64)[int(target_ix)])
+                    _guard_ok, _guard_note = _profile_ci_plausible(ci_info, _guard_beta, _guard_stat)
+                    if not _guard_ok:
+                        print(
+                            f"[CI-PROFILE-REJECTED] name={s_name} site=lrt_overall_worker {_guard_note}",
+                            flush=True,
+                        )
+                        ci_info = dict(ci_info, valid=False, note=_guard_note)
+                        notes.append(_guard_note)
                 ci_method = ci_info.get("method")
                 ci_sided = ci_info.get("sided", "two")
                 ci_valid = bool(ci_info.get("valid", False))
-                
+
                 # Print CI profile penalized details if using profile_penalized method
                 if ci_method == "profile_penalized":
                     beta_hat = getattr(fit_full_use, "params", [np.nan])[target_ix] if hasattr(fit_full_use, "params") else np.nan
@@ -5091,6 +5145,17 @@ def _lrt_followup_worker_impl(task):
                         # (will fall through to score tests below)
                         inference_type = inference_family
                     ci_info = _profile_ci_beta(X_anc_zv, y_anc, target_ix_anc, fit_full_use, kind=inference_family)
+                    if inference_family == "mle" and ci_info.get("valid", False):
+                        _guard_beta = float(
+                            np.asarray(getattr(fit_full_use, "params"), dtype=np.float64)[int(target_ix_anc)]
+                        )
+                        _guard_ok, _guard_note = _profile_ci_plausible(ci_info, _guard_beta, stat)
+                        if not _guard_ok:
+                            print(
+                                f"[CI-PROFILE-REJECTED] name={s_name} anc={anc_upper} {_guard_note}",
+                                flush=True,
+                            )
+                            ci_info = dict(ci_info, valid=False, note=_guard_note)
                     ci_method = ci_info.get("method")
                     ci_sided = ci_info.get("sided", "two")
                     ci_valid = bool(ci_info.get("valid", False))
@@ -5108,6 +5173,23 @@ def _lrt_followup_worker_impl(task):
                         ci_str = _fmt_ci(ci_lo_or, ci_hi_or)
                         if ci_sided == "one":
                             ci_label = "one-sided (boundary)"
+                    elif inference_family == "mle":
+                        # Same fallback as the pooled model: a rejected or failed
+                        # profile interval is replaced by the Wald interval from
+                        # the full MLE fit rather than leaving the stratum empty.
+                        _wald_anc = _wald_ci_or_from_fit(fit_full_use, target_ix_anc, alpha=0.05, penalized=False)
+                        if _wald_anc.get("valid", False):
+                            ci_lo_or = float(_wald_anc["lo_or"])
+                            ci_hi_or = float(_wald_anc["hi_or"])
+                            ci_str = _fmt_ci(ci_lo_or, ci_hi_or)
+                            ci_method = _wald_anc["method"]
+                            ci_sided = "two"
+                            ci_valid = True
+                            print(
+                                f"[CI-WALD-FALLBACK] name={s_name} anc={anc_upper} "
+                                f"lo_or={ci_lo_or:.4f} hi_or={ci_hi_or:.4f}",
+                                flush=True,
+                            )
                     params_full = getattr(fit_full_use, "params", None)
                     if params_full is not None:
                         try:

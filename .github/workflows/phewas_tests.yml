@@ -1,0 +1,62 @@
+name: PheWAS model tests
+
+# Runs the pure-Python PheWAS test suite (profile-likelihood refit, the
+# LRT-quadratic interval rebuild, and the collapsed-interval guard) and refuses
+# any committed PheWAS table that still carries a profile interval from the
+# defective constrained refit.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/phewas_tests.yml'
+      - 'phewas/**'
+      - 'stats/rebuild_phewas_profile_cis.py'
+      - 'data/phewas_results.tsv'
+      - 'data/all_pop_phewas_tag.tsv'
+      - 'data/within_ancestry_pc_phewas_results.tsv'
+      - 'data/phewas_within_ancestry/**'
+  pull_request:
+    paths:
+      - '.github/workflows/phewas_tests.yml'
+      - 'phewas/**'
+      - 'stats/rebuild_phewas_profile_cis.py'
+      - 'data/phewas_results.tsv'
+      - 'data/all_pop_phewas_tag.tsv'
+      - 'data/within_ancestry_pc_phewas_results.tsv'
+      - 'data/phewas_within_ancestry/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phewas-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --disable-pip-version-check \
+            numpy==2.2.6 scipy==1.15.3 pandas==2.3.1 statsmodels==0.14.5 pytest==8.4.1
+
+      - name: Verify the committed PheWAS tables carry rebuilt intervals
+        run: python stats/rebuild_phewas_profile_cis.py --check
+
+      - name: Run the PheWAS model tests
+        run: |
+          python -m pytest -q \
+            phewas/tests/test_profile_ci.py \
+            phewas/tests/test_rebuild_phewas_profile_cis.py
