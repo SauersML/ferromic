@@ -28,7 +28,8 @@ from PIL import Image
 INK_THRESHOLD = 250          # luminance below which a pixel counts as ink
 DEFAULT_SPLIT_FRACTION = 692 / 1430   # x position separating panel A from B/C
 LETTER_BOX = (0, 80, 0, 37)  # rows [0, 80) and cols [0, 37): the panel letter
-WIDTH_TOLERANCE = 0.03
+WIDTH_TOLERANCE = 0.01   # never let the new panel grow into panels B and C
+MAX_NARROWING = 0.15     # a narrower render is fine (legend inside the axes)
 PDF_DPI = 300
 
 
@@ -80,10 +81,14 @@ def replace_panel_a(base: Image.Image, panel: Image.Image, split_fraction: float
     new_h, new_w = pbottom - ptop, pright - pleft
     scale = old_h / new_h
     scaled_w = new_w * scale
-    if abs(scaled_w - old_w) / old_w > WIDTH_TOLERANCE:
+    # The committed forest script keeps its legend inside the axes, so its render
+    # is somewhat narrower than the submitted panel, whose legend sat to the
+    # right of the axes. A narrower panel leaves white space before panel B and
+    # is accepted; a wider one would collide with B and is refused.
+    if scaled_w > old_w * (1 + WIDTH_TOLERANCE) or scaled_w < old_w * (1 - MAX_NARROWING):
         raise ValueError(
-            f"rescaled forest width {scaled_w:.0f}px differs from the original panel width {old_w}px "
-            f"by more than {WIDTH_TOLERANCE:.0%}; the layouts do not match"
+            f"rescaled forest width {scaled_w:.0f}px is incompatible with the original panel width {old_w}px "
+            f"(allowed: up to {MAX_NARROWING:.0%} narrower, {WIDTH_TOLERANCE:.0%} wider)"
         )
     cropped = panel.crop((pleft, ptop, pright, pbottom))
     target_w = int(round(scaled_w))

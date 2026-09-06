@@ -6,7 +6,8 @@
   "evaluable_association_population_comparisons": 187,
   "direction_concordant_comparisons": 180,
   "direction_concordance_percent": 96.2566844919786,
-  "pearson_r_log_or": 0.981329321779238,
+  "pearson_r_log_or": 0.9813293217792378,
+  "spearman_rho_neg_log10_p": 0.9494451226814588,
   "median_absolute_beta_shift": 0.022209401291266716,
   "percentile_95_absolute_beta_shift": 0.1813032454973695,
   "nonconcordant_comparisons": [
