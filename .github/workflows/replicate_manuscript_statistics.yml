@@ -84,6 +84,9 @@ jobs:
           if-no-files-found: error
 
       - name: Commit and push data updates
+        # Pull-request runs check out a synthetic merge commit; pushing from
+        # them put unreviewed pull-request state on main (2026-09-06).
+        if: github.event_name != 'pull_request'
         env:
           PUSH_TOKEN: ${{ secrets.WRITE_TOKEN }}
         run: |
