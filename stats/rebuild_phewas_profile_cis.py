@@ -274,6 +274,8 @@ def process_block(table: Table, block: Block, *, write: bool, tol: float = 1e-9)
     label_ix = table.col(block.label_col) if block.label_col else None
     mirror_ix = {table.col(src): table.col(dst) for src, dst in block.mirror_cols.items()}
 
+    notes_ix = table.col("Model_Notes") if (block.label == "overall" and table.has("Model_Notes")) else None
+
     for row in table.rows:
         method = row[m].strip()
         if method == REBUILT_METHOD:
@@ -286,6 +288,12 @@ def process_block(table: Table, block: Block, *, write: bool, tol: float = 1e-9)
             stored_lo, stored_hi = _to_float(row[lo_ix]), _to_float(row[hi_ix])
             if abs(stored_lo - lo) > tol * max(1.0, lo) or abs(stored_hi - hi) > tol * max(1.0, hi):
                 report.drift += 1
+            elif notes_ix is not None and _stale_note(row[notes_ix]):
+                # The pipeline's diagnostic note still names the old method.
+                if write:
+                    row[notes_ix] = _update_note(row[notes_ix])
+                report.rebuilt += 1
+                report.count("diagnostic note updated")
             else:
                 report.already += 1
             continue
@@ -325,11 +333,26 @@ def process_block(table: Table, block: Block, *, write: bool, tol: float = 1e-9)
                 row[sided_ix] = "two"
             if label_ix is not None:
                 row[label_ix] = ""
+            if notes_ix is not None:
+                row[notes_ix] = _update_note(row[notes_ix])
             for src_ix, dst_ix in mirror_ix.items():
                 row[dst_ix] = row[src_ix]
         report.rebuilt += 1
         report.count(category)
     return report
+
+
+STALE_NOTE_TOKEN = "ci=" + SOURCE_METHOD
+NEW_NOTE_TOKEN = "ci=" + REBUILT_METHOD
+
+
+def _stale_note(note: str) -> bool:
+    return STALE_NOTE_TOKEN in note.split(";")
+
+
+def _update_note(note: str) -> str:
+    """Rename the pipeline's ci=profile diagnostic token on a rebuilt row."""
+    return ";".join(NEW_NOTE_TOKEN if tok == STALE_NOTE_TOKEN else tok for tok in note.split(";"))
 
 
 # ---------------------------------------------------------------------------
