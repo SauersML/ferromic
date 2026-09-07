@@ -1,0 +1,8 @@
+phenotype	pan_ukb_code	population	grch37_position	ref	alt	beta	se	neglog10_p	odds_ratio	ci_lo	ci_hi	p
+Malignant neoplasm of breast	icd10-C50	EUR	chr17:44073889	A	G	-0.05883	0.01635	3.493	0.9429	0.9131	0.9736	0.000321
+Malignant neoplasm of breast	icd10-C50	meta	chr17:44073889	A	G	-0.05859	0.01629	3.491	0.9431	0.9135	0.9737	0.000323
+Obesity	phecode-278.1	EUR	chr17:44073889	A	G	0.06538	0.01419	5.392	1.0676	1.0383	1.0977	4.06e-06
+Obesity	phecode-278.1	meta	chr17:44073889	A	G	0.06702	0.01405	5.731	1.0693	1.0403	1.0992	1.86e-06
+Mild cognitive impairment	phecode-292.2	EUR	chr17:44073889	A	G	-0.01709	0.0948	0.06705	0.9831	0.8164	1.1838	0.857
+Heart failure	icd10-I50	EUR	chr17:44073889	A	G	-0.001297	0.02029	0.02271	0.9987	0.9598	1.0392	0.949
+Heart failure	icd10-I50	meta	chr17:44073889	A	G	0.000893	0.02014	0.01564	1.0009	0.9622	1.0412	0.965
