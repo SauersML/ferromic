@@ -175,12 +175,12 @@ PHEWAS_COLUMN_DEFS: Dict[str, str] = OrderedDict(
         ),
         (
             "P_Source_x",
-            "Test that produced the p-value ('lrt_mle', 'score_chi2', or 'score_boot_mle').",
+            "Test that produced the p-value: likelihood ratio test, score test, or score bootstrap.",
         ),
         (
             "CI_Method",
-            "Confidence interval method: lrt_quadratic (from the likelihood-ratio statistic, see the sheet "
-            "description) or wald_mle.",
+            "Method used for the 95% confidence interval: likelihood ratio (see the sheet description), Wald, "
+            "or Firth profile likelihood.",
         ),
         (
             "Inference_Type",
@@ -412,8 +412,8 @@ TAG_PHEWAS_COLUMN_DEFS: Dict[str, str] = OrderedDict(
             "CI_Method",
             _phewas_desc(
                 "CI_Method",
-                "Confidence interval method: lrt_quadratic, profile_penalized (Firth), or wald_mle (see the PheWAS "
-                "results sheet).",
+                "Method used for the 95% confidence interval: likelihood ratio, Firth profile likelihood, or Wald "
+                "(see the PheWAS results sheet).",
             ),
         ),
         ("CI_Sided", _phewas_desc("CI_Sided", "Whether the confidence interval is one- or two-sided.")),
@@ -1722,6 +1722,111 @@ def _load_simple_tsv(path: Path) -> pd.DataFrame:
     return pd.read_csv(path, sep="\t", dtype=str, low_memory=False)
 
 
+_CI_METHOD_VALUES = {
+    "lrt_quadratic": "likelihood ratio",
+    "wald_mle": "Wald",
+    "profile_penalized": "Firth profile likelihood",
+    "profile": "profile likelihood",
+}
+_TEST_VALUES = {
+    "lrt_mle": "likelihood ratio test",
+    "score_chi2": "score test",
+    "score_boot_mle": "score bootstrap",
+    "score_boot_firth": "score bootstrap (Firth)",
+    "rao_score": "Rao score test",
+}
+_FIT_VALUES = {
+    "mle": "maximum likelihood",
+    "firth": "Firth",
+    "none": "none",
+    "score": "score test",
+    "score_boot": "score bootstrap",
+    "rao_score": "Rao score test",
+}
+_NOTE_TOKENS = {
+    "ridge_seeded_refit": "ridge-seeded refit",
+    "firth_seeded_refit": "Firth-seeded refit",
+    "firth_refit": "Firth refit",
+    "penalized_fit_in_path": "penalized fit in path",
+    "rao_score_multi": "multi-df Rao score test",
+    "sex_restricted_to_0": "restricted to female participants",
+    "sex_restricted_to_1": "restricted to male participants",
+    "sex_majority_restricted_to_0": "most cases female",
+    "sex_majority_restricted_to_1": "most cases male",
+    "sex_forced_restriction_to_0": "sex-specific phenotype",
+    "sex_forced_restriction_to_1": "sex-specific phenotype",
+    "sex_no_controls_in_case_sex": "no controls of the case sex",
+    "existing_stratified_estimate_unavailable": "existing stratified estimate unavailable",
+}
+_NOTE_PREFIXES = {
+    "inference": ("inference: ", _FIT_VALUES),
+    "ci": ("CI: ", _CI_METHOD_VALUES),
+    "dropped_rank_def": ("dropped rank-deficient column ", {}),
+    "rank": ("rank ", {}),
+    "cond": ("condition number ", {}),
+    "reason": ("reason: ", _NOTE_TOKENS),
+}
+
+
+_NUMBER_LIKE = re.compile(r"^[0-9.eE+-]+$")
+
+
+def _readable_token(token: str, values: Dict[str, str]) -> str:
+    token = token.strip()
+    if token in values:
+        return values[token]
+    if token == "" or _NUMBER_LIKE.match(token):
+        return token
+    if "+" in token:
+        return ", ".join(_readable_token(part, values) for part in token.split("+"))
+    return token.replace("_", " ")
+
+
+def _readable_note(note: str) -> str:
+    """Turn a pipeline diagnostic string such as
+    'ridge_seeded_refit;ridge_seeded_refit;inference=mle;ci=wald_mle' into
+    'ridge-seeded refit; inference: maximum likelihood; CI: Wald'."""
+    parts: List[str] = []
+    for raw in str(note).split(";"):
+        tok = raw.strip()
+        if not tok:
+            continue
+        if tok in _NOTE_TOKENS:
+            text = _NOTE_TOKENS[tok]
+        elif "=" in tok or ":" in tok:
+            sep = "=" if "=" in tok else ":"
+            key, val = tok.split(sep, 1)
+            prefix, values = _NOTE_PREFIXES.get(key, (key.replace("_", " ") + ": ", {}))
+            text = prefix + _readable_token(val, values)
+        else:
+            text = tok.replace("_", " ")
+        if not parts or parts[-1] != text:
+            parts.append(text)
+    return "; ".join(parts)
+
+
+def _readable_phewas_values(df: pd.DataFrame) -> pd.DataFrame:
+    """Replace pipeline tokens in the PheWAS sheets with readable text."""
+    df = df.copy()
+
+    def _map(col: str, values: Dict[str, str]) -> None:
+        if col in df.columns:
+            df[col] = df[col].map(lambda v: v if pd.isna(v) else _readable_token(str(v), values))
+
+    for col in df.columns:
+        if col == "CI_Method" or col.endswith("_CI_Method"):
+            _map(col, _CI_METHOD_VALUES)
+        elif col in {"P_Source", "P_Source_x", "P_Source_y", "P_Method", "P_Value_Method"} or col.endswith("_P_Source") or col.endswith("_P_Method"):
+            _map(col, _TEST_VALUES)
+        elif col in {"Inference_Type", "Coef_Source"} or col.endswith("_Inference_Type"):
+            _map(col, _FIT_VALUES)
+        elif col.endswith("Model_Notes") or col.endswith("_reason") or col.endswith("_Reason") or col in {"Skip_Reason"}:
+            df[col] = df[col].map(lambda v: v if pd.isna(v) else _readable_note(str(v)))
+        elif col == "Phenotype":
+            df[col] = df[col].map(lambda v: v if pd.isna(v) else str(v).replace("_", " "))
+    return df
+
+
 def _clean_phewas_df(
     df: pd.DataFrame, sheet_name: str, column_defs: Dict[str, str]
 ) -> pd.DataFrame:
@@ -1756,7 +1861,7 @@ def _clean_phewas_df(
     if "P_Source" in df.columns and "P_Source_x" not in df.columns:
         df = df.rename(columns={"P_Source": "P_Source_x"})
 
-    return _prune_columns(df, column_defs, sheet_name)
+    return _prune_columns(_readable_phewas_values(df), column_defs, sheet_name)
 
 
 def _load_phewas_results() -> pd.DataFrame:
@@ -1782,7 +1887,7 @@ def _load_phewas_results() -> pd.DataFrame:
 def _load_within_ancestry_phewas() -> pd.DataFrame:
     df = _load_simple_tsv(WITHIN_ANCESTRY_PHEWAS_RESULTS)
     df = _prune_columns(
-        df,
+        _readable_phewas_values(df),
         WITHIN_ANCESTRY_PHEWAS_COLUMN_DEFS,
         "Within-ancestry PC PheWAS",
     )
@@ -2198,11 +2303,9 @@ def build_workbook(output_path: Path) -> None:
                 "squared, genetically inferred sex, and 16 global genetic principal components. NA marks a model with "
                 "no valid estimate, nearly all sex-restricted obstetric phenotypes. Interaction and ancestry-specific "
                 "tests were run only for associations passing the FDR threshold, and only in groups with enough "
-                "cases. CI_Method is the method used for each 95% confidence interval. lrt_quadratic means "
-                "exp(beta ± 1.96·|beta|/z), where z is the standard normal quantile of the likelihood ratio test "
-                "p-value. wald_mle means a Wald interval. profile_penalized means a Firth profile likelihood "
-                "interval. lrt_quadratic bounds are only approximate in ancestry groups with fewer than about "
-                "200 cases."
+                "cases. The confidence interval method column gives the method used for each 95% confidence "
+                "interval. Likelihood ratio intervals are exp(beta ± 1.96·|beta|/z), where z is the standard normal "
+                "quantile of the likelihood ratio test p-value."
             ),
             column_defs=PHEWAS_COLUMN_DEFS,
             loader=_load_phewas_results,
