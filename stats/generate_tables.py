@@ -1814,11 +1814,11 @@ def _readable_phewas_values(df: pd.DataFrame) -> pd.DataFrame:
             df[col] = df[col].map(lambda v: v if pd.isna(v) else _readable_token(str(v), values))
 
     for col in df.columns:
-        if col == "CI_Method" or col.endswith("_CI_Method"):
+        if "CI_Method" in col:
             _map(col, _CI_METHOD_VALUES)
-        elif col in {"P_Source", "P_Source_x", "P_Source_y", "P_Method", "P_Value_Method"} or col.endswith("_P_Source") or col.endswith("_P_Method"):
+        elif "P_Source" in col or "P_Method" in col or col == "P_Value_Method":
             _map(col, _TEST_VALUES)
-        elif col in {"Inference_Type", "Coef_Source"} or col.endswith("_Inference_Type"):
+        elif "Inference_Type" in col or col == "Coef_Source":
             _map(col, _FIT_VALUES)
         elif col.endswith("Model_Notes") or col.endswith("_reason") or col.endswith("_Reason") or col in {"Skip_Reason"}:
             df[col] = df[col].map(lambda v: v if pd.isna(v) else _readable_note(str(v)))
