@@ -2198,11 +2198,11 @@ def build_workbook(output_path: Path) -> None:
                 "squared, genetically inferred sex, and 16 global genetic principal components. NA marks a model with "
                 "no valid estimate, nearly all sex-restricted obstetric phenotypes. Interaction and ancestry-specific "
                 "tests were run only for associations passing the FDR threshold, and only in groups with enough "
-                "cases. Confidence intervals labelled lrt_quadratic are computed from the likelihood-ratio statistic "
-                "as exp(beta ± 1.96·|beta|/z), where z is the standard-normal quantile of the likelihood-ratio "
-                "p-value. Intervals labelled wald_mle are Wald intervals, and intervals labelled profile_penalized "
-                "are Firth profile-likelihood intervals. In ancestry groups with fewer than about 200 cases the "
-                "lrt_quadratic bounds are approximate."
+                "cases. CI_Method is the method used for each 95% confidence interval. lrt_quadratic means "
+                "exp(beta ± 1.96·|beta|/z), where z is the standard normal quantile of the likelihood ratio test "
+                "p-value. wald_mle means a Wald interval. profile_penalized means a Firth profile likelihood "
+                "interval. lrt_quadratic bounds are only approximate in ancestry groups with fewer than about "
+                "200 cases."
             ),
             column_defs=PHEWAS_COLUMN_DEFS,
             loader=_load_phewas_results,
