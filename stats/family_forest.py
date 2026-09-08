@@ -11,6 +11,7 @@ plt.rcParams.update({
 })
 
 from forest import (
+    DEFAULT_STYLE,
     plot_forest,
     compute_padded_or_range,
     map_inversion_series,
@@ -169,7 +170,9 @@ def main():
         or_range=or_range,
         out_pdf=OUT_PDF,
         out_png=OUT_PNG,
-        legend_position="top_right"
+        legend_position="top_right",
+        bold_unshaded_rows=False,
+        style=DEFAULT_STYLE,
     )
     print("Done.")
 
