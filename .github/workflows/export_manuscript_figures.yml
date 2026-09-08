@@ -62,6 +62,11 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Install Helvetica-compatible fonts for the forest plot
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-urw-base35 fonts-liberation
+
       - name: Install PDF export dependencies
         run: |
           python -m pip install --disable-pip-version-check \

@@ -24,8 +24,72 @@ BLOCK_GAP_H      = 0.80   # vertical gap after a section (breathing room)
 # Panel widths: [label panel, main plot panel]
 LEFT_RIGHT       = (0.4, 0.6)
 
-# Text & styling
-WRAP_WIDTH       = 42      # phenotype label wrapping width (characters)
+# Typography and panel spacing. Figure 5A (the main PheWAS forest) is typeset in
+# Helvetica with larger labels than the script's default; the later families in
+# its font list are fallbacks for machines without Helvetica (Nimbus Sans is the
+# URW Helvetica clone). Figure S21 uses the default style.
+FIGURE_5A_STYLE = {
+    "font_family": ["Helvetica", "Arial", "Nimbus Sans", "Liberation Sans", "DejaVu Sans"],
+    "label_fontsize": 26.0,       # phenotype labels
+    "header_fontsize": 32.0,      # inversion headers
+    "header_x_shift": 0.037,      # x of the header text (axes fraction of the label panel)
+    "header_top_pad": 0.135,      # header text offset below the header box top (fraction of the box)
+    "tick_fontsize": 36.0,        # odds-ratio tick labels
+    "axis_label_fontsize": 36.0,  # "Odds ratio"
+    "wrap_width": 41,             # phenotype label wrapping width (characters)
+    "wrap_width_bold": 35,        # bold labels are wider, so they wrap earlier
+    "label_linespacing": 0.95,    # line spacing of two-line labels (font-size multiples)
+    "panel_wspace": 0.075,        # gap between the label panel and the plot panel
+    "fig_width_in": 20.15,        # figure width in inches
+}
+DEFAULT_STYLE = {
+    "font_family": ["DejaVu Sans"],
+    "label_fontsize": 20.0,
+    "header_fontsize": 20.0,
+    "header_x_shift": 0.08,
+    "header_top_pad": 0.10,
+    "tick_fontsize": 26.0,
+    "axis_label_fontsize": 36.0,
+    "wrap_width": 42,
+    "wrap_width_bold": 42,
+    "label_linespacing": 1.2,
+    "panel_wspace": 0.05,
+    "fig_width_in": 20.0,
+}
+LEGEND_FONTSIZE  = 36.0    # "BH p =" labels of the q-value legend (right_vertical)
+LEGEND_X         = 1.062   # x of the legend column (axes fraction of the plot panel)
+LEGEND_YS        = (0.434, 0.273, 0.124) # y of the three legend points (axes fraction)
+LEGEND_TEXT_GAP  = 0.015   # gap between a legend point and its label (axes fraction)
+# Hand placement of individual labels in the submitted Figure 5A, keyed by
+# (inversion header, phenotype): an x offset in axes fraction of the label panel
+# and a y offset in row heights (positive moves the label down). The vertical
+# offsets keep single-line labels clear of the two-line labels next to them.
+CHR17 = "chr17:45,585,159-46,292,045"
+CHR12 = "chr12:46,896,694-46,915,975"
+CHR10 = "chr10:79,542,901-80,217,413"
+LABEL_OFFSETS = {
+    (CHR17, "Rosacea"): (0.0215, -0.05),
+    (CHR17, "Lump or mass in breast or nonspecific abnormal breast exam"): (0.0, 0.08),
+    (CHR17, "Morbid obesity"): (0.0, 0.20),
+    (CHR17, "Skin changes due to chronic exposure to nonionizing radiation"): (0.0, 0.13),
+    (CHR17, "Abnormal mammogram"): (0.0, 0.31),
+    (CHR17, "Abnormal cytological findings in specimens from genital organs"): (0.0, 0.08),
+    (CHR17, "Abnormal Papanicolaou smear"): (0.0, 0.31),
+    (CHR17, "Mild cognitive impairment"): (0.0, 0.18),
+    (CHR17, "Goiter"): (0.0215, -0.05),
+    (CHR12, "Acne"): (0.0215, -0.05),
+    (CHR12, "Rosacea"): (0.0215, -0.05),
+    (CHR12, "Lump or mass in breast or nonspecific abnormal breast exam"): (0.0, 0.05),
+    (CHR12, "Migraine"): (0.0215, 0.23),
+    (CHR10, "High risk human papillomavirus HPV DNA test positive"): (0.0, 0.05),
+}
+# Labels whose line break is fixed by hand (Figure 5A layout).
+LABEL_LINE_BREAKS = {
+    "High risk human papillomavirus HPV DNA test positive":
+        "High risk human papillomavirus\nHPV DNA test positive",
+    "Skin changes due to chronic exposure to nonionizing radiation":
+        "Skin changes due to chronic\nexposure to nonionizing radiation",
+}
 GRID_ALPHA       = 0.28
 BAND_ALPHA       = 0.06
 HEADER_UL_ALPHA  = 0.16
@@ -38,8 +102,6 @@ CI_CAP_LW        = 3.0     # Thickness of the vertical CI end-caps
 CI_CAP_H         = 0.30    # Height of the CI end-caps
 
 # Header label placement (initial seed) and movement limits
-HEADER_X_SHIFT        = 0.08      # x-position (axes-fraction on left panel) for header text
-HEADER_TOP_PAD_FRAC   = 0.10      # initial offset *below* the header-box top edge (fraction of HEADER_BOX_H)
 HEADER_MIN_PAD_FRAC   = 0.02      # minimal allowed offset below the top edge (safety margin)
 HEADER_LIFT_STEP_FRAC = 0.06      # how much to move UP per iteration if overlap is detected (fraction of HEADER_BOX_H)
 HEADER_MAX_ITERS      = 40        # max iterations while trying to resolve overlap
@@ -50,12 +112,13 @@ HEADER_MAX_ITERS      = 40        # max iterations while trying to resolve overl
 GAMMA            = 0.50           # 0<GAMMA<1 expands center; 0.5 is a gentle, readable default
 
 # Fixed x ticks (subset to range)
-TICK_OR_VALUES   = [0.2, 0.5, 0.9, 1.1, 1.5, 2.0]
+TICK_OR_VALUES   = [0.2, 0.5, 0.9, 1.1, 2.0]
 
 # Matplotlib defaults
 mpl.rcParams.update({
     "figure.dpi": 120,
     "savefig.dpi": 300,
+    "font.family": "sans-serif",
     "font.size": 28.0,
     "axes.labelsize": 32.0,
     "axes.linewidth": 1.05,
@@ -69,7 +132,7 @@ mpl.rcParams.update({
 
 # --------------------------- Helpers ---------------------------
 
-def wrap_label(s: str, width=WRAP_WIDTH) -> str:
+def wrap_label(s: str, width: int) -> str:
     s = "" if pd.isna(s) else str(s).replace("_", " ").strip()
     return "\n".join(textwrap.wrap(s, width=width, break_long_words=False, break_on_hyphens=True)) if s else ""
 
@@ -424,8 +487,21 @@ def plot_forest(
     or_range,
     out_pdf=OUT_PDF,
     out_png=OUT_PNG,
-    legend_position="top_right",
+    legend_position="right_vertical",
+    bold_unshaded_rows=True,
+    style=None,
 ):
+    """Draw the forest plot.
+
+    legend_position: "right_vertical" draws the three BH p reference points as a
+    column outside the right edge of the axes with rotated labels (the layout of
+    main Figure 5A); "top_right" / "top_left" draw a boxed q-value legend inside
+    the axes. bold_unshaded_rows sets the phenotype labels of the rows without a
+    grey band in bold, as in Figure 5A. style is a dict of typography and panel
+    spacing (FIGURE_5A_STYLE, the default, or DEFAULT_STYLE).
+    """
+    style = dict(FIGURE_5A_STYLE if style is None else style)
+    mpl.rcParams["font.sans-serif"] = list(style["font_family"])
     sections, y_max = build_layout(df)
     point_style_for_q = make_qvalue_point_scaler(sections)
 
@@ -445,12 +521,12 @@ def plot_forest(
     row_height_inches = (ROW_BOX_H / 1.70) * 0.4
     
     fig_h = max(8.0, min(150.0, 2.3 + n_rows_total * row_height_inches + len(sections) * 0.90))
-    fig_w = 20.0
+    fig_w = style["fig_width_in"]
 
     # Panels
     fig = plt.figure(figsize=(fig_w, fig_h))
 
-    gs = fig.add_gridspec(nrows=1, ncols=2, width_ratios=LEFT_RIGHT, wspace=0.05)
+    gs = fig.add_gridspec(nrows=1, ncols=2, width_ratios=LEFT_RIGHT, wspace=style["panel_wspace"])
     axL = fig.add_subplot(gs[0, 0])  # label panel
     axR = fig.add_subplot(gs[0, 1])  # main plot panel
 
@@ -458,8 +534,10 @@ def plot_forest(
     axL.set_ylim(y_max, 0.0)
     axR.set_ylim(y_max, 0.0)
 
-    # Left panel styling
-    axL.set_facecolor("white")
+    # Left panel styling. The label panel is drawn above the plot panel with a
+    # transparent background so that a wide header is not hidden by the plot.
+    axL.set_facecolor("none")
+    axL.set_zorder(axR.get_zorder() + 1)
     axL.set_xticks([]); axL.set_yticks([])
     for sp in axL.spines.values():
         sp.set_visible(False)
@@ -467,7 +545,8 @@ def plot_forest(
 
     # Right panel styling
     axR.set_yticks([])
-    axR.set_xlabel("Odds ratio", fontsize=36)
+    axR.set_xlabel("Odds ratio", fontsize=style["axis_label_fontsize"])
+    axR.tick_params(axis="x", labelsize=style["tick_fontsize"])
 
     # Warped x-limits (not forced symmetric)
     x_left_warp  = float(warp_or_to_axis([x_or_left])[0])
@@ -486,10 +565,11 @@ def plot_forest(
 
     # Alternating background bands per phenotype row (phecode)
     xr0, xr1 = axR.get_xlim()
-    row_idx = 0
     for sec in sections:
+        row_idx = 0  # striping restarts in each inversion section
         for row in sec["rows"]:
-            if row_idx % 2 == 0:
+            row["shaded"] = (row_idx % 2 == 0)
+            if row["shaded"]:
                 y0, y1 = row["row_y0"], row["row_y1"]
                 axL.add_patch(Rectangle((0, y0), 1.0, (y1 - y0), transform=yxf,
                                         color="#2f4f4f", alpha=BAND_ALPHA, zorder=0))
@@ -508,9 +588,9 @@ def plot_forest(
         head_y0 = sec["head_y0"]
 
         # initial y for header label: a bit below the top edge; anchor with va='top'
-        y_header = head_y0 + HEADER_BOX_H * HEADER_TOP_PAD_FRAC
-        t = axL.text(HEADER_X_SHIFT, y_header, inv, ha="left", va="top",
-                     fontsize=20.0, fontweight="semibold", color=c,
+        y_header = head_y0 + HEADER_BOX_H * style["header_top_pad"]
+        t = axL.text(style["header_x_shift"], y_header, inv, ha="left", va="top",
+                     fontsize=style["header_fontsize"], fontweight="semibold", color=c,
                      transform=yxf, zorder=3)
         header_texts.append({"text": t, "sec": sec, "color": c})
 
@@ -529,9 +609,16 @@ def plot_forest(
             # Left labels CENTERED vertically within the row box
             y_label = yc  # center of the row box
 
-            phen = wrap_label(row["Phenotype"])
-            t1 = axL.text(0.02,  y_label, phen, ha="left",  va="center",
-                          fontsize=20.0, color="#111111", transform=yxf, zorder=3)
+            weight = "bold" if (bold_unshaded_rows and not row.get("shaded", True)) else "normal"
+            clean = str(row["Phenotype"]).replace("_", " ").strip()
+            phen = LABEL_LINE_BREAKS.get(clean) or wrap_label(
+                row["Phenotype"],
+                width=(style["wrap_width_bold"] if weight == "bold" else style["wrap_width"]),
+            )
+            dx, dy = LABEL_OFFSETS.get((sec["Inversion"], clean), (0.0, 0.0))
+            t1 = axL.text(0.02 + dx, y_label + dy * ROW_BOX_H, phen, ha="left", va="center",
+                          fontsize=style["label_fontsize"], fontweight=weight, color="#111111",
+                          linespacing=style["label_linespacing"], transform=yxf, zorder=3)
 
             row_texts_by_section[sec_id].extend([t1])
 
@@ -560,17 +647,8 @@ def plot_forest(
     axR.set_xticks(tick_pos)
     axR.set_xticklabels(tick_lbl)
 
-    # 4) Add custom legend box in top corner of the plot
+    # 4) Legend for the point-size encoding of the BH-adjusted p-value
     from matplotlib.patches import FancyBboxPatch
-
-    # Legend positioning (in axes fraction coordinates)
-    if legend_position == "top_left":
-        legend_x = 0.02 + 0.30  # left edge + width (so box starts at 0.02)
-    else:  # top_right (default)
-        legend_x = 0.98  # right edge
-    legend_y = 0.98  # top edge
-    legend_width = 0.30
-    legend_height_per_item = 0.040  # Spacing between legend items
 
     # Hard-coded reasonable q-value examples for the legend
     legend_q_values = [0.001, 0.01, 0.05]
@@ -579,6 +657,29 @@ def plot_forest(
         "q=0.01",
         "q=0.05"
     ]
+
+    if legend_position == "right_vertical":
+        # Column of reference points outside the right edge of the axes, each
+        # labelled "BH p =…" in text rotated to read downward (Figure 5A).
+        legend_x = LEGEND_X
+        for q_val, y_pos in zip(legend_q_values, LEGEND_YS):
+            size_pt2, facecolor = point_style_for_q(q_val, "#4C78A8")
+            axR.scatter([legend_x], [y_pos], s=size_pt2, facecolor=facecolor, edgecolor="black",
+                        linewidth=POINT_EDGE_LW * 0.85, alpha=0.97,
+                        transform=axR.transAxes, zorder=52, clip_on=False)
+            axR.text(legend_x, y_pos - LEGEND_TEXT_GAP, f"BH p ={q_val:g}", ha="left", va="center",
+                     rotation=270, rotation_mode="anchor", fontsize=LEGEND_FONTSIZE,
+                     transform=axR.transAxes, zorder=52, clip_on=False)
+        legend_q_values = []
+
+    # Legend positioning (in axes fraction coordinates)
+    if legend_position == "top_left":
+        legend_x = 0.02 + 0.30  # left edge + width (so box starts at 0.02)
+    else:  # top_right
+        legend_x = 0.98  # right edge
+    legend_y = 0.98  # top edge
+    legend_width = 0.30
+    legend_height_per_item = 0.040  # Spacing between legend items
 
     n_items = len(legend_q_values)
 
@@ -598,13 +699,13 @@ def plot_forest(
         facecolor='white', edgecolor='#555555',
         linewidth=2.0, alpha=0.90, zorder=50
     )
-    axR.add_patch(box)
-
-    # Subtitle explaining the encoding - positioned near top with proper spacing below
-    axR.text(legend_x - legend_width/2, legend_y - subtitle_offset,
-             "by q-value (FDR)",
-             ha='center', va='top', fontsize=24, style='italic', color='#444444',
-             transform=axR.transAxes, zorder=51)
+    if legend_position != "right_vertical":
+        axR.add_patch(box)
+        # Subtitle explaining the encoding - positioned near top with proper spacing below
+        axR.text(legend_x - legend_width/2, legend_y - subtitle_offset,
+                 "by q-value (FDR)",
+                 ha='center', va='top', fontsize=24, style='italic', color='#444444',
+                 transform=axR.transAxes, zorder=51)
 
     # Use a neutral color for legend examples
     legend_base_color = "#4C78A8"
