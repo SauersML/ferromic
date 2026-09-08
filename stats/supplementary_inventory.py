@@ -213,7 +213,15 @@ FINAL_SUPPLEMENTARY_FIGURES = (
         "data/tag_vs_imputed_concordance.png",
         "Each point is a phecode tested by both the imputed dosage scan and the tagging SNP scan. (A) Association p-values from the imputed inversion dosage analysis and the tagging SNP analysis, colored by Benjamini-Hochberg significance (q < 0.05). (B) Effect estimates from the two analyses. Gray points had BH q \u2265 0.05 in both analyses, blue points were significant using imputed dosage only, orange points were significant using tagging SNP dosage only, and green points were significant in both analyses. Tagging SNP dosage was determined by unanimity across three tagging SNPs at chr17:45,974,480, chr17:45,996,523, and chr17:46,003,698. Samples were assigned a dosage of 0, 1, or 2 only when all three SNPs agreed; samples with missing or discordant genotypes were excluded. The same controls were used in both analyses (Methods).",
     ),
-    SupplementaryFigure(21, "family_history", "Concordance between family and personal history for 17q21.31 allele associations", "original Figure S12", 12, None, None),
+    SupplementaryFigure(
+        21,
+        "family_history",
+        "Concordance between family and personal history for 17q21.31 allele associations",
+        "revision figure",
+        None,
+        "results/family_history/family_vs_main_forest.png",
+        'Forest plot showing the effect estimate of the 17q21.31 inversion allele across four categories. For each phenotype, the odds ratio from the main PheWAS effect is shown, and below it, the odds ratio for family history is shown. The horizontal bars indicate the 95% confidence interval. Family history associations used kinship-weighted models to estimate the allelic effect transmitted to relatives (Methods). Electronic healthcare records (EHRs) were used for personal history. Survey data was used for family history. For breast cancer, personal history is for "malignant neoplasm of the breast," and likewise "breast cancer" for the family history survey data. "Obesity" was used for both the EHR data and the survey question. For heart failure, EHR for heart failure was used, whereas the survey data specifically indicated "congestive heart failure." For cognitive impairment, the personal history used EHR records for mild cognitive impairment, whereas the survey reports used questions for "dementia" and "memory loss or impairment."',
+    ),
     SupplementaryFigure(
         22,
         "cds_test_calibration_power",

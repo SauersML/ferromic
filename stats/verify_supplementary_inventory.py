@@ -55,7 +55,6 @@ def verify_inventory() -> None:
         8: 15,
         9: 17,
         10: 19,
-        12: 21,
         13: 23,
     }
     if ORIGINAL_FIGURE_TO_FINAL != expected_old_map:
@@ -95,7 +94,7 @@ def main() -> int:
         return 1
     print(
         "Verified final supplementary inventory: 23 figures and 21 tables; "
-        "original Figure S11 is replaced by the regenerated Figure S19."
+        "original Figures S11 and S12 are replaced by the regenerated Figures S20 and S21."
     )
     return 0
 

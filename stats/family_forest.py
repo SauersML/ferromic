@@ -1,6 +1,8 @@
 
+import argparse
 import os
 import sys
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -94,6 +96,11 @@ def load_main_data(path):
     return df
 
 def main():
+    parser = argparse.ArgumentParser(description="Family history versus main PheWAS forest plot (Figure S21).")
+    parser.add_argument("--out-dir", type=Path, default=Path("."),
+                        help="directory for family_vs_main_forest.pdf and .png (default: current directory)")
+    args = parser.parse_args()
+    args.out_dir.mkdir(parents=True, exist_ok=True)
     print("Loading data...")
     # Check if files exist relative to CWD
     if not os.path.exists(FAMILY_FILE):
@@ -168,8 +175,8 @@ def main():
     plot_forest(
         df_plot,
         or_range=or_range,
-        out_pdf=OUT_PDF,
-        out_png=OUT_PNG,
+        out_pdf=str(args.out_dir / OUT_PDF),
+        out_png=str(args.out_dir / OUT_PNG),
         legend_position="top_right",
         bold_unshaded_rows=False,
         style=DEFAULT_STYLE,
