@@ -25,6 +25,9 @@ on:
       - 'stats/divergence_da_dxy_by_type.py'
       - 'stats/figure2a_repolarized.py'
       - 'stats/imputation_benchmark_figure.py'
+      - 'stats/family_forest.py'
+      - 'stats/forest.py'
+      - 'data/family_phewas.tsv'
       - 'stats/phewas_within_ancestry_figures.py'
       - 'data/four_fold_pi_by_inversion.tsv'
       - 'data/recurrence_sd_calls.tsv'
@@ -148,6 +151,7 @@ jobs:
           (cd data && python ../stats/divergence_da_dxy_by_type.py)
           python stats/figure2a_repolarized.py
           python stats/imputation_benchmark_figure.py
+          python stats/family_forest.py --out-dir results/family_history
           python stats/phewas_within_ancestry_figures.py
           python stats/tag_vs_imputed_concordance.py
           python stats/svbyeye_supplement.py
@@ -269,6 +273,7 @@ jobs:
               'within_ancestry_pc':
                   'results/phewas_within_ancestry/effect_pvalue_correspondence.pdf',
               'tagging_snp_concordance': 'data/tag_vs_imputed_concordance.pdf',
+              'family_history': 'results/family_history/family_vs_main_forest.pdf',
               'cds_test_calibration_power': 'data/cds_permutation_calibration_power.pdf',
           }
           out = Path('output/manuscript_figures/all_figures_pdf')

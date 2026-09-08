@@ -770,6 +770,9 @@ def _load_imputation_benchmarks() -> pd.DataFrame:
             raise SupplementaryTablesError(
                 f"External imputation benchmark is stale for {row['inversion']}."
             )
+    for column in ("agreement_r2", "hard_call_concordance",
+                   "inverted_allele_freq_imputed", "inverted_allele_freq_external"):
+        out[column] = out[column].astype(float).round(3)
     return out
 
 
