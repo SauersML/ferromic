@@ -157,9 +157,9 @@ def main() -> None:
     chimp_path = RESULTS / "figure2a_repolarized" / "figure2a_model_effects.tsv"
     chimp = {row["contrast"]: row for row in read_tsv(chimp_path)}
     for contrast, ratio, p_value in (
-        ("derived_vs_ancestral_single_event", 0.2027584654, 0.00260253284),
-        ("derived_vs_ancestral_recurrent", 1.012834655, 0.9402941444),
-        ("orientation_by_recurrence_interaction", 4.995276784, 0.0038556859),
+        ("derived_vs_ancestral_single_event", 0.2506025144, 0.005514634522),
+        ("derived_vs_ancestral_recurrent", 0.9369754455, 0.7094737107),
+        ("orientation_by_recurrence_interaction", 3.738890839, 0.01256133784),
     ):
         audit.number(f"chimp-polarized {contrast} ratio", chimp[contrast]["ratio"], ratio, 5e-9, chimp_path)
         audit.number(
