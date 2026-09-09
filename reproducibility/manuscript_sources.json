@@ -96,8 +96,8 @@
       "id": "chimp_orientation_ledger",
       "kind": "repository",
       "path": "data/chimp_alignment_responses.json",
-      "sha256": "5b869ebd2106509f83fea49234e0a2204ecd76ef1985d2215b1e921e1e4ff3e5",
-      "role": "Manual panTro6-versus-GRCh38 review calls for all 292 loci"
+      "sha256": "05dfae8a7d234ea18045b06016fe371f9eefcaf4a033be8647bdf99135aea9ef",
+      "role": "Orientation calls from mPanTro3-versus-GRCh38 alignments for all 292 loci (svbyeye/bin/build_orientation_ledger.py, every plot inspected)"
     },
     {
       "id": "tagging_snp_table",
@@ -109,10 +109,10 @@
     {
       "id": "svbyeye_consensus_93_boxed_bundle",
       "kind": "url",
-      "url": "https://github.com/SauersML/ferromic/releases/download/manuscript-analysis-sources-v7/svbyeye-consensus-93-boxed.tar.gz",
+      "url": "https://github.com/SauersML/ferromic/releases/download/manuscript-analysis-sources-v8/svbyeye-consensus-93-boxed.tar.gz",
       "filename": "svbyeye-consensus-93-boxed.tar.gz",
-      "sha256": "a6c61cb5b35d764655ace64a5b88de4cf40b7352fc7ba251c10548045a7ba7e9",
-      "role": "Pinned one-page, uniformly sized GRCh38-versus-panTro6 SVbyEye plots for the 93 consensus-classified inversions"
+      "sha256": "5147c21569bef7a488d6a192421b898d61e97134f8e87a10bc360ba2f0b31b5b",
+      "role": "Pinned one-page, uniformly sized GRCh38-versus-mPanTro3 SVbyEye plots for the 93 consensus-classified inversions"
     },
     {
       "id": "supplementary_materials_template",

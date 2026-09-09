@@ -2468,7 +2468,7 @@ def build_workbook(output_path: Path) -> None:
         SheetInfo(
             name="Chimpanzee polarity per locus",
             description=(
-                "Ancestral arrangement at each locus from manual review of panTro6 to GRCh38 alignments, with nucleotide "
+                "Ancestral arrangement at each locus from manual review of mPanTro3 to GRCh38 alignments, with nucleotide "
                 "diversity recomputed for haplotypes grouped as ancestral or derived. For loci excluded from the figure or the "
                 "model, the reason is given in the exclusion columns."
             ),

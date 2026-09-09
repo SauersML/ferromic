@@ -1,51 +1,51 @@
 {
   "polarity_dataset": "chimp_vs_hg38_inversion_alignments",
-  "polarity_updated_at": "2026-07-24T06:26:05.350509+00:00",
+  "polarity_updated_at": "2026-09-09T19:02:24.379815+00:00",
   "n_reviewed_total": 292,
   "n_manuscript_loci": 93,
-  "epsilon": 5.135e-06,
+  "epsilon": 5.205e-06,
   "model": "log((pi_derived + epsilon)/(pi_ancestral + epsilon)) ~ recurrent",
   "covariance": "HC3",
-  "n_included": 33,
-  "n_single_event": 19,
-  "mean_pi_ancestral_single_event": 0.0005138421052631579,
-  "mean_pi_derived_single_event": 0.00019405263157894735,
+  "n_included": 34,
+  "n_single_event": 21,
+  "mean_pi_ancestral_single_event": 0.000490952380952381,
+  "mean_pi_derived_single_event": 0.0002140952380952381,
   "median_pi_ancestral_single_event": 0.000377,
-  "median_pi_derived_single_event": 6.3e-05,
-  "n_recurrent": 14,
-  "mean_pi_ancestral_recurrent": 0.0005537857142857143,
-  "mean_pi_derived_recurrent": 0.0006053571428571428,
-  "median_pi_ancestral_recurrent": 0.000561,
-  "median_pi_derived_recurrent": 0.0005549999999999999,
-  "n_plot_loci": 33,
-  "n_polarized_loci": 57,
-  "n_model_loci": 33,
-  "n_excluded_from_plot": 36,
-  "n_excluded_from_model": 60,
+  "median_pi_derived_single_event": 6.7e-05,
+  "n_recurrent": 13,
+  "mean_pi_ancestral_recurrent": 0.0005308461538461538,
+  "mean_pi_derived_recurrent": 0.0005176923076923077,
+  "median_pi_ancestral_recurrent": 0.00053,
+  "median_pi_derived_recurrent": 0.000513,
+  "n_plot_loci": 34,
+  "n_polarized_loci": 59,
+  "n_model_loci": 34,
+  "n_excluded_from_plot": 34,
+  "n_excluded_from_model": 59,
   "plot_exclusion_counts": {
-    "unresolved_chimp_orientation": 36
+    "unresolved_chimp_orientation": 34
   },
   "model_exclusion_counts": {
-    "unresolved_chimp_orientation": 36,
-    "one_orientation_missing_pi": 24
+    "unresolved_chimp_orientation": 34,
+    "one_orientation_missing_pi": 25
   },
   "chimp_calls_in_manuscript_loci": {
-    "direct": 50,
-    "na": 36,
-    "inverted": 7
+    "direct": 51,
+    "na": 34,
+    "inverted": 8
   },
   "input_files": {
     "output_csv": {
-      "path": "/home/runner/work/ferromic/ferromic/data/output.csv",
+      "path": "/Users/user/ferromic/.claude/worktrees/ci-rebuild-20260906/data/output.csv",
       "sha256": "c19cd7af05d9100df4aca76599cfffd7e63ae46b081a67cca2e5d9c1fd8f7737"
     },
     "inv_properties": {
-      "path": "/home/runner/work/ferromic/ferromic/data/inv_properties.tsv",
+      "path": "/Users/user/ferromic/.claude/worktrees/ci-rebuild-20260906/data/inv_properties.tsv",
       "sha256": "fc6bcb95681737e6b838db8495e730e2e28e74d219f1905a0037dc066b04cc34"
     },
     "polarity_json": {
-      "path": "/home/runner/work/ferromic/ferromic/data/chimp_alignment_responses.json",
-      "sha256": "5b869ebd2106509f83fea49234e0a2204ecd76ef1985d2215b1e921e1e4ff3e5"
+      "path": "/Users/user/ferromic/.claude/worktrees/ci-rebuild-20260906/data/chimp_alignment_responses.json",
+      "sha256": "05dfae8a7d234ea18045b06016fe371f9eefcaf4a033be8647bdf99135aea9ef"
     }
   }
 }
