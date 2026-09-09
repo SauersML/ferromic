@@ -36,15 +36,15 @@
   },
   "input_files": {
     "output_csv": {
-      "path": "/Users/user/ferromic/.claude/worktrees/ci-rebuild-20260906/data/output.csv",
+      "path": "/home/runner/work/ferromic/ferromic/data/output.csv",
       "sha256": "c19cd7af05d9100df4aca76599cfffd7e63ae46b081a67cca2e5d9c1fd8f7737"
     },
     "inv_properties": {
-      "path": "/Users/user/ferromic/.claude/worktrees/ci-rebuild-20260906/data/inv_properties.tsv",
+      "path": "/home/runner/work/ferromic/ferromic/data/inv_properties.tsv",
       "sha256": "fc6bcb95681737e6b838db8495e730e2e28e74d219f1905a0037dc066b04cc34"
     },
     "polarity_json": {
-      "path": "/Users/user/ferromic/.claude/worktrees/ci-rebuild-20260906/data/chimp_alignment_responses.json",
+      "path": "/home/runner/work/ferromic/ferromic/data/chimp_alignment_responses.json",
       "sha256": "05dfae8a7d234ea18045b06016fe371f9eefcaf4a033be8647bdf99135aea9ef"
     }
   }
