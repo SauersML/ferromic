@@ -906,7 +906,7 @@ CHIMP_POLARITY_COLUMN_DEFS = {
     "start": "Inversion start coordinate (GRCh38).",
     "end": "Inversion end coordinate (GRCh38).",
     "recurrence": "Consensus recurrence label.",
-    "chimp_call": "Human arrangement shared with chimpanzee, from manual review.",
+    "chimp_call": "Human arrangement shared with chimpanzee, from the alignment call.",
     "flip_ref_polarity": "Whether the GRCh38 reference arrangement is the derived one.",
     "included_in_plot": "Whether the locus is included in the diversity figure.",
     "included_in_model": "Whether the locus is included in the statistical model.",
@@ -2468,7 +2468,7 @@ def build_workbook(output_path: Path) -> None:
         SheetInfo(
             name="Chimpanzee polarity per locus",
             description=(
-                "Ancestral arrangement at each locus from manual review of mPanTro3 to GRCh38 alignments, with nucleotide "
+                "Ancestral arrangement at each locus called from mPanTro3 to GRCh38 alignments (Methods), with nucleotide "
                 "diversity recomputed for haplotypes grouped as ancestral or derived. For loci excluded from the figure or the "
                 "model, the reason is given in the exclusion columns."
             ),
