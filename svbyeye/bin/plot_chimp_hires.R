@@ -1,9 +1,10 @@
 #!/usr/bin/env Rscript
 
 # Publication-resolution human–chimpanzee alignment plot for one inversion.
-# Human (GRCh38) is always the upper target track. Chimpanzee (panTro6) is the
-# lower query track, reoriented when necessary so the predominant alignment in
-# the two flanks is forward. A shallow red box marks the inversion only on the
+# Human (GRCh38) is always the upper target track. The chimpanzee assembly
+# (named by SVBYEYE_CHIMP_ASSEMBLY: panTro6 or mPanTro3) is the lower query
+# track, reoriented when necessary so the predominant alignment in the two
+# flanks is forward. A shallow red box marks the inversion only on the
 # human track; it does not imply exact orthologous chimpanzee breakpoints.
 
 suppressPackageStartupMessages({
@@ -99,8 +100,9 @@ paf$t.end <- paf$t.end + region_offset
 # kept: a recurrent inversion is flanked by inverted repeats, so one chimpanzee
 # segment matches both flanks and minimap2 demotes one of them: filtering on
 # tp:A:P deletes a whole flank at exactly the loci this figure is about.
-# A handful of loci sit in sequence where panTro6 has nothing close, so take the
-# tightest cut that leaves anything rather than dropping the page, and record it.
+# A handful of loci sit in sequence where the chimpanzee assembly has nothing
+# close, so take the tightest cut that leaves anything rather than dropping the
+# page, and record it.
 raw_alignments <- nrow(paf)
 secondary_kept <- sum(paf$tp != "P", na.rm = TRUE)
 de_limit <- NA_real_
@@ -312,7 +314,10 @@ if (axis_reversed) {
 }
 
 human_name <- "Human (GRCh38)"
-chimp_name <- "Chimpanzee (panTro6)"
+# The chimpanzee assembly name comes from the environment so the same renderer
+# serves panTro6 and the T2T assembly (mPanTro3).
+chimp_assembly <- Sys.getenv("SVBYEYE_CHIMP_ASSEMBLY", "panTro6")
+chimp_name <- paste0("Chimpanzee (", chimp_assembly, ")")
 plot_paf$t.name <- human_name
 plot_paf$q.name <- chimp_name
 
@@ -425,11 +430,26 @@ thin_labels <- function(values, span) {
   kept
 }
 
-query_labels <- pretty(query_range)
-query_labels <- query_labels[
-  query_labels >= query_range[[1]] & query_labels <= query_range[[2]]
+# Tick labels are genomic chimpanzee coordinates. On a reversed axis the plotted
+# position is query_length minus the genomic position, so pick round numbers in
+# genomic space and map them onto the reversed axis; the labels then decrease
+# from left to right, which is what a reversed contig looks like.
+genomic_range <- if (axis_reversed) {
+  query_length - rev(query_range)
+} else {
+  query_range
+}
+query_label_values <- pretty(genomic_range)
+query_label_values <- query_label_values[
+  query_label_values >= genomic_range[[1]] &
+    query_label_values <= genomic_range[[2]]
 ]
-query_labels <- thin_labels(query_labels, diff(query_range))
+query_label_values <- thin_labels(query_label_values, diff(genomic_range))
+query_labels <- if (axis_reversed) {
+  query_length - query_label_values
+} else {
+  query_label_values
+}
 query_breaks <- map_query_to_panel(query_labels)
 target_labels <- pretty(c(window_start, window_end))
 target_labels <- target_labels[
@@ -439,9 +459,9 @@ target_labels <- thin_labels(target_labels, window_end - window_start)
 
 plot <- plot +
   scale_x_continuous(
-    name = paste0("Chimpanzee (panTro6) ", chimp_contig, " position (bp)"),
+    name = paste0(chimp_name, " ", chimp_contig, " position (bp)"),
     breaks = query_breaks,
-    labels = scales::comma(abs(query_labels)),
+    labels = scales::comma(query_label_values),
     sec.axis = sec_axis(
       transform = ~ .,
       name = paste0("Human (GRCh38) ", chrom, " position (bp)"),
@@ -532,6 +552,9 @@ orientation <- data.frame(
   right_reverse_bp = right_support[["reverse"]],
   right_vote = right_vote,
   combined_vote = combined_vote,
+  interior_forward_bp = interior_support[["forward"]],
+  interior_reverse_bp = interior_support[["reverse"]],
+  interior_vote = interior_vote,
   axis_vote = axis_vote,
   axis_rule = axis_rule,
   left_boundary_gap_bp = left_gap,

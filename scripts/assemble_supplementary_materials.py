@@ -3,7 +3,7 @@
 
 The source DOCX is never written. Existing figure blocks are cloned from it,
 revision figures are inserted using its image and caption formatting, and the
-93 consensus-locus GRCh38-versus-panTro6 SVbyEye plots are appended as a
+93 consensus-locus GRCh38-versus-mPanTro3 SVbyEye plots are appended as a
 two-plots-per-page portrait appendix rather than promoted to numbered
 supplementary figures.
 """
@@ -442,7 +442,7 @@ def append_svbyeye(document, pdf_path: Path, image_template, caption_template, h
         heading_run,
         body_run,
         SVBYEYE_APPENDIX_TITLE,
-        "Chimpanzee (panTro6) versus human GRCh38 alignments used for orientation polarization.",
+        "Chimpanzee (mPanTro3) versus human GRCh38 alignments used for orientation polarization.",
     )
     set_page_break_before(appendix_heading._p)
 
@@ -488,7 +488,7 @@ def append_svbyeye(document, pdf_path: Path, image_template, caption_template, h
         call = CALL_LABELS[locus["classification"]]
         heading = f"SVbyEye alignment {index} of 93. {locus['label']}."
         body = (
-            "Chimpanzee (panTro6) versus human GRCh38 alignment used to polarize "
+            "Chimpanzee (mPanTro3) versus human GRCh38 alignment used to polarize "
             f"orientation. Recurrence class: {locus['recurrence']}; GRCh38 "
             f"orientation relative to chimpanzee: {call}."
         )

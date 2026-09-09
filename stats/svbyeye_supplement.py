@@ -23,7 +23,7 @@ PLOT_SCRIPT = REPO / "svbyeye" / "bin" / "plot_chimp_hires.R"
 
 EXAMPLE_IDS = (
     "chr8-7301025-INV-5297356",
-    "chr15-23345460-INV-5044410",
+    "chr10-79542902-INV-674513",
 )
 PLOTS_PER_PAGE = 2
 
@@ -140,7 +140,7 @@ def write_consensus_pdf(
         {
             "/Title": "SVbyEye alignments for 93 consensus-classified inversions",
             "/Subject": (
-                "Canonical panTro6-versus-GRCh38 boxed inversion plots, "
+                "Canonical mPanTro3-versus-GRCh38 boxed inversion plots, "
                 "two full-width plots per page"
             ),
         }
@@ -176,7 +176,7 @@ def write_example_figure(by_id: dict[str, Path]) -> Path:
     writer.add_metadata(
         {
             "/Title": "Examples of inversion alignments to chimpanzee used for polarization",
-            "/Subject": "8p23.1 and 15q11.2-q13.1 SVbyEye alignments",
+            "/Subject": "8p23.1 and 10q22.3 SVbyEye alignments",
         }
     )
     with output.open("wb") as handle:
@@ -192,15 +192,15 @@ def write_example_figure(by_id: dict[str, Path]) -> Path:
 def write_legends() -> None:
     (OUTPUT_DIR / "Supplemental_Figure_SVbyEye_orientation_examples_legend.txt").write_text(
         "Figure S[X]. Examples of inversion alignments to chimpanzee used for polarization. "
-        "SVbyEye shows alignments between GRCh38 (top) and panTro6 (bottom) across "
-        "(A) the recurrent 8p23.1 inversion and (B) the single-event 15q11.2-q13.1 inversion. "
+        "SVbyEye shows alignments between GRCh38 (top) and mPanTro3 (bottom) across "
+        "(A) the recurrent 8p23.1 inversion and (B) the single-event 10q22.3 inversion. "
         "Green and blue indicate forward and reverse alignments, respectively. Red dashed "
         "boxes indicate the inversion coordinates in GRCh38. The alignment in (A) indicates "
         "that the GRCh38 orientation is ancestral, whereas the alignment in (B) indicates "
         "that the GRCh38 orientation is derived.\n"
     )
     (OUTPUT_DIR / "Supplemental_File_SVbyEye_consensus_93_loci_legend.txt").write_text(
-        "SVbyEye alignments between GRCh38 (top) and panTro6 (bottom) across the 93 "
+        "SVbyEye alignments between GRCh38 (top) and mPanTro3 (bottom) across the 93 "
         "consensus-classified inversions. Green and blue indicate forward and reverse "
         "alignments, respectively. Red dashed boxes indicate the inversion coordinates "
         "in GRCh38. Two full-width loci are shown per page, ordered top-to-bottom "

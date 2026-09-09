@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare the 93 consensus inversion windows for one panTro6 alignment."""
+"""Prepare the 93 consensus inversion windows for one chimpanzee alignment."""
 
 from __future__ import annotations
 

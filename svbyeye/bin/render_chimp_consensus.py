@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Split a combined panTro6 PAF and render all 93 canonical SVbyEye plots."""
+"""Split a combined chimpanzee PAF and render all 93 canonical SVbyEye plots."""
 
 from __future__ import annotations
 
@@ -54,7 +54,7 @@ def split_paf(path: Path, loci: set[str], output_dir: Path) -> dict[str, Path]:
             handle.close()
     missing = sorted(loci - counts.keys())
     if missing:
-        raise RuntimeError(f"No panTro6 alignments for {len(missing)} loci: {missing}")
+        raise RuntimeError(f"No chimpanzee alignments for {len(missing)} loci: {missing}")
     return paths
 
 
