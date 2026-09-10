@@ -23,7 +23,7 @@ PLOT_SCRIPT = REPO / "svbyeye" / "bin" / "plot_chimp_hires.R"
 
 EXAMPLE_IDS = (
     "chr8-7301025-INV-5297356",
-    "chr10-79542902-INV-674513",
+    "chr17-45585160-INV-706887",
 )
 PLOTS_PER_PAGE = 2
 
@@ -176,7 +176,7 @@ def write_example_figure(by_id: dict[str, Path]) -> Path:
     writer.add_metadata(
         {
             "/Title": "Examples of inversion alignments to chimpanzee used for polarization",
-            "/Subject": "8p23.1 and 10q22.3 SVbyEye alignments",
+            "/Subject": "8p23.1 and 17q21.31 SVbyEye alignments",
         }
     )
     with output.open("wb") as handle:
@@ -193,7 +193,7 @@ def write_legends() -> None:
     (OUTPUT_DIR / "Supplemental_Figure_SVbyEye_orientation_examples_legend.txt").write_text(
         "Figure S[X]. Examples of inversion alignments to chimpanzee used for polarization. "
         "SVbyEye shows alignments between GRCh38 (top) and mPanTro3 (bottom) across "
-        "(A) the recurrent 8p23.1 inversion and (B) the single-event 10q22.3 inversion. "
+        "(A) the recurrent 8p23.1 inversion and (B) the single-event 17q21.31 inversion. "
         "Green and blue indicate forward and reverse alignments, respectively. Red dashed "
         "boxes indicate the inversion coordinates in GRCh38. The alignment in (A) indicates "
         "that the GRCh38 orientation is ancestral, whereas the alignment in (B) indicates "
