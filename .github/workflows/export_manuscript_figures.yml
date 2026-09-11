@@ -10,6 +10,8 @@ on:
       - 'scripts/annotate_main_figure_2a.py'
       - 'scripts/replace_main_figure_3b.py'
       - 'scripts/replace_main_figure_5a.py'
+      - 'scripts/correct_main_figure_5_axes.py'
+      - 'output/manuscript_figures/figure_5c_letter_base.png'
       - 'output/manuscript_figures/figure_5_composite_base.png'
       - 'stats/forest.py'
       - 'stats/rebuild_phewas_profile_cis.py'
@@ -29,6 +31,8 @@ on:
       - 'scripts/annotate_main_figure_2a.py'
       - 'scripts/replace_main_figure_3b.py'
       - 'scripts/replace_main_figure_5a.py'
+      - 'scripts/correct_main_figure_5_axes.py'
+      - 'output/manuscript_figures/figure_5c_letter_base.png'
       - 'output/manuscript_figures/figure_5_composite_base.png'
       - 'stats/forest.py'
       - 'stats/rebuild_phewas_profile_cis.py'
@@ -126,6 +130,19 @@ jobs:
             --panel-a phewas_forest.png \
             --output-png "$RUNNER_TEMP/Figure_5.corrected.png" \
             --output-pdf output/manuscript_figures/all_figures_pdf/Figure_5.pdf
+          # B/C plot raw model p-values. Correct the stored axis titles while
+          # preserving all plotted pixels; export the letter's panel C as well.
+          python scripts/correct_main_figure_5_axes.py \
+            --base "$RUNNER_TEMP/Figure_5.corrected.png" \
+            --letter-base output/manuscript_figures/figure_5c_letter_base.png \
+            --output-dir "$RUNNER_TEMP/Figure_5.axes"
+          cp "$RUNNER_TEMP/Figure_5.axes/Figure_5.pdf" \
+            "$RUNNER_TEMP/Figure_5.axes/Figure_5.png" \
+            output/manuscript_figures/all_figures_pdf/
+          mkdir -p output/manuscript_figures/response_figures
+          cp "$RUNNER_TEMP/Figure_5.axes/Figure_5C.pdf" \
+            "$RUNNER_TEMP/Figure_5.axes/Figure_5C.png" \
+            output/manuscript_figures/response_figures/
           python simulations/refsim/make_demography_fig.py \
             --out "$RUNNER_TEMP/gene_flux_model.png"
           test -s simulations/refsim/gene_flux_fpr_power.pdf
@@ -152,4 +169,11 @@ jobs:
         with:
           name: all-manuscript-figures-pdf
           path: output/manuscript_figures/all_figures_pdf/
+          if-no-files-found: error
+
+      - name: Upload corrected response figure
+        uses: actions/upload-artifact@v4
+        with:
+          name: response-figure-5c
+          path: output/manuscript_figures/response_figures/
           if-no-files-found: error
